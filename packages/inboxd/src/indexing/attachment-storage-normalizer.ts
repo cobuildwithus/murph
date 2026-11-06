@@ -38,7 +38,7 @@ const ALLOWED_STATIC_RASTER_INPUT_FORMATS = new Set([
   "png",
   "webp",
 ]);
-type SharpFactory = typeof import("sharp");
+type SharpFactory = typeof import("sharp").default;
 
 export async function normalizeAttachmentForStorage(
   input: NormalizeAttachmentForStorageInput,
@@ -104,7 +104,8 @@ export async function normalizeAttachmentForStorage(
       })
       .webp({
         quality: IMAGE_NORMALIZATION_WEBP_QUALITY,
-        effort: 4,
+        // Keep resolution and quality settings; reduce foreground encoding CPU.
+        effort: 0,
       })
       .toBuffer();
 
@@ -141,7 +142,9 @@ async function buildGifStoryboard(input: {
         fit: "inside",
         withoutEnlargement: true,
       })
-      .png()
+      // These bounded, in-memory frames are immediately decoded by the join below.
+      // Skip intermediate compression; the final WebP encoding is unchanged.
+      .png({ compressionLevel: 0 })
       .toBuffer();
     frames.push(frame);
   }

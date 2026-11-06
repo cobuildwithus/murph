@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-04",
+  "order": 100,
+  "item": {
+    "id": "reliable-imessage-typing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable iMessage typing indicators",
+    "summary": "Typing indicators recover correctly after a message that does not need a reply.",
+    "details": "An earlier silent message no longer leaves later messages without a typing indicator. This applies to private conversations and supported group chats.",
+    "relevanceTags": [
+      "conversation",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4004
+    ]
+  }
+}

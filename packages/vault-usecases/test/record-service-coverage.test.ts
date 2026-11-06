@@ -49,7 +49,6 @@ import {
   asListEnvelope,
   assertNoReservedPayloadKeys,
   buildEntityLinks,
-  buildScaffoldPayload,
   describeLookupConstraint,
   inferEntityKind,
   isQueryableRecordId,
@@ -62,7 +61,6 @@ import {
   requirePayloadObjectField,
   toGenericListItem,
   toGenericShowEntity,
-  toJournalLookupId,
 } from "../src/usecases/shared.ts";
 import {
   compactObject,
@@ -95,13 +93,6 @@ import {
   upsertRecipeRecord,
 } from "../src/usecases/recipe.ts";
 import { importWithMocks, mockActualModule } from "./mock-import.ts";
-import * as helpersModule from "../src/helpers.ts";
-import * as indexModule from "../src/index.ts";
-import * as recordsModule from "../src/records.ts";
-import * as runtimeModule from "../src/runtime.ts";
-import * as testingModule from "../src/testing.ts";
-import * as vaultServicesModule from "../src/vault-services.ts";
-import * as workoutsModule from "../src/workouts.ts";
 
 type QueryRecord = Parameters<typeof toCommandShowEntity>[0];
 const FIXED_SHA256 =
@@ -391,8 +382,6 @@ describe("shared and vault helper functions", () => {
     assert.equal(isVaultQueryableRecordId("goal_sleep"), true);
     assert.equal(describeLookupConstraint("goal_sleep"), null);
     assert.equal(describeLookupConstraint("journal:2026-04-08"), null);
-    assert.equal(toJournalLookupId("2026-04-08"), "journal:2026-04-08");
-
     assert.deepEqual(asEntityEnvelope("./vault", toGenericShowEntity(sampleQueryRecord()), "missing"), {
       vault: "./vault",
       entity: toGenericShowEntity(sampleQueryRecord()),
@@ -409,10 +398,6 @@ describe("shared and vault helper functions", () => {
     assert.equal(recordPath({ document: { relativePath: "raw/documents/doc.pdf" } }), "raw/documents/doc.pdf");
     assert.equal(recordPath({}), undefined);
 
-    const scaffold = buildScaffoldPayload("goal");
-    assert.equal(typeof scaffold, "object");
-    assert.ok(scaffold && typeof scaffold === "object");
-    assert.throws(() => buildScaffoldPayload("does-not-exist"), VaultCliError);
     assert.deepEqual(assertNoReservedPayloadKeys({ title: "ok" }), undefined);
     assert.throws(() => assertNoReservedPayloadKeys({ vault: "x" }), VaultCliError);
     assert.deepEqual(optionalStringArray([" alpha ", "beta"], "field"), ["alpha", "beta"]);
@@ -554,19 +539,6 @@ describe("record patching and duration helpers", () => {
   test("daily food time and lookup slug retain their format", () => {
     assert.equal(dailyFoodTimeSchema.parse("07:05"), "07:05");
     assert.equal(slugifyFoodLookup("  Acai Bowl!  "), "acai-bowl");
-  });
-});
-
-describe("public barrel exports", () => {
-  test("keep the package-level barrels wired to the owning modules", () => {
-    assert.equal(typeof indexModule.normalizeInputFileOption, "function");
-    assert.equal(Object.hasOwn(helpersModule, "applyRecordPatch"), false);
-    assert.equal(typeof recordsModule.scaffoldFoodPayload, "function");
-    assert.deepEqual(recordsModule.scaffoldFoodPayload(), scaffoldFoodPayload());
-    assert.equal(typeof testingModule.applyRecordPatch, "function");
-    assert.equal(typeof vaultServicesModule.createIntegratedVaultServices, "function");
-    assert.equal(typeof workoutsModule.resolveWorkoutCapture, "function");
-    assert.equal(typeof runtimeModule.createRuntimeUnavailableError, "function");
   });
 });
 
@@ -1021,198 +993,6 @@ describe("record service seams", () => {
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
-  });
-
-  test("provider, recipe, and food persistence seams use the runtime module", async () => {
-    const providerCore = {
-      upsertProvider: vi.fn(async () => ({
-        providerId: "prov_1",
-        relativePath: "providers/prov_1.md",
-        created: true,
-      })),
-    };
-    const foodCore = {
-      upsertFood: vi.fn(async () => ({
-        created: true,
-        record: { foodId: "food_1", relativePath: "foods/food_1.md" },
-      })),
-      readFood: vi.fn(async () => ({
-        foodId: "food_1",
-        slug: "regular-acai-bowl",
-        title: "Regular Acai Bowl",
-        status: "active",
-        nutrition: {
-          perServing: {
-            calories: 540,
-            proteinGrams: 11,
-            carbsGrams: 68,
-            fatGrams: 24,
-            fiberGrams: 11,
-          },
-          provenance: {
-            source: "estimated",
-            confidence: "medium",
-            sourceDetail: "Neighborhood menu plus standard granola serving.",
-          },
-        },
-        relativePath: "foods/food_1.md",
-        markdown: "# Food",
-      })),
-      listFoods: vi.fn(async () => [
-        {
-          foodId: "food_1",
-          slug: "regular-acai-bowl",
-          title: "Regular Acai Bowl",
-          status: "active",
-          nutrition: {
-            perServing: {
-              calories: 540,
-              proteinGrams: 11,
-              carbsGrams: 68,
-              fatGrams: 24,
-              fiberGrams: 11,
-            },
-            provenance: {
-              source: "estimated",
-              confidence: "medium",
-              sourceDetail: "Neighborhood menu plus standard granola serving.",
-            },
-          },
-          relativePath: "foods/food_1.md",
-          markdown: "# Food",
-        },
-      ]),
-    };
-    const recipeCore = {
-      upsertRecipe: vi.fn(async () => ({
-        created: true,
-        record: { recipeId: "rcp_1", relativePath: "recipes/rcp_1.md" },
-      })),
-      readRecipe: vi.fn(async () => ({
-        recipeId: "rcp_1",
-        slug: "sheet-pan-salmon-bowls",
-        title: "Sheet Pan Salmon Bowls",
-        status: "saved",
-        relativePath: "recipes/rcp_1.md",
-        markdown: "# Recipe",
-      })),
-      listRecipes: vi.fn(async () => []),
-    };
-
-    const provider = await importWithMocks<typeof import("../src/usecases/provider-event.ts")>(
-      "../src/usecases/provider-event.ts",
-      {
-        "../src/runtime-import.ts": mockActualModule(
-          "../src/runtime-import.ts",
-          (actual) => ({
-            ...actual,
-            loadRuntimeModule: vi.fn(async (specifier: string) => {
-              if (specifier === "@murphai/core") {
-                return providerCore;
-              }
-              throw new Error(`Unexpected specifier: ${specifier}`);
-            }),
-          }),
-        ),
-      },
-    );
-    assert.deepEqual(await provider.upsertProviderRecord({
-      vault: "./vault",
-      payload: provider.scaffoldProviderPayload(),
-    }), {
-      vault: "./vault",
-      providerId: "prov_1",
-      lookupId: "prov_1",
-      path: "providers/prov_1.md",
-      created: true,
-    });
-    assert.equal(provider.parseProviderPayload(provider.scaffoldProviderPayload()).title, "Primary Care Clinic");
-    assert.equal(provider.scaffoldEventPayload("note").kind, "note");
-
-    const food = await importWithMocks<typeof import("../src/usecases/food.ts")>(
-      "../src/usecases/food.ts",
-      {
-        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") {
-              return foodCore;
-            }
-            throw new Error(`Unexpected specifier: ${specifier}`);
-          }),
-        })),
-      },
-    );
-    assert.deepEqual(await food.upsertFoodRecord({
-      vault: "./vault",
-      payload: food.scaffoldFoodPayload(),
-    }), {
-      vault: "./vault",
-      foodId: "food_1",
-      lookupId: "food_1",
-      path: "foods/food_1.md",
-      created: true,
-    });
-    assert.equal(typeof food.scaffoldFoodPayload, "function");
-    const shownFood = await food.showFoodRecord("./vault", "food_1");
-    assert.deepEqual(shownFood.entity.data.nutrition, {
-      perServing: {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-      },
-      provenance: {
-        source: "estimated",
-        confidence: "medium",
-        sourceDetail: "Neighborhood menu plus standard granola serving.",
-      },
-    });
-    const listedFoods = await food.listFoodRecords({
-      vault: "./vault",
-      limit: 10,
-    });
-    assert.deepEqual(listedFoods.items[0]?.data.nutrition, {
-      perServing: {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-      },
-      provenance: {
-        source: "estimated",
-        confidence: "medium",
-        sourceDetail: "Neighborhood menu plus standard granola serving.",
-      },
-    });
-
-    const recipe = await importWithMocks<typeof import("../src/usecases/recipe.ts")>(
-      "../src/usecases/recipe.ts",
-      {
-        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") {
-              return recipeCore;
-            }
-            throw new Error(`Unexpected specifier: ${specifier}`);
-          }),
-        })),
-      },
-    );
-    assert.deepEqual(await recipe.upsertRecipeRecord({
-      vault: "./vault",
-      payload: recipe.scaffoldRecipePayload(),
-    }), {
-      vault: "./vault",
-      recipeId: "rcp_1",
-      lookupId: "rcp_1",
-      path: "recipes/rcp_1.md",
-      created: true,
-    });
-    assert.equal(recipe.parseRecipePayload(recipe.scaffoldRecipePayload()).title, "Sheet Pan Salmon Bowls");
   });
 
   test("daily food scheduling validates the exact eventual slug before food persistence", async () => {
@@ -1675,7 +1455,14 @@ describe("record service seams", () => {
               title: "Core",
               occurredAt: "2026-04-08T11:00:00.000Z",
             })]
-          : []),
+          : family === "experiment"
+            ? [sampleQueryRecord({
+                entityId: "exp_1",
+                primaryLookupId: "exp_1",
+                family: "experiment",
+                kind: "experiment",
+              })]
+            : []),
       listEntities: vi.fn(() => [sampleQueryRecord({
         entityId: "exp_1",
         primaryLookupId: "exp_1",
@@ -1727,7 +1514,13 @@ describe("record service seams", () => {
       })),
       "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
         ...actual,
-        loadQueryRuntime: vi.fn(async () => journalQuery),
+        loadQueryRuntime: vi.fn(async () => ({
+          ...journalQuery,
+          readExperimentQuerySource: vi.fn(async () => ({
+            readModel: await journalQuery.readVault(),
+            listMetricPoints: journalQuery.listMetricPoints,
+          })),
+        })),
       })),
     });
     assert.deepEqual(await journal.createExperimentRecord({ vault: "./vault", slug: "focus-sprint" }), {
@@ -1837,6 +1630,13 @@ describe("record service seams", () => {
     });
     const anchoredMetricPointFilters: unknown[] = [];
     const anchoredMetricQuery = {
+      readExperimentQuerySource: vi.fn(async () => ({
+        readModel: journalQuery.readVault(),
+        listMetricPoints: (filtersList: readonly unknown[]) => {
+          anchoredMetricPointFilters.push(...filtersList);
+          return [];
+        },
+      })),
       readVault: vi.fn(async () => journalQuery.readVault()),
       lookupEntityById: vi.fn(() => anchoredExperiment),
       resolveCanonicalEntityInFamily: vi.fn(async () => anchoredExperiment),
@@ -2064,7 +1864,14 @@ describe("record service seams", () => {
         })),
         "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
           ...actual,
-          loadQueryRuntime: vi.fn(async () => experimentOutcomeQuery),
+          loadQueryRuntime: vi.fn(async () => ({
+            ...experimentOutcomeQuery,
+            resolveCanonicalEntityInFamily: vi.fn(async () => experimentOutcomeQuery.lookupEntityById()),
+            readExperimentQuerySource: vi.fn(async () => ({
+              readModel: await journalQuery.readVault(),
+              listMetricPoints: () => [],
+            })),
+          })),
         })),
       });
 

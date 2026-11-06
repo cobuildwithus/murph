@@ -1,31 +1,27 @@
 "use client";
 
-import { UsersRound } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
-import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import { HostedAuthRequiredScreenView } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
 import {
   navigateHostedAuthRedirect,
   reloadCurrentHostedAuthDocument,
 } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import { LinkPageSurface } from "@/src/components/link-page/link-page-shell";
+import {
+  LinkPageSignIn,
+  LinkPageSignInScreen,
+} from "@/src/components/link-page/link-page-sign-in";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-const FAMILY_SETUP_AUTH_COPY = {
-  description:
-    "Sign in or create your Murph account to open your private Family settings.",
-  eyebrow: "Murph Family",
-  eyebrowIcon: UsersRound,
-  footer:
-    "Family billing, membership, and invitations stay private to your account.",
-  title: "Set up Family",
-} as const;
+const FAMILY_SETUP_COPY = {
+  detail: "Family billing, membership, and invitations stay private to your account.",
+  title: "Sign in to set up Family.",
+};
 
 export function FamilySetupAuthRequired() {
-  const [open, setOpen] = useState(true);
   const handleAuthCompleted = useCallback(
-    (payload: HostedPrivyCompletionPayload) => {
+    (payload: HostedAuthenticationCompletionPayload) => {
       if (isHostedOnboardingAccessibleStage(payload.stage)) {
         reloadCurrentHostedAuthDocument();
         return;
@@ -36,24 +32,13 @@ export function FamilySetupAuthRequired() {
     [],
   );
 
-  return (
-    <>
-      <HostedAuthRequiredScreenView
-        {...FAMILY_SETUP_AUTH_COPY}
-        onLogin={() => setOpen(true)}
-      />
-      <AuthDialog
-        description="Sign in to continue to your private Family settings."
-        onCompleted={handleAuthCompleted}
-        onOpenChange={setOpen}
-        open={open}
-        requireLaunchConsentOnCompletion
-        title="Set up Murph Family"
-      />
-    </>
-  );
+  return <LinkPageSignIn {...FAMILY_SETUP_COPY} onCompleted={handleAuthCompleted} />;
 }
 
 export function FamilySetupAuthRequiredView() {
-  return <HostedAuthRequiredScreenView {...FAMILY_SETUP_AUTH_COPY} />;
+  return (
+    <LinkPageSurface>
+      <LinkPageSignInScreen {...FAMILY_SETUP_COPY} />
+    </LinkPageSurface>
+  );
 }

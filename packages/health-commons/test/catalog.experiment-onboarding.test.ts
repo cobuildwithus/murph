@@ -1,6 +1,3 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,11 +7,8 @@ import {
   type HealthCommonsPageFrontmatter,
 } from "@murphai/contracts";
 
-import { buildHealthCommonsCatalog, buildHealthCommonsCatalogFromContent } from "../src/catalog.ts";
+import { buildHealthCommonsCatalogFromContent } from "../src/catalog.ts";
 import type { HealthCommonsContentSet, HealthCommonsSourcePage } from "../src/load.ts";
-
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const contentRoot = path.join(packageRoot, "content");
 
 function createBiomarkerPage(): HealthCommonsSourcePage {
   const frontmatter: HealthCommonsPageFrontmatter = {
@@ -179,36 +173,6 @@ function createContentSet(input: {
 }
 
 describe("buildHealthCommonsCatalogFromContent", () => {
-  it("keeps psyllium lab defaults out of daily LDL-C run-in windows", async () => {
-    const catalog = await buildHealthCommonsCatalog({ contentRoot });
-    const protocol = catalog.entities.find(
-      (entity) => entity.key === "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol",
-    );
-
-    expect(protocol).toBeDefined();
-    expect(protocol?.testPlans).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          planId: "lipid-panel-12-week",
-          baselineDays: 0,
-          durationDays: 84,
-          interventionDays: 84,
-        }),
-        expect.objectContaining({
-          planId: "lipid-panel-8-week-minimum",
-          baselineDays: 0,
-          durationDays: 56,
-          interventionDays: 56,
-        }),
-      ]),
-    );
-    expect(protocol?.experimentOnboarding?.planDefaults).toEqual(expect.objectContaining({
-      testPlanId: "lipid-panel-12-week",
-    }));
-    expect(protocol?.experimentOnboarding?.planDefaults).not.toHaveProperty("baselineDays");
-    expect(protocol?.experimentOnboarding?.planDefaults).not.toHaveProperty("interventionDays");
-  });
-
   it("changes pageRevisionId without changing runSpecRevisionId for narrative-only edits", () => {
     const firstCatalog = buildHealthCommonsCatalogFromContent(
       createContentSet({

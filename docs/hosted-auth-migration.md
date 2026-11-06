@@ -1,6 +1,6 @@
 # Hosted authentication migration
 
-Status: implementation in progress. This document is the rollout owner for removing Privy in favor of Better Auth. It is not evidence that any stage is deployed or ready to activate.
+Status: first-party-only Web is live; legacy schema and project configuration are retired as of 2026-10-21. Native SDK removals are merged. Store publication and deletion of the downgraded vendor app are separate, unfinished actions; see the rollout record below. This document owns the rollout from Privy to Better Auth.
 
 ## Target and boundaries
 
@@ -14,14 +14,69 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 
 | PR | Usable result | Activation prerequisite | Temporary ownership |
 | --- | --- | --- | --- |
-| 1. Approval migration | Protected members enroll Murph passkeys and approve actions without wallet signatures | Real WebAuthn, storage, concurrency and enrollment proof; production RP qualified; compatible readers deployed before enrollment is enabled | Existing approved factor authorizes transition; old proof reader remains for unmigrated members |
+| 1. Approval migration | Protected members enroll Murph passkeys and approve actions without wallet signatures | Real WebAuthn, storage, concurrency and enrollment proof; production RP qualified; compatible readers deployed before enrollment is enabled | Existing-factor migration plus the explicit never-migrated repair policy below; replacement readers always fence old proof |
 | 2. Better Auth and compatibility | Email/SMS login and same-member session compatibility; new native protocol accepts requests | Adapter/privacy and same-member proof; deploy readers with issuance off until PR 3 is ready | Per-member monotonic handoff, local old-session reader, exact-route native bridge |
 | 3. Client adoption | Web/native clients, Telegram login and credential controls use Better Auth | All login methods and credential controls qualified; new backend works before dependent apps are distributed | Valid old browser sessions drain; supported old native clients retain bounded admission |
 | 4. Retirement | No supported client, live service or cleanup job needs Privy | All retirement gates below met | Remove temporary code, mappings, vendor configuration and obsolete schema |
 
 Four Murph PRs are integration boundaries. iOS and Android changes are reviewed in their own repositories and pinned to the corresponding backend protocol; native store publication is a separate event from merging code.
 
+Historical candidates and code qualification:
+
+| Stage | Candidate | Reviewed source and remaining preparation |
+| --- | --- | --- |
+| 1 | [Murph #3127](https://github.com/cobuildwithus/murph/pull/3127) | Round 2 PASS and green CI at `bc9f3728b12bcb54ab941505e34ff32cecde9c68` |
+| 2 | [Murph #3128](https://github.com/cobuildwithus/murph/pull/3128) | Round 3 PASS and green CI at `ca1c6a115aaf050df78a939c77f0590f0737e995` |
+| 3 | [Murph #3132](https://github.com/cobuildwithus/murph/pull/3132) | [Round 3 PASS](https://chatgpt.com/c/6aa27f48-2834-83ea-8988-d5c4ca137932) and green CI at `540a4ac11863970587139579edc9d5e19b2040bc` |
+| 3 | [iOS #150](https://github.com/cobuildwithus/murph-ios/pull/150) | Round 2 PASS and green CI at `c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e` |
+| 3 | [Android #39](https://github.com/cobuildwithus/murph-android/pull/39) | [Round 3 PASS](https://chatgpt.com/c/6aa27f77-4630-83ea-9bbd-fd92c0d39a01) and green CI at `a589e0072bbcfc9efcce36471e0d4dce099bb4f7` |
+| 4 | [Murph #3134](https://github.com/cobuildwithus/murph/pull/3134) | [Round 2 PASS](https://chatgpt.com/c/6aa26b77-4f88-83ea-83c6-b8d752026677) and green CI on runtime source `87786eda0b935ac32614fc843665e0aadefa971c`; the September reconciliation includes newer first-passkey behavior and requires a fresh full review and final-head CI |
+| 4 | [iOS #151](https://github.com/cobuildwithus/murph-ios/pull/151) | Round 1 PASS and green CI at `4380c93cca8bd47fc4b8ddee0c41e1de58de1b72` |
+| 4 | [Android #40](https://github.com/cobuildwithus/murph-android/pull/40) | [Round 2 PASS](https://chatgpt.com/c/6aa28183-b694-83ea-92c1-a430aebc4552) and green CI at `ffc5d97752b6c2c99ae73f9002201dfbbe4c562c` |
+
+Android [#38](https://github.com/cobuildwithus/murph-android/pull/38) at `614cbc6cc05d2229c76148a3dd5bea1ed1c18bb5` is the independently reviewed tooling prerequisite before #39. After #40, [#41](https://github.com/cobuildwithus/murph-android/pull/41) at `bf346f57a1f8aaef5d620bd359dc57a1bdad59dc` removes two unused CI placeholders. Its refreshed trusted review passes against #40, including 13 contract tests and unchanged control-policy proof; check the PR for final CI. These control changes are isolated from product review and add no rollout stage.
+
+Web adoption now invalidates the previous decrypted vault at successful replacement-response headers and orders cookie writes across tabs. Its actual Next TypeScript 5 and Web TypeScript 7 checks and four real Chromium/HttpOnly-cookie OTP/Telegram scenarios pass. The first round-3 attempt produced only a preliminary note without a completed verdict or model evidence; it is invalid and does not count as a substantive round. The completed fresh full round 3 retains the original first-reviewed and previous valid heads; exact-turn, response hash and actual gpt-6-pro metadata validate its PASS.
+
+Android adoption uses the existing AndroidX Core AtomicFile to stage first writes consistently on supported platforms. Both empty and partial initial-write interruptions reproduce the old failure on API 29; all nine actual Keystore/storage/HTTP/composed recovery cases pass with the fix on API 28, 29 and 36. CI also passes all 44 synthetic cases on each of API 28/29/30. There is no new storage format, dependency or platform branch. The SDK-free release preserves this same secure-record owner, encryption key and local member binding. iOS retirement passes 601 unit tests and Debug/Release simulator builds.
+
+The table above records historical source qualification, not current deployment state. The rollout record below owns the executed retirement. Real delivery, installed/signed-device upgrades and dormant/skipped-version recovery remain separate native publication evidence.
+
+
+## Current rollout record
+
+Executed 2026-10-21. The operator accepted older-native update/re-login risk,
+confirmed wallets were unused, and authorized retirement. This acceptance is
+not a claim that every installed device upgraded or that new SDK-free binaries
+were published.
+
+| Work | Executed result and remaining boundary |
+| --- | --- |
+| Web retirement #3134 | Merged after round-5 PASS and required CI. Production now serves `5d56f443eb1b2e705b47f3b1e227c6c02ec79932`, including browser-fixture corrections #4276 and #4280. Exact-candidate production admission [39640574045](https://github.com/cobuildwithus/murph/actions/runs/39640574045) passed all hosted browser/runtime scenarios. |
+| Canonical signup cleanup | The explicitly authorized unused-signup deletion completed through the guarded canonical Ops owner with terminal cleanup. No retained member was deleted to satisfy convergence. The temporary endpoint is removed. |
+| Schema contraction | [39642935706](https://github.com/cobuildwithus/murph/actions/runs/39642935706) verified the production alias, drained prior functions, and applied guarded contract migrations. Read-only catalog checks confirmed the legacy session table and all nine retired identity/wallet/cleanup columns are absent. |
+| Deployed configuration | Removed all 14 Privy project settings across Vercel production, preview, and development; metadata inventory is clear. The shared session HMAC key remains for billing, referrals, and device flows. Existing immutable deployment snapshots are not vendor credential revocation. |
+| Android retirement #40 | Merged as `b05c926b592b2feab5773b808eaec9c4827b482c`. Validated exact-head [ReviewGPT PASS](https://chatgpt.com/c/6ad8f1ec-c458-83ea-aa99-69cfe9cc0aef), zero findings, and all three required checks green. Local proof: 2,975 unit-test executions, lint/builds, nine real-Keystore API36 cases, and inspected synthetic screenshots. Interrupted sign-out with absent credentials reaches login only after health teardown. |
+| Android CI cleanup #41 | Merged as `ce3450cda5d7e0359cd4ec31095997644b3754d6`; independent control review and required checks passed. Only obsolete CI inputs and Gradle comments were removed. Review-export correction #63 was separately reviewed and merged before final product review. |
+| iOS retirement #151 | Merged as `b79432de259f0417ac8ca187ac686382da295e85` after validated round-4 PASS and required checks. Local signed host tests passed: 718 passed, one skipped. Post-merge CI subsequently failed two different APIClient/wearable fixture tests across two attempts; those runs are not recorded as passes. |
+| Native publication | No new App Store or Play binary was published by this retirement operation. API28/29 hosted Android emulators failed during setup before test execution. Installed upgrades, skipped versions, real OTP delivery, physical devices, provider integration, and signed-candidate checks remain publication gates. Native canary source pins were not advanced here. |
+| Vendor account | The operator already downgraded Privy. Vendor-app deletion and vendor-side credential revocation were deferred; neither is claimed complete or required for the now-independent live backend. |
+
+Unauthenticated production smoke checks returned 200 for the homepage, 401 for
+both browser/native session readers, and 404 for the retired native exchange
+and Privy onboarding endpoints. These checks do not prove authenticated native
+store behavior. Production identity and cleanup records remain private.
+
+The contracted deployment is the rollback floor: do not restore a reader that
+requires the removed schema. Use the normal reviewed Git deployment path for
+any correction. Preserve the shared session HMAC key.
+
 ## Backend configuration and deployment
+
+The following flags and import commands apply to the additive transition
+releases. The retirement release removes the native bridge, importer and legacy
+configuration after their obligations converge; do not run transition commands
+against the contracted deployment.
 
 PR 2 is an additive compatibility release. Apply both additive schema migrations
 before its Web build reaches requests; old builds tolerate the new tables. Keep
@@ -31,6 +86,12 @@ activate PR 2 alone: PR 3 supplies the new login/settings clients, Telegram logi
 and credential-change/recovery journeys. Those must be usable before importing
 members or distributing a dependent native release.
 
+PR 3 changes the main Web dialog and invite entry to first-party authentication
+unconditionally. Deploy that client with issuance enabled only after the complete
+PR 3 qualification below; do not ship its new login UI with issuance still off.
+After cutover, pausing issuance keeps the new UI and both session readers in
+place. It must not reload Privy login or restore legacy credential writers.
+
 | Configuration | Purpose | Pause behavior |
 | --- | --- | --- |
 | `HOSTED_BETTER_AUTH_ENABLED=true` | Enable OTP send/verify, native exchange and importer apply; stop old full Privy completion | Unset/false pauses new issuance. Existing Better Auth sessions still read, renew and sign out. Handed-off members retain legacy-write guards. |
@@ -38,7 +99,9 @@ members or distributing a dependent native release.
 | `HOSTED_BETTER_AUTH_SECRET` | Independent canonical 32-byte base64url Better Auth signing secret | Retain while any replacement session exists. |
 | `HOSTED_AUTH_STORAGE_KEY` | Independent canonical 32-byte base64url pre-auth encryption and separated blind-lookup/rate-limit domains | Retain while auth records exist. Rotation needs a reviewed reindex/re-encryption procedure; do not replace it as a rollout toggle. |
 | `HOSTED_AUTH_EMAIL_FROM`, existing `RESEND_API_KEY` | OTP email delivery through the existing email owner | Qualify sender/delivery in hosted staging. |
-| `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID` | Dedicated SMS sender credentials/configuration | Qualify service, destination coverage and fraud controls before exposing phone login. |
+| `HOSTED_AUTH_REVIEW_EMAIL`, `HOSTED_AUTH_REVIEW_CODE` | One dedicated app-store review account signs in with this fixed six-digit email code and receives no email; the companion also lets that verified member past messaging setup, because reviewers cannot receive its texts. Every other address keeps random emailed codes and required messaging setup, and expiry, attempt and rate limits are unchanged | Unset either value to disable it. Use a review-only account with no real member data, and rotate the code when a review cycle ends. |
+| `HOSTED_AUTH_TELEGRAM_CLIENT_ID` | Numeric Telegram login client ID; verified token audience and browser popup configuration | Qualify the registered Web origin, profile ID and bot messaging scopes before Telegram login is exposed. |
+| `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_VERIFY_SERVICE_SID` | Dedicated Twilio Verify SMS service and API key | Qualify six-digit codes, destination coverage and fraud controls before exposing phone login. |
 
 All secret provisioning occurs through the reviewed hosted configuration path.
 Use the same stable values across compatible builds in one environment. The
@@ -48,7 +111,8 @@ headers. Vercel ingress supplies the client address for authentication budgets.
 No production secret is downloaded for local tests or previews.
 
 The closed route surface is `/api/auth/otp/send`, `/api/auth/otp/verify`,
-`/api/auth/session`, `/api/auth/logout` and `/api/auth/complete`. Native equivalents
+`/api/auth/telegram/start`, `/api/auth/telegram/verify`, `/api/auth/session`,
+`/api/auth/logout` and `/api/auth/complete`. Native OTP/session equivalents
 live below `/api/device-sync/companion/auth`, with an additional `/exchange` and
 existing companion admission for product bootstrap. No Better Auth catch-all
 handler is exposed. A successful browser OTP response sets only its cookie;
@@ -66,6 +130,76 @@ native renewal. Issuance pause and legacy-admission disable have separate tests.
 These local proofs do not qualify actual KMS, provider deliverability, app-store
 upgrades or dormant devices.
 
+OTP send admission allows two attempts per contact in a sixty-second window,
+including one immediate resend. The short-window check precedes the five-attempt
+per-contact ten-minute budget, so rejected rapid resends do not spend that longer
+budget. The independent twenty-request per-IP ten-minute guard still counts
+rejected requests. Verification budgets and provider fraud protection are unchanged.
+These send limits do not define code expiry.
+
+## SMS verification owner
+
+Use a dedicated [Twilio Verify service](https://www.twilio.com/docs/verify/api/service)
+with the friendly name Murph, SMS enabled and six-digit codes. Verify manages
+sending numbers; do not provision a Programmable Messaging sender pool for login.
+The restricted API key needs `twilio/verify/verification/create` and
+`twilio/verify/verification-check/create`. Service settings can be qualified in
+Console or with a separate diagnostic key; `twilio/verify/service/read` is not a
+runtime requirement. Keep Verify fraud protection enabled and
+qualify the intended destination countries before activation. See the
+[restricted-key permissions](https://www.twilio.com/docs/iam/api-keys/restricted-api-keys).
+
+The private SMS owner replaces the existing encrypted verification record under
+the OTP contact lock, then starts Verify outside the transaction. A late send
+response may attach its verification SID only to that exact, unexpired record.
+Verification reserves at most three attempts per local generation before the
+external check. An approved response persists a keyed digest bound to the code
+and generation, never the plaintext code. Final completion rechecks that proof,
+expiry and generation, then consumes it with canonical member/contact writes and
+session issuance in one database-only transaction. A failed canonical commit can
+retry the same approved code without calling the already-consumed provider again.
+
+The local challenge expires five minutes after each send request. Twilio can
+reuse its code and verification SID within its own validity window; a resend
+replaces the local generation even when the displayed code stays the same.
+Twilio expiry can therefore precede the local deadline. A lost provider approval
+response or a failure before its local save requires a new code request; it
+cannot be treated as approved. Start/check calls have a ten-second deadline,
+propagate request cancellation and do not retry automatically. Missing service
+configuration, rejected provider authority and malformed responses fail closed.
+Server-side failure causes retain only the operation, fixed failure stage,
+HTTP status, a five-digit numeric Twilio code and finite response/parameter
+diagnostics read from at most 4 KiB. For code `60200`, `parameter` and
+`parameterKind` recognize the exact `Invalid parameter: LABEL` format for
+`To`, `Channel`, `RiskCheck`, `Code` and `VerificationSid`. They also recognize
+an exact backtick-delimited `To` label followed by a colon, space and an
+E.164-shaped destination; the destination is discarded. Only a recognized `To`
+rejection on send with HTTP 400 maps to the existing invalid-request response.
+For HTTP 400/code `60200` with `parameterKind unrecognized`, an optional
+`parameterHint` retains only one of those five labels. It recognizes a leading
+`Invalid parameter: LABEL`, or a backtick-delimited label after
+`Invalid parameter ` or `Invalid parameter: `. End of input, ASCII space, tab
+or colon must follow the bare label or closing backtick. The hint indicates a
+known label in a different format; its absence leaves the label unresolved,
+not proven unknown. It is log-only and never participates in classification.
+Provider prose, contacts, response bodies and original exceptions are discarded;
+the public authentication error remains unchanged. Use these diagnostics to
+distinguish configuration, transport and provider rejection before changing
+provider settings or delivery policy.
+
+Keep issuance off while deploying this owner. Old raw SMS records and new Verify
+records are mutually incompatible; users would need a fresh code if switching
+formats during active issuance. Existing sessions and email codes retain their
+readers and formats. There is no SMS database migration. Phone credential changes
+prepare Verify approval through the same owner outside locks, then revalidate
+the exact generation and code inside the existing credential transaction. Contact
+proof, action approval, canonical writes and session revocation commit together;
+canonical rollback retains the bound approval for retry. Before client activation,
+qualify send/check, same-member login, credential changes and real-device receipt.
+A deployed backend alone is not activation approval. Once Verify issuance is
+active, recovery builds must include this challenge reader; pausing issuance
+preserves existing sessions.
+
 ## Approval migration
 
 PR 1 is an additive reader-first deployment. Apply its credential-table migration before deploying the new Web build. Leave `HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED` unset (disabled) through mixed-version deployment. Verify every production route and reachable historical deployment enforces replacement credentials, then enable enrollment with the exact value `true`. The switch gates both registration options and final registration; it does not gate verification of already enrolled keys.
@@ -76,15 +210,286 @@ Use the same action challenge and member/session binding for both proof formats.
 
 Enrollment must be authorized by the member's existing approved factor, or by a separately defined independent recovery operation. A normal authenticated session alone cannot replace established protection. Verify authorization at options generation and final registration, then consume it with the credential write. Do not issue a login session from enrollment.
 
+Accounts with no established approval aggregate use one first-passkey enrollment
+owner after retirement. Fresh proof must come from a canonical linked primary
+sign-in within five minutes; silent exchange and session renewal do not qualify.
+The newer repair protections remain in this shared path, including canonical
+login generation binding and revocation of other first-party sessions. An existing
+approval aggregate always requires its current factor or saved-key recovery.
+
 Credential state is bounded and encrypted under the existing member crypto owner. Verify and prepare crypto before the transaction; recheck the exact state and current session under member locks. Commit signature-counter changes, one-use challenge acceptance and the protected mutation together. Counterless synced passkeys still depend on challenge consumption for replay protection.
 
-Once replacement protection is established, do not try a legacy wallet after a failed passkey assertion. Corrupt credential state fails closed. The legacy proof reader is temporary and cannot become a recovery mechanism that ignores newer revocations.
+Once replacement protection is established, failed assertions and corrupt state
+fail closed. There is no wallet verifier or browser SDK fallback after retirement.
+
+### First-passkey enrollment after retirement
+
+The rollout accepted canonical primary proof for imported accounts that never
+established Murph approval protection. This remains a deliberate weaker-factor
+policy than proving the former Privy factor. After provider/schema retirement,
+new and imported accounts use the same policy; no legacy identity marker remains.
+Email, phone or Telegram compromise can therefore permit initial enrollment.
+Any approval row, including empty or corrupt state, excludes this path.
+
+`initial-passkey-enrollment.ts` requires a current first-party session, no approval
+row, fresh non-future primary proof and an encrypted login projection exactly
+matching canonical verified methods. It binds the challenge to member, session,
+primary proof and canonical generation, then rechecks all state under locks.
+Credential revocation fencing must not postdate primary proof. New users start
+without a revocation timestamp because no earlier authority exists; subsequent
+revocation, recovery and initial enrollment stamp the existing field. Enrollment
+never creates a primary session or changes a sign-in method.
+
+When primary proof is stale, the existing auth dialog runs a same-account
+reauthentication continuation. Fixed OTP send/verify and Telegram start/verify
+routes accept an explicit browser-only `reauthenticate` intent. The current
+session selects the member; the submitted method must already match its canonical
+verified sign-in. This branch never calls the importer, searches for another
+member by contact, creates an account, attaches a contact, merges accounts, or
+runs signup completion. Telegram's nonce is one-use and bound to the original
+member/session. Actual OTP or signed Telegram proof issues the new primary
+session through the existing auth owner. Recheck the old session and exact
+canonical/login snapshot at that commit. Canceling closes the dialog and does
+not resume enrollment.
+
+The existing Approve control calls `/approval-passkeys/initial-options`, performs
+user-verified WebAuthn registration and submits the distinct `initialToken`
+to the existing register route. One five-minute, member/session/primary-proof/
+canonical-generation-bound challenge is pending per member; a new attempt
+supersedes an abandoned one. Member/IP admission and the existing twenty-session
+ceiling bound work. Prepare WebAuthn, encrypted writes, login/root state and all
+session roots outside locks. Under the member/current-session locks, a
+provider-disabled database-only transaction rechecks exact authority, absence of
+any native aggregate, freshness and rollout gates; consumes the challenge with
+its absent-state credential CAS; stamps `credentialsChangedAt`; revokes other
+first-party sessions and all legacy browser sessions. The fresh authorizing
+browser remains signed in. No provider/KMS call is permitted under these locks.
+
+Registration **does not approve the requested action**. The client requests a
+fresh challenge for the captured approval ID (reauthentication may have changed
+the session) and obtains a separate native assertion through the existing
+verification/decision owner. Terminal or expired actions cannot be approved.
+Deny and return-to-conversation behavior are unchanged. Closing, failed proof or
+registration never sends a decision. A lost registration response may mean the
+passkey was saved: explicit retry/reload reselects the durable native factor, not
+repair or an automatic irreversible retry. Concurrent enrollment has one winner;
+a losing attempt retries using that winning factor. The same enrollment hook is
+available from the existing Security and protected-action controls; there is no
+new Settings product or generic recovery framework.
+
+**Activation and rollback:** both existing switches,
+`HOSTED_BETTER_AUTH_ENABLED=true` and
+`HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED=true`, must be enabled after reader,
+canonical-login and browser qualification. This patch adds no new switch,
+changes no deployment configuration and needs no new schema migration. Pausing
+either switch blocks repair options and commit, not existing native approvals.
+Keep the native credential reader and session fences as the rollback floor;
+never restore wallet fallback for a repaired member or delete their aggregate.
+
+**Retirement prerequisite:** every in-scope legacy account must already have an
+independently reconciled Better Auth login projection and a usable canonical
+verified sign-in before Privy becomes unavailable. The repair cannot safely
+invent that ownership for unimported, conflicting or inaccessible identities.
+Resolve those in the existing bounded migration inventory first. Qualify all
+supported browser authenticators, first-party delivery and the inline stale-login
+continuation; checked-in tests or a merged patch are not deployment evidence.
+
+### Independent recovery
+
+PR 3 adds one nullable encrypted recovery-hash column to the existing approval
+aggregate. Apply `20260910040000_approval_recovery_key` before deploying its
+generated client; no backfill is needed. Existing readers tolerate this column.
+
+After migrating or setting up a Murph passkey, use **Save a recovery key** in
+Security. A current passkey approval authorizes generating one random 32-byte
+key, shown once. Only its SHA-256 digest, encrypted and bound to the member and
+field, is stored. Generation preserves sessions and replaces any prior recovery
+key. If delivery is lost, the current passkey can authorize a new key; no key
+retrieval endpoint exists. Keep the saved key separate from the passkey.
+
+**Use a recovery key** requires first-party primary authentication within five
+minutes and the previously saved key. A five-minute challenge binds the current
+member, browser session and exact recovery-key generation. Final registration
+requires a new user-verified WebAuthn credential. One transaction replaces all
+previous approval credentials, consumes the challenge/key, revokes other
+first-party and legacy browser sessions, and fences legacy native credentials.
+The authorizing browser stays signed in. The newly approved passkey can then
+authorize a fresh recovery key. Recovery does not change primary sign-in methods
+or contacts. Member/IP limits bound attempts; primary login
+alone, silent native exchange, and a provider wallet cannot redeem or provision
+this recovery path for an already protected member.
+
+Both issuance and enrollment switches gate recovery mutations. A pause preserves
+existing protection; the UI never falls back to provider login or a weaker
+reset. Local proof must include a failed database commit followed by retry,
+simultaneous redemption, another member/session, changed keys, revoked sessions,
+and provider-independent completion. Qualify storage/copying and WebAuthn on
+supported browsers before widening.
+
+A previously saved key remains mandatory for replacement of any established
+Murph approval aggregate. Primary proof alone cannot provision or redeem that
+path. Accounts without an approval aggregate use the first-passkey
+enrollment policy above; accounts outside its canonical-ownership prerequisites
+remain unresolved retirement gates, not an email/SMS support override. Saved-key
+recovery follows [OWASP's MFA recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html#resetting-mfa).
+
+## Credential settings
+
+The fixed `/api/settings/login-methods` reader and challenge, OTP send/verify,
+Telegram start/prepare/verify, and remove routes own first-party credential
+changes. They require the current browser session and canonical member, reject
+other members' contacts, and preserve the last usable sign-in. Existing approval
+covers the exact operation and old/new identity. Email changes use the pinned
+private Better Auth change-email API; phone proof uses its server-only consume
+API. Telegram verification accepts only a signed positive safe-integer profile `id`,
+encoded as a JSON number or a canonical decimal string; it never substitutes
+the OIDC `sub`. Verification binds that numeric identity and nonce to this member and
+session, with a distinct purpose from login. No library catch-all is exposed.
+
+First messaging setup for an email-only first-party member needs fresh primary
+login (within five minutes) and either the new phone's code or a verified,
+session-bound Telegram token, without passkey enrollment.
+The server requires no canonical phone, Telegram login, legacy binding, or
+approval aggregate. It rechecks eligibility, freshness,
+and the original session under the member lock in the transaction that consumes
+channel proof and writes both identities. Any established approval state keeps the normal approval
+path; stale primary proof requires signing in again. No other credential operation
+uses this exception. The reader's eligibility flag controls presentation only. Onboarding renders the
+phone form and Telegram connection action directly on the channel page; Settings
+retains dialogs for account changes.
+
+Proof, canonical contact/routing writes, encrypted login records, approval
+acceptance and the durable channel wake commit together. Delivery, crypto
+preparation and runtime signaling occur outside the transaction. Wrong-code
+budgets commit; later database failures roll back the proof for a safe retry.
+Email replacement also removes old routing authority and rotates its reply alias.
+
+Adding a method keeps existing sessions, including imported native sessions.
+Replacing/removing one preserves the authorizing first-party browser but revokes
+other sessions and blocks native legacy credentials. This security action may
+require those devices to sign in again. A later import cannot restore the old
+method. These routes remain gated by issuance activation; the settings clients
+and recovery journeys must be qualified before enabling them.
+
+### Native first messaging setup
+
+Authenticated companions use four additive, cookie-rejecting POST endpoints:
+
+- `/api/device-sync/companion/auth/messaging/phone/send`
+- `/api/device-sync/companion/auth/messaging/phone/verify`
+- `/api/device-sync/companion/auth/messaging/telegram/start`
+- `/api/device-sync/companion/auth/messaging/telegram/complete`
+
+Phone requests carry `{ change: { method: "phone", operation: "set",
+expectedIdentity: null, value: "<E164_PHONE>" } }`; verify also carries `code`.
+The existing credential owner owns canonical conflict checks, SMS budgets,
+Twilio Verify proof, current-session revalidation, first-messaging eligibility,
+five-minute primary freshness, atomic contact/login writes and durable channel
+wake. These endpoints cannot replace/remove methods, accept client approval,
+import members, or bypass existing approval state. Protected members use account
+settings; stale primary proof requires signing in again. Additions preserve
+sessions. Existing browser credential routes are unchanged.
+
+Telegram start accepts `{}` and returns `{ ok: true, startId, clientId }`, without
+cookies. The random 256-bit start ID expires after five minutes in the existing
+encrypted auth verification store, bound to the native member and session under
+a purpose distinct from browser login and credential changes. Completion accepts
+`{ startId, idToken }` with the original bearer. The unmodified official SDKs
+request `openid profile telegram:bot_access` and own registered HTTPS App Link /
+Universal Link callbacks and PKCE. No Murph-hosted browser intermediary, backend
+code exchange, SDK fork or client secret is introduced. The SDK may use its own
+platform authentication-session fallback when Telegram is not installed.
+
+The human-approved native exception does not require the nonce the SDKs cannot
+send. It retains the shared verifier's JWKS, algorithms, issuer, audience and
+expiry checks, requires `sub` and `iat`, limits token age to two minutes with at
+most five seconds of future clock skew, and rejects tokens issued before the
+pending start (allowing five seconds for clock skew). A SHA-256 token digest
+becomes a globally unique consumed verification record, retained beyond its
+acceptance window. Pending-start consumption, replay reservation and canonical
+credential mutation commit atomically. Wrong member/session, missing start,
+stale token, replay and conflicts fail closed; member/IP attempt budgets apply.
+The trust rationale is delivery through the registered app callback with SDK
+PKCE, plus current native bearer authority and short-lived one-use proof. This
+is not a cryptographic token-to-start nonce binding. A stolen fresh token remains
+a bearer proof until consumption; never log, persist or expose it in app URLs.
+Browser login and browser credential changes still require the exact signed
+nonce and cookie binding without this exception.
+
+After the committed link, one bounded Bot API send attempts the existing
+`assistant.signup_welcome` content. Telegram documents no bot-access token claim;
+requesting the scope alone is not proof that a message can be delivered. Only a
+successful Bot API message response naming the verified private chat promotes
+`telegramThreadId`, through the existing routing owner and channel-update wake.
+Promotion rechecks the identity under the member lock so removal/replacement
+while the send was in flight cannot restore a stale link. Replay cannot resend.
+Provider rejection, missing access, blocked bots, malformed responses and network
+uncertainty leave the identity linked but awaiting inbound. This narrow native
+link welcome does not enable general proactive Telegram activation welcomes.
+
+Completion also returns `telegramAwaitingInbound` and `telegramUrl` (the bot chat
+with a prefilled greeting, or null if unconfigured). The initial-onboarding
+projection includes the additive `telegramAwaitingInbound` flag for recovery
+across process restarts, only when no other direct messaging route exists. A
+member with a canonical phone must not be held for an unrelated pending Telegram
+thread. Legacy `messagingSetupRequired` semantics are unchanged:
+a verified canonical phone or linked Telegram identity clears that flag. New
+clients show the explicit say-hi step while Telegram awaits inbound and refresh
+on return; they must not infer a direct route from a successful SDK callback.
+The bot-start linking protocol, recipient proof and custom return page are gone.
+
+The native setup default contains the existing phone input and Send code action,
+a quiet divider and secondary Connect Telegram button, with Sign out in the top
+bar. SMS uses the existing six-digit input. Telegram login uses the centered
+confirming state, then either readiness continuation or the say-hi fallback.
+Cancellation and errors stay inline; account settings appears only for changes
+that need its existing approval or conflict controls.
+
+Deploy this backend before distributing either native consumer. Older apps keep
+using browser settings, and the new initial-onboarding field is additive. New
+apps against an older backend fail the native operation without weakening proof.
+Rollback to a backend without these endpoints requires pausing dependent native
+distribution; already installed newer apps retain SMS/browser error recovery.
+Production merge qualification includes an unauthenticated endpoint rejection
+smoke. Native distribution additionally needs registered callback domains and
+real-device Telegram approval. Android distribution also requires its real
+registered redirect host and the official SDK package-fetch credentials.
 
 ## Browser and native continuity
 
+Browser renewal and primary sign-in/logout serialize cookie-writing requests with one origin-wide Web Lock. An older renewal must settle before another login is dispatched, including across tabs; no valid server session is revoked merely to change accounts. Renewal requests have a ten-second deadline and verification/logout have thirty-second deadlines. Browsers without the lock API retain their existing cookie lifetime and can still sign in; native bearer renewal is unchanged. This uses the browser's [Web Locks contract](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API), with no persistent coordinator.
+
+
 Existing browser cookies are first-party Murph credentials and verify locally. Keep their reader and rows until old issuance has stopped and every valid old session has expired or been security-revoked. Preserve outstanding callback/handoff bindings and metadata. New authentication issues Better Auth sessions. No unconditional session purge occurs at activation.
 
-Both current native auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
+Visible authenticated Web pages make at most one renewal check per hour per
+mounted document and retry on later focus/visibility changes. The server keeps
+the daily renewal threshold and primary-proof timestamp. Hidden/offline tabs do
+not sign out or fall back to another provider. A legacy renewal request only
+reads its existing record and never sets a replacement cookie or extends expiry.
+
+Browser sign-out waits for durable server revocation, then refreshes canonical
+state without loading the legacy SDK. Confirmed deletion navigates immediately
+to the public farewell and preserves its pending-cleanup status. Leftover SDK
+browser state is never primary-login authority after cutover; old completion and
+credential writers remain fenced. The temporary approval port independently
+checks the current member before using any restored SDK principal.
+
+`/settings/accounts` shares the dashboard's credential and passkey controls but
+uses identity admission before subscription setup. Email-only onboarding links
+there to add a messaging method, then returns through `/join` to the canonical
+onboarding owner. Targeted invites retain their member binding; phone invites
+show their existing masked hint and request the full number for first-party OTP.
+The server rejects proof for another member even if the entered contact changes.
+
+The native ephemeral settings browser opens `/settings/accounts?companion=ios`
+or `ios-dev`. Login resumes that page. Its explicit return link uses the fixed
+app/environment callback scheme with host `account-settings`, no query, token or
+member ID. Duplicate or unknown companion parameters produce only the local
+`/join` link. A callback only asks native admission to reread canonical setup;
+it never proves successful account linking or changes the stored app principal.
+
+Both native transition auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
 
 Ship the usable backend first. Release native transition builds independently and measure supported-version adoption. Remove SDK restoration only after the migration journey and dormant-client recovery are qualified. Installed users who skip transition releases require a tested route; zero recent legacy traffic is not sufficient evidence. Expired or revoked credentials may require reauthentication.
 
@@ -125,6 +530,12 @@ canonical member; it cannot resurrect the deleted one.
 
 ## Recovery and observation
 
+`AUTH_IDENTITY_RECONCILIATION_REQUIRED` keeps its existing public 409 response.
+The existing `Hosted onboarding route failed.` warning carries only a fixed,
+allowlisted `authIdentityReconciliationReason` from the rejected guard; unknown
+values are omitted. Reasons contain no identifiers, credentials, source snapshots
+or provider payloads and do not change reconciliation or retry policy.
+
 Widen cohorts only after method success, identity conflicts, integrity failures, native rejection causes and cleanup backlog are understood against the baseline. Cross-member authority, restored removed credentials, ignored revocation or deletion resurrection stops widening immediately.
 
 Before every stage, identify the minimum compatibility-aware recovery build. After new credential or factor mutations, an old Privy-only build is not a safe rollback target. Pause affected issuance/mutations while preserving valid sessions, then repair forward or use a build that preserves all committed state. Database snapshot restoration can resurrect deleted/revoked authority and is not routine rollback.
@@ -138,7 +549,7 @@ Retirement requires all of the following:
 - No valid old browser session needs its verifier, and no supported callback or recovery build needs the old format.
 - Supported native clients can migrate, renew, recover and handle upgrade requirements; dormant users have an explicit path.
 - Every retained member/provider principal has a terminal import/conflict/recovery disposition. No live lookup needs Privy.
-- Previously protected members have replacement protection or operational independent recovery; no silent primary-OTP downgrade exists.
+- Established Murph-passkey members retain their factor or saved-key recovery. Never-migrated legacy members have a reconciled first-party login and the qualified explicit repair policy above; other unresolved factor/identity cases still block retirement. Do not describe the exception as old-factor-equivalent recovery.
 - Wallet/export obligations are resolved and destructive vendor retirement has its explicit authorization.
 - Encrypted durable receipts preserve every provider target before detaching unused bindings. Provider calls happen outside transactions, with rebound checks and retries.
 - Cleanup readers support the next payload before writers emit it. Remaining Stripe, Cloudflare, runtime-log and Temporal work keeps its leases, cursors, attempts and outcomes. Missing configuration never means successful deletion.
@@ -148,11 +559,62 @@ Disable drained legacy admission; finish authorized vendor obligations while cre
 
 Remove live Privy SDKs, verifiers, hooks, wallet code, native dependencies, CSP/configuration, obsolete sessions/bindings, import/runtime migration branches, harnesses, canaries and current documentation. Keep canonical contacts and unrelated key consumers. In particular, the session-named HMAC key also authenticates billing quotes, referrals, device callbacks and recovery witnesses; it is not exclusively a Privy/session dependency.
 
+## Retirement execution
+
+PR 4 removes the old verifiers, exchange/import routes, provider contact writers,
+wallet approvals, SDK UI, native admission fallback and provider configuration.
+It retains the first-party credential format, secure storage contract, canonical
+member IDs and session signing/storage keys. Updated mobile installations read
+the same durable credential after the SDK is removed. Installed upgrades and
+skipped-version recovery still require device qualification before distribution.
+
+Do not merge or deploy PR 4 merely because code review and CI pass. First complete
+the inventory above, including protected accounts, dormant clients and vendor
+exports/deletions. Confirm no valid legacy browser session remains, no retained
+provider-bound identity lacks its first-party user, and no pending deletion
+receipt still targets the provider. For receipts, the relevant pending condition
+is a non-null provider lookup key with no provider completion timestamp; a new
+receipt with neither field is not an outstanding provider obligation. This SQL
+check supplements the hosted encrypted-record/provider inventory; it cannot
+prove passkey availability, payload integrity or native adoption.
+
+Deploy the code that does not reference the old schema, drain incompatible Web
+functions and cleanup workers, then run the existing postdeploy contract lane.
+`20260910070000_retire_legacy_auth` refuses to drop the old table/columns while
+those database obligations remain. The existing runner's current-deployment
+check and short transaction timeouts still apply. The new reader works both
+before and after contraction. After contraction, use a compatible forward fix;
+older schema-dependent builds are below the rollback floor.
+
+Cleanup payloads keep their existing v1 schema. The previous parser accepts an
+omitted optional provider identifier, so both versions can read newly written
+receipts during drain. Stripe, Cloudflare, runtime-log and Temporal cleanup keep
+their current leases, cursors and retry owner. The deletion response retains
+`vendorAccounts.privyUser` as a fixed `skipped_no_record` result for already-open
+browser tabs that read that key after deletion commits. This compatibility field
+is valid only after actual provider obligations are resolved; it never turns
+missing provider configuration into a successful deletion. Historical migrations,
+changelogs and secret-deny rules remain as evidence and privacy protection.
+
+The App Review helper prepares product access for an existing first-party
+account. The reviewer must first use the existing first-party review-account sign-in;
+the helper neither creates provider test users nor issues credentials. Preserve
+the configured review-account code and its ordinary OTP/session limits. Qualify
+the actual review journey before store submission. Finally revoke the obsolete provider secrets,
+custom auth-domain configuration and service account access through the approved
+hosted path after the last reader and obligation are gone.
+
 ## Completion evidence
 
-Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. Native proof uses actual apps/devices, including skipped-version upgrades.
+Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. First-passkey proof additionally covers stale/exchanged primary sessions, exact canonical sign-in, established/corrupt aggregate exclusion, flags at commit, session fencing/rollback, inline cancellation/reload/lost response, terminal actions and a separate native decision with Privy unavailable. Native proof uses actual apps/devices, including skipped-version upgrades.
 
 Final completion also inspects dependency graphs/bundles, schema/catalog, deployed configuration, operational jobs and durable cleanup outcomes. Startup without Privy configuration and cold/warm login must work. Static source review or a grep result alone does not establish vendor retirement.
+
+The final Web adoption response SHA-256 is `19433a8fcfb65fd2f446cfb3404db3a14cd1e72994400871db6d08163c5797a9`; Android adoption is `dfa8cd36fe214ed58930ae1efa6da0f58fdc987a0fd2183ea200168a3cdd27c0`. Android retirement response SHA-256 is `ba3ca1fb5839f18c6412ce9d23bec5bd216edb043cb54faa2fd8869b8b1d375c`; its exact-thread response, context digest, checked head and actual gpt-6-pro model metadata were validated. Native review bodies retain their reviewed context; this rollout owner records current cross-repository status.
+
+### Local browser proof limitation
+
+The composed `pnpm hosted-local e2e hosted-web-browser-smoke --profile e2e:stub` journey reaches authenticated Connect but reports the same invalid-element server-render failure on retirement source `87786eda0b935ac32614fc843665e0aadefa971c` and the earlier compatibility source `ca1c6a115aaf050df78a939c77f0590f0737e995`. Both pages recover through client rendering. This is an existing rendering defect, not a clean full-stack pass. The historical Frog entry `20260910003445-public-auth-smoke` recorded that diagnostic gap; it has since been retired from current main. Focused real-browser auth/cookie proof, canonical PostgreSQL proof and native boundary tests pass independently; none substitutes for hosted delivery and installed-device qualification.
 
 ## Source contracts
 
@@ -161,9 +623,72 @@ adapter, OTP and session code. Public contracts: [adapter factory](https://bette
 [email OTP](https://better-auth.com/docs/plugins/email-otp),
 [phone OTP](https://better-auth.com/docs/plugins/phone-number), and
 [sessions](https://better-auth.com/docs/concepts/session-management).
-SMS transport follows the [Twilio Message resource](https://www.twilio.com/docs/messaging/api/message-resource):
-bounded validity, discarded message content, obfuscated retained addresses and
-fraud checking. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
+SMS transport follows [Twilio Verify start](https://www.twilio.com/docs/verify/api/verification)
+and [verification check](https://www.twilio.com/docs/verify/api/verification-check),
+with explicit fraud checking and local expiry/attempt bounds. The former
+Programmable Messaging content/address retention parameters do not apply to
+Verify. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
 PR 3 must qualify [Telegram's current login contract](https://core.telegram.org/bots/telegram-login),
 including verified numeric user identity, nonce binding and one-use completion;
 the OIDC subject must not be assumed to equal the existing numeric bot user ID.
+
+
+## Conditional iPhone update screen
+
+`GET /api/device-sync/companion/app-policy` is anonymous public metadata with
+`Cache-Control: no-store`. Its version-1 response is
+`{ "schemaVersion": 1, "minimumIOSBuild": null }` when
+`HOSTED_IOS_MINIMUM_BUILD` is unset. An explicitly configured positive 32-bit
+integer sets the minimum supported `CFBundleVersion`; this is not the latest
+release number. Invalid configuration returns 503 rather than clearing a floor.
+No database, provider, cookie or member authority participates in this lookup.
+
+The native reader presents Update Murph only below that floor. It checks before
+showing login/product UI and again on foreground. A failed initial lookup leaves
+normal offline and authentication recovery intact; a failed later lookup retains
+a known update requirement in memory. The policy never logs out an account,
+clears local data, revokes Health permissions, or replaces API authorization.
+Background SDK work remains under its existing authority owners. The update
+button opens the fixed Murph App Store listing. There is no Web notice.
+
+Deploy the endpoint with the floor unset, then distribute the native reader.
+Raise the minimum only for a breaking change after its replacement is publicly
+available in every supported storefront and on supported OS versions. Continue
+monotonically increasing integer iOS build numbers across marketing versions.
+Clear the setting to withdraw the requirement; app foreground or Check again
+rereads it. This is a user-facing compatibility control, not a security fence.
+Older installed binaries without the reader cannot show the new screen and
+still require an ordinary App Store update. Keep legacy auth until its separate
+retirement gates pass; publishing a new app does not prove adoption.
+
+## Operator disposition of unused legacy signups
+
+The preparation release in #3589 provides this operation. It is deliberately
+absent from retirement readers and must finish before deploying them. During
+preparation, an explicitly authorized unused signup can be
+removed through `POST /api/ops/auth-migration/unused-signup`. This temporary
+endpoint requires the existing active Ops allowlist and same-origin checks,
+one exact `memberId`, its ISO `createdAt`, and the confirmation
+`DELETE UNUSED SIGNUP`. There is no discovery, batch delete, impersonated session
+or contact-based target selection. Keep private target values in the authenticated
+request only; do not record them in rollout documents or command logs.
+
+Before any external operation, the normal deletion locks protect a fresh check
+that the target is the specified never-onboarded legacy signup, with no
+first-party authentication, verified/contact routing, wallet, approval protection,
+billing, workspace, messaging, group, device or other admitted product use.
+Any unrevoked, unexpired legacy session rejects cleanup. Legacy cookie reads do
+not advance `lastSeenAt`, so signup-only timestamps cannot prove absence of
+return visits. Recorded session activity outside the first ten minutes also
+rejects cleanup. Eligibility means no durable product use and no live legacy
+authority; it is not a claim that the person never revisited the site.
+The same transaction establishes the ordinary suspension fence. A changed target
+returns `UNUSED_SIGNUP_CHANGED`; missing or conflicting data never becomes
+permission to delete a retained member.
+
+The existing deletion service then owns revocation, canonical deletion and the
+encrypted provider/runtime cleanup receipt. Partial failure retains suspension
+and the existing retry owners. An HTTP success with `cleanupPending: true` is
+not provider convergence. Verify canonical absence and receipt outcomes before
+clearing the retirement inventory. The retirement change removes this endpoint and its unused-signup check with
+the importer; do not deploy retirement before authorized cleanup converges.

@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-10-05",
+  "order": 100,
+  "item": {
+    "id": "wrist-buzz-timing",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Short waits and clearer wrist buzz results",
+    "summary": "Ask Murph to wait a few seconds before buzzing your WHOOP or Garmin, and to check whether the band accepted it.",
+    "details": "Waits under a minute happen right away; longer delays still use reminders. If the Murph app is not open on your iPhone, Murph now says so instead of reporting a buzz that cannot arrive. Keep the app open with the band connected for delivery.",
+    "relevanceTags": [
+      "reminders",
+      "wearables"
+    ],
+    "sourcePullRequests": [
+      4033
+    ],
+    "tryIt": {
+      "label": "Try a short wait",
+      "prompt": "Wait 5 seconds, then buzz my band once and tell me if it was accepted."
+    }
+  }
+}

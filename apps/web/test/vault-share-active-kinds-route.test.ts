@@ -37,6 +37,8 @@ import {
 	buildHostedVaultShareActivityDistanceProjectionScope,
 	buildHostedVaultShareActivitySessionCountProjectionScope,
 	buildHostedVaultShareProjectionScopeKey,
+	HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+	HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
 	HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -79,6 +81,7 @@ function projectionWork(
 			projectionScope,
 		})),
 		hasDeferredProjectionWork: false,
+		publishedSourceWorkspaceVersionByProjectionScopeKey: {},
 	};
 }
 
@@ -101,6 +104,15 @@ function withDeferredWorkCapability(search = ""): string {
 	params.set(
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+	);
+	return `?${params.toString()}`;
+}
+
+function withContentDigestCapability(search = ""): string {
+	const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+	params.set(
+		HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+		HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
 	);
 	return `?${params.toString()}`;
 }
@@ -157,8 +169,56 @@ describe("vault-share active-kinds route", () => {
 		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations).toHaveBeenCalledWith(expect.objectContaining({
 			grantorMemberId: "member_grantor",
 			prisma: { kind: "prisma" },
+			sourceWorkspaceVersion: undefined,
 		}));
 	});
+
+	it("includes published source versions only for compatible runners", async () => {
+		const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue({
+			generations: [{
+				generationToken: generationToken(0),
+				projectionScope: PROFILE_SCOPE,
+			}],
+			hasDeferredProjectionWork: false,
+			publishedSourceWorkspaceVersionByProjectionScopeKey: {
+				[profileScopeKey]: "7",
+			},
+		});
+
+		const compatible = await activeKindsRoute.GET(buildRequest(withContentDigestCapability()));
+		expect(await compatible.json()).toMatchObject({
+			publishedSourceWorkspaceVersionByProjectionScopeKey: {
+				[profileScopeKey]: "7",
+			},
+		});
+
+		const legacy = await activeKindsRoute.GET(buildRequest());
+		expect(await legacy.json()).not.toHaveProperty(
+			"publishedSourceWorkspaceVersionByProjectionScopeKey",
+		);
+	});
+
+	it("passes the optional canonical source version to scope discovery", async () => {
+		const response = await activeKindsRoute.GET(buildRequest("?sourceWorkspaceVersion=7"));
+
+		expect(response.status).toBe(200);
+		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations)
+			.toHaveBeenCalledWith(expect.objectContaining({ sourceWorkspaceVersion: "7" }));
+	});
+
+	it.each(["", "-1", "01", "1.5", "9223372036854775808"])(
+		"rejects invalid source version %j before reading projections",
+		async (sourceWorkspaceVersion) => {
+			const response = await activeKindsRoute.GET(buildRequest(
+				`?sourceWorkspaceVersion=${sourceWorkspaceVersion}`,
+			));
+
+			expect(response.status).toBe(400);
+			expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations)
+				.not.toHaveBeenCalled();
+		},
+	);
 
 	it("filters new selector scopes from old runners that do not declare support", async () => {
 		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue(projectionWork(

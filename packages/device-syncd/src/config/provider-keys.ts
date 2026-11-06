@@ -5,9 +5,6 @@ import type {
 
 export const configuredDeviceSyncProviderKeys = Object.freeze([
   "junction",
-  "oura",
-  "whoop",
-  "strava",
 ] as const satisfies readonly ConfiguredDeviceSyncProviderKey[]);
 
 export function listConfiguredDeviceSyncProviderNames(

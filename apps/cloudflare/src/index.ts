@@ -1,7 +1,6 @@
 export { ContainerProxy } from "@cloudflare/containers";
 export { DeploySmokeRunnerContainer, NextRunnerContainer, RunnerContainer } from "./runner-container.ts";
-export { StandbyRunnerContainer } from "./standby-runner-container.ts";
-export { SmallRunnerContainer } from "./small-runner-container.ts";
+export { SmallRunnerContainer, StandbyRunnerContainer } from "./standby-runner-container.ts";
 export {
   DatabaseHealthDurableObject,
 } from "./worker/database-health-durable-object.ts";
@@ -14,5 +13,4 @@ export {
 export {
   StandbyRunnerCoordinatorDurableObject,
 } from "./worker/standby-runner-coordinator-durable-object.ts";
-export { UserRunnerDurableObject } from "./worker/user-runner-durable-object.ts";
 export { default } from "./worker/index.ts";

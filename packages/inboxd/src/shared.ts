@@ -17,7 +17,6 @@ import {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-  waitForAbortOrTimeout,
 } from "./shared-runtime.ts";
 
 export {
@@ -27,7 +26,6 @@ export {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-  waitForAbortOrTimeout,
 } from "./shared-runtime.ts";
 
 export function generatePrefixedId(prefix: string, now = Date.now()): string {
@@ -178,13 +176,6 @@ export function buildFtsQuery(text: string): string {
   return tokens.map((token) => `"${token.replace(/"/g, "\"\"")}"*`).join(" AND ");
 }
 
-export function mapObjectEntries(
-  value: object,
-  mapEntry: (key: string, entry: unknown) => [string, unknown],
-): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => mapEntry(key, entry)));
-}
-
 export function buildSnippet(...sources: Array<string | null | undefined>): string {
   for (const source of sources) {
     const value = normalizeTextValue(source);
@@ -194,10 +185,6 @@ export function buildSnippet(...sources: Array<string | null | undefined>): stri
   }
 
   return "";
-}
-
-export async function ensureParentDirectory(filePath: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
 }
 
 function sha256Hex(value: string): string {

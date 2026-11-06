@@ -68,7 +68,7 @@ export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
   { resource: "distance", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
   { resource: "calories_active", enabledByDefault: true, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
   { resource: "heartrate", enabledByDefault: true, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
-  { resource: "weight", enabledByDefault: true, normalizationMode: "sparse_reading", historyWindow: "summary_history", fetchChunkDays: 1 },
+  { resource: "weight", enabledByDefault: true, normalizationMode: "sparse_reading", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "body_mass_index", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "carbohydrates", enabledByDefault: true, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30, maxCanonicalRecordsPerWindow: 3_000, maxSamplesPerWindow: 3_840 },
   { resource: "fat", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },

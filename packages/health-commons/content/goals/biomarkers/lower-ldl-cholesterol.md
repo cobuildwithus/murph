@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-ldl-cholesterol
 slug: lower-ldl-cholesterol
-title: Lower My LDL Cholesterol
-summary: Lower LDL with repeatable food changes and risk-appropriate treatment, then verify the response with follow-up testing.
+title: Understand My LDL Cholesterol
+summary: Understand LDL cholesterol results, how they fit your health history, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:lower-cholesterol
   outcomeKind: biomarker
-  goalPhrase: lower my LDL cholesterol
+  goalPhrase: understand my LDL cholesterol
   successSignals:
     - id: ldl_cholesterol
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my LDL cholesterol.
+  startPrompt: Hey Murph, help me understand my LDL cholesterol.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -88,4 +88,4 @@ Contact the prescriber about significant new muscle symptoms, weakness, dark uri
 
 ## Related goals
 
-[Lower My Cholesterol](/goals/lower-cholesterol) · [Lower My ApoB](/goals/lower-apob) · [Lower My Risk of Heart Disease](/goals/reduce-heart-disease-risk)
+[Understand My Cholesterol](/goals/lower-cholesterol) · [Understand My ApoB](/goals/lower-apob) · [Understand Heart Disease Prevention](/goals/reduce-heart-disease-risk)

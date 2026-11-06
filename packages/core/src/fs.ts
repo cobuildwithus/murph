@@ -15,7 +15,6 @@ import {
 } from "./path-safety.ts";
 import {
   applyImmutableWriteTarget,
-  applyJsonlAppendTarget,
   applyTextWriteTarget,
   fileContentsEqual,
   prepareVerifiedWriteTarget,
@@ -133,37 +132,6 @@ export async function writeVaultTextFile(
   return resolved.relativePath;
 }
 
-export async function writeVaultJsonFile(
-  vaultRoot: string,
-  relativePath: string,
-  value: unknown,
-  options: WriteVaultTextFileOptions = {},
-): Promise<string> {
-  const content = `${JSON.stringify(value, null, 2)}\n`;
-  return writeVaultTextFile(vaultRoot, relativePath, content, options);
-}
-
-export async function appendVaultTextFile(
-  vaultRoot: string,
-  relativePath: string,
-  content: string,
-): Promise<string> {
-  const resolved = await prepareVerifiedWriteTarget(vaultRoot, relativePath, {
-    kind: "jsonl_append",
-    messages: {
-      appendOnlyDisallowed: "Append-only writes are restricted to JSONL ledger and audit shards.",
-      rawDisallowed: "Raw files are immutable once written.",
-    },
-  });
-  await applyJsonlAppendTarget({
-    appendPayload: (payload) => fs.appendFile(resolved.absolutePath, payload, "utf8"),
-    readPayload: async () => content,
-    target: resolved,
-  });
-
-  return resolved.relativePath;
-}
-
 export async function copyImmutableFileIntoVaultRaw(
   vaultRoot: string,
   sourcePath: string,
@@ -194,30 +162,6 @@ export async function copyImmutableFileIntoVaultRaw(
     createTarget: () => copyFileAtomicExclusive(sourceAbsolutePath, resolved.absolutePath),
     existsErrorMessage: "Raw target already exists and may not be overwritten.",
     matchesExistingContent: () => fileContentsEqual(sourceAbsolutePath, resolved.absolutePath),
-    target: resolved,
-  });
-
-  return resolved.relativePath;
-}
-
-export async function writeImmutableJsonFileIntoVaultRaw(
-  vaultRoot: string,
-  relativePath: string,
-  value: unknown,
-  options: ImmutableRawWriteOptions = {},
-): Promise<string> {
-  const content = `${JSON.stringify(value, null, 2)}\n`;
-  const resolved = await prepareVerifiedWriteTarget(vaultRoot, relativePath, {
-    kind: "raw",
-    messages: {
-      rawRequired: "Raw writes must target the raw/ tree.",
-    },
-  });
-  await applyImmutableWriteTarget({
-    allowExistingMatch: options.allowExistingMatch,
-    createTarget: () => writeTextFileAtomicExclusive(resolved.absolutePath, content),
-    existsErrorMessage: "Raw target already exists and may not be overwritten.",
-    matchesExistingContent: () => readUtf8FileMatches(resolved.absolutePath, content),
     target: resolved,
   });
 

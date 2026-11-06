@@ -68,13 +68,13 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
-        action: "run-device-sync-wake",
-        kind: "device-sync.wake",
+        action: "apply-clinical-enrichment",
+        kind: "clinical-records.enrichment-requested",
         lane: "system",
       },
       {
-        action: "run-environment-voice",
-        kind: "environment-voice.captured",
+        action: "run-device-sync-wake",
+        kind: "device-sync.wake",
         lane: "system",
       },
       {
@@ -94,7 +94,22 @@ describe("hosted mailbox routing", () => {
       },
       {
         action: "skip-retired-mailbox-item",
+        kind: "environment-interview.completed",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
+        kind: "environment-voice.captured",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
         kind: "group-newsletter.email-needed",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
+        kind: "runtime.codex-auth-requested",
         lane: "system",
       },
       {
@@ -160,7 +175,6 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.completed"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("clinical-records.sync-requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
-    assert.equal(resolveExpectedLaneForHostedMailboxKind("environment-voice.captured"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("meal-photo.captured"), "system");
     assert.equal(
       resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"),

@@ -1,27 +1,24 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import { initializeVault } from "@murphai/core";
-import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
 import {
-  type Cursor,
   type AttachmentParseJobRecord,
-  createParsedInboxPipeline,
   createInboxPipeline,
-  type EmitCapture,
   type FailAttachmentParseJobInput,
   type InboxCaptureRecord,
-  openInboxRuntime,
-  type PollConnector,
-  rebuildRuntimeFromVault,
-  runInboxDaemonWithParsers,
   type InboxRuntimeStore,
+  openInboxRuntime,
+  rebuildRuntimeFromVault,
 } from "@murphai/inboxd";
+import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
 
 import {
+  type AttachmentParseJobClaimFilters,
   createConfiguredParserRegistry,
   createInboxParserService,
   createParserRegistry,
@@ -30,23 +27,22 @@ import {
   discoverParserToolchain,
   getParserToolchainPaths,
   parseAttachment,
-  prepareAudioInput,
   PARSER_RESULT_MAX_BYTES,
+  type ParserProvider,
+  prepareAudioInput,
   readParserResult,
   readParserToolchainConfig,
+  type RequeueAttachmentParseJobsInput,
   runAttachmentParseJobOnce,
   runAttachmentParseWorker,
   writeParserResult,
   writeParserToolchainConfig,
-  type AttachmentParseJobClaimFilters,
-  type ParserProvider,
-  type RequeueAttachmentParseJobsInput,
 } from "../src/index.js";
 import {
   describeExecutableAvailability,
   removeVaultDirectoryIfExists,
-  resolveConfiguredExecutable,
   requireExecutable,
+  resolveConfiguredExecutable,
 } from "../src/shared.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -2713,6 +2709,120 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   pipeline.close();
 });
 
+test("capture replay preserves a recovered success while the worker drains another attachment", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-recovered-success-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-recovered-success-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  try {
+    const input = {
+      source: "telegram",
+      externalId: "recovered-success-1",
+      accountId: "self",
+      thread: { id: "chat-recovered-success-1" },
+      actor: { isSelf: false },
+      occurredAt: "2026-03-13T11:00:00.000Z",
+      text: null,
+      attachments: [
+        {
+          kind: "audio" as const,
+          mime: "audio/wav",
+          originalPath: await writeExternalFile(sourceRoot, "a.wav", "wav-bytes-a"),
+          fileName: "a.wav",
+        },
+        {
+          kind: "audio" as const,
+          mime: "audio/wav",
+          originalPath: await writeExternalFile(sourceRoot, "b.wav", "wav-bytes-b"),
+          fileName: "b.wav",
+        },
+      ],
+      raw: {},
+    };
+    const capture = await pipeline.processCapture(input);
+    const [jobA, jobB] = runtime.listAttachmentParseJobs({ captureId: capture.captureId });
+    assert.ok(jobA);
+    assert.ok(jobB);
+    const providerCalls: string[] = [];
+    const registry = createParserRegistry([{
+      id: "recovered-success-parser",
+      locality: "local",
+      openness: "open_source",
+      runtime: "node",
+      priority: 500,
+      async discover() {
+        return { available: true, reason: "available for recovery test" };
+      },
+      supports(request) {
+        return (request.preparedKind ?? request.artifact.kind) === "audio";
+      },
+      async run(request) {
+        providerCalls.push(request.artifact.attachmentId);
+        if (request.artifact.attachmentId === jobA.attachmentId && providerCalls.length > 1) {
+          throw new Error("published attachment must not be transcribed again");
+        }
+        return { text: request.artifact.attachmentId === jobA.attachmentId
+          ? "Published transcript A." : "Published transcript B." };
+      },
+    }]);
+    const workerInput = {
+      vaultRoot, runtime, registry, ffmpeg: disableFfmpegLookup(),
+      jobFilters: { captureId: capture.captureId },
+    };
+    const [published] = await runAttachmentParseWorker({ ...workerInput, maxJobs: 1 });
+    assert.equal(published?.status, "succeeded");
+    assert.equal(published.job.attachmentId, jobA.attachmentId);
+    assert.ok(published.resultPath);
+    assert.equal((await readParserResult({ vaultRoot, resultPath: published.resultPath })).text,
+      "Published transcript A.");
+
+    // Recreate owner loss after publication but before runtime finalization.
+    const database = new DatabaseSync(runtime.databasePath);
+    try {
+      database.prepare(`update attachment_parse_job
+        set state = 'running', result_path = null, finished_at = null
+        where job_id = ?`).run(jobA.jobId);
+      database.prepare(`update capture_attachment
+        set parser_state = 'running', transcript_text = null, derived_path = null
+        where attachment_id = ?`).run(jobA.attachmentId);
+    } finally {
+      database.close();
+    }
+    assert.equal(runtime.getAttachment(jobA.attachmentId)?.attachment.transcriptText, null);
+    assert.equal(runtime.requeueAttachmentParseJobs({
+      exactAttempt: { jobId: jobA.jobId, attempt: published.job.attempts },
+    }), 1);
+    assert.equal((await pipeline.processCapture(input)).deduped, true);
+    const recovered = runtime.getAttachment(jobA.attachmentId)?.attachment;
+    assert.equal(recovered?.parseState, "succeeded");
+    assert.equal(recovered.transcriptText, "Published transcript A.");
+    assert.equal(recovered.derivedPath, published.resultPath);
+    assert.deepEqual(runtime.listAttachmentParseJobs({ captureId: capture.captureId })
+      .map((job) => job.state), ["pending", "pending"]);
+    assert.equal(runtime.getAttachment(jobB.attachmentId)?.attachment.parseState, "pending");
+
+    const callsBeforeDrain = providerCalls.length;
+    const drained = await runAttachmentParseWorker(workerInput);
+    assert.deepEqual(providerCalls.slice(callsBeforeDrain), [jobB.attachmentId]);
+    assert.equal(drained.length, 1);
+    assert.equal(drained[0]?.status, "succeeded");
+    const attachmentA = runtime.getAttachment(jobA.attachmentId)?.attachment;
+    assert.equal(attachmentA?.transcriptText, "Published transcript A.");
+    assert.equal(attachmentA.parseState, "succeeded");
+    assert.equal(attachmentA.derivedPath, published.resultPath);
+    assert.equal(runtime.listAttachmentParseJobs({ attachmentId: jobA.attachmentId })[0]?.attempts,
+      published.job.attempts);
+    assert.equal(runtime.getAttachment(jobB.attachmentId)?.attachment.parseState, "succeeded");
+    assert.equal(runtime.listAttachmentParseJobs({ attachmentId: jobB.attachmentId })[0]?.state, "succeeded");
+  } finally {
+    pipeline.close();
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+  }
+});
+
 test("attachment parse worker requeues its claimed job when provider parsing aborts", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-worker-aborted-provider-vault");
   const sourceRoot = await makeTempDirectory("murph-parser-worker-aborted-provider-source");
@@ -2798,6 +2908,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
     {
       attachmentId,
       captureId: capture.captureId,
+      exactAttempt: { attempt: 1, jobId: runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]!.jobId },
       state: "running",
     },
   ]);
@@ -2812,7 +2923,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
   pipeline.close();
 });
 
-test("stale running parser attempts do not overwrite a requeued rerun", async () => {
+test.each(["completion", "abort"] as const)("stale running parser %s does not overwrite a requeued rerun", async (lateAction) => {
   const vaultRoot = await makeTempDirectory("murph-parser-worker-race-vault");
   const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -2853,6 +2964,18 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const firstRunRelease = new Promise<void>((resolve) => {
     releaseFirstRun = resolve;
   });
+  let signalSecondRunStarted: (() => void) | undefined;
+  const secondRunStarted = new Promise<void>((resolve) => { signalSecondRunStarted = resolve; });
+  let releaseSecondRun: (() => void) | undefined;
+  const secondRunRelease = new Promise<void>((resolve) => { releaseSecondRun = resolve; });
+  const controller = new AbortController();
+  const finalizations: Array<{ attempt: number; applied: boolean }> = [];
+  const complete = runtime.completeAttachmentParseJob;
+  runtime.completeAttachmentParseJob = (input) => {
+    const result = complete(input);
+    finalizations.push({ attempt: input.attempt, applied: result.applied });
+    return result;
+  };
 
   const registry = createParserRegistry([
     {
@@ -2880,6 +3003,8 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
           };
         }
 
+        signalSecondRunStarted?.();
+        await secondRunRelease;
         return {
           text: "fresh rerun text",
         };
@@ -2892,28 +3017,44 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     runtime,
     registry,
     ffmpeg: disableFfmpegLookup(),
+    signal: controller.signal,
   });
 
   await firstRunStarted;
+  const firstJob = runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]!;
   assert.equal(
     runtime.requeueAttachmentParseJobs({
       captureId: capture.captureId,
+      exactAttempt: { jobId: firstJob.jobId, attempt: firstJob.attempts },
       state: "running",
     }),
     1,
   );
 
-  const rerun = await runAttachmentParseJobOnce({
+  const secondAttempt = runAttachmentParseJobOnce({
     vaultRoot,
     runtime,
     registry,
     ffmpeg: disableFfmpegLookup(),
   });
+  try {
+    await secondRunStarted;
+    if (lateAction === "abort") controller.abort();
+    releaseFirstRun?.();
+    assert.equal(await firstAttempt, null);
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.state, "running");
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.attempts, 2);
+    assert.equal(runtime.getCapture(capture.captureId)?.attachments[0]?.parseState, "running");
+    if (lateAction === "completion") assert.deepEqual(finalizations, [{ attempt: 1, applied: false }]);
+  } finally {
+    releaseFirstRun?.();
+    releaseSecondRun?.();
+    await Promise.allSettled([firstAttempt, secondAttempt]);
+  }
+  const rerun = await secondAttempt;
   assert.equal(rerun?.status, "succeeded");
+  assert.equal(rerun?.job.attempts, 2);
   assert.match(rerun?.resultPath ?? "", /attempts\/0002\/result\.json$/u);
-
-  releaseFirstRun?.();
-  assert.equal(await firstAttempt, null);
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
@@ -3389,562 +3530,6 @@ test("parser publication accepts text-provider output above the obsolete 64 MiB 
   assert.equal(output.text.length, sourceText.length);
   assert.equal(output.blocks.length, lineCount);
   assert.deepEqual(await fs.readdir(scratchRoot), []);
-});
-
-test("parsed inbox pipeline auto-drains parser jobs for each processed capture", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-pipeline-vault");
-  const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-source");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const imagePath = await writeExternalFile(sourceRoot, "auto-parse.wav", "wav-bytes-placeholder");
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const pipeline = await createParsedInboxPipeline({
-    vaultRoot,
-    runtime,
-    registry: createParserRegistry([
-      {
-        id: "auto-image-parser",
-        locality: "local",
-        openness: "open_source",
-        runtime: "node",
-        priority: 500,
-        async discover() {
-          return {
-            available: true,
-            reason: "available for parsed pipeline test",
-          };
-        },
-        supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "audio";
-        },
-        async run() {
-          return {
-            text: "Auto-drained OCR text",
-          };
-        },
-      },
-    ]),
-    ffmpeg: disableFfmpegLookup(),
-  });
-
-  const capture = await pipeline.processCapture({
-    source: "telegram",
-    externalId: "auto-drain-1",
-    thread: {
-      id: "chat-auto-drain",
-    },
-    actor: {
-      isSelf: false,
-    },
-    occurredAt: "2026-03-13T11:30:00.000Z",
-    text: null,
-    attachments: [
-      {
-        kind: "audio",
-        mime: "audio/wav",
-        originalPath: imagePath,
-        fileName: "auto-parse.wav",
-      },
-    ],
-    raw: {},
-  });
-
-  const refreshed = runtime.getCapture(capture.captureId);
-  assert.ok(refreshed);
-  assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
-  assert.equal(refreshed.attachments[0]?.transcriptText, "Auto-drained OCR text");
-  assert.equal(
-    runtime.listAttachmentParseJobs({
-      captureId: capture.captureId,
-      limit: 10,
-    })[0]?.state,
-    "succeeded",
-  );
-
-  pipeline.close();
-});
-
-test("daemon with parsers drains pending jobs before connector watch work begins", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-startup-vault");
-  const sourceRoot = await makeTempDirectory("murph-parsed-daemon-startup-source");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const imagePath = await writeExternalFile(sourceRoot, "startup.wav", "wav-bytes-placeholder");
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
-
-  const capture = await pipeline.processCapture({
-    source: "telegram",
-    externalId: "startup-drain-1",
-    thread: {
-      id: "chat-startup-drain",
-    },
-    actor: {
-      isSelf: false,
-    },
-    occurredAt: "2026-03-13T11:35:00.000Z",
-    text: null,
-    attachments: [
-      {
-        kind: "audio",
-        mime: "audio/wav",
-        originalPath: imagePath,
-        fileName: "startup.wav",
-      },
-    ],
-    raw: {},
-  });
-  pipeline.close();
-
-  const daemonRuntime = await openInboxRuntime({ vaultRoot });
-  const controller = new AbortController();
-  let resolveWatchStarted: (() => void) | null = null;
-  const watchStarted = new Promise<void>((resolve) => {
-    resolveWatchStarted = resolve;
-  });
-  const connector: PollConnector = {
-    id: "noop-telegram",
-    source: "telegram",
-    accountId: "self",
-    kind: "poll" as const,
-    capabilities: {
-      attachments: true,
-      backfill: false,
-      ownMessages: false,
-      watch: true,
-      webhooks: false,
-    },
-    async backfill(cursor: Cursor | null) {
-      return cursor;
-    },
-    async watch(_cursor: Cursor | null, _emit: EmitCapture, signal: AbortSignal) {
-      if (signal.aborted) {
-        return;
-      }
-
-      resolveWatchStarted?.();
-      await new Promise<void>((resolve) => {
-        signal.addEventListener("abort", () => resolve(), { once: true });
-      });
-    },
-    async close() {},
-  };
-
-  const running = runInboxDaemonWithParsers({
-    vaultRoot,
-    runtime: daemonRuntime,
-    registry: createParserRegistry([
-      {
-        id: "startup-drain-parser",
-        locality: "local",
-        openness: "open_source",
-        runtime: "node",
-        priority: 500,
-        async discover() {
-          return {
-            available: true,
-            reason: "available for startup drain test",
-          };
-        },
-        supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "audio";
-        },
-        async run() {
-          return {
-            text: "Startup-drained OCR text",
-          };
-        },
-      },
-    ]),
-    ffmpeg: disableFfmpegLookup(),
-    connectors: [connector],
-    signal: controller.signal,
-  });
-
-  await watchStarted;
-  controller.abort();
-  await running;
-
-  const refreshedRuntime = await openInboxRuntime({ vaultRoot });
-  try {
-    const refreshed = refreshedRuntime.getCapture(capture.captureId);
-    assert.ok(refreshed);
-    assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
-    assert.equal(refreshed.attachments[0]?.transcriptText, "Startup-drained OCR text");
-  } finally {
-    refreshedRuntime.close();
-  }
-});
-
-test("daemon with parsers skips startup drain when the signal is already aborted", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-aborted-vault");
-  const sourceRoot = await makeTempDirectory("murph-parsed-daemon-aborted-source");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const imagePath = await writeExternalFile(sourceRoot, "aborted.wav", "wav-bytes-placeholder");
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
-
-  const capture = await pipeline.processCapture({
-    source: "telegram",
-    externalId: "aborted-drain-1",
-    thread: {
-      id: "chat-aborted-drain",
-    },
-    actor: {
-      isSelf: false,
-    },
-    occurredAt: "2026-03-13T11:36:00.000Z",
-    text: null,
-    attachments: [
-      {
-        kind: "audio",
-        mime: "audio/wav",
-        originalPath: imagePath,
-        fileName: "aborted.wav",
-      },
-    ],
-    raw: {},
-  });
-  pipeline.close();
-
-  let closeCount = 0;
-  const daemonRuntime = await openInboxRuntime({ vaultRoot });
-  const controller = new AbortController();
-  controller.abort();
-
-  await runInboxDaemonWithParsers({
-    vaultRoot,
-    runtime: daemonRuntime,
-    registry: createParserRegistry([]),
-    ffmpeg: disableFfmpegLookup(),
-    connectors: [
-      {
-        id: "aborted-telegram",
-        source: "telegram",
-        accountId: "self",
-        kind: "poll" as const,
-        capabilities: {
-          attachments: true,
-          backfill: false,
-          ownMessages: false,
-          watch: false,
-          webhooks: false,
-        },
-        async backfill(cursor: Cursor | null) {
-          return cursor;
-        },
-        async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {},
-        async close() {
-          closeCount += 1;
-        },
-      },
-    ],
-    signal: controller.signal,
-  });
-
-  const refreshedRuntime = await openInboxRuntime({ vaultRoot });
-  try {
-    const refreshed = refreshedRuntime.getCapture(capture.captureId);
-    assert.ok(refreshed);
-    assert.equal(refreshed.attachments[0]?.parseState, "pending");
-  } finally {
-    refreshedRuntime.close();
-  }
-  assert.equal(closeCount, 1);
-});
-
-test("daemon with parsers leaves startup drain jobs pending when abort arrives before finalization", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-vault");
-  const sourceRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-source");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const firstPath = await writeExternalFile(sourceRoot, "first.wav", "first-audio");
-  const secondPath = await writeExternalFile(sourceRoot, "second.wav", "second-audio");
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
-
-  const first = await pipeline.processCapture({
-    source: "telegram",
-    externalId: "abort-drain-first",
-    thread: {
-      id: "chat-abort-drain",
-    },
-    actor: {
-      isSelf: false,
-    },
-    occurredAt: "2026-03-13T11:37:00.000Z",
-    text: null,
-    attachments: [
-      {
-        kind: "audio",
-        mime: "audio/wav",
-        originalPath: firstPath,
-        fileName: "first.wav",
-      },
-    ],
-    raw: {},
-  });
-  const second = await pipeline.processCapture({
-    source: "telegram",
-    externalId: "abort-drain-second",
-    thread: {
-      id: "chat-abort-drain",
-    },
-    actor: {
-      isSelf: false,
-    },
-    occurredAt: "2026-03-13T11:38:00.000Z",
-    text: null,
-    attachments: [
-      {
-        kind: "audio",
-        mime: "audio/wav",
-        originalPath: secondPath,
-        fileName: "second.wav",
-      },
-    ],
-    raw: {},
-  });
-  pipeline.close();
-
-  const daemonRuntime = await openInboxRuntime({ vaultRoot });
-  const controller = new AbortController();
-  let parseCount = 0;
-
-  await runInboxDaemonWithParsers({
-    vaultRoot,
-    runtime: daemonRuntime,
-    registry: createParserRegistry([
-      {
-        id: "abort-mid-drain-parser",
-        locality: "local",
-        openness: "open_source",
-        runtime: "node",
-        priority: 500,
-        async discover() {
-          return {
-            available: true,
-            reason: "available for abort-mid-drain test",
-          };
-        },
-        supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "audio";
-        },
-        async run() {
-          parseCount += 1;
-          if (parseCount === 1) {
-            controller.abort();
-          }
-
-          return {
-            text: `drained ${parseCount}`,
-          };
-        },
-      },
-    ]),
-    ffmpeg: disableFfmpegLookup(),
-    connectors: [],
-    signal: controller.signal,
-  });
-
-  const refreshedRuntime = await openInboxRuntime({ vaultRoot });
-  try {
-    assert.equal(refreshedRuntime.getCapture(first.captureId)?.attachments[0]?.parseState, "pending");
-    assert.equal(refreshedRuntime.getCapture(second.captureId)?.attachments[0]?.parseState, "pending");
-  } finally {
-    refreshedRuntime.close();
-  }
-});
-
-test("daemon with parsers still rejects connector failures after cleanup", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-failure-vault");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const runtime = await openInboxRuntime({ vaultRoot });
-
-  await assert.rejects(
-    runInboxDaemonWithParsers({
-      vaultRoot,
-      runtime,
-      registry: createParserRegistry([]),
-      connectors: [
-        {
-          id: "failing-telegram",
-          source: "telegram",
-          accountId: "self",
-          kind: "poll" as const,
-          capabilities: {
-            attachments: true,
-            backfill: true,
-            ownMessages: false,
-            watch: false,
-            webhooks: false,
-          },
-          async backfill() {
-            throw new Error("daemon blew up");
-          },
-          async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {},
-          async close() {},
-        },
-      ],
-      signal: new AbortController().signal,
-    }),
-    /Connector "failing-telegram" \(telegram\) failed: daemon blew up/u,
-  );
-});
-
-test("daemon with parsers can keep healthy connectors running after one connector fails", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-isolated-failure-vault");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const controller = new AbortController();
-  let healthyConnectorAborted = false;
-  let healthyConnectorClosed = 0;
-  let sawFailingConnectorClose = false;
-  let resolveFailingConnectorClose: (() => void) | null = null;
-  const failingConnectorClosed = new Promise<void>((resolve) => {
-    resolveFailingConnectorClose = resolve;
-  });
-
-  const running = runInboxDaemonWithParsers({
-    vaultRoot,
-    runtime,
-    registry: createParserRegistry([]),
-    connectors: [
-        {
-          id: "healthy-linq",
-          source: "linq",
-        accountId: "primary",
-        kind: "poll" as const,
-          capabilities: {
-            attachments: true,
-            backfill: false,
-            ownMessages: false,
-            watch: true,
-            webhooks: false,
-          },
-          async backfill(cursor: Cursor | null) {
-            return cursor;
-          },
-          async watch(_cursor: Cursor | null, _emit: EmitCapture, signal: AbortSignal) {
-            if (signal.aborted) {
-              healthyConnectorAborted = true;
-              return;
-          }
-
-          await new Promise<void>((resolve) => {
-            signal.addEventListener(
-              "abort",
-              () => {
-                healthyConnectorAborted = true;
-                resolve();
-              },
-              { once: true },
-            );
-          });
-        },
-        async close() {
-          healthyConnectorClosed += 1;
-        },
-      },
-        {
-          id: "failing-telegram",
-          source: "telegram",
-        accountId: "self",
-        kind: "poll" as const,
-          capabilities: {
-            attachments: true,
-            backfill: false,
-            ownMessages: false,
-            watch: true,
-            webhooks: false,
-          },
-          async backfill(cursor: Cursor | null) {
-            return cursor;
-          },
-          async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {
-            throw new Error("daemon blew up");
-          },
-        async close() {
-          sawFailingConnectorClose = true;
-          resolveFailingConnectorClose?.();
-        },
-      },
-    ],
-    signal: controller.signal,
-    continueOnConnectorFailure: true,
-  });
-
-  await failingConnectorClosed;
-  assert.equal(sawFailingConnectorClose, true);
-  assert.equal(healthyConnectorAborted, false);
-
-  controller.abort();
-  await running;
-
-  assert.equal(healthyConnectorAborted, true);
-  assert.equal(healthyConnectorClosed, 1);
-});
-
-test("parsed inbox pipeline stores captures even when auto-drain parsing fails", async () => {
-  const vaultRoot = await makeTempDirectory("murph-parsed-pipeline-failure-vault");
-  const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-failure-source");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const imagePath = await writeExternalFile(sourceRoot, "auto-fail.wav", "wav-bytes-placeholder");
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const pipeline = await createParsedInboxPipeline({
-    vaultRoot,
-    runtime,
-    registry: createParserRegistry([]),
-    ffmpeg: disableFfmpegLookup(),
-  });
-
-  const capture = await pipeline.processCapture({
-    source: "telegram",
-    externalId: "auto-drain-fail-1",
-    thread: {
-      id: "chat-auto-fail",
-    },
-    actor: {
-      isSelf: false,
-    },
-    occurredAt: "2026-03-13T11:31:00.000Z",
-    text: null,
-    attachments: [
-      {
-        kind: "audio",
-        mime: "audio/wav",
-        originalPath: imagePath,
-        fileName: "auto-fail.wav",
-      },
-    ],
-    raw: {},
-  });
-
-  const refreshed = runtime.getCapture(capture.captureId);
-  assert.ok(refreshed);
-  assert.equal(refreshed.attachments[0]?.parseState, "failed");
-  assert.equal(refreshed.attachments[0]?.derivedPath ?? null, null);
-  assert.equal(refreshed.attachments[0]?.extractedText ?? null, null);
-  assert.equal(
-    runtime.searchCaptures({
-      text: "auto-drained",
-      limit: 10,
-    }).length,
-    0,
-  );
-  assert.equal(
-    runtime.listAttachmentParseJobs({
-      captureId: capture.captureId,
-      limit: 10,
-    })[0]?.state,
-    "failed",
-  );
-
-  pipeline.close();
 });
 
 test("attachment parse worker marks jobs failed when no provider can handle the attachment", async () => {

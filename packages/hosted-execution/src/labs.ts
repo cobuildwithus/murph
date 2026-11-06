@@ -118,7 +118,7 @@ export const hostedRuntimeLabsLocationSchema = z
   .strict();
 
 const hostedRuntimeLabsResponseBase = {
-  checkedAt: z.string().datetime({ offset: true }),
+  checkedAt: z.isoDateTime({ offset: true }),
   orderingStatus: z.literal("discovery_only"),
   orderableThroughMurph: z.literal(false),
 } as const;

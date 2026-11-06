@@ -2,6 +2,7 @@ import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
+  listAssistantInputEvents,
   isSameAssistantConversationRef,
   isAssistantHostedImageCompletionEvent,
   parseAssistantHostedImageCompletionOriginText,
@@ -13,6 +14,8 @@ import {
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
+  type AssistantInputExactLookupExclusionReason,
+  type AssistantInputExactLookupExclusionReasonCounts,
   type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from "@murphai/assistant-engine";
@@ -23,7 +26,6 @@ import {
   isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
-import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -31,9 +33,11 @@ import {
 
 import {
   compactHostedPendingAssistantInputIds,
+  dropHostedStalePendingAssistantInputRetries,
   isHostedPendingAssistantInputStillReplyable,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   runHostedPendingAssistantInputContentRetention,
+  type HostedStaleRetryDropReason,
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
@@ -53,6 +57,7 @@ type HostedAssistantInputSelection =
       mode: "background";
       pendingInputIds: string[];
       preserveInputOrder?: true;
+      staleRetryDropped?: Array<{ inputId: string; reason: HostedStaleRetryDropReason }>;
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
@@ -63,16 +68,11 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
-export type HostedConversationActivityObservation =
-  | "not_observed"
-  | "observed"
-  | "uncertain";
-
 export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<{
-  conversationActivity: HostedConversationActivityObservation;
+  conversationActivityReceivedAtEpochMs: number | null;
   currentInputId: string | null;
   foregroundPriorityInputAccepted: boolean;
   latencyTraceInputGroups: Array<{
@@ -83,7 +83,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   const inputIds = uniqueStrings(input.assistantInputIds);
   if (inputIds.length === 0) {
     return {
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
       latencyTraceInputGroups: [],
@@ -91,7 +91,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   }
   if (inputIds.length !== input.assistantInputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -105,7 +105,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -116,15 +116,24 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   );
   if (events.length !== inputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups,
     };
   }
-  const conversationActivity = events.some(isHostedConversationActivityInputEvent)
-    ? "observed"
-    : "not_observed";
+  // The persisted receipt is admission evidence; execution/replay time and
+  // provider occurredAt are not. Unknown reads keep foreground priority above,
+  // but cannot manufacture a conversation deadline.
+  const nowMs = Date.now();
+  const conversationActivityReceivedAtEpochMs = events
+    .filter(isHostedConversationActivityInputEvent)
+    .reduce<number | null>((latest, event) => {
+      const receivedAt = event.receivedAt === null ? NaN : Date.parse(event.receivedAt);
+      return Number.isSafeInteger(receivedAt) && receivedAt >= 0 && receivedAt <= nowMs
+        ? Math.max(latest ?? receivedAt, receivedAt)
+        : latest;
+    }, null);
   const foregroundPriorityInputAccepted = events.some((event) =>
     isHostedConversationActivityInputEvent(event)
     || isAssistantHostedImageCompletionEvent(event)
@@ -143,14 +152,14 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity,
+      conversationActivityReceivedAtEpochMs,
       currentInputId: null,
       foregroundPriorityInputAccepted,
       latencyTraceInputGroups,
     };
   }
   return {
-    conversationActivity,
+    conversationActivityReceivedAtEpochMs,
     currentInputId: batch.length === events.length
       ? batch.at(-1)?.inputId ?? null
       : null,
@@ -184,10 +193,13 @@ function groupHostedAssistantInputLatencyTraceEvents(
 function isHostedConversationActivityInputEvent(
   event: AssistantInputEventRecord,
 ): boolean {
-  return event.sourceRef.kind === "inbox-capture"
-    || (
-      event.sourceRef.kind === "hosted-mailbox"
-      && event.sourceRef.lane === "conversation"
+  return event.conversation?.actorIsSelf !== true
+    && (
+      event.sourceRef.kind === "inbox-capture"
+      || (
+        event.sourceRef.kind === "hosted-mailbox"
+        && event.sourceRef.lane === "conversation"
+      )
     );
 }
 
@@ -312,7 +324,12 @@ export function createHostedAssistantInputSource(input: {
         missingInput: "skip",
         vaultRoot: input.vaultRoot,
       });
-      const replyableEvents = events.length === inputIds.length
+      const exclusions = createHostedAssistantExactLookupExclusionCounts();
+      if (events.length < inputIds.length) {
+        exclusions.record("missing_event", inputIds.length - events.length);
+      }
+      const replyabilityEvaluated = events.length === inputIds.length;
+      const replyableEvents = replyabilityEvaluated
         ? await filterHostedReplyablePendingAssistantInputEvents({
             events,
             vaultRoot: input.vaultRoot,
@@ -321,6 +338,13 @@ export function createHostedAssistantInputSource(input: {
       const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
         afterCursor: query.afterCursor ?? null,
         events,
+        // An incomplete batch never builds a replyable set; name that, not a rejection.
+        recordExclusion: replyabilityEvaluated
+          ? exclusions.record
+          : (reason, count) => exclusions.record(
+              reason === "not_replyable" ? "replyability_not_evaluated" : reason,
+              count,
+            ),
         replyableInputIds: new Set(
           replyableEvents.map((event) => event.inputId),
         ),
@@ -331,11 +355,21 @@ export function createHostedAssistantInputSource(input: {
         vaultRoot: input.vaultRoot,
       });
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      return filterHostedAssistantInputCandidates({
+      let filteredCount = 0;
+      const batch = filterHostedAssistantInputCandidates({
         candidates,
         ignoreAfterCursor: true,
         query,
+        recordExclusion: (reason, count) => {
+          filteredCount += count ?? 1;
+          exclusions.record(reason, count);
+        },
       });
+      // With ignoreAfterCursor the batch builder only sorts and slices, so every
+      // candidate is either filtered (counted above), returned, or cut by the limit.
+      const overLimit = candidates.length - filteredCount - batch.inputs.length;
+      if (overLimit > 0) exclusions.record("over_limit", overLimit);
+      return { ...batch, exactLookupExclusionReasonCounts: exclusions.read() };
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
@@ -404,23 +438,32 @@ export async function selectHostedAssistantInputIds(
     | {
         limit?: number;
         mode: "background";
+        signal?: AbortSignal | null;
         vaultRoot: string;
       },
 ): Promise<HostedAssistantInputSelection> {
   if (input.mode === "background") {
+    input.signal?.throwIfAborted();
+    const { events: storedEvents } = await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER, signal: input.signal, vault: input.vaultRoot,
+    });
     await runHostedPendingAssistantInputContentRetention({
-      vaultRoot: input.vaultRoot,
+      events: storedEvents, signal: input.signal, vaultRoot: input.vaultRoot,
     });
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
-      vaultRoot: input.vaultRoot,
+      signal: input.signal, vaultRoot: input.vaultRoot,
     });
-    const pendingEvents = await readHostedReplyablePendingAssistantInputEvents({
-      inputIds: pendingInputIds,
+    const stale = await dropHostedStalePendingAssistantInputRetries({
+      storedEvents, signal: input.signal,
+      events: await readHostedReplyablePendingAssistantInputEvents({
+        inputIds: pendingInputIds,
+        vaultRoot: input.vaultRoot,
+      }),
       vaultRoot: input.vaultRoot,
     });
     const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
     const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
-      events: pendingEvents,
+      events: stale.kept,
       limit,
       vaultRoot: input.vaultRoot,
     });
@@ -431,6 +474,7 @@ export async function selectHostedAssistantInputIds(
       ...(selected.preserveInputOrder
         ? { preserveInputOrder: true as const }
         : {}),
+      ...(stale.dropped.length > 0 ? { staleRetryDropped: stale.dropped } : {}),
     };
   }
 
@@ -687,11 +731,13 @@ function selectHostedAssistantInputEventBatch(input: {
 async function selectHostedAssistantExactSuccessorEvents(input: {
   afterCursor: AssistantInputCursor | null;
   events: readonly AssistantInputEventRecord[];
+  recordExclusion?: HostedAssistantExactLookupExclusionRecorder;
   replyableInputIds: ReadonlySet<string>;
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const afterCursor = input.afterCursor;
   if (!afterCursor || input.events.length === 0) {
+    if (input.events.length > 0) input.recordExclusion?.("no_cursor", input.events.length);
     return [];
   }
   const [anchor] = await readHostedAssistantInputEventsById({
@@ -700,36 +746,48 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
     vaultRoot: input.vaultRoot,
   });
   if (!anchor) {
+    input.recordExclusion?.("anchor_unavailable", input.events.length);
     return [];
   }
   const anchorCandidate = assistantInputCandidateFromStoredEvent(anchor);
 
   // Exact invocation-local candidates avoid a global scan, but they do not
   // weaken the compound-batch boundary. Ignore duplicate candidates at or
-  // behind the supplied frontier, then stop at the first missing causal
+  // behind the supplied frontier, then stop at the first missing conversation
   // successor, incomplete projection, or non-replyable event and leave later
   // IDs pending.
   const successorEvents = [...input.events]
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
-    .filter((event) =>
-      compareAssistantInputCursors(event.cursor, afterCursor) > 0
-    )
-    .filter((event) =>
-      shouldGroupAdjacentAssistantInputCandidates(
+    .filter((event) => {
+      const after = compareAssistantInputCursors(event.cursor, afterCursor) > 0;
+      if (!after) input.recordExclusion?.("at_or_before_cursor");
+      return after;
+    })
+    .filter((event) => {
+      const grouped = shouldGroupAdjacentAssistantInputCandidates(
         anchorCandidate,
         assistantInputCandidateFromStoredEvent(event),
-      )
-    );
+      );
+      if (!grouped) input.recordExclusion?.("not_grouped_with_anchor");
+      return grouped;
+    });
   const selected: AssistantInputEventRecord[] = [];
   let previous = anchor;
-  for (const event of successorEvents) {
-    if (
-      event.projection.status === "pending"
-      || !input.replyableInputIds.has(event.inputId)
-      || !isHostedAssistantInputEventBatchSuccessor(previous, event)
-    ) {
+  for (const [index, event] of successorEvents.entries()) {
+    // Same checks in the same short-circuit order; only the first failure is named.
+    const exclusion = event.projection.status === "pending"
+      ? "projection_pending"
+      : !input.replyableInputIds.has(event.inputId)
+        ? "not_replyable"
+        : !isHostedAssistantInputEventBatchSuccessor(previous, event)
+          ? "not_batch_successor"
+          : null;
+    if (exclusion) {
+      input.recordExclusion?.(exclusion);
+      const later = successorEvents.length - index - 1;
+      if (later > 0) input.recordExclusion?.("after_earlier_exclusion", later);
       break;
     }
     selected.push(event);
@@ -751,23 +809,31 @@ function isHostedAssistantInputEventBatchSuccessor(
     return false;
   }
 
-  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
-  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
-  return previousCausalSeq !== null
+  const previousLaneSeq = readPositiveHostedConversationInputSequence(previous, "laneSeq");
+  const candidateLaneSeq = readPositiveHostedConversationInputSequence(candidate, "laneSeq");
+  const previousCausalSeq = readPositiveHostedConversationInputSequence(previous, "causalSeq");
+  const candidateCausalSeq = readPositiveHostedConversationInputSequence(candidate, "causalSeq");
+  // System work shares causal order, but cannot create a missing conversation
+  // message. Effect owners retain their separate causal authority checks.
+  return previousLaneSeq !== null
+    && candidateLaneSeq === previousLaneSeq + 1n
+    && previousCausalSeq !== null
     && candidateCausalSeq !== null
-    && candidateCausalSeq === previousCausalSeq + 1n;
+    && candidateCausalSeq > previousCausalSeq;
 }
 
-function readPositiveHostedAssistantInputCausalSeq(
+function readPositiveHostedConversationInputSequence(
   event: AssistantInputEventRecord,
+  field: "causalSeq" | "laneSeq",
 ): bigint | null {
-  if (event.sourceRef.kind !== "hosted-mailbox") {
+  if (event.sourceRef.kind !== "hosted-mailbox"
+    || event.sourceRef.lane !== "conversation") {
     return null;
   }
-  const causalSeq = BigInt(
-    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
-  );
-  return causalSeq > 0n ? causalSeq : null;
+  const value = event.sourceRef[field] ?? "";
+  if (!/^[1-9][0-9]{0,18}$/u.test(value)) return null;
+  const seq = BigInt(value);
+  return seq <= 9_223_372_036_854_775_807n ? seq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -807,9 +873,6 @@ async function createHostedAssistantInputCandidates(input: {
           : {}),
         ...(hostedMailboxItem?.groupReactionContext
           ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
-          : {}),
-        ...(hostedMailboxItem?.groupRunningBit
-          ? { groupRunningBit: hostedMailboxItem.groupRunningBit }
           : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
         ...(hostedMailboxItem?.usageRunningLow === true
@@ -879,12 +942,29 @@ async function filterHostedReplyablePendingAssistantInputEvents(input: {
   return replyableEvents;
 }
 
+type HostedAssistantExactLookupExclusionRecorder = (
+  reason: AssistantInputExactLookupExclusionReason,
+  count?: number,
+) => void;
+
+// Diagnostics only: names the existing exact-lookup step that dropped each requested ID.
+function createHostedAssistantExactLookupExclusionCounts() {
+  const counts: Partial<Record<AssistantInputExactLookupExclusionReason, number>> = {};
+  return {
+    read: (): AssistantInputExactLookupExclusionReasonCounts => ({ ...counts }),
+    record: (reason: AssistantInputExactLookupExclusionReason, count = 1) => {
+      counts[reason] = (counts[reason] ?? 0) + count;
+    },
+  };
+}
+
 function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
   emittedCursorKeys?: Set<string>;
   ignoreAfterCursor?: boolean;
   preserveInputOrder?: boolean;
   query: AssistantInputCandidateQuery;
+  recordExclusion?: HostedAssistantExactLookupExclusionRecorder;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
   const afterCursor = input.ignoreAfterCursor === true
@@ -897,12 +977,14 @@ function filterHostedAssistantInputCandidates(input: {
     afterCursor,
     candidates: input.candidates.filter((candidate) => {
       if (knownInputIds.has(candidate.event.inputId)) {
+        input.recordExclusion?.("known_input");
         return false;
       }
       if (
         input.query.sourceId
         && candidate.event.source !== input.query.sourceId
       ) {
+        input.recordExclusion?.("source_mismatch");
         return false;
       }
       return true;

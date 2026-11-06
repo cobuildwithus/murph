@@ -87,7 +87,11 @@ describe("hosted runtime maintenance ops", () => {
   });
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T12:00:00.000Z"));
     vi.clearAllMocks();
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     process.env.HOSTED_OPS_MEMBER_IDS = "member_ops";
     process.env.HOSTED_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 7).toString("base64url");
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
@@ -120,6 +124,8 @@ describe("hosted runtime maintenance ops", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
     if (originalHostedOpsMemberIds === undefined) {
       delete process.env.HOSTED_OPS_MEMBER_IDS;
     } else {
@@ -885,6 +891,24 @@ function activeCheckpointedWorkspaceWhere() {
   return {
     member: {
       OR: [
+        {
+          suspendedAt: null,
+          threadContainer: { isNot: null },
+          chatHostedGames: { some: {
+            OR: [
+              { status: { in: ["negotiating", "live"] } },
+              { status: "settled", settledAt: {
+                gt: new Date("2026-10-15T12:00:00.000Z"),
+                lte: new Date("2026-10-22T12:00:00.000Z"),
+              } },
+            ],
+            AND: [{ players: { some: { seat: 0 } } }, { players: { some: { seat: 1 } } }, {}],
+            players: { every: {
+              seat: { in: [0, 1] },
+              profile: { member: { suspendedAt: null, consentGrants: { none: { scope: "launch.health-data", status: "revoked" } } } },
+            } },
+          } },
+        },
         {
           OR: personAccess,
           threadContainer: null,

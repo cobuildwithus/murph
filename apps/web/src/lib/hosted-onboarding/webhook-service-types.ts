@@ -25,9 +25,13 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
 };
 
 export type HostedWebhookWakeHandoff = {
+  conversationIsGroup?: boolean;
+  acceptedLinqDeliveryId?: string;
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;
+  // Telemetry only; mailboxItemId and its checkpoint still own the actual wake.
+  originalInboundMailboxItemId?: string;
   source: "linq" | "telegram";
   userId: string;
   wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;

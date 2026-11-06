@@ -40,7 +40,7 @@ export function RecentMemberRetention(input: {
           Recent member retention
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-          The newest 20 real member signups, newest first. Counts use inbound
+          The newest 20 real member accounts, newest first. Counts include texts received before activation and use inbound
           message receipt time from personal conversations: Today is the
           current UTC day and 7 days is rolling, including today. Activity
           status describes only these visible windows.
@@ -49,7 +49,7 @@ export function RecentMemberRetention(input: {
 
       {input.retention.members.length === 0 ? (
         <div className="rounded-xl border border-border/70 bg-card/90 px-4 py-10 text-center text-sm text-muted-foreground">
-          No real member signups yet.
+          No real member accounts yet.
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
@@ -150,7 +150,7 @@ function MemberIdentity(input: {
           `Member · ${input.member.memberId.slice(-8)}`}
       </div>
       <div className="mt-1 text-xs leading-5 text-muted-foreground">
-        Joined {formatUtcDateTime(input.member.createdAt)} · {formatAgo(
+        First seen {formatUtcDateTime(input.member.createdAt)} · {formatAgo(
           input.member.createdAt,
           input.capturedAt,
         )}

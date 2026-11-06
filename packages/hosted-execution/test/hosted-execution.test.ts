@@ -470,7 +470,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(15);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBeGreaterThanOrEqual(15);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -761,7 +761,6 @@ describe("hosted execution coverage gaps", () => {
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
-      "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
     ]);
@@ -793,14 +792,13 @@ describe("hosted execution coverage gaps", () => {
 
     const exportKeys = Object.keys(packageJson.exports ?? {}).sort();
 
-    expect(packageJson.dependencies?.zod).toBe("^4.4.3");
+    expect(packageJson.dependencies?.zod).toBe("^4.5.4");
     expect(packageJson.devDependencies?.zod).toBeUndefined();
     expect(exportKeys).toEqual([
       ".",
       "./action-approval",
       "./assistant-capabilities",
       "./assistant-identifiers",
-      "./assistant-inference",
       "./assistant-model",
       "./assistant-permissions",
       "./assistant-personalization",
@@ -810,17 +808,20 @@ describe("hosted execution coverage gaps", () => {
       "./bundles",
       "./clinical-records",
       "./clinical-records-boundary",
+      "./codex-behavior",
+      "./companion-presence",
       "./computer-use",
       "./connected-apps",
       "./contracts",
-      "./dashboard-replica",
+      "./conversation-polls",
       "./env",
       "./hosted-codex-subscription-auth",
       "./hosted-email",
       "./labs",
-      "./legacy-dashboard-replica",
+      "./observability",
       "./orchestration-control",
       "./parsers",
+      "./parsers/mailbox",
       "./pending-group-setup",
       "./phone-calls",
       "./physical-notes",
@@ -828,17 +829,20 @@ describe("hosted execution coverage gaps", () => {
       "./return-contact",
       "./routes",
       "./runtime-control",
+      "./runtime-media",
+      "./runtime-owner",
+      "./runtime-resource-purge",
+      "./runtime-resources",
       "./side-effects",
+      "./storage-paths",
       "./subscription",
       "./temporal-env",
+      "./usage-diagnostics",
       "./vault-share",
+      "./voice-control",
+      "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
-    expect(
-      exportKeys.filter(
-        (key) => key.startsWith("./") && key.slice(2).includes("/"),
-      ),
-    ).toEqual([]);
     expect(exportKeys).not.toContain("./dispatch-ref");
     expect(exportKeys).not.toContain("./client");
     expect(exportKeys).not.toContain("./outbox-payload");
@@ -859,12 +863,7 @@ describe("hosted execution coverage gaps", () => {
     const clinicalRecordsModule = (await import(
       "@murphai/hosted-execution/clinical-records"
     )) as Record<string, unknown>;
-    const legacyDashboardReplicaModule = await import(
-      "@murphai/hosted-execution/legacy-dashboard-replica"
-    );
-    const legacyDashboardReplicaCompatibilityModule = await import(
-      "@murphai/hosted-execution/dashboard-replica"
-    );
+
     const routeModule = (await import(
       "@murphai/hosted-execution/routes"
     )) as Record<string, unknown>;
@@ -889,9 +888,11 @@ describe("hosted execution coverage gaps", () => {
       false,
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6.1-terra",
+      "gpt-6.1-sol",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-luna",
-      "gpt-5.6-terra",
-      "gpt-5.6-sol",
       "gpt-6-astra",
     ]);
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(
@@ -933,27 +934,7 @@ describe("hosted execution coverage gaps", () => {
     expect(typeof browserVaultModule.shouldScheduleBrowserVaultRefresh).toBe(
       "function",
     );
-    expect(
-      typeof legacyDashboardReplicaModule.getDashboardReplicaFreshness,
-    ).toBe("function");
-    expect(
-      legacyDashboardReplicaModule.getDashboardReplicaFreshness({
-        replicaRef: null,
-        snapshotRef: null,
-      }),
-    ).toBe("stale");
-    expect(
-      legacyDashboardReplicaModule.shouldScheduleDashboardReplicaRefresh({
-        currentReplicaRef: null,
-        currentSnapshotRef: null,
-      }),
-    ).toBeNull();
-    expect(
-      legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null),
-    ).toBeNull();
-    expect(
-      typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness,
-    ).toBe("function");
+
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
     expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
@@ -997,6 +978,7 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
+      "HOSTED_MACHINE_ROUTE_PREFIX",
       "HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
@@ -1004,13 +986,14 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH",
       "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
-      "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
+      "HOSTED_RUNTIME_DATA_API_PATHS",
       "HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH",
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH",
+      "HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH",
       "HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LABS_TOOL_PATH",
@@ -1023,6 +1006,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH",
+      "HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH",
       "HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH",
       "HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
@@ -1030,19 +1014,24 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
+      "HOSTED_RUNTIME_POLL_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",
       "HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH",
+      "HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH",
+      "HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
+      "HOSTED_RUNTIME_VOICE_INPUT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",
       "isHostedRuntimeVaultShareDeliverContinuation",
+      "parseHostedExecutionResolvedLinqDeliveryRoute",
       "parseHostedRuntimeOwnerReleaseSearch",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(

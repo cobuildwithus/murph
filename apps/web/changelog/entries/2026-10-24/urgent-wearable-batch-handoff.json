@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-24",
+  "order": 100,
+  "item": {
+    "id": "urgent-wearable-batch-handoff",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster sleep and workout updates",
+    "summary": "New sleep and workout updates can start syncing while routine daily totals are still being batched.",
+    "details": "Repeated updates stay coalesced, and routine daily totals keep their existing batching window.",
+    "relevanceTags": [
+      "wearables",
+      "device-sync",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4350
+    ]
+  }
+}

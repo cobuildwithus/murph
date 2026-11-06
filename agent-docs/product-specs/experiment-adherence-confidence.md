@@ -117,7 +117,7 @@ Cardio experiment evidence resolves to:
 { eventKind: "activity_session", activityKind: "cardio" }
 ```
 
-Downstream surfaces such as missed-log device checks, dedupe, device-activity automations, and browser progress inherit this through the shared matcher.
+Downstream surfaces such as missed-log device checks, dedupe, and device-activity automations inherit this through the shared matcher.
 
 ## V3 Not In Scope
 

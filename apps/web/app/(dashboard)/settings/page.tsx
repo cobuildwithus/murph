@@ -2,13 +2,11 @@ import { isApprovalPasskeyEnrollmentEnabled } from "@/src/lib/sensitive-actions/
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import {
-  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
-import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { HostedLoginMethodSettings } from "@/src/components/settings/hosted-login-method-settings";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
@@ -27,7 +25,6 @@ import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   readHostedAccountSettingsPageSnapshot,
-  withServerApprovedPrivyAccountHints,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
   canScheduleHostedBillingPlanChange,
@@ -42,14 +39,6 @@ import {
   hasConfirmedHostedGroupMembership,
   resolveVisibleHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
-import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
-import {
-  isHostedCustomChatCompletionsEnabled,
-  isHostedCustomInferenceEnabled,
-} from "@/src/lib/hosted-inference/feature";
-import {
-  readHostedInferenceConnectionView,
-} from "@/src/lib/hosted-inference/connection-store";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
@@ -75,8 +64,7 @@ import {
   HOSTED_FAMILY_INVITE_RETURN_PARAM,
   parseHostedFamilyInviteReturnPath,
 } from "@/src/lib/hosted-onboarding/app-routes";
-import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
-import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes,
@@ -102,7 +90,10 @@ import {
   readHostedUsageCreditPurchaseTargetForPayer,
   type HostedUsageCreditPurchaseTargetProjection,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
-import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
+import {
+  resolveMurphContactOptions,
+  withMurphContactOptionBody,
+} from "@/src/lib/murph-contact-routing";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Settings — Murph",
@@ -134,20 +125,15 @@ export default async function SettingsPage({
   const resolvedSearchParams = await searchParams;
   const request = resolveSettingsPageRequest(resolvedSearchParams);
   const { authenticated, authenticatedMember, session } =
-    await getHostedDashboardPageAuthSnapshot();
+    await getHostedPageAuthSnapshot();
   if (!authenticated) {
-    if (
-      request.familyInviteReturnPath === null
-      && !request.groupPaymentMethodSaved
-      && request.planChangeReturn === null
-      && request.usageTopUpPurchaseReturn === null
-      && !request.familyRecoveryRequested
-      && !request.usageRecoveryInitialOpen
-    ) {
-      redirect("/");
-    }
     return (
       <SettingsAuthRequired
+        addUsage={request.openPersonalUsageTopUp || request.requestedFamilyOwnerUsageTopUp}
+        billingReturn={request.familyInviteReturnPath !== null
+          || request.groupPaymentMethodSaved
+          || request.planChangeReturn !== null
+          || request.usageTopUpPurchaseReturn !== null}
         familyRecovery={request.familyRecoveryRequested}
         usageRecovery={request.usageRecoveryInitialOpen}
       />
@@ -166,7 +152,6 @@ export default async function SettingsPage({
     ? await readSettingsPageData({
         memberId: authenticatedMember.id,
         prisma,
-        privyUserId: session?.privyUserId,
         usageReturnPurchaseId:
           request.usageTopUpPurchaseReturn?.purchaseId ?? null,
       })
@@ -181,7 +166,7 @@ export default async function SettingsPage({
 }
 
 type HostedDashboardPageAuthSnapshot = Awaited<
-  ReturnType<typeof getHostedDashboardPageAuthSnapshot>
+  ReturnType<typeof getHostedPageAuthSnapshot>
 >;
 
 function renderAuthenticatedSettingsPage(input: {
@@ -214,9 +199,7 @@ function renderAuthenticatedSettingsPage(input: {
     familyAccess,
     familyDraftRecovery,
     familyOwner,
-    freshPrivySession,
     hasConfirmedGroupMembership,
-    inferenceConnection,
     secureApprovalStatus,
     settingsSnapshot,
     usageActivity,
@@ -296,17 +279,13 @@ function renderAuthenticatedSettingsPage(input: {
     maxPlanConfigured,
   });
   const {
-    accountWithPrivyDisplay,
     murphPhoneNumber,
-    privyAppId,
-    privyClientId,
-    privySessionMatchesAppSession,
+    usageAddedContactOption,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
   } = resolveSettingsAccountPresentation({
     account,
-    freshPrivySession,
     routing,
     session,
     usageActivity,
@@ -367,6 +346,7 @@ function renderAuthenticatedSettingsPage(input: {
           payerMemberId={authenticatedMember?.id}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+          usageAddedContactOption={usageAddedContactOption}
           usageRecoveryInitialOpen={usageRecoveryPresentationOpen}
           usageStatus={usageStatus}
           usageTopUpActivePurchase={billingUsageTopUpActivePurchase}
@@ -413,27 +393,18 @@ function renderAuthenticatedSettingsPage(input: {
         <HostedAssistantModelSettings
           availableModels={assistant?.availableModels}
           canUpgradeToEdge={canUpgradeToEdge && !planChangePending}
-          chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
           configurationAvailable={assistant?.configurationAvailable === true}
-          customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
             || currentPlanCode === "launch_monthly"
               ? currentPlanCode
               : undefined
           }
-          initialConnection={
-            isHostedCustomInferenceEnabled() ? inferenceConnection : null
-          }
           initialDormantSolPreference={
             assistant?.dormantSolPreference === true
           }
-          initialModel={assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
-          initialProvider={
-            assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
-          }
+          initialModel={assistant?.model ?? HOSTED_ASSISTANT_DEFAULT_MODEL}
           solAvailable={assistant?.solAvailable === true}
-          veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>
 
@@ -462,24 +433,22 @@ function renderAuthenticatedSettingsPage(input: {
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Messaging
         </div>
-        {accountWithPrivyDisplay ? (
-          <HostedAccountSettingsCards
-            account={accountWithPrivyDisplay}
-            expectedPrivyUserId={session?.privyUserId ?? null}
+        {account ? (
+          <HostedLoginMethodSettings
+            account={account}
             murphPhoneNumber={murphPhoneNumber}
             openEmailLink={openEmailLink}
-            privySessionMatchesAppSession={privySessionMatchesAppSession}
           />
         ) : null}
       </section>
 
-      {accountWithPrivyDisplay ? (
+      {account ? (
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Customize your Murph
           </div>
           <CustomizeMurphSettings
-            assistant={accountWithPrivyDisplay.assistant ?? null}
+            assistant={account.assistant ?? null}
             murphPhoneNumber={murphPhoneNumber}
             openVoiceLink={openVoiceLink}
             voiceTestContactOption={voiceTestContactOption}
@@ -500,8 +469,7 @@ function renderAuthenticatedSettingsPage(input: {
         </Link>
       </section>
 
-      {privyAppId ? (
-        <section className="flex flex-col gap-4">
+      <section id="security" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Security
           </div>
@@ -510,8 +478,7 @@ function renderAuthenticatedSettingsPage(input: {
             authenticated={authenticated}
             secureApprovalStatus={secureApprovalStatus}
           />
-        </section>
-      ) : null}
+      </section>
 
       <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -523,17 +490,13 @@ function renderAuthenticatedSettingsPage(input: {
         />
         <HostedDataPrivacySettings
           authenticated={authenticated}
-          authorizationEnabled={Boolean(privyAppId)}
+          authorizationEnabled
         />
       </section>
     </div>
   );
 
-  return privyAppId ? (
-    <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
-      {settingsContent}
-    </HostedPrivyProvider>
-  ) : settingsContent;
+  return settingsContent;
 }
 
 type NormalizedSettingsPageData = ReturnType<typeof normalizeSettingsPageData>;
@@ -553,38 +516,22 @@ type SettingsRouting = NonNullable<
 
 function resolveSettingsAccountPresentation(input: {
   account: SettingsAccount | null;
-  freshPrivySession: NormalizedSettingsPageData["freshPrivySession"];
   routing: SettingsRouting | null;
   session: HostedDashboardPageAuthSnapshot["session"];
   usageActivity: NormalizedSettingsPageData["usageActivity"];
 }) {
-  const { account, freshPrivySession, routing, session, usageActivity } = input;
-  const privySessionMatchesAppSession =
-    freshPrivySession !== null
-    && freshPrivySession.identity.userId === session?.privyUserId;
-  const serverApprovedPrivyUser = privySessionMatchesAppSession
-    ? freshPrivySession.verifiedPrivyUser
-    : null;
-  const accountWithPrivyDisplay = account
-    ? withServerApprovedPrivyAccountHints({
-        snapshot: account,
-        serverApprovedPrivyUser,
-      })
-    : account;
+  const { account, routing, usageActivity } = input;
   const murphPhoneNumber =
     routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null;
-  // The member sends this to Murph right after picking a voice, so the reply
-  // comes back as a voice memo in the new voice. Voice memos only deliver over
-  // text and Telegram, so an email-only member gets no redirect.
-  const resolvedVoiceTestOption = account
+  // One route to Murph. Each surface adds its own message. Voice memos and
+  // missions only work over text and Telegram, so an email-only member keeps the
+  // route but gets neither.
+  const chatContactOption = account
     ? resolveMurphContactOptions({
         contactChannels: {
           email: Boolean(account.email.murphEmailAddress),
           telegram: Boolean(account.telegram.telegramUserId),
           text: Boolean(account.phone.number),
-        },
-        message: {
-          body: "just picked a new voice for you! send me a voice memo so I can hear it",
         },
         murphEmailAddress: account.email.murphEmailAddress ?? null,
         murphPhoneNumber: routing?.linqRecipientPhone ?? null,
@@ -592,27 +539,21 @@ function resolveSettingsAccountPresentation(input: {
         userEmailAddress: account.email.address,
       })[0] ?? null
     : null;
-  const voiceTestContactOption =
-    resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
-      ? resolvedVoiceTestOption
-      : null;
-  const usageMissionContactOption =
-    usageActivity?.missionsEnabled === true && account
-      ? resolveMurphContactOptions({
-          contactChannels: {
-            email: false,
-            telegram: Boolean(account.telegram.telegramUserId),
-            text: Boolean(account.phone.number),
-          },
-          message: {
-            body: "Hey Murph, what referral options can I choose from?",
-          },
-          murphEmailAddress: account.email.murphEmailAddress ?? null,
-          murphPhoneNumber: routing?.linqRecipientPhone ?? null,
-          preferredKind: "text",
-          userEmailAddress: account.email.address,
-        })[0] ?? null
-      : null;
+  const messageContactOption = chatContactOption?.kind === "email" ? null : chatContactOption;
+  // The member sends this to Murph right after picking a voice, so the reply
+  // comes back as a voice memo in the new voice.
+  const voiceTestContactOption = messageContactOption
+    ? withMurphContactOptionBody(
+        messageContactOption,
+        "just picked a new voice for you! send me a voice memo so I can hear it",
+      )
+    : null;
+  const usageMissionContactOption = usageActivity?.missionsEnabled === true && messageContactOption
+    ? withMurphContactOptionBody(
+        messageContactOption,
+        "Hey Murph, what referral options can I choose from?",
+      )
+    : null;
   const canStartUsageMissions =
     usageActivity?.missionsEnabled === true
     && usageMissionContactOption !== null;
@@ -627,11 +568,8 @@ function resolveSettingsAccountPresentation(input: {
       : null;
 
   return {
-    accountWithPrivyDisplay,
     murphPhoneNumber,
-    privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null,
-    privyClientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null,
-    privySessionMatchesAppSession,
+    usageAddedContactOption: chatContactOption,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
@@ -989,12 +927,10 @@ function normalizeSettingsPageData(
     familyAccess: settingsData?.familyAccess ?? null,
     familyDraftRecovery: settingsData?.familyDraftRecovery ?? null,
     familyOwner: settingsData?.familyOwner ?? null,
-    freshPrivySession: settingsData?.freshPrivySession ?? null,
     hasConfirmedGroupMembership:
       settingsData?.hasConfirmedGroupMembership === true,
-    inferenceConnection: settingsData?.inferenceConnection ?? null,
     secureApprovalStatus:
-      settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const),
+      settingsData?.secureApprovalStatus ?? ({ status: "unavailable", method: undefined } as const),
     settingsSnapshot: settingsData?.settingsSnapshot ?? null,
     usageActivity: settingsData?.usageActivity ?? null,
     usageStatus: settingsData?.usageStatus ?? null,
@@ -1007,16 +943,13 @@ function normalizeSettingsPageData(
 async function readSettingsPageData(input: {
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
-  privyUserId: string | null | undefined;
   usageReturnPurchaseId: string | null;
 }) {
   const { memberId, prisma } = input;
-  // Approval status adds one bounded member lookup before the legacy provider
-  // read. The larger Settings projections below remain sequential.
-  const freshPrivySessionPromise = getHostedPrivySession().catch(() => null);
+  // Approval status adds one bounded member lookup. The larger Settings
+  // projections below remain sequential.
   const secureApprovalStatusPromise = readHostedSecureApprovalStatus({
     memberId, prisma,
-    privyUserId: input.privyUserId,
   });
 
   // The database-backed reads run sequentially on purpose: several of them
@@ -1026,12 +959,6 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
-  const inferenceConnection = isHostedCustomInferenceEnabled()
-    ? await readHostedInferenceConnectionView({
-        memberId,
-        prisma,
-      })
-    : null;
   const consentStatus = await readHostedConsentStatus({
     memberId,
     prisma,
@@ -1111,8 +1038,6 @@ async function readSettingsPageData(input: {
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,
-    inferenceConnection,
-    freshPrivySession: await freshPrivySessionPromise,
     maxPlanAvailable,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,

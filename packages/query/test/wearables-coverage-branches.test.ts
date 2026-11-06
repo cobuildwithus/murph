@@ -45,7 +45,6 @@ import {
   formatMetricValue,
   formatProviderName,
   inferDefaultMetricFamily,
-  isPreferredWearableProvider,
   resolveMetricTolerance,
   resolveWearableProviderPriority,
   resourceTypeScore,
@@ -83,7 +82,6 @@ import type {
   WearableConfidenceLevel,
   WearableExternalRef,
   WearableMetricCandidate,
-  WearableMetricConfidence,
   WearableMetricSelection,
   WearableResolvedMetric,
   WearableSleepWindowCandidate,
@@ -183,6 +181,8 @@ function makeSleepWindowCandidate(
     recordIds: overrides.recordIds ?? [overrides.candidateId],
     sourceFamily: overrides.sourceFamily,
     sourceKind: overrides.sourceKind,
+    sleepState: overrides.sleepState,
+    sleepType: overrides.sleepType,
     startAt: overrides.startAt ?? null,
     title: overrides.title ?? null,
   };
@@ -195,7 +195,6 @@ function makeResolvedMetric(overrides: {
   level?: WearableConfidenceLevel;
   conflictingProviders?: string[];
   exactDuplicateCount?: number;
-  reasons?: string[];
   resolution?: WearableMetricSelection["resolution"];
   fallbackFromMetric?: string | null;
   fallbackReason?: string | null;
@@ -217,7 +216,6 @@ function makeResolvedMetric(overrides: {
       conflictingProviders: overrides.conflictingProviders ?? [],
       exactDuplicateCount: overrides.exactDuplicateCount ?? 0,
       level: overrides.level ?? (overrides.value === null ? "none" : "high"),
-      reasons: overrides.reasons ?? [],
     },
     metric: overrides.metric,
     selection: {
@@ -283,8 +281,6 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
   assert.equal(resolveWearableProviderPriority("steps", "unknown-provider"), 0);
   assert.equal(resolveWearableProviderPriority("steps", "oura") > 0, true);
   assert.equal(compareWearableProviders("steps", "beta", "alpha") > 0, true);
-  assert.equal(isPreferredWearableProvider("steps", "alpha", ["beta", "alpha"]), true);
-  assert.equal(isPreferredWearableProvider("steps", " ", ["beta", "alpha"]), false);
 
   assert.equal(inferDefaultMetricFamily("sleepScore"), "sleep");
   assert.equal(inferDefaultMetricFamily("recoveryScore"), "recovery");
@@ -441,18 +437,6 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(lowConfidence.selection.value, 1000);
   assert.equal(lowConfidence.confidence.level, "low");
   assert.deepEqual(lowConfidence.confidence.conflictingProviders, ["alpha"]);
-  assert.equal(
-    lowConfidence.confidence.reasons.some((reason) => reason.includes("Suppressed 1 exact duplicate candidate.")),
-    true,
-  );
-  assert.equal(
-    lowConfidence.confidence.reasons.some((reason) => reason.includes("scored highest") && reason.includes("ahead of")),
-    true,
-  );
-  assert.equal(
-    lowConfidence.confidence.reasons.some((reason) => reason.includes("Conflicting values remained from alpha.")),
-    true,
-  );
 
   const withinTolerance = resolveMetric("steps", [
     makeMetricCandidate({
@@ -497,10 +481,6 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
     }),
   ], { metricFamily: "activity" });
   assert.equal(withinTolerance.confidence.level, "high");
-  assert.equal(
-    withinTolerance.confidence.reasons.some((reason) => reason.includes("Providers agreed within tolerance:")),
-    true,
-  );
   assert.equal(withinTolerance.confidence.conflictingProviders.length, 0);
 
   const empty = resolveMetric("steps", [], { metricFamily: "activity" });
@@ -537,10 +517,6 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(liftedFallback.selection.fallbackFromMetric, "sessionMinutes");
   assert.equal(liftedFallback.selection.fallbackReason, "Used the selected sleep session duration because no direct total-sleep metric was available.");
   assert.equal(
-    liftedFallback.confidence.reasons[0],
-    "Used the selected sleep session duration because no direct total-sleep metric was available.",
-  );
-  assert.equal(
     withMetricFallback(lowConfidence, sleepFallback, "Used the selected sleep session duration because no direct total-sleep metric was available."),
     lowConfidence,
   );
@@ -564,10 +540,6 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
     }),
   ]);
   assert.equal(directNapSelection.selection?.nap, true);
-  assert.equal(
-    directNapSelection.confidence.reasons[0]?.includes("nap penalty -6"),
-    true,
-  );
 
   const conflictedSleepSelection = resolveSleepWindowSelection([
     makeSleepWindowCandidate({
@@ -603,12 +575,6 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
       title: "Beta overnight sleep",
     }),
   ]);
-  assert.equal(
-    conflictedSleepSelection.confidence.reasons.some((reason) =>
-      reason.startsWith("Sleep windows differed across "),
-    ),
-    true,
-  );
 
   const duplicateWindows = dedupeSleepWindowCandidates([
     makeSleepWindowCandidate({
@@ -663,6 +629,29 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(duplicateWindows.length, 2);
   assert.deepEqual(duplicateWindows[0]?.paths, ["sleep-a.jsonl", "sleep-b.jsonl"]);
   assert.equal(duplicateWindows[0]?.recordedAt, "2026-04-02T06:20:00Z");
+
+  const sameShortWindow = (candidateId: string, sleepState: "tentative" | "confirmed") =>
+    makeSleepWindowCandidate({
+      candidateId,
+      date: "2026-04-01",
+      durationMinutes: 40,
+      endAt: "2026-04-01T12:40:00Z",
+      nap: false,
+      provider: "garmin",
+      sleepState,
+      sleepType: "short_sleep",
+      sourceFamily: "event",
+      sourceKind: "sleep_session",
+      startAt: "2026-04-01T12:00:00Z",
+    });
+  const stateWindows = dedupeSleepWindowCandidates([
+    sameShortWindow("garmin:short:tentative", "tentative"),
+    sameShortWindow("garmin:short:confirmed", "confirmed"),
+    sameShortWindow("garmin:short:stale", "tentative"),
+  ]);
+  assert.equal(stateWindows.length, 1);
+  assert.equal(stateWindows[0]?.sleepType, "short_sleep");
+  assert.equal(stateWindows[0]?.sleepState, "confirmed");
 
   const sessionCandidates = [
     makeMetricCandidate({
@@ -1725,16 +1714,6 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   assert.equal(day?.activity?.steps.selection.provider, "garmin");
   assert.deepEqual(day?.activity?.steps.confidence.conflictingProviders, ["garmin"]);
   assert.equal(day?.activity?.steps.confidence.level, "medium");
-  assert.equal(
-    day?.activity?.steps.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
-  assert.equal(
-    day?.activity?.steps.confidence.reasons.some((reason) => reason.includes("Garmin conflicts with Garmin")),
-    false,
-  );
   const sourceHealth = listWearableSourceHealth(vault, { providers: ["garmin"] });
   assert.deepEqual(sourceHealth.map((row) => row.provider), ["garmin"]);
   assert.equal(sourceHealth[0]?.providerDisplayName, "Garmin");
@@ -1760,14 +1739,6 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     .find((night) => night.date === "2026-04-07");
   assert.equal(garminSleep?.totalSleepMinutes.selection.provider, "garmin");
   assert.equal(garminSleep?.totalSleepMinutes.selection.value, 390);
-  assert.equal(
-    garminSleep?.totalSleepMinutes.confidence.reasons.some((reason) => /\bjunction\b/iu.test(reason)),
-    false,
-  );
-  assert.equal(
-    garminSleep?.totalSleepMinutes.confidence.reasons.some((reason) => reason.startsWith("Selected Garmin ")),
-    true,
-  );
   assert.equal(
     garminSleep?.summaryConfidence.notes.some((note) => /\bjunction\b/iu.test(note)),
     false,
@@ -1799,12 +1770,6 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   );
   assert.deepEqual(directConflictSleep?.sessionMinutes.confidence.conflictingProviders, ["garmin"]);
   assert.equal(directConflictSleep?.sessionMinutes.confidence.level, "medium");
-  assert.equal(
-    directConflictSleep?.sessionMinutes.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
   assert.equal(directConflictSleep?.summaryConfidence.level, "medium");
   assert.equal(directConflictSleep?.summaryConfidence.conflictingMetrics.includes("sessionMinutes"), true);
   assert.equal(
@@ -1822,12 +1787,6 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   );
   assert.deepEqual(crossPublicSleep?.sessionMinutes.confidence.conflictingProviders, ["oura"]);
   assert.equal(crossPublicSleep?.sessionMinutes.confidence.level, "medium");
-  assert.equal(
-    crossPublicSleep?.sessionMinutes.confidence.reasons.some((reason) =>
-      reason === "Conflicting values remained from Oura."
-    ),
-    true,
-  );
   assert.equal(crossPublicSleep?.summaryConfidence.level, "medium");
   assert.equal(crossPublicSleep?.summaryConfidence.conflictingMetrics.includes("sessionMinutes"), true);
   assert.equal(
@@ -1864,58 +1823,18 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     true,
   );
   assert.equal(
-    mixedPublicSleep?.sessionMinutes.confidence.reasons.some((reason) =>
-      reason === "Conflicting values remained from Oura."
-    ),
-    true,
-  );
-  assert.equal(
-    mixedPublicSleep?.sessionMinutes.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
-  assert.equal(
     mixedPublicSleep?.summaryConfidence.notes.some((note) => /\bjunction\b/iu.test(note)),
     false,
   );
 
   const ambiguousEvidenceDay = summarizeWearableDay(vault, "2026-04-13");
-  const ambiguousStepReason = ambiguousEvidenceDay?.activity?.steps.confidence.reasons.find((reason) =>
-    reason.startsWith("Selected ")
-  ) ?? "";
   assert.equal(ambiguousEvidenceDay?.activity?.steps.selection.provider, "garmin");
   assert.deepEqual(ambiguousEvidenceDay?.activity?.steps.confidence.conflictingProviders, ["oura"]);
   assert.equal(ambiguousEvidenceDay?.activity?.steps.confidence.level, "medium");
-  assert.equal(
-    ambiguousEvidenceDay?.activity?.steps.confidence.reasons.some((reason) =>
-      reason === "Conflicting values remained from Oura."
-    ),
-    true,
-  );
-  assert.equal(
-    ambiguousStepReason.includes("Garmin/Oura observation:daily-steps recorded 2026-04-13T08:00:00Z"),
-    true,
-  );
-  assert.equal(ambiguousStepReason.includes("Junction observation:daily-steps recorded"), false);
-  assert.equal(ambiguousStepReason.includes("ahead of Garmin observation recorded"), false);
-  assert.equal(ambiguousStepReason.includes("ahead of Oura observation recorded"), false);
 
   const mixedConflictDay = summarizeWearableDay(vault, "2026-04-14");
   assert.equal(mixedConflictDay?.activity?.steps.selection.provider, "garmin");
   assert.deepEqual(mixedConflictDay?.activity?.steps.confidence.conflictingProviders, ["garmin", "oura"]);
-  assert.equal(
-    mixedConflictDay?.activity?.steps.confidence.reasons.some((reason) =>
-      reason === "Conflicting values remained from Oura."
-    ),
-    true,
-  );
-  assert.equal(
-    mixedConflictDay?.activity?.steps.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
 
   const mixedSourceSleep = summarizeWearableSleep(vault)
     .find((night) => night.date === "2026-04-08");
@@ -1940,10 +1859,6 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   assert.deepEqual(whoopDay?.providers, ["whoop"]);
   assert.equal(whoopDay?.activity?.steps.selection.provider, "whoop");
   assert.equal(
-    whoopDay?.activity?.steps.confidence.reasons.some((reason) => /\bjunction\b/iu.test(reason)),
-    false,
-  );
-  assert.equal(
     /(?:\bJunction\b|whoop[_-]v2)/iu.test(whoopDay?.activity?.steps.selection.title ?? ""),
     false,
   );
@@ -1952,10 +1867,6 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
       /(?:\bJunction\b|whoop[_-]v2)/iu.test(candidate.title ?? "")
     ),
     false,
-  );
-  assert.equal(
-    whoopDay?.activity?.steps.confidence.reasons.some((reason) => reason.startsWith("Selected WHOOP ")),
-    true,
   );
 });
 
@@ -2109,7 +2020,6 @@ test("confidence and summary helpers describe the selected evidence plainly", ()
         conflictingProviders: [],
         exactDuplicateCount: 0,
         level: "high",
-        reasons: [],
       },
       selection: makeSleepWindowCandidate({
         candidateId: "oura:sleep:summary",

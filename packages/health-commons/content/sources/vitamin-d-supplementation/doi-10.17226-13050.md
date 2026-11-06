@@ -13,14 +13,8 @@ aliases:
   - 10.17226/13050
 categories:
   - vitamin-d-supplementation
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
-  -
-    type: parent_family
-    target: experiment_family:vitamin-d-supplementation
 sourceIdentity:
   identityKind: guideline
   canonicalIdBasis: doi

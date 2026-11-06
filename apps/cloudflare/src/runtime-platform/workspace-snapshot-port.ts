@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -29,7 +30,6 @@ import {
 import {
   encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
 } from "../workspace-snapshot-store.ts";
 import {
   isHostedWorkspaceSnapshotAbortFailure,
@@ -60,11 +60,13 @@ import {
   readRequiredHostedRuntimePositiveInteger,
   readRequiredHostedRuntimeString,
 } from "./hosted-http.ts";
+import {
+  observeHostedWorkspaceSnapshotFetch,
+  readHostedWorkspaceSnapshotResponseIds,
+} from "./fetch-transport-diagnostics.ts";
 
 const WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS = 15_000;
-const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
 const WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS = 2;
-const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
 const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_MAX_BYTES = 16 * 1024;
 const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS = 1_000;
 const WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS = 2;
@@ -84,17 +86,17 @@ const WORKSPACE_SNAPSHOT_R2_PUT_RETRYABLE_ERROR_CODES = new Set([
 const WORKSPACE_SNAPSHOT_R2_PUT_RETRYABLE_STATUSES = new Set([
   429,
   500,
+  502,
   503,
+  504,
 ]);
-// Session creation records the server heartbeat before its response reaches the
-// runtime. Cap that handshake so an immediate first heartbeat still has one
-// full cadence of margin before replacement may consider the session stale.
-const WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS =
-  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS
-  - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS
-  - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS;
-
+type HostedWorkspaceSnapshotUploadFailurePhase =
+  | "upload_prepare"
+  | "upload_presign"
+  | "upload_transfer"
+  | "upload_receipt";
 type HostedWorkspaceSnapshotFailurePhase =
+  | HostedWorkspaceSnapshotUploadFailurePhase
   | "session_complete_payload_validation"
   | "session_complete_record_checkpoint"
   | "session_complete_request"
@@ -114,8 +116,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const sessionRuntimeState = new Map<string, {
     headers: Headers;
+    managedPart?: { uploadId: string; etag: string };
   }>();
-  const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
     snapshotId: string,
     description: string,
@@ -129,87 +131,15 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       description,
     );
   };
-  const stopSessionHeartbeat = (snapshotId: string): void => {
-    sessionHeartbeatStops.get(snapshotId)?.();
-    sessionHeartbeatStops.delete(snapshotId);
-  };
-  const startSessionHeartbeat = (
-    snapshotId: string,
-    headers: Headers,
-    signal?: AbortSignal | null,
-  ): void => {
-    stopSessionHeartbeat(snapshotId);
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let failureLogged = false;
-    const schedule = (delayMs: number) => {
-      if (stopped) {
-        return;
-      }
-      timer = setTimeout(() => {
-        timer = null;
-        void heartbeat();
-      }, delayMs);
-    };
-    const heartbeat = async () => {
-      const startedAtMs = Date.now();
-      try {
-        await fetchHostedJson({
-          body: { snapshotId },
-          description: "Hosted workspace snapshot handoff heartbeat",
-          exposeResponseBodyInError: false,
-          fetchImpl: input.fetchImpl,
-          headers: new Headers(headers),
-          method: "POST",
-          redactedLogPath: "/workspace-snapshots/REDACTED/heartbeat",
-          signal: signal ?? null,
-          timeoutMs: Math.min(
-            input.timeoutMs,
-            WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS,
-          ),
-          url: new URL(
-            `/workspace-snapshots/${encodeURIComponent(snapshotId)}/heartbeat`,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-          ),
-        });
-        failureLogged = false;
-      } catch (error) {
-        if (!stopped && signal?.aborted !== true && !failureLogged) {
-          failureLogged = true;
-          console.warn("Hosted workspace snapshot handoff heartbeat failed.", {
-            errorName: error instanceof Error ? error.name : typeof error,
-          });
-        }
-      } finally {
-        schedule(Math.max(
-          0,
-          WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS
-          - (Date.now() - startedAtMs),
-        ));
-      }
-    };
-    const stopForAbort = () => {
-      stopSessionHeartbeat(snapshotId);
-    };
-    const stop = () => {
-      stopped = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      signal?.removeEventListener("abort", stopForAbort);
-    };
-    sessionHeartbeatStops.set(snapshotId, stop);
-    if (signal?.aborted) {
-      stopSessionHeartbeat(snapshotId);
-      return;
-    }
-    signal?.addEventListener("abort", stopForAbort, { once: true });
-    void heartbeat();
+  const rememberManagedSnapshotPart = async (snapshotId: string, uploadId: string | undefined, response: Response): Promise<void> => {
+    if (uploadId === undefined) return;
+    const etag = response.headers.get("etag");
+    if (!etag) throw new Error("Managed snapshot upload did not return a part ETag.");
+    const headers = await readSessionWriteFenceHeaders(snapshotId, "Managed snapshot completion");
+    sessionRuntimeState.set(snapshotId, { headers, managedPart: { uploadId, etag } });
   };
   const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
     async abortSnapshotSession(request) {
-      stopSessionHeartbeat(request.snapshotId);
       const headers = await readSessionWriteFenceHeaders(
         request.snapshotId,
         "Hosted workspace snapshot session abort",
@@ -251,7 +181,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           phase: "session_complete_write_fence_headers",
         });
       }
-      startSessionHeartbeat(snapshotId, headers);
       headers.set("content-type", "application/json; charset=utf-8");
       // Canonical publication and its one exact replay stay non-interruptible
       // once `/complete` starts.
@@ -260,6 +189,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         checkpointRequest: request.checkpointRequest,
         objectKey: request.ref.objectKey,
         snapshotId,
+        managedPart: sessionRuntimeState.get(snapshotId)?.managedPart,
       });
       const url = new URL(
         `/workspace-snapshots/${encodeURIComponent(snapshotId)}/complete`,
@@ -322,7 +252,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           payload = await complete(replayTimeoutMs);
         }
       } finally {
-        stopSessionHeartbeat(snapshotId);
         sessionRuntimeState.delete(snapshotId);
       }
       let completed: HostedRuntimeWorkspaceSnapshotSessionCompleteResult;
@@ -351,21 +280,27 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
     },
 
     async putSnapshotObjectDirect(request) {
-      assertHostedWorkspaceSnapshotOperationLive(request.signal);
-      if (!Number.isSafeInteger(request.encryptedByteSize) || request.encryptedByteSize <= 0) {
-        throw new TypeError("Hosted workspace snapshot encryptedByteSize must be a positive safe integer.");
-      }
-      const timings: HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails = {};
-      const source = await stat(request.sourceFilePath);
-      assertHostedWorkspaceSnapshotOperationLive(request.signal);
-      if (source.size !== request.encryptedByteSize) {
-        throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
-      }
-      const presignStartedAt = Date.now();
-      let presignedPut: { expiresAt: string; putUrl: string };
+      let phase: HostedWorkspaceSnapshotUploadFailurePhase = "upload_prepare";
       try {
-        presignedPut = await presignWorkspaceSnapshotPut({
+        assertHostedWorkspaceSnapshotOperationLive(request.signal);
+        if (!Number.isSafeInteger(request.encryptedByteSize) || request.encryptedByteSize <= 0) {
+          throw new TypeError("Hosted workspace snapshot encryptedByteSize must be a positive safe integer.");
+        }
+        const timings: HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails = {};
+        const source = await stat(request.sourceFilePath);
+        assertHostedWorkspaceSnapshotOperationLive(request.signal);
+        if (source.size !== request.encryptedByteSize) {
+          throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
+        }
+        const presignStartedAt = Date.now();
+        // Declared at admission so the Worker can verify publication through R2's
+        // ETag instead of reading the stored object back.
+        const encryptedMd5 = await readFileMd5Hex(request.sourceFilePath);
+        assertHostedWorkspaceSnapshotOperationLive(request.signal);
+        phase = "upload_presign";
+        const presignedPut = await presignWorkspaceSnapshotPut({
           encryptedByteSize: request.encryptedByteSize,
+          encryptedMd5,
           encryptedObjectSha256: request.encryptedObjectSha256,
           fetchImpl: input.fetchImpl,
           headers: await readSessionWriteFenceHeaders(
@@ -378,80 +313,146 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           timeoutMs: input.timeoutMs,
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
         });
-      } catch (error) {
-        throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
-          error,
-          request.signal,
-        );
-        throw error;
-      }
-      assertHostedWorkspaceSnapshotOperationLive(request.signal);
-      timings.snapshotDirectR2PresignElapsedMs =
-        readHostedRuntimeStepElapsedMs(presignStartedAt);
-      const expiresAtMs = Date.parse(presignedPut.expiresAt);
-      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-        throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
-      }
-      const checksumSha256Base64 = encodeHostedWorkspaceSnapshotSha256Base64(
-        request.encryptedObjectSha256,
-      );
-      const putStartedAt = Date.now();
-      const putHeaders = {
-        "content-length": String(request.encryptedByteSize),
-        "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-        "if-none-match": "*",
-        "x-amz-checksum-sha256": checksumSha256Base64,
-        "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
-        "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
-        "x-amz-meta-snapshotid": request.snapshotId,
-      };
-      let precedingAttemptWasAmbiguous = false;
-      for (
-        let attempt = 1;
-        attempt <= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS;
-        attempt += 1
-      ) {
         assertHostedWorkspaceSnapshotOperationLive(request.signal);
-        const putTimeoutMs = expiresAtMs - Date.now();
-        if (putTimeoutMs <= 0) {
+        timings.snapshotDirectR2PresignElapsedMs =
+          readHostedRuntimeStepElapsedMs(presignStartedAt);
+        const expiresAtMs = Date.parse(presignedPut.expiresAt);
+        if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
           throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
         }
-        const body = Readable.toWeb(
-          createReadStream(request.sourceFilePath),
-        ) as ReadableStream<Uint8Array>;
-        let response: Response;
-        try {
-          response = await fetchHostedResponse({
-            description: "Hosted workspace snapshot direct R2 upload",
-            fetchImpl: input.fetchImpl,
-            init: {
-              body: body as BodyInit,
-              duplex: "half",
-              headers: putHeaders,
-              method: "PUT",
-            } as RequestInit & { duplex: "half" },
-            redactedLogPath: "/workspace-snapshot-object",
-            redactedResponseOrigin: "workspace_snapshot_object",
-            signal: request.signal,
-            timeoutMs: putTimeoutMs,
-            url: new URL(presignedPut.putUrl),
-          });
-        } catch (error) {
-          throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
-            error,
-            request.signal,
-          );
-          await cancelHostedWorkspaceSnapshotResponseBody(body);
+        const checksumSha256Base64 = encodeHostedWorkspaceSnapshotSha256Base64(
+          request.encryptedObjectSha256,
+        );
+        phase = "upload_transfer";
+        const putStartedAt = Date.now();
+        const putHeaders = {
+          "content-length": String(request.encryptedByteSize),
+          "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+          ...(presignedPut.managedUploadId ? {} : {
+          "if-none-match": "*",
+          "x-amz-checksum-sha256": checksumSha256Base64,
+          "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
+          "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+          "x-amz-meta-snapshotid": request.snapshotId,
+          }),
+        };
+        let precedingAttemptWasAmbiguous = false;
+        for (
+          let attempt = 1;
+          attempt <= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS;
+          attempt += 1
+        ) {
+          assertHostedWorkspaceSnapshotOperationLive(request.signal);
+          const putTimeoutMs = expiresAtMs - Date.now();
+          if (putTimeoutMs <= 0) {
+            throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
+          }
+          const body = Readable.toWeb(
+            createReadStream(request.sourceFilePath),
+          ) as ReadableStream<Uint8Array>;
+          let response: Response;
+          try {
+            response = await fetchHostedResponse({
+              description: "Hosted workspace snapshot direct R2 upload",
+              fetchImpl: input.fetchImpl,
+              init: {
+                body: body as BodyInit,
+                duplex: "half",
+                headers: putHeaders,
+                method: "PUT",
+              } as RequestInit & { duplex: "half" },
+              redactedLogPath: "/workspace-snapshot-object",
+              redactedResponseOrigin: "workspace_snapshot_object",
+              signal: request.signal,
+              timeoutMs: putTimeoutMs,
+              url: new URL(presignedPut.putUrl),
+            });
+          } catch (error) {
+            throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+              error,
+              request.signal,
+            );
+            await cancelHostedWorkspaceSnapshotResponseBody(body);
+            const terminalError = new Error(
+              "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
+              + "abandon this snapshot session and start a fresh snapshot before retrying.",
+              { cause: error },
+            );
+            if (
+              request.signal?.aborted
+              ||
+              attempt >= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS
+              || !isRetryableHostedWorkspaceSnapshotR2TransportFailure(error)
+            ) {
+              throw terminalError;
+            }
+            let retryWithinDeadline: boolean;
+            try {
+              retryWithinDeadline = await waitForHostedWorkspaceSnapshotR2PutRetry({
+                expiresAtMs,
+                signal: request.signal,
+              });
+            } catch {
+              throw terminalError;
+            }
+            if (!retryWithinDeadline) {
+              throw terminalError;
+            }
+            precedingAttemptWasAmbiguous = true;
+            continue;
+          }
+
+          if (response.ok) {
+            assertHostedWorkspaceSnapshotOperationLive(request.signal);
+            phase = "upload_receipt";
+            await rememberManagedSnapshotPart(request.snapshotId, presignedPut.managedUploadId, response);
+            timings.snapshotDirectR2PutElapsedMs =
+              readHostedRuntimeStepElapsedMs(putStartedAt);
+            return timings;
+          }
+          if (isCompletedAmbiguousDirectPut(response, presignedPut, attempt, precedingAttemptWasAmbiguous)) {
+            await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+            assertHostedWorkspaceSnapshotOperationLive(request.signal);
+            timings.snapshotDirectR2PutElapsedMs =
+              readHostedRuntimeStepElapsedMs(putStartedAt);
+            return timings;
+          }
+
+          const r2FailureDiagnostics =
+            await readHostedWorkspaceSnapshotR2FailureDiagnostics({
+              response,
+              signal: request.signal,
+              timeoutMs: Math.min(
+                WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS,
+                input.timeoutMs,
+              ),
+            });
+          let responseError: unknown;
+          try {
+            assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
+          } catch (error) {
+            responseError = error;
+          }
           const terminalError = new Error(
-            "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
+            `Hosted workspace snapshot direct R2 upload is not resumable after HTTP ${response.status}; `
             + "abandon this snapshot session and start a fresh snapshot before retrying.",
-            { cause: error },
+            {
+              cause: buildHostedWorkspaceSnapshotR2FailureError({
+                cause: responseError,
+                diagnostics: r2FailureDiagnostics,
+                status: response.status,
+              }),
+            },
           );
           if (
             request.signal?.aborted
             ||
             attempt >= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS
-            || !isRetryableHostedWorkspaceSnapshotR2TransportFailure(error)
+            || response.status === 412
+            || !isRetryableHostedWorkspaceSnapshotR2Response({
+              diagnostics: r2FailureDiagnostics,
+              status: response.status,
+            })
           ) {
             throw terminalError;
           }
@@ -467,82 +468,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           if (!retryWithinDeadline) {
             throw terminalError;
           }
-          precedingAttemptWasAmbiguous = true;
-          continue;
+          precedingAttemptWasAmbiguous = false;
         }
 
-        if (response.ok) {
-          assertHostedWorkspaceSnapshotOperationLive(request.signal);
-          timings.snapshotDirectR2PutElapsedMs =
-            readHostedRuntimeStepElapsedMs(putStartedAt);
-          return timings;
-        }
-        if (
-          response.status === 412
-          && attempt > 1
-          && precedingAttemptWasAmbiguous
-        ) {
-          await cancelHostedWorkspaceSnapshotResponseBody(response.body);
-          assertHostedWorkspaceSnapshotOperationLive(request.signal);
-          timings.snapshotDirectR2PutElapsedMs =
-            readHostedRuntimeStepElapsedMs(putStartedAt);
-          return timings;
-        }
-
-        const r2FailureDiagnostics =
-          await readHostedWorkspaceSnapshotR2FailureDiagnostics({
-            response,
-            signal: request.signal,
-            timeoutMs: Math.min(
-              WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS,
-              input.timeoutMs,
-            ),
-          });
-        let responseError: unknown;
-        try {
-          assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
-        } catch (error) {
-          responseError = error;
-        }
-        const terminalError = new Error(
-          `Hosted workspace snapshot direct R2 upload is not resumable after HTTP ${response.status}; `
-          + "abandon this snapshot session and start a fresh snapshot before retrying.",
-          {
-            cause: buildHostedWorkspaceSnapshotR2FailureError({
-              cause: responseError,
-              diagnostics: r2FailureDiagnostics,
-              status: response.status,
-            }),
-          },
-        );
-        if (
-          request.signal?.aborted
-          ||
-          attempt >= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS
-          || response.status === 412
-          || !isRetryableHostedWorkspaceSnapshotR2Response({
-            diagnostics: r2FailureDiagnostics,
-            status: response.status,
-          })
-        ) {
-          throw terminalError;
-        }
-        let retryWithinDeadline: boolean;
-        try {
-          retryWithinDeadline = await waitForHostedWorkspaceSnapshotR2PutRetry({
-            expiresAtMs,
-            signal: request.signal,
-          });
-        } catch {
-          throw terminalError;
-        }
-        if (!retryWithinDeadline) {
-          throw terminalError;
-        }
-        precedingAttemptWasAmbiguous = false;
+        throw new Error("Hosted workspace snapshot direct R2 upload exhausted its attempt bound.");
+      } catch (error) {
+        throw annotateHostedWorkspaceSnapshotUploadFailure({ error, phase, signal: request.signal });
       }
-
-      throw new Error("Hosted workspace snapshot direct R2 upload exhausted its attempt bound.");
     },
 
     async restoreWorkspaceSnapshot(request) {
@@ -582,7 +514,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
       let dataKey: string;
       let presignedGet: { expiresAtMs: number; getUrl: string };
-      if (input.preparedSnapshotRestore) {
+      if (input.preparedSnapshotRestore && request.usePreparedRestore !== false) {
         const prepared = requireHostedWorkspaceSnapshotPreparedRestoreForRef({
           prepared: input.preparedSnapshotRestore,
           ref: request.ref,
@@ -648,11 +580,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
 
       const objectFetchStartedAt = Date.now();
+      let objectFetchAttempt = 0;
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         signal: request.signal,
         onAttempt: noteReplaySafeReadAttempt,
         run: async () => {
+          objectFetchAttempt += 1;
           const objectFetchAttemptTiming = {
             objectFetchResponseHeadersMs: 0,
             objectFetchBodyReadMs: 0,
@@ -661,6 +595,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
           const encryptedStream = readHostedWorkspaceSnapshotEncryptedObjectStream({
+            attempt: objectFetchAttempt,
             deadlineMs: objectFetchDeadlineMs,
             expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
             fetchImpl: input.fetchImpl,
@@ -712,10 +647,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
       headers.set("content-type", "application/json; charset=utf-8");
       assertHostedWorkspaceSnapshotOperationLive(signal);
-      const startTimeoutMs = Math.min(
-        input.timeoutMs,
-        WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS,
-      );
+      const startTimeoutMs = input.timeoutMs;
       const startDeadlineMs = Date.now() + startTimeoutMs;
       const startTimeoutSignal = AbortSignal.timeout(startTimeoutMs);
       const startSignal = combineAbortSignalsWithCleanup(
@@ -807,11 +739,37 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       sessionRuntimeState.set(started.snapshotId, {
         headers: new Headers(headers),
       });
-      startSessionHeartbeat(started.snapshotId, headers, signal);
       return started;
     },
   };
   return port;
+}
+
+function annotateHostedWorkspaceSnapshotUploadFailure(input: {
+  error: unknown;
+  phase: HostedWorkspaceSnapshotUploadFailurePhase;
+  signal?: AbortSignal | null;
+}): unknown {
+  // Exact caller interruptions are control flow, including frozen Error reasons.
+  if (input.signal?.aborted && input.error === input.signal.reason) {
+    return input.error;
+  }
+  if (input.phase === "upload_presign") {
+    throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(input.error, input.signal);
+  }
+  const error = input.error instanceof Error
+    ? input.error
+    : new Error(typeof input.error === "string" ? input.error : "Hosted workspace snapshot upload failed.", {
+        cause: input.error,
+      });
+  // A phase belongs to its existing owner; do not read accessors or shadow it.
+  if ("phase" in error) {
+    return error;
+  }
+  const annotatableError = Object.isExtensible(error)
+    ? error
+    : Object.assign(new Error(error.message, { cause: error }), { name: error.name });
+  return annotateHostedWorkspaceSnapshotFailure({ error: annotatableError, phase: input.phase });
 }
 
 function annotateHostedWorkspaceSnapshotFailure(input: {
@@ -1190,9 +1148,15 @@ function parseHostedWorkspaceSnapshotStartPayload(
   };
 }
 
+interface SnapshotPresignedPut { expiresAt: string; putUrl: string; managedUploadId?: string }
+
+function isCompletedAmbiguousDirectPut(response: Response, presigned: SnapshotPresignedPut, attempt: number, ambiguous: boolean): boolean {
+  return response.status === 412 && presigned.managedUploadId === undefined && attempt > 1 && ambiguous;
+}
+
 function parseHostedWorkspaceSnapshotPresignedPutPayload(
   value: unknown,
-): { expiresAt: string; putUrl: string } {
+): SnapshotPresignedPut {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted workspace snapshot presign response must be an object.");
   }
@@ -1200,11 +1164,21 @@ function parseHostedWorkspaceSnapshotPresignedPutPayload(
   return {
     expiresAt: readRequiredHostedRuntimeString(record.expiresAt, "Hosted workspace snapshot presign expiresAt"),
     putUrl: readRequiredHostedRuntimeString(record.putUrl, "Hosted workspace snapshot presign putUrl"),
+    ...(record.managedUploadId === undefined ? {} : { managedUploadId: readRequiredHostedRuntimeString(record.managedUploadId, "Managed snapshot upload ID") }),
   };
+}
+
+async function readFileMd5Hex(filePath: string): Promise<string> {
+  const hash = createHash("md5");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk as Uint8Array);
+  }
+  return hash.digest("hex");
 }
 
 async function presignWorkspaceSnapshotPut(input: {
   encryptedByteSize: number;
+  encryptedMd5: string;
   encryptedObjectSha256: string;
   fetchImpl: typeof fetch;
   headers?: Headers;
@@ -1213,14 +1187,16 @@ async function presignWorkspaceSnapshotPut(input: {
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
-}): Promise<{ expiresAt: string; putUrl: string }> {
+}): Promise<SnapshotPresignedPut> {
   const headers = input.headers
     ?? await requireHostedRuntimeWriteFenceHeaders(
       input.workspaceCheckpointBridge,
       "Hosted workspace snapshot presign PUT",
     );
   const body = {
+    supportsManagedUpload: true,
     encryptedByteSize: input.encryptedByteSize,
+    encryptedMd5: input.encryptedMd5,
     encryptedObjectSha256: input.encryptedObjectSha256,
     objectKey: input.objectKey,
     snapshotId: input.snapshotId,
@@ -1394,6 +1370,7 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
 }
 
 async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
+  attempt: number;
   deadlineMs: number;
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
@@ -1406,7 +1383,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   timeoutMs: number;
 }): AsyncIterable<Uint8Array> {
   const responseHeadersStartedAt = Date.now();
-  const response = await fetchHostedResponse({
+  const response = await observeHostedWorkspaceSnapshotFetch(() => fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
     init: {
@@ -1417,7 +1394,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
-  });
+  }), { attempt: input.attempt, timeoutMs: input.timeoutMs });
   input.timing.objectFetchResponseHeadersMs =
     readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
   if (response.status === 404) {
@@ -1465,6 +1442,9 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.workspace-snapshot",
       details: {
+        workspaceSnapshotRestoreAttempt: input.attempt,
+        workspaceSnapshotRestoreStep: "object_fetch",
+        ...readHostedWorkspaceSnapshotResponseIds(response.headers),
         bytesRead: byteCount,
         complete,
         durationMs,

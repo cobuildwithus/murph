@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test, vi } from 'vitest'
 
 const { sdkLoaded } = vi.hoisted(() => ({ sdkLoaded: vi.fn() }))
@@ -10,7 +11,7 @@ vi.mock('@elevenlabs/elevenlabs-js', async (importOriginal) => {
 test('loads the audio SDK only for a validated audio request', async () => {
   const runtime = await import('../src/elevenlabs-runtime.ts')
   expect(sdkLoaded).not.toHaveBeenCalled()
-  expect(runtime.resolveElevenLabsModelId({})).toBe('eleven_multilingual_v2')
+  expect(runtime.resolveElevenLabsModelId({})).toBe('eleven_v4')
   expect(runtime.ELEVENLABS_TTS_MAX_TEXT_LENGTH).toBe(1000)
 
   await expect(runtime.generateElevenLabsSpeech({
@@ -21,8 +22,9 @@ test('loads the audio SDK only for a validated audio request', async () => {
   })).rejects.toMatchObject({ code: 'ELEVENLABS_INVALID_INPUT' })
   expect(sdkLoaded).not.toHaveBeenCalled()
 
+  const audioBytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
   const fetchImplementation = vi.fn(async () => new Response(
-    new Uint8Array([1, 2, 3]),
+    audioBytes,
     { headers: { 'content-type': 'audio/mpeg' }, status: 200 },
   ))
   await expect(runtime.generateElevenLabsSpeech({
@@ -31,7 +33,7 @@ test('loads the audio SDK only for a validated audio request', async () => {
     modelId: 'eleven_multilingual_v2',
     text: 'A synthetic audio request.',
     voiceId: 'synthetic-voice',
-  })).resolves.toMatchObject({ bytes: new Uint8Array([1, 2, 3]) })
+  })).resolves.toMatchObject({ bytes: audioBytes })
   expect(sdkLoaded).toHaveBeenCalledOnce()
   expect(fetchImplementation).toHaveBeenCalledOnce()
 })

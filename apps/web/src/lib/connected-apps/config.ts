@@ -174,8 +174,6 @@ const CONNECTED_APP_TOOLKIT_LABELS: Readonly<Record<string, string>> = {
 
 const HOSTED_CONNECTED_APPS_POLICY_VERSION = 1;
 
-export const HOSTED_CONNECTED_APPS_POLICY_REVISION = HOSTED_CONNECTED_APPS_POLICY_VERSION;
-
 export function buildHostedConnectedAppsPolicyRevision(
   config: HostedConnectedAppsConfig,
 ): number {

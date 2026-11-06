@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import pg, { type Client, type Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   verifyHostedRuntimeLogDatabaseEndpoints,
@@ -12,6 +12,7 @@ import {
 import {
   deleteExpiredHostedRuntimeLogs,
   deleteHostedRuntimeLogDataForUsers,
+  hostedRuntimeLogLockKey,
   hostedRuntimeLogSubjectKey,
   listHostedRuntimeLogs,
   listHostedRuntimeTurnTimingLogs,
@@ -20,6 +21,9 @@ import {
   type HostedRuntimeLogSqlDatabase,
   type HostedRuntimeLogSqlResult,
 } from "@/src/lib/hosted-runtime-log/store";
+
+import { summarizeDeviceImportHealth } from "@/src/lib/hosted-runtime-progress/device-import-health";
+import { readDeviceImportObservations } from "@/src/lib/hosted-runtime-progress/device-import-observation";
 
 const { Client: PgClient, Pool: PgPool } = pg;
 const primaryDatabaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -186,8 +190,293 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       "DELETE FROM hosted_account_deletion_cleanup WHERE id = ANY($1::text[])",
       [[oldWebReceiptId, preExpandReceiptId]],
     );
-    database = poolDatabase(pool);
+    database = pool;
   }, 30_000);
+
+  it.each(["between statements", "during a statement"])(
+    "rejects a lost connection %s without an uncaught exception",
+    async (timing) => {
+      const postgres = requirePool(pool);
+      const userId = `member_runtime_log_disconnect_${randomToken()}`;
+      const subjectKey = rememberSubject(subjectKeys, userId);
+      const lockKey = hostedRuntimeLogLockKey(subjectKey);
+      const betweenStatements = timing === "between statements";
+      const uncaught: Error[] = [];
+      const onUncaught = (error: Error) => { uncaught.push(error); };
+      let runtimePool: Pool | undefined;
+      let clientEnded = false;
+      const lockClient = betweenStatements ? null : await postgres.connect();
+
+      vi.resetModules();
+      vi.stubGlobal("__murphHostedRuntimeLogPool", undefined);
+      vi.stubEnv("HOSTED_RUNTIME_LOG_DATABASE_URL", postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName));
+      vi.stubEnv("HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL", undefined);
+      process.on("uncaughtException", onUncaught);
+      try {
+        const { getHostedRuntimeLogPool } = await import("@/src/lib/hosted-runtime-log/database");
+        const { recordHostedRuntimeLogs: record } = await import("@/src/lib/hosted-runtime-log/store");
+        runtimePool = getHostedRuntimeLogPool();
+        runtimePool.once("acquire", (client) => {
+          client.once("end", () => { clientEnded = true; });
+        });
+
+        const terminateWriter = async () => {
+          let pid = 0;
+          await vi.waitFor(async () => {
+            const result = await postgres.query<{ pid: number }>(`
+              SELECT pid FROM pg_stat_activity
+              WHERE datname = current_database()
+                AND ${betweenStatements ? "state = 'idle in transaction'" : "wait_event_type = 'Lock'"}
+            `);
+            expect(result.rows).toHaveLength(1);
+            pid = result.rows[0]!.pid;
+          }, { timeout: 30_000 });
+          await expect(postgres.query("SELECT pg_terminate_backend($1) AS terminated", [pid]))
+            .resolves.toMatchObject({ rows: [{ terminated: true }] });
+        };
+
+        if (lockClient) {
+          await lockClient.query("BEGIN");
+          await lockClient.query("SELECT pg_advisory_xact_lock($1::bigint)", [lockKey]);
+        }
+        const write = record({
+          entries: [runtimeEntry()],
+          isUserActive: async () => {
+            if (betweenStatements) {
+              await terminateWriter();
+              // Without a client error listener, pg throws before emitting end.
+              await vi.waitFor(() => {
+                expect(clientEnded || uncaught.length > 0).toBe(true);
+              }, { timeout: 30_000 });
+            }
+            return true;
+          },
+          userId,
+        });
+        const rejection = expect(write).rejects.toThrow(/connection|terminating/iu);
+        if (!betweenStatements) await terminateWriter();
+        await rejection;
+        await lockClient?.query("ROLLBACK");
+        expect(uncaught).toEqual([]);
+
+        expect(runtimePool.totalCount).toBe(0);
+        await expect(record({ entries: [runtimeEntry()], isUserActive: async () => true, userId }))
+          .resolves.toBe(1);
+        await expect(postgres.query(
+          "SELECT event_code FROM hosted_runtime_log WHERE subject_key = $1", [subjectKey],
+        )).resolves.toMatchObject({ rows: [{ event_code: "mailbox.imported" }] });
+      } finally {
+        try {
+          await lockClient?.query("ROLLBACK");
+        } finally {
+          lockClient?.release();
+          await runtimePool?.end();
+          process.removeListener("uncaughtException", onUncaught);
+          vi.unstubAllEnvs();
+          vi.unstubAllGlobals();
+          vi.resetModules();
+        }
+      }
+    },
+  );
+
+  it("keeps later writes visible after a query timeout strands rollback", async () => {
+    const postgres = requirePool(pool);
+    const userId = `member_runtime_log_timeout_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
+    const id = randomUUID();
+    const timeoutPool = new PgPool({
+      connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
+      max: 1,
+      query_timeout: 1_000,
+    });
+
+    try {
+      const lockClient = await postgres.connect();
+      try {
+        await lockClient.query("BEGIN");
+        await lockClient.query("SELECT pg_advisory_xact_lock($1::bigint)", [
+          hostedRuntimeLogLockKey(subjectKey),
+        ]);
+        await expect(recordHostedRuntimeLogs({
+          database: timeoutPool,
+          entries: [runtimeEntry()],
+          isUserActive: async () => true,
+          userId,
+        })).rejects.toThrow("Query read timeout");
+      } finally {
+        try {
+          await lockClient.query("ROLLBACK");
+        } finally {
+          lockClient.release();
+        }
+      }
+
+      const insert = {
+        text: `
+          INSERT INTO hosted_runtime_log (
+            id, subject_key, at, level, component, phase, event_code
+          ) VALUES ($1, $2, CURRENT_TIMESTAMP, 'info', 'mailbox', 'import', 'mailbox.imported')
+        `,
+        values: [id, subjectKey],
+        query_timeout: 30_000,
+      };
+      await timeoutPool.query(insert);
+      await expect(postgres.query<{ id: string }>(
+        "SELECT id FROM hosted_runtime_log WHERE id = $1",
+        [id],
+      )).resolves.toMatchObject({ rows: [{ id }] });
+    } finally {
+      await timeoutPool.end();
+    }
+  });
+
+  it("reuses the connection after an acknowledged rollback", async () => {
+    const rollbackPool = new PgPool({
+      connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
+      max: 1,
+    });
+    const failure = new Error("member authority unavailable");
+
+    try {
+      const before = await rollbackPool.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      await expect(recordHostedRuntimeLogs({
+        database: rollbackPool,
+        entries: [runtimeEntry()],
+        isUserActive: async () => { throw failure; },
+        userId: `member_runtime_log_rollback_${randomToken()}`,
+      })).rejects.toBe(failure);
+      const after = await rollbackPool.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      expect(after.rows[0]!.pid).toBe(before.rows[0]!.pid);
+    } finally {
+      await rollbackPool.end();
+    }
+  });
+
+  it("projects bounded device import metadata without exposing payloads", async () => {
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const subject = hostedRuntimeLogSubjectKey("synthetic-import-runtime");
+    const entries = [
+      { event: "device-sync.pass_finished", details: { outcome: "yielded", processedJobs: 7, deviceSyncConnectionKey: "c".repeat(64),
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "b".repeat(64),
+        outgoingRetainedJobCount: 10, pendingJobCountAfter: 10, queueSnapshotAfterPresent: true,
+        yieldReason: "outer_signal", privateCanary: "must-not-be-selected" } },
+      { event: "checkpoint.snapshot_finished", details: { webCheckpointAccepted: true } },
+      { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "woken" } },
+      { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started" } },
+      { event: "device-sync.pass_finished", details: { processedJobs: "malformed", deviceSyncConnectionKey: "not-a-connection-key", pendingJobCountAfter: "malformed", queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { outcome: "completed", processedJobs: 0, pendingJobCountAfter: 0, outgoingRetainedJobCount: 0, queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportAppliedCount: 4,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportNoopCount: 4,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
+    ];
+    for (const [index, entry] of entries.entries()) {
+      await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+        VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, 'synthetic-attempt', $5::jsonb)`,
+        [randomUUID(), subject, new Date(+now - (entries.length - index) * 1000), entry.event, JSON.stringify(entry.details)]);
+    }
+    const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(observations).toHaveLength(8);
+    expect(observations[0]).toMatchObject({ pending: true, progressed: true, cancelled: true, connectionKey: "c".repeat(64) });
+    expect(observations[1]).toMatchObject({ checkpointAccepted: true, connectionKey: null });
+    expect(observations[2]).toMatchObject({ restarted: false });
+    expect(observations[3]).toMatchObject({ restarted: true });
+    expect(observations[4]).toMatchObject({ pending: null, progressed: false, connectionKey: null });
+    expect(observations[5]).toMatchObject({ pending: false, connectionKey: null });
+    expect(observations[6]).toMatchObject({ progressed: true });
+    expect(observations[7]).toMatchObject({ progressed: false });
+    expect(JSON.stringify(observations)).not.toContain("must-not-be-selected");
+    expect(await readDeviceImportObservations({ database: db, now, subjects: ["unrelated-subject"] })).toEqual([]);
+  });
+
+  it("distinguishes scheduled work through the actual SQL reader and checkpointed evaluator", async () => {
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const scheduled = { outcome: "completed", deviceSyncConnectionKey: "d".repeat(64),
+      outgoingRetainedJobCount: 2, incomingRetainedJobCount: 2, pendingJobCountAfter: 2,
+      queueSnapshotAfterPresent: true, pendingJobCountAfterTruncated: false,
+      pendingRunnableJobCountAfter: 0, outgoingRetainedRunnableJobCount: 0 };
+    const cases = [
+      { name: "scheduled", patch: {}, runnable: false, backlog: false },
+      { name: "queue-due", patch: { pendingRunnableJobCountAfter: 1 }, runnable: true, backlog: true },
+      { name: "continuation-due", patch: { outgoingRetainedRunnableJobCount: 1 }, runnable: true, backlog: true },
+      { name: "failed", patch: { outcome: "failed" }, runnable: null, backlog: true },
+      { name: "truncated", patch: { pendingJobCountAfterTruncated: true }, runnable: null, backlog: true },
+      { name: "unobserved", patch: { queueSnapshotAfterPresent: false }, runnable: null, backlog: true },
+      { name: "legacy", patch: { pendingRunnableJobCountAfter: undefined,
+        outgoingRetainedRunnableJobCount: undefined }, runnable: null, backlog: true },
+      { name: "malformed", patch: { outgoingRetainedRunnableJobCount: "invalid" }, runnable: null, backlog: true },
+    ];
+    for (const scenario of cases) {
+      const subject = hostedRuntimeLogSubjectKey(`synthetic-availability-${scenario.name}`);
+      subjectKeys.add(subject);
+      for (let age = 70; age >= 0; age -= 5) {
+        for (const [event, offset, details] of [
+          ["device-sync.pass_finished", 1000, { ...scheduled, ...scenario.patch }],
+          ["checkpoint.snapshot_finished", 0, { webCheckpointAccepted: true }],
+        ] as const) {
+          await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+            VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, $5, $6::jsonb)`,
+          [randomUUID(), subject, new Date(+now - age * 60_000 - offset), event,
+            `synthetic-attempt-${age}`, JSON.stringify(details)]);
+        }
+      }
+      const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+      expect(observations[0], scenario.name).toMatchObject({ pending: true, runnable: scenario.runnable });
+      const healthyWake = summarizeDeviceImportHealth({ now, observations, dueSubjects: new Set() });
+      expect(healthyWake.backlog.anomalous, scenario.name).toBe(scenario.backlog);
+      expect(healthyWake.stalled.anomalous, scenario.name).toBe(false);
+      expect(summarizeDeviceImportHealth({ now, observations, dueSubjects: new Set([subject]) })
+        .stalled.anomalous, scenario.name).toBe(true);
+    }
+  });
+
+  it.each([0, 1])("keeps failed retained work pending through retry checkpoints with %i local jobs", async (pendingJobCount) => {
+    // The runtime producer asserts this same metadata on a late reconciliation failure.
+    const failedPass = JSON.parse(await readFile(new URL(
+      "../../../packages/assistant-runtime/test/fixtures/device-import-failed-pass.json", import.meta.url,
+    ), "utf8"));
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const subject = hostedRuntimeLogSubjectKey(`synthetic-failed-import-${pendingJobCount}`);
+    const insert = async (minutesAgo: number, event: string, details: Record<string, unknown>) => {
+      await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+        VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, 'synthetic-retry-attempt', $5::jsonb)`,
+      [randomUUID(), subject, new Date(+now - minutesAgo * 60_000), event, JSON.stringify(details)]);
+    };
+    for (const age of [20, 15, 10, 5]) {
+      await insert(age, "device-sync.pass_finished", { ...failedPass, pendingJobCountAfter: pendingJobCount });
+      await insert(age - 0.1, "checkpoint.snapshot_finished", { webCheckpointAccepted: true });
+      await insert(age - 0.2, "runner.processing_finished", {
+        runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started",
+      });
+    }
+    const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    for (const pass of observations.filter(row => row.eventCode === "device-sync.pass_finished")) {
+      expect(pass).toMatchObject({ pending: true, progressed: false });
+    }
+    const health = () => summarizeDeviceImportHealth({ now, observations, dueSubjects: new Set([subject]) });
+    expect(health().stalled).toMatchObject({ anomalous: true, savedProgressPassCount: 0 });
+    expect(health().cycling).toMatchObject({ anomalous: true, savedProgressPassCount: 0 });
+    // Applied canonical imports can still be saved by a retry checkpoint.
+    await insert(3, "device-sync.pass_finished", { ...failedPass, pendingJobCountAfter: 0, deviceSyncImportAppliedCount: 1 });
+    await insert(2.9, "checkpoint.snapshot_finished", { webCheckpointAccepted: true });
+    const applied = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(applied.find(row => row.at.getTime() === +now - 3 * 60_000)).toMatchObject({ pending: true, progressed: true });
+    expect(summarizeDeviceImportHealth({ now, observations: applied, dueSubjects: new Set([subject]) }).cycling)
+      .toMatchObject({ anomalous: true, savedProgressPassCount: 1 });
+    // Only a successfully returned drain and its checkpoint resolve the retry obligation.
+    await insert(1, "device-sync.pass_finished", { ...failedPass, outcome: "completed", pendingJobCountAfter: 0 });
+    const beforeCheckpoint = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(summarizeDeviceImportHealth({ now, observations: beforeCheckpoint, dueSubjects: new Set([subject]) }).cycling.anomalous).toBe(true);
+    await insert(0.5, "checkpoint.snapshot_finished", { webCheckpointAccepted: true });
+    const recovered = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    const result = summarizeDeviceImportHealth({ now, observations: recovered, dueSubjects: new Set([subject]) });
+    expect(result.stalled.anomalous).toBe(false);
+    expect(result.cycling.anomalous).toBe(false);
+  });
 
   afterAll(async () => {
     if (pool && subjectKeys.size > 0) {
@@ -197,7 +486,8 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       );
     }
     await pool?.end();
-    await admin?.query(`DROP DATABASE IF EXISTS "${testDatabaseName}" WITH (FORCE)`);
+    // pg-pool can resolve end() before its clients finish disconnecting.
+    await admin?.query(`DROP DATABASE IF EXISTS "${testDatabaseName}"`);
     await admin?.end();
   }, 30_000);
 
@@ -445,17 +735,21 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
           attemptId,
           stage: "provider-result",
         }),
+        timingEntry({
+          attemptId,
+          stage: "linq-dispatch-entered",
+        }),
       ],
       isUserActive: async () => true,
       userId,
-    })).resolves.toBe(3);
+    })).resolves.toBe(4);
 
     const recent = await listHostedRuntimeLogs({
       database: sql,
       limit: 10,
       userId,
     });
-    expect(recent).toHaveLength(3);
+    expect(recent).toHaveLength(4);
     expect(recent.every((row) => row.userId === userId)).toBe(true);
     expect(recent).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -483,6 +777,17 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
         }),
       }),
     ]);
+    const stagedTiming = await listHostedRuntimeTurnTimingLogs({
+      attemptIds: [attemptId],
+      database: sql,
+      from: new Date("2026-07-29T00:00:00.000Z"),
+      limit: 10,
+      stages: ["linq-dispatch-entered", "reply-dispatched"],
+      to: new Date("2026-07-30T00:00:00.000Z"),
+    });
+    expect(stagedTiming.map((row) =>
+      (row.redactedJson as { turnTimingStage?: unknown }).turnTimingStage).sort())
+      .toEqual(["linq-dispatch-entered", "reply-dispatched"]);
   });
 
   it("executes one-row retention batches with separate verbose and hard cutoffs", async () => {
@@ -603,41 +908,8 @@ function hookClient(
       await hook(text, values ?? []);
       return result;
     },
-    release() {
-      client.release();
-    },
-  };
-}
-
-function poolDatabase(pool: Pool): HostedRuntimeLogSqlDatabase {
-  return {
-    async connect() {
-      const client = await pool.connect();
-      return {
-        async query<Row extends Record<string, unknown>>(
-          text: string,
-          values?: readonly unknown[],
-        ): Promise<HostedRuntimeLogSqlResult<Row>> {
-          const result = await client.query<Row>(
-            text,
-            values === undefined ? undefined : [...values],
-          );
-          return { rowCount: result.rowCount, rows: result.rows };
-        },
-        release() {
-          client.release();
-        },
-      };
-    },
-    async query<Row extends Record<string, unknown>>(
-      text: string,
-      values?: readonly unknown[],
-    ): Promise<HostedRuntimeLogSqlResult<Row>> {
-      const result = await pool.query<Row>(
-        text,
-        values === undefined ? undefined : [...values],
-      );
-      return { rowCount: result.rowCount, rows: result.rows };
+    release(destroy?: boolean) {
+      client.release(destroy);
     },
   };
 }

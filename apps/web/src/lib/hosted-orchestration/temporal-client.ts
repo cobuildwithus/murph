@@ -19,6 +19,7 @@ export type {
 };
 
 export interface HostedRuntimeTemporalSignalClient {
+  withDeadline<R>(deadline: number, fn: () => Promise<R>): Promise<R>;
   withAbortSignal<R>(
     abortSignal: AbortSignal,
     fn: () => Promise<R>,
@@ -91,6 +92,18 @@ export async function createHostedRuntimeTemporalSignalClient(
     connection,
     namespace: environment.namespace,
   });
+}
+
+/**
+ * Bounds every Temporal call made inside `run`. Cancellation reaches only the
+ * client's first gRPC attempt, so a deadline is what ends its retry backoff.
+ */
+export async function withHostedRuntimeTemporalDeadline<R>(
+  deadlineMs: number,
+  run: () => Promise<R>,
+): Promise<R> {
+  const client = await readHostedRuntimeTemporalSignalClientIfConfigured();
+  return client ? client.withDeadline(deadlineMs, run) : run();
 }
 
 function buildConnectionOptions(

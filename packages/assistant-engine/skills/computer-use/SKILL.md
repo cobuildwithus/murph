@@ -14,11 +14,31 @@ Operate the website end-to-end when the user asked Murph to do it and the needed
 information is available. Success means the requested browser-side result is
 verified on the site, or the run is paused/finished with a clear blocker.
 
+For a requested real-world action (an order, booking, change, payment, refill,
+form or portal task), lookup is preflight only: use a completion-capable tool
+once the next safe step is clear, and also read `appointment-scheduling` for a
+medical check-in or intake. Make reversible progress first. Ask the smallest
+concrete in-chat approval question; a handoff link is optional unless takeover
+is required, and a takeover message carries the pause tool's fresh URL and one
+precise action. If this route has no completion-capable tool, state the blocker
+and the best handoff.
+
 Prefer a structured integration when it can complete the same operation with
 less browser risk. Connected apps can also supply task context even when they
 cannot perform the final action. Use computer use when the task needs a website
 UI, an authenticated portal, checkout, or a flow that no structured tool can
 complete.
+
+For public information alone, use the owning structured lookup when applicable,
+then available web search and text-page reading (`web.run` when exposed).
+An official label, menu, policy, price, or specification does not by itself
+require a live browser. Use this skill for research only when a material fact
+requires interaction or visual inspection unavailable through those tools.
+Do not open a browser or retry failed page access to refine a minor detail in
+an otherwise useful estimate. Stop when the requested answer is supported;
+state remaining uncertainty. Preserve exact verification for safety-critical
+facts and explicit exactness requests. Website actions still follow the
+end-to-end workflow below.
 
 ## Common health use cases
 

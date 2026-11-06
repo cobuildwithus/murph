@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
+
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest:
     mocks.requireHostedCloudflareCallbackRequest,

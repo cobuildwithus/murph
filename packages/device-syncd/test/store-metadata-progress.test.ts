@@ -8,6 +8,10 @@ describe("bounded sync-result metadata", () => {
     (outcome) => {
       const store = new SqliteDeviceSyncStore(":memory:");
       const progress = {
+        junctionReconcileProofV1: "synthetic-proof",
+        junctionTemporalSweepV1: "synthetic-sweep",
+        junctionProfileSummaryCheckedAt: "2025-04-01T00:00:00.000Z",
+        junctionProfileSummaryNormalizationRevision: 2,
         junctionHistoricalBackfillStatus: "coverage_v3_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
@@ -15,7 +19,7 @@ describe("bounded sync-result metadata", () => {
         junctionHistoricalBackfillWindowEnd: "2025-04-01",
       };
       const metadata = {
-        ...Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`diagnostic${index}`, index])),
+        ...Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`diagnostic${index}`, index])),
         ...progress,
       };
       try {
@@ -43,12 +47,15 @@ describe("bounded sync-result metadata", () => {
         expect(after?.metadata).toMatchObject({ ...progress, ...metadataPatch });
         expect(Object.keys(after?.metadata ?? {})).toHaveLength(16);
 
-        store.markSyncSucceeded(account.id, "2025-04-03T00:00:00.000Z", account.disconnectGeneration, {
-          metadataPatch: Object.fromEntries(
-            Array.from({ length: 16 }, (_, index) => [`newDiagnostic${index}`, index]),
-          ),
-        });
-        expect(store.getAccountById(account.id)?.metadata).toMatchObject(progress);
+        const diagnostics = { metadataPatch: Object.fromEntries(
+          Array.from({ length: 16 }, (_, index) => [`newDiagnostic${index}`, index]),
+        ) };
+        if (outcome === "success") {
+          store.markSyncSucceeded(account.id, "2025-04-03T00:00:00.000Z", account.disconnectGeneration, diagnostics);
+        } else {
+          store.markSyncFailed(account.id, "2025-04-03T00:00:00.000Z", "RETRY", "Retry later.", "active", diagnostics);
+        }
+        expect(store.getAccountById(account.id)?.metadata).toMatchObject({ ...progress, ...metadataPatch });
         expect(Object.keys(store.getAccountById(account.id)?.metadata ?? {})).toHaveLength(16);
       } finally {
         store.close();

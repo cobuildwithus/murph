@@ -1,3 +1,4 @@
+import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -15,7 +16,7 @@ import {
   type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  handleHostedRuntimeGroupTool,
+  handleHostedRuntimeConversationTool,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
   createHostedAssistantAskRequestId,
@@ -50,6 +51,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
+  const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
   const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
@@ -60,7 +62,8 @@ export const POST = withJsonError(async (request: Request) => {
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
   );
   const executeTool = async () => filterHostedRuntimeGroupToolResponseProjectionScopes(
-    await handleHostedRuntimeGroupTool({
+    await handleHostedRuntimeConversationTool({
+      gameMultiplayer: new URL(request.url).searchParams.get("gameMultiplayer") === "1",
       includeMembershipAvailability:
         membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
@@ -70,14 +73,18 @@ export const POST = withJsonError(async (request: Request) => {
         || membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
+      ...(body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap"
+        ? { runtimeIdentity: runtimeAuthority ? { ...runtimeAuthority, userId: memberId } : null }
+        : {}),
       request: body,
       requestStartedAtMs,
-      scheduleMailboxWake: (wake) =>
-        handoffHostedMailboxWake({
+      scheduleMailboxWake: async (wake) => {
+        await handoffHostedMailboxWake({
           ...wake,
           directWakeSource: "assistant-ask-request",
           signal: request.signal,
-        }),
+        });
+      },
     }),
     supportedProjectionScopeKeys,
   );

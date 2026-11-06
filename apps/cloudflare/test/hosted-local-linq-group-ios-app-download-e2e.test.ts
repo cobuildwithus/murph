@@ -25,7 +25,7 @@ const linqApiToken = "linq-local-group-ios-app-token";
 const linqWebhookSecret = "linq-local-group-ios-app-webhook-secret";
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
 const safeLiveAssistantModel =
-  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-5.6-terra";
+  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-6.1-sol";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride =

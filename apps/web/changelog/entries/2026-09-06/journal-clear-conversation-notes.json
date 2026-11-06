@@ -13,10 +13,6 @@
     ],
     "sourcePullRequests": [
       2970
-    ],
-    "tryIt": {
-      "label": "Open Journal",
-      "href": "/journal"
-    }
+    ]
   }
 }

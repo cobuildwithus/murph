@@ -5,16 +5,20 @@ import { existsSync, promises as fs, readdirSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  automationFrontmatterSchema,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 
+import { withHostedCanonicalWritePort } from "../src/operations/write-batch.ts";
+import { normalizeId } from "../src/bank/shared.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
 import {
   resolveSlugMarkdownDocumentTarget,
   writeCanonicalMarkdownDocument,
 } from "../src/markdown-documents.ts";
 import {
+  createAutomationForInputs,
   advanceAutomationDeviceActivityCursor,
   archiveAutomationIfActiveUntilElapsed,
   buildAutomationMarkdownPreview,
@@ -348,6 +352,34 @@ describe("markdown document primitives", () => {
       .toMatchObject({
         scheduleAnchorAt: "2026-07-30T03:00:00.000Z",
       });
+  });
+
+  it("commits a migrated schedule and its not-before anchor together without moving audit time", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const now = new Date("2030-01-15T17:10:00.000Z");
+    const firstRun = new Date("2030-01-16T15:37:00.000Z");
+    const created = await upsertAutomation({ vaultRoot, now,
+      ...createAutomationPayload({ schedule: { kind: "cron", expression: "0 13 * * *" } }) });
+    const migrated = await patchAutomation({ vaultRoot, now,
+      lookup: created.record.automationId, expectedUpdatedAt: created.record.updatedAt,
+      schedule: { kind: "dailyLocal", localTime: "15:37", timeZone: "UTC" },
+      scheduleNotBefore: new Date(firstRun.getTime() - 1),
+    });
+    expect(migrated.record.updatedAt).toBe(now.toISOString());
+    expect(migrated.record.scheduleAnchorAt).toBe("2030-01-16T15:36:59.999Z");
+    const readback = await showAutomation({ vaultRoot, automationId: migrated.record.automationId });
+    expect(readback?.scheduleAnchorAt).toBe(migrated.record.scheduleAnchorAt);
+    expect(readback?.schedule).toEqual(migrated.record.schedule);
+    const edited = await patchAutomation({ vaultRoot, lookup: migrated.record.automationId,
+      now: new Date("2030-01-15T18:00:00.000Z"), schedule: { kind: "dailyLocal", localTime: "18:30" } });
+    expect(edited.record.scheduleAnchorAt).toBe("2030-01-15T18:00:00.000Z");
+    await expect(patchAutomation({ vaultRoot, lookup: edited.record.automationId,
+      expectedUpdatedAt: migrated.record.updatedAt,
+      schedule: { kind: "dailyLocal", localTime: "15:37" },
+      scheduleNotBefore: firstRun,
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+    expect((await showAutomation({ vaultRoot, automationId: edited.record.automationId }))?.schedule)
+      .toEqual(edited.record.schedule);
   });
 
   it("preserves an explicit recurring timezone across a partial schedule patch", async () => {
@@ -1283,5 +1315,90 @@ describe("markdown document primitives", () => {
     expect(readRecord.status).toBe("paused");
     expect(readRecord.summary).toBe("Trimmed summary");
     expect(readRecord.tags).toEqual(["nightly", "assistant"]);
+  });
+});
+
+
+it("reads retired stored Sol overrides as 6.1 Sol but rejects explicit writes", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const created = await upsertAutomation({ vaultRoot, ...createAutomationPayload({
+    assistantTargetOverride: { model: "gpt-6.1-sol", reasoningEffort: "xhigh" },
+  }) });
+  const file = path.join(vaultRoot, created.record.relativePath);
+  await fs.writeFile(file, (await fs.readFile(file, "utf8")).replace("gpt-6.1-sol", "gpt-5.6-sol"));
+  const read = await readAutomation({ vaultRoot, automationId: created.record.automationId });
+  expect(read.assistantTargetOverride).toEqual({ model: "gpt-6.1-sol", reasoningEffort: "xhigh" });
+  expect(await fs.readFile(file, "utf8")).toContain("gpt-5.6-sol");
+  const edited = await patchAutomation({ vaultRoot, lookup: created.record.automationId, title: "Renamed reminder" });
+  expect(edited.record.assistantTargetOverride).toEqual(read.assistantTargetOverride);
+  expect(await fs.readFile(file, "utf8")).not.toContain("gpt-5.6-sol");
+  await expect(patchAutomation({ vaultRoot, lookup: created.record.automationId,
+    assistantTargetOverride: { model: "gpt-5.6-sol" },
+  })).rejects.toThrow("retired");
+  await expect(upsertAutomation({ vaultRoot, ...createAutomationPayload({
+    assistantTargetOverride: { model: "gpt-5.6-sol" },
+  }) })).rejects.toThrow("retired");
+});
+
+describe("ordinary automation input slots", () => {
+  const acceptedInputIds = ["ain_synthetic_first"];
+  const payload = () => {
+    const { slug: _slug, ...fields } = createAutomationPayload();
+    return fields;
+  };
+
+  it("rejects an empty accepted scope without claiming or writing anything", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const claimedAutomationIds = new Set<string>();
+    await expect(createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds: [], claimedAutomationIds }))
+      .rejects.toMatchObject({ code: "VAULT_INVALID_INPUT" });
+    expect(claimedAutomationIds.size).toBe(0);
+    expect((await listAutomations({ vaultRoot })).items).toEqual([]);
+  });
+
+  it("claims nothing after a failed write and reuses the first slot after correction", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const claimedAutomationIds = new Set<string>();
+    const input = { ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds };
+    const failure = new Error("Synthetic canonical publication rejection.");
+    await expect(withHostedCanonicalWritePort({ persistCanonicalWrite: async () => { throw failure; } },
+      () => createAutomationForInputs(input))).rejects.toBe(failure);
+    expect(claimedAutomationIds.size).toBe(0);
+    expect((await listAutomations({ vaultRoot })).items).toEqual([]);
+    const saved = await createAutomationForInputs(input);
+    expect(saved.created).toBe(true);
+    expect([...claimedAutomationIds]).toEqual([saved.record.automationId]);
+    expect(await createAutomationForInputs({ ...input, claimedAutomationIds: new Set() }))
+      .toMatchObject({ created: false, record: saved.record });
+  });
+
+  it("cannot prevent another record when the scope omits the owning input", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const first = await createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds: new Set() });
+    const second = await createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds: ["ain_synthetic_other"], claimedAutomationIds: new Set() });
+    expect(second.created).toBe(true);
+    expect(second.record.automationId).not.toBe(first.record.automationId);
+    expect((await listAutomations({ vaultRoot })).items).toHaveLength(2);
+  });
+
+  it("writes an id accepted by normalizeId and the existing frontmatter schema", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const { record } = await createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds: new Set() });
+    expect(normalizeId(record.automationId, "automationId", "automation")).toBe(record.automationId);
+    const document = parseFrontmatterDocument(await fs.readFile(path.join(vaultRoot, record.relativePath), "utf8"));
+    expect(automationFrontmatterSchema.safeParse(document.attributes).success).toBe(true);
+    expect(document.attributes).not.toHaveProperty("acceptedInputIds");
+    expect(document.attributes).not.toHaveProperty("claimedAutomationIds");
+  });
+
+  it("serializes concurrent saves sharing a claimed set into distinct records", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const claimedAutomationIds = new Set<string>();
+    const input = { ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds };
+    const saved = await Promise.all([createAutomationForInputs(input), createAutomationForInputs(input)]);
+    expect(saved.every(result => result.created)).toBe(true);
+    expect(new Set(saved.map(result => result.record.automationId)).size).toBe(2);
+    expect(claimedAutomationIds.size).toBe(2);
+    expect((await listAutomations({ vaultRoot })).items).toHaveLength(2);
   });
 });

@@ -1,3 +1,4 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedMailboxLane,
   HostedRuntimeRedactedJson,
@@ -12,7 +13,7 @@ import {
   type HostedMailboxImportLoopResult,
   type HostedMailboxPostCheckpointEffect,
   type HostedMailboxPrefixPrefetch,
-  type HostedMailboxResolvedImportItem,
+  type HostedMailboxImporter,
   type HostedMailboxItemImportOutcome,
 } from "./mailbox-import.ts";
 import {
@@ -37,7 +38,7 @@ export interface HostedMailboxImportCheckpointInput {
   deferCheckpoint?: boolean;
   expectedUserId: string;
   fetchSignal?: AbortSignal | null;
-  importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  importItem: HostedMailboxImporter;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
@@ -106,20 +107,36 @@ export async function importHostedMailboxPrefixAndCheckpoint(
         vaultRoot: input.vaultRoot,
       });
   const afterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
+  const importAudioPair = input.importItem.importAudioPair;
+  const collectEffect = (outcome: HostedMailboxItemImportOutcome): void => {
+    if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.afterCheckpoint) {
+      afterCheckpointEffects.push(outcome.afterCheckpoint);
+    }
+  };
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     deferConversationUntil: input.deferConversationUntil ?? null,
     expectedUserId: input.expectedUserId,
     fetchSignal: input.fetchSignal ?? null,
-    importItem: async (item) => {
-      const outcome = await input.importItem(item);
-      if (
-        (outcome.status === "imported" || outcome.status === "skipped")
-        && outcome.afterCheckpoint
-      ) {
-        afterCheckpointEffects.push(outcome.afterCheckpoint);
-      }
-      return outcome;
-    },
+    importItem: Object.assign(
+      async (item: Parameters<HostedMailboxImporter>[0]) => {
+        const outcome = await input.importItem(item);
+        collectEffect(outcome);
+        return outcome;
+      },
+      {
+        importAudioPair: importAudioPair
+          ? async (items: Parameters<NonNullable<HostedMailboxImporter["importAudioPair"]>>[0]) => {
+              const outcomes = await importAudioPair(items);
+              if (outcomes) {
+                for (const outcome of outcomes) {
+                  if (outcome) collectEffect(outcome);
+                }
+              }
+              return outcomes;
+            }
+          : undefined,
+      },
+    ),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
@@ -147,9 +164,15 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   }
 
   if (stateChanged) {
+    const watermarkStartedAt = performance.now();
     await writeHostedMailboxImportState({
       state: importResult.state,
       vaultRoot: input.vaultRoot,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "runtime", phase: "wake.running", level: "info",
+      message: "Hosted mailbox watermark write timing.",
+      details: { watermarkWriteMs: Math.round(performance.now() - watermarkStartedAt) },
     });
   }
 
@@ -169,10 +192,12 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   try {
     const systemMailboxProgress = await readHostedSystemMailboxProgress({
       importedSeq: importResult.state.watermarks.system,
+      now: input.now,
       vaultRoot: input.vaultRoot,
     });
     const redactedStatus = {
       ...buildHostedMailboxImportRedactedStatus(importResult),
+      hostedMailboxSystemModelFreeWakeAt: systemMailboxProgress.modelFreeWakeAt,
       hostedMailboxSystemFirstPendingClassifierFailures:
         systemMailboxProgress.firstPendingClassifierFailures,
       hostedMailboxSystemHandledThroughSeq:
@@ -192,7 +217,11 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     checkpoint = await input.workspacePort.checkpoint({
       ...checkpointRequest,
       reason: checkpointReason,
-      redactedStatus: cloneHostedRuntimeRedactedJson(redactedStatus),
+      redactedStatus: {
+        ...cloneHostedRuntimeRedactedJson(redactedStatus),
+        hostedMailboxSystemModelFreeWakeVersion:
+          (BigInt(checkpointRequest.expectedWorkspaceVersion) + 1n).toString(),
+      },
     });
     if (checkpoint.workspace.userId !== input.expectedUserId) {
       throw new HostedMailboxImportCheckpointUserMismatchError({

@@ -2,7 +2,7 @@
   "name": "@murphai/inboxd",
   "version": "1.0.0",
   "private": true,
-  "description": "Local inbox ingestion runtime for Murph.",
+  "description": "Hosted inbox normalization, persistence, and projections for Murph.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -58,11 +58,11 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --noEmit --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --noEmit --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage",
     "verify:package-boundary": "pnpm build && MURPH_INBOXD_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage",
@@ -74,7 +74,6 @@
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "grammy": "1.42.0",
-    "sharp": "0.34.5"
+    "sharp": "0.35.5"
   }
 }

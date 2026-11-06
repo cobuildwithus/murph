@@ -18,10 +18,9 @@ function buildPrompt(): string {
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
     channel: 'imessage',
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-08-05',
     currentTimeZone: 'America/New_York',
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
   })

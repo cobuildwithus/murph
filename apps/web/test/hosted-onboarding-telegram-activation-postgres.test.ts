@@ -104,7 +104,7 @@ function createDeferred(): Deferred {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Telegram activation PostgreSQL concurrency",
   () => {
-    it("releases root authority for member-first activation and appends once after retry", async () => {
+    it("waits for member-first activation and appends once without a retry", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_telegram_activation_${fixtureId}`;
       const controlRootKeyId = `control_${fixtureId}`;
@@ -185,29 +185,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: inbound,
           update,
         });
-        const firstOutcome = await settleWithin(firstAttempt, 1_000);
+        // Ingress waits on the member row instead of bouncing for a retry.
+        await expect(settleWithin(firstAttempt, 1_000)).resolves.toEqual({
+          status: "timed_out",
+        });
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        })).resolves.toBe(0);
 
         allowActivationRoot.resolve();
         await expect(activationTransaction).resolves.toBeUndefined();
-
-        expect(firstOutcome).toMatchObject({
-          reason: {
-            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-            details: {
-              preparationTarget: "direct_telegram_sender_route",
-            },
-            retryable: true,
-          },
-          status: "rejected",
-        });
-        await expect(runPreparedTelegramPlanTransaction({
-          controlRootKeyId,
-          existingControlRootKeyId: null,
-          ingressRootKeyId,
-          memberId,
-          prisma: inbound,
-          update,
-        })).resolves.toMatchObject({
+        await expect(firstAttempt).resolves.toMatchObject({
           response: {
             ok: true,
             reason: "wake-appended-active-member",

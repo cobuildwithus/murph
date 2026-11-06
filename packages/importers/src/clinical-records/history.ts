@@ -1,4 +1,4 @@
-import type { Resource } from "@medplum/fhirtypes";
+import type { Observation, Resource } from "@medplum/fhirtypes";
 import { isWritableIsoDateTime } from "@murphai/contracts";
 
 // These are provider statements, not member-confirmed diagnoses or medication
@@ -32,6 +32,25 @@ export interface FhirSourceNote {
   sections?: Array<{ heading: string; kind: "other"; text: string }>;
 }
 
+/** Unmapped observations remain dated source statements, never guessed metrics. */
+export function buildFhirObservationSourceNote(resource: Observation, sourceRevision?: string) {
+  const clinicalDate = readExactDate(resource.effectiveDateTime ?? resource.effectivePeriod?.start);
+  if ((resource.effectiveDateTime !== undefined || resource.effectivePeriod?.start !== undefined) && !clinicalDate) return null;
+  const occurredAt = clinicalDate ?? readExactDate(sourceRevision);
+  if (!occurredAt) return null;
+  const selected = Object.fromEntries(Object.entries(resource).filter(([key]) =>
+    !["id", "meta", "subject", "encounter", "performer", "basedOn", "derivedFrom", "device"].includes(key)));
+  const note = buildFhirSourceNote("Original source observation. Values and codes are preserved without metric normalization or inferred units.\n\n"
+    + (clinicalDate ? "" : `Source record timestamp: ${occurredAt}. Clinical event date is not available.\n\n`)
+    + JSON.stringify(selected, (_key, value: unknown) => {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, Reflect.get(value, key)]));
+    }, 2));
+  if (!note) return null;
+  const label = readLabel(resource.code) ?? "Source clinical observation";
+  return { ...note, occurredAt, title: `Source observation: ${label}`.slice(0, 160), noteType: "fhir_observation_source" };
+}
+
 /** Preserve the full text within the existing note/section contract. */
 export function buildFhirSourceNote(text: string): FhirSourceNote | null {
   if (text.length <= 4_000) return { note: text };
@@ -48,7 +67,12 @@ export function buildFhirSourceNote(text: string): FhirSourceNote | null {
   return { note: "The complete provider record is retained in the ordered sections below.", sections };
 }
 
-export function buildFhirHistoryNote(resource: Resource): ({
+/**
+ * `sourceRevision` is the importer's resolved revision (`meta.lastUpdated`, or
+ * the retrieval batch when the server omits it) and dates a record that
+ * carries no clinical date of its own.
+ */
+export function buildFhirHistoryNote(resource: Resource, sourceRevision: string | undefined = resource.meta?.lastUpdated): ({
   title: string;
   occurredAt: string;
   noteType: string;
@@ -58,12 +82,18 @@ export function buildFhirHistoryNote(resource: Resource): ({
   const selected = Object.fromEntries(Object.entries(resource).filter(([key]) => fields.includes(key)));
   if (Object.keys(selected).length === 0) return null;
   const clinicalDate = readClinicalDate(selected);
-  const occurredAt = clinicalDate ?? readExactDate(resource.meta?.lastUpdated);
+  const occurredAt = clinicalDate ?? readExactDate(sourceRevision);
   if (!occurredAt) return null;
+  // Note text is canonical content compared at the same source revision, so the
+  // sentence for a `meta.lastUpdated`-dated record must stay byte-identical to
+  // what earlier imports wrote; only the batch fallback gets its own wording.
+  const datedByResource = sourceRevision !== undefined && sourceRevision === resource.meta?.lastUpdated;
   const note = buildFhirSourceNote([
     `Provider ${resource.resourceType} record. Statuses and statements below are as recorded by the source.`,
     ...(resource.resourceType.startsWith("Medication") ? ["A medication order, statement or dispense does not establish that a dose was taken."] : []),
-    clinicalDate ? `Clinical record date: ${clinicalDate}` : `Record updated: ${occurredAt}. Clinical event date is not available.`,
+    clinicalDate ? `Clinical record date: ${clinicalDate}`
+      : datedByResource ? `Record updated: ${occurredAt}. Clinical event date is not available.`
+      : `Record retrieved: ${occurredAt}. Clinical event date is not available.`,
     JSON.stringify(selected, (_key, value: unknown) => {
       // JSON object order is not clinical content; array order remains meaningful.
       if (value === null || typeof value !== "object" || Array.isArray(value)) return value;

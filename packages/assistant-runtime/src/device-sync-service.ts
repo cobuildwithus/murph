@@ -1,3 +1,5 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
+import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
 import path from "node:path";
 
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
@@ -31,7 +33,6 @@ import type {
 import {
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
-  HostedRuntimeCanonicalCheckpointError,
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
 import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
@@ -101,6 +102,10 @@ function createHostedRuntimeDeviceSyncImporter(
 }
 
 function translateHostedRuntimeDeviceSyncImporterError(error: unknown): unknown {
+  if (error instanceof HostedColdHistoryUnavailableError) {
+    return deviceSyncError({ cause: error, code: error.code, httpStatus: 503,
+      message: "Cold integration-ingest history is unavailable. Retry shortly.", retryable: true });
+  }
   if (error instanceof HostedRuntimeArtifactReadError) {
     return deviceSyncError({
       cause: error,
@@ -119,7 +124,7 @@ function translateHostedRuntimeDeviceSyncImporterError(error: unknown): unknown 
       retryable: error.retryable,
     });
   }
-  if (error instanceof HostedRuntimeCanonicalCheckpointError) {
+  if (error instanceof HostedCanonicalWriteOutcomeUnknownError) {
     return deviceSyncError({
       cause: error,
       code: "HOSTED_DEVICE_SYNC_CANONICAL_CHECKPOINT_FAILED",

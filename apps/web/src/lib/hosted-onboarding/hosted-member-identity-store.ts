@@ -12,8 +12,6 @@ import {
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
-  createHostedPrivyUserLookupKey,
-  createHostedPrivyUserLookupKeyReadCandidates,
   normalizeHostedEmailAddress,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
@@ -48,11 +46,6 @@ export interface HostedMemberIdentityState {
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
   phoneNumberVerifiedAt: Date | null;
-  privyUserId: string | null;
-  walletAddress: string | null;
-  walletChainType: string | null;
-  walletCreatedAt: Date | null;
-  walletProvider: string | null;
 }
 
 export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "phoneLookupKey">;
@@ -60,8 +53,7 @@ export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "p
 export type HostedMemberIdentityLookupMatch =
   | "linqEmailHandle"
   | "phoneLookupKey"
-  | "phoneNumber"
-  | "privyUserId";
+  | "phoneNumber";
 
 export interface HostedMemberIdentityLookup {
   core: HostedMember;
@@ -87,7 +79,7 @@ export interface HostedMemberIdentityCoreLookup {
   core: Prisma.HostedMemberIdentityGetPayload<{
     select: typeof hostedMemberIdentityCoreLookupSelect;
   }>["member"];
-  matchedBy: "linqEmailHandle" | "phoneNumber" | "privyUserId";
+  matchedBy: "linqEmailHandle" | "phoneNumber";
 }
 
 type HostedMemberIdentityCoreLookupRecord =
@@ -113,7 +105,6 @@ export interface HostedMemberIdentityWriteInput {
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
   phoneNumber: string | null;
-  privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
@@ -161,52 +152,6 @@ export interface HostedMemberSignupPhoneStateWriteInput {
   signupPhoneCodeSendAttemptStartedAt?: Date | null;
   signupPhoneCodeSentAt?: Date | null;
   signupPhoneNumber?: string | null;
-}
-
-type HostedMemberIdentityByPrivyUserIdInput = {
-  prisma: HostedOnboardingReadClient;
-  privyUserId: string;
-};
-
-export async function lookupHostedMemberIdentityByPrivyUserId(
-  input: HostedMemberIdentityByPrivyUserIdInput & { projection: "core" },
-): Promise<HostedMemberIdentityCoreLookup | null>;
-export async function lookupHostedMemberIdentityByPrivyUserId(
-  input: HostedMemberIdentityByPrivyUserIdInput,
-): Promise<HostedMemberIdentityLookup | null>;
-export async function lookupHostedMemberIdentityByPrivyUserId(
-  input: HostedMemberIdentityByPrivyUserIdInput & { projection?: "core" },
-): Promise<HostedMemberIdentityCoreLookup | HostedMemberIdentityLookup | null> {
-  const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
-
-  if (privyUserLookupKeys.length === 0) {
-    return null;
-  }
-
-  if (input.projection === "core") {
-    const records = await input.prisma.hostedMemberIdentity.findMany({
-      where: {
-        privyUserLookupKey: {
-          in: privyUserLookupKeys,
-        },
-      },
-      select: hostedMemberIdentityCoreLookupSelect,
-    });
-    return resolveHostedMemberIdentityCoreLookup(records, "privyUserId");
-  }
-
-  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
-    where: {
-      privyUserLookupKey: {
-        in: privyUserLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return resolveHostedMemberIdentityLookup(identityRecords, "privyUserId", input.prisma);
 }
 
 export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
@@ -455,18 +400,11 @@ const HOSTED_MEMBER_IDENTITY_RECORD_KEYS = [
   "phoneLookupKey",
   "phoneNumberEncrypted",
   "phoneNumberVerifiedAt",
-  "privyUserIdEncrypted",
-  "privyUserLookupKey",
   "signupPhoneCodeSendAttemptId",
   "signupPhoneCodeSendAttemptStartedAt",
   "signupPhoneCodeSentAt",
   "signupPhoneNumberEncrypted",
   "updatedAt",
-  "walletAddressEncrypted",
-  "walletAddressLookupKey",
-  "walletChainType",
-  "walletCreatedAt",
-  "walletProvider",
 ] as const satisfies readonly (keyof HostedMemberIdentityRecord)[];
 
 export function hostedMemberIdentityRecordsEqual(
@@ -493,9 +431,7 @@ export function readHostedMemberIdentityControlRootKeyIds(
   }
   const encryptedValues = [
     identity.phoneNumberEncrypted,
-    identity.privyUserIdEncrypted,
     identity.signupPhoneNumberEncrypted,
-    identity.walletAddressEncrypted,
   ];
   return [...new Set(encryptedValues.flatMap((value) => {
     const reference = readHostedUserSecureBoxStringRootReference({
@@ -641,7 +577,6 @@ export async function writeHostedMemberSignupPhoneState(
       memberId: input.memberId,
       phoneNumber: null,
       prisma: input.prisma,
-      privyUserId: null,
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
@@ -677,11 +612,6 @@ export async function projectHostedMemberIdentityState(
     signupPhoneCodeSentAt: privateState.signupPhoneCodeSentAt,
     signupPhoneNumber: privateState.signupPhoneNumber,
     phoneNumberVerifiedAt: identity.phoneNumberVerifiedAt,
-    privyUserId: privateState.privyUserId,
-    walletAddress: privateState.walletAddress,
-    walletChainType: identity.walletChainType,
-    walletCreatedAt: identity.walletCreatedAt,
-    walletProvider: identity.walletProvider,
   };
 }
 
@@ -699,15 +629,10 @@ async function projectHostedMemberIdentityLookup(
       memberId: identityState.memberId,
       phoneNumber: identityState.phoneNumber,
       phoneNumberVerifiedAt: identityState.phoneNumberVerifiedAt,
-      privyUserId: identityState.privyUserId,
       signupPhoneCodeSendAttemptId: identityState.signupPhoneCodeSendAttemptId,
       signupPhoneCodeSendAttemptStartedAt: identityState.signupPhoneCodeSendAttemptStartedAt,
       signupPhoneCodeSentAt: identityState.signupPhoneCodeSentAt,
       signupPhoneNumber: identityState.signupPhoneNumber,
-      walletAddress: identityState.walletAddress,
-      walletChainType: identityState.walletChainType,
-      walletCreatedAt: identityState.walletCreatedAt,
-      walletProvider: identityState.walletProvider,
     },
     matchedBy,
   };
@@ -812,7 +737,6 @@ async function buildHostedMemberIdentityMutationData(
     phoneNumber: input.phoneNumber,
     preparedRoot,
     prisma: input.prisma,
-    privyUserId: input.privyUserId,
     signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
@@ -828,7 +752,6 @@ async function buildHostedMemberIdentityMutationData(
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
     ...privateColumns,
   };
 }

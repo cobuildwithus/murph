@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
@@ -9,7 +9,7 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 
-async function readExperimentOnboardingSkill(): Promise<string> {
+function resolveExperimentOnboardingSkillDirectory(): string {
   const skill = ASSISTANT_SKILLS.find(
     (candidate) => candidate.slug === 'experiment-onboarding',
   )
@@ -18,41 +18,54 @@ async function readExperimentOnboardingSkill(): Promise<string> {
     throw new Error('experiment-onboarding skill is not registered')
   }
 
+  return path.join(resolveAssistantSkillsRoot(), skill.slug)
+}
+
+async function readExperimentOnboardingSkill(): Promise<string> {
   return readFile(
-    path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
+    path.join(resolveExperimentOnboardingSkillDirectory(), 'SKILL.md'),
     'utf8',
   )
 }
 
-describe('private experiment deep links', () => {
-  it('routes custom experiment links from canonical ids in verified-private conversations', async () => {
+async function readExperimentOnboardingSkillAssets(): Promise<string[]> {
+  const directory = resolveExperimentOnboardingSkillDirectory()
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true })
+  return Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => readFile(path.join(entry.parentPath, entry.name), 'utf8')),
+  )
+}
+
+describe('private assistant experiments', () => {
+  it('keeps run, log, and progress tools on the private experiment surface', async () => {
     const skill = await readExperimentOnboardingSkill()
 
+    expect(skill).toContain('vault-cli experiment start <slug>')
+    expect(skill).toContain('--dry-run --format json')
+    expect(skill).toContain('vault-cli experiment session log <id>')
+    expect(skill).toContain('vault-cli experiment context log <id>')
+    expect(skill).toContain('vault-cli experiment progress <id> --format json')
     expect(skill).toContain(
-      'Do not send an experiment page link proactively. Creating a run is not a reason to send one',
+      'vault-cli experiment progress-card <id> --format json',
     )
-    expect(skill).toContain(
-      'Send a link only when the user asks for one or clearly wants more detail on the experiment',
-    )
-    expect(skill).toContain(
-      'When a link is warranted for a successfully persisted custom unlinked run in a verified-private conversation',
-    )
-    expect(skill).toContain(
-      `${MURPH_PRODUCT_ORIGIN}/experiments/runs/<experimentId>`,
-    )
-    expect(skill).toContain(
-      'the exact canonical `experimentId` returned by the successful non-dry-run command',
-    )
-    expect(skill).toContain(
-      'use the exact canonical `experimentId` from trusted active-experiment context when present',
-    )
-    expect(skill).toContain('Never require a prebuilt URL from the context')
-    expect(skill).toContain('percent-encoded as one path segment')
-    expect(skill).toContain('never derive the route from a title or slug')
-    expect(skill).toContain('never send it in a group or unverified conversation')
-    expect(skill).toContain('normal account access still applies')
-    expect(skill).not.toContain(
-      'Do not invent a page URL for custom unlinked runs.',
-    )
+    expect(skill).toContain('never construct or attach a progress-card URL')
+    expect(skill).toContain('do not construct experiment website URLs')
+  })
+
+  it('designs new runs without public catalog discovery or experiment webpage links', async () => {
+    const assets = await readExperimentOnboardingSkillAssets()
+    expect(assets.length).toBeGreaterThan(0)
+
+    for (const asset of assets) {
+      expect(asset).not.toContain('vault-cli commons protocol')
+      expect(asset).not.toContain('--from-protocol')
+      expect(asset).not.toContain('--no-public-protocol')
+      expect(asset).not.toContain('--page-revision-id')
+      expect(asset).not.toContain('--run-spec-revision-id')
+      expect(asset).not.toContain(`${MURPH_PRODUCT_ORIGIN}/experiments`)
+      expect(asset).not.toMatch(/\/experiments\/(?:runs\/)?</u)
+    }
   })
 })

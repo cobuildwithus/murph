@@ -29,7 +29,6 @@ import {
   normalizeRelativePath,
   readUtf8IfExists,
   redactSensitiveText,
-  resetDirectory,
   resolveVaultRelativePath,
   runCommand,
   splitTextIntoBlocks,
@@ -872,8 +871,6 @@ test("shared parser helpers cover vault path guards, markdown shaping, and recur
     vaultRoot,
   });
 
-  const nestedDirectory = path.join(vaultRoot, "derived", "knowledge");
-  await resetDirectory(nestedDirectory);
   const nestedFile = await writeFile(vaultRoot, "derived/knowledge/page.md", "# Heading\n\n- item");
   assert.equal(await readUtf8IfExists(nestedFile), "# Heading\n\n- item");
   await assert.rejects(

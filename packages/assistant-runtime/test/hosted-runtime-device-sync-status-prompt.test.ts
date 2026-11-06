@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  listConfiguredDeviceSyncReconnectTargets,
+  listConfiguredDeviceSyncConnectTargets,
 } from "@murphai/device-syncd/connect-config";
 
 import {
@@ -115,21 +115,18 @@ describe("hosted device sync status prompt", () => {
       reconnectTargets: [
         {
           connectTarget: "whoop",
-          connectTargetCommandSafe: true,
           label: "WHOOP",
           provider: "junction",
           sourceProviderSlug: "whoop_v2",
         },
         {
           connectTarget: "withings",
-          connectTargetCommandSafe: true,
           label: "Withings",
           provider: "junction",
           sourceProviderSlug: "withings",
         },
         {
           connectTarget: "oura",
-          connectTargetCommandSafe: true,
           label: "Oura",
           provider: "oura",
         },
@@ -149,7 +146,7 @@ describe("hosted device sync status prompt", () => {
   });
 
   it("uses one member snapshot for all default Junction targets and suppresses unconfigured sources", async () => {
-    const reconnectTargets = listConfiguredDeviceSyncReconnectTargets({
+    const reconnectTargets = listConfiguredDeviceSyncConnectTargets({
       junction: { providerFilter: [] },
     });
     const whoopTarget = reconnectTargets.find(
@@ -319,7 +316,6 @@ describe("hosted device sync status prompt", () => {
       reconnectTargets: [
         {
           connectTarget: "whoop",
-          connectTargetCommandSafe: true,
           label: "WHOOP",
           provider: "junction",
           sourceProviderSlug: "whoop_v2",
@@ -513,7 +509,6 @@ describe("hosted device sync status prompt", () => {
         {
           connectionAvailable: false,
           connectTarget: "strava",
-          connectTargetCommandSafe: false,
           label: "Strava",
           provider: "junction",
           sourceProviderSlug: "strava",
@@ -549,7 +544,6 @@ describe("hosted device sync status prompt", () => {
         {
           connectionAvailable: false,
           connectTarget: "dexcom_v3",
-          connectTargetCommandSafe: false,
           label: "Dexcom",
           provider: "junction",
           sourceProviderSlug: "dexcom_v3",
@@ -717,69 +711,11 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("No hosted reconnect target");
   });
 
-  it("does not render ambiguous generic commands for duplicate WHOOP reconnect targets", () => {
+  it("renders source-specific Junction WHOOP commands", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
         {
           connectTarget: "whoop",
-          connectTargetAmbiguous: true,
-          label: "WHOOP",
-          provider: "whoop",
-        },
-        {
-          connectTarget: "whoop",
-          connectTargetAmbiguous: true,
-          label: "WHOOP",
-          provider: "junction",
-          sourceProviderSlug: "whoop_v2",
-        },
-      ],
-      snapshot: buildSnapshot({
-        connection: {
-          accessTokenExpiresAt: null,
-          connectedAt: "2026-06-01T00:00:00.000Z",
-          createdAt: "2026-06-01T00:00:00.000Z",
-          displayName: "WHOOP",
-          externalAccountId: "external-account-id",
-          id: "connection-id",
-          metadata: {},
-          provider: "whoop",
-          scopes: [],
-          setupPhase: "source_confirmed",
-          status: "reauthorization_required",
-        },
-        localState: {
-          lastErrorCode: "TOKEN_REFRESH_FAILED",
-          lastErrorMessage: null,
-          lastSyncCompletedAt: "2026-06-08T00:00:00.000Z",
-          lastSyncErrorAt: "2026-06-29T00:00:00.000Z",
-          lastSyncStartedAt: "2026-06-29T00:00:00.000Z",
-          lastWebhookAt: null,
-          nextReconcileAt: null,
-        },
-        sources: [],
-      }),
-    });
-
-    expect(prompt).toContain("WHOOP currently needs reconnect");
-    expect(prompt).toContain("account is in error state `TOKEN_REFRESH_FAILED`");
-    expect(prompt).toContain("generic device-connect command is ambiguous");
-    expect(prompt).not.toContain("vault-cli device connect whoop --format json");
-  });
-
-  it("renders source-specific Junction WHOOP commands even when direct WHOOP is configured", () => {
-    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
-      reconnectTargets: [
-        {
-          connectTarget: "whoop",
-          connectTargetAmbiguous: true,
-          label: "WHOOP",
-          provider: "whoop",
-        },
-        {
-          connectTarget: "whoop",
-          connectTargetAmbiguous: true,
-          connectTargetCommandSafe: true,
           label: "WHOOP",
           provider: "junction",
           sourceProviderSlug: "whoop_v2",
@@ -792,48 +728,6 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("source `whoop_v2`");
     expect(prompt).toContain("vault-cli device connect whoop --format json");
     expect(prompt).not.toContain("generic device-connect command is ambiguous");
-  });
-
-  it("does not render a source-specific Junction command when the public target resolves elsewhere", () => {
-    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
-      reconnectTargets: [
-        {
-          connectTarget: "oura",
-          connectTargetAmbiguous: true,
-          connectTargetCommandSafe: true,
-          label: "Oura",
-          provider: "oura",
-        },
-        {
-          connectTarget: "oura",
-          connectTargetAmbiguous: true,
-          connectTargetCommandSafe: false,
-          label: "Oura",
-          provider: "junction",
-          sourceProviderSlug: "oura",
-        },
-      ],
-      snapshot: buildSnapshot({
-        sources: [
-          {
-            displayName: null,
-            firstSeenAt: "2026-06-01T00:00:00.000Z",
-            lastErrorCode: "TOKEN_REFRESH_FAILED",
-            lastErrorMessage: null,
-            lastSeenAt: "2026-06-29T00:00:00.000Z",
-            lastDataAt: null,
-            resourceCount: 0,
-            sourceProviderSlug: "oura",
-            status: "error",
-          },
-        ],
-      }),
-    });
-
-    expect(prompt).toContain("Oura currently needs reconnect");
-    expect(prompt).toContain("source `oura`");
-    expect(prompt).toContain("generic device-connect command is ambiguous");
-    expect(prompt).not.toContain("vault-cli device connect oura --format json");
   });
 
   it("maps Junction account reauthorization through the connection source before provider fallback", () => {

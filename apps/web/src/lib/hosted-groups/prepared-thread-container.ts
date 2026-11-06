@@ -1,6 +1,9 @@
+import { GAME_MAX_OPEN_PER_PAIR } from "../game/rules";
+import { gamePairWhere } from "../game/chat-membership";
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import {
   bindArmedHostedUsageReferralToNewContainerTx,
@@ -72,6 +75,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   threadId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPreparedLinqThreadContainerResult> {
+  await assertNoPendingGameChatBootstrapTx(input);
   const pendingSetupClaim = await claimHostedPendingGroupSetupForParticipantsTx({
     incomingRecipientPhoneLookupKeys: input.incomingRecipientPhoneLookupKeys,
     occurredAt: input.occurredAt,
@@ -197,6 +201,35 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     pendingSetupApplied,
     pendingSetupResolution: pendingSetupClaim.reason,
   };
+}
+
+/** A reply may race the first create-chat response. Retry ingress, never fork its workspace. */
+export async function assertNoPendingGameChatBootstrapTx(input: {
+  participantMemberIds: readonly string[];
+  incomingRecipientPhoneLookupKeys: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const participants = [...new Set(input.participantMemberIds)];
+  if (participants.length !== 2) return;
+  const games = await input.tx.game.findMany({
+    where: {
+      ...gamePairWhere(participants),
+      status: { in: ["live", "negotiating"] },
+      chatContainerMember: { is: { threadContainer: { is: { routes: { none: {} } } } } },
+    },
+    select: { chatContainerMemberId: true },
+    take: GAME_MAX_OPEN_PER_PAIR,
+  });
+  const rooms = games.flatMap((game) => game.chatContainerMemberId ? [game.chatContainerMemberId] : []);
+  if (!rooms.length) return;
+  const receipt = await input.tx.hostedLinqDelivery.findFirst({
+    where: { payloadOwnerMemberId: { in: rooms }, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: null, skippedAt: null, phoneNumberLookupKey: { in: [...input.incomingRecipientPhoneLookupKeys] } },
+    select: { id: true },
+  });
+  if (receipt) throw hostedOnboardingError({
+    code: "HOSTED_GAME_CHAT_BOOTSTRAP_PENDING", httpStatus: 503, retryable: true,
+    message: "The initial game chat route is being confirmed. Retry this message.",
+  });
 }
 
 function buildInitialHostedGroupRoomModelMarkdown(

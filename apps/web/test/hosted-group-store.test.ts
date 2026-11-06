@@ -5,6 +5,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   hostedVaultShareProjectionKindToScope,
   type HostedVaultShareFixedProjectionKind,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -144,6 +145,7 @@ function buildTx(input?: {
   };
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
+  offerProjectionScopes?: HostedVaultShareProjectionScope[];
   requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
@@ -168,6 +170,7 @@ function buildTx(input?: {
   };
 } {
   return createPrismaStub({
+    hostedGroupOfferGestureReceipt: { createMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
@@ -211,7 +214,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionScopes ?? input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -232,7 +235,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionScopes ?? input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -347,6 +350,37 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
     mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
+  });
+
+  it("retains the selected active plain metric without grant supersession", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([SLEEP_SCOPE]);
+    const result = await acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing", joinCode: "join_1", memberId: "member_grantor",
+      now: new Date("2026-09-17T12:00:00Z"), selectedVaultShareProjectionScopes: [SLEEP_SCOPE], tx,
+    });
+    expect(result.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, SLEEP_SCOPE]);
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
+  it("accepts and replays an immutable old native offer using the same chosen metric", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing", offerProjectionScopes: [SLEEP_SCOPE] });
+    for (let replay = 0; replay < 2; replay++) {
+      mocks.grantHostedVaultShareTx.mockClear();
+      mocks.revokeHostedVaultSharesTx.mockClear();
+      const result = await acceptHostedGroupJoinOfferTx({
+        affirmationEventId: `gesture_event_${replay}`,
+        channel: "linq", memberId: "member_grantor",
+        messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+        threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+        now: new Date("2026-09-17T12:00:00Z"), tx,
+      });
+      expect(result).not.toBeNull();
+      expect(result!.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, SLEEP_SCOPE]);
+      expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+      expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+    }
   });
 
   it("rejects membership when the group runtime is inactive even with no selected permissions", async () => {
@@ -1074,6 +1108,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "telegram",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
@@ -1102,6 +1137,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     tx.hostedThreadRoute.findFirst.mockResolvedValue(null);
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "telegram",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
@@ -1122,6 +1158,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     tx.hostedGroupJoinOffer.findFirst.mockResolvedValue(null);
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "telegram",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:other-message"],
@@ -1465,6 +1502,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1513,6 +1551,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1558,6 +1597,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     }));
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1584,6 +1624,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       confirmationPublicBaseUrl: "https://murph.example",
       memberId: "member_grantor",
@@ -1628,6 +1669,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1686,6 +1728,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates,
@@ -1735,6 +1778,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1773,6 +1817,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
@@ -2950,6 +2995,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   }> = [];
 
   return createPrismaStub({
+    hostedGroupOfferGestureReceipt: { createMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
@@ -3071,6 +3117,7 @@ describe("readHostedGroupJoinView leave affordance", () => {
       requestedVaultShareProjections: [{
         label: "Deep sleep",
         projectionScope: LEGACY_DEEP_SLEEP_SCOPE,
+        description: expect.stringContaining("90 days"),
       }],
     });
     expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({

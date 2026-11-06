@@ -1,12 +1,16 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { attachDatabasePool } from "@vercel/functions";
-import pg, { type Pool as PgPool } from "pg";
+import pg, { type Pool as PgPool, type PoolClient } from "pg";
 
 import { assertHostedWebDatabaseUrlConfigured } from "./hosted-web/database-env";
 import {
   isPrismaOperationTimingActive,
   recordPrismaOperationTiming,
+  startPrismaPoolAcquisitionTiming,
+  startPrismaQueryTiming,
 } from "./prisma-operation-timing";
 import { installHostedWebWarningFilters } from "./process-warnings";
 
@@ -30,6 +34,21 @@ const DATABASE_RETRY_MIN_DELAY_MS = 50;
 const DATABASE_RETRY_MAX_DELAY_MS = 250;
 const POOL_PRESSURE_SAMPLE_INTERVAL_MS = 10_000;
 const SLOW_TRANSACTION_MS = 5_000;
+
+// A read in a batch or interactive transaction must keep that transaction's
+// snapshot and failure boundary. The public transaction wrapper owns the scope;
+// no Prisma-private request metadata is needed.
+const databaseTransactionScope = new AsyncLocalStorage<boolean>();
+const REPLAYABLE_MODEL_READS = new Set([
+  "findUnique",
+  "findUniqueOrThrow",
+  "findFirst",
+  "findFirstOrThrow",
+  "findMany",
+  "count",
+  "aggregate",
+  "groupBy",
+]);
 
 export type PrismaInteractiveTransactionOperation =
   | "account_deletion.database_delete"
@@ -55,6 +74,7 @@ type DatabasePoolFailureCategory =
   | "idle_connection_error"
   | "pool_checkout_timeout"
   | "tls_error"
+  | "transaction_left_open"
   | "transaction_start_timeout"
   | "unreachable";
 
@@ -123,6 +143,19 @@ const DATABASE_POOL_FAILURE_BY_SQLSTATE = new Map<
   ["53300", "connection_limit"],
 ]);
 
+// pg sometimes emits plain Errors without a code. Keep message-only fallbacks
+// together; a closed socket alone does not prove whether SQL ran.
+const DATABASE_POOL_FAILURE_BY_MESSAGE: readonly [RegExp, DatabasePoolFailureCategory][] = [
+  [/^Connection terminated unexpectedly$/, "connection_closed"],
+  [/timeout exceeded when trying to connect/, "pool_checkout_timeout"],
+  // P2028 covers every transaction-API fault; only this message means setup.
+  [/Unable to start a transaction in the given time/, "transaction_start_timeout"],
+  [/Connection terminated due to connection timeout/, "connection_establishment_timeout"],
+  [/remaining connection slots are reserved/, "connection_limit"],
+  [/too many connections for role/, "connection_limit"],
+  [/sorry, too many clients already/, "connection_limit"],
+];
+
 const PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE = "08P01";
 const PGBOUNCER_MAX_CLIENT_CONN_MESSAGE =
   "no more connections allowed (max_client_conn)";
@@ -181,9 +214,99 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
     connectionString: normalizePrismaConnectionString(input.databaseUrl),
     connectionTimeoutMillis: PG_CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: PG_IDLE_TIMEOUT_MS,
+    // Prisma decodes PostgreSQL timestamps as UTC; establish that session
+    // convention during startup, before any pooled query can run.
+    options: `${process.env.PGOPTIONS ?? ""} -c timezone=UTC`.trim(),
     max: poolMax,
   });
 
+  // A physical client covers pool queries and transaction statements exactly
+  // once. Capture the requesting scope before pg invokes completion callbacks.
+  pool.on("connect", (client) => {
+    client.query = new Proxy(client.query, {
+      apply(query, receiver, args) {
+        const record = startPrismaQueryTiming();
+        if (!record) return Reflect.apply(query, receiver, args);
+        const callback = args.at(-1);
+        try {
+          if (typeof callback === "function") {
+            return Reflect.apply(query, receiver, [...args.slice(0, -1), function (this: unknown, ...result: unknown[]) {
+              record(result[0] != null);
+              return Reflect.apply(callback, this, result);
+            }]);
+          }
+          const pending: Promise<unknown> = Reflect.apply(query, receiver, args);
+          // pg also accepts streaming Submittable objects; leave those intact.
+          if (!pending || typeof pending.then !== "function") return pending;
+          return pending.then(
+            result => { record(false); return result; },
+            error => { record(true); throw error; },
+          );
+        } catch (error) {
+          record(true);
+          throw error;
+        }
+      },
+    });
+  });
+
+  // Only the backend's own status proves a connection left its transaction.
+  // Prisma sends ROLLBACK for a discarded start, then releases in a finally.
+  // A failed ROLLBACK or any other path can still return a connection inside a
+  // transaction, where a later write would report success and then vanish.
+  // Closing the connection ends the transaction. pg-pool sets release on
+  // every checkout.
+  const closeOpenTransactionOnRelease = (client: PoolClient): PoolClient => {
+    const release = client.release;
+    client.release = (error) => {
+      const leftOpen = !error && client.getTransactionStatus() !== "I";
+      if (leftOpen) {
+        reportDatabasePoolFailure(readDatabasePoolSnapshot(pool), "transaction_left_open", {
+          attempt: null,
+          disposition: "signal",
+          operation: "adapter.release",
+          poolMax,
+          source: "adapter_connection",
+        });
+      }
+      release(error || leftOpen);
+    };
+    return client;
+  };
+
+  // Transaction statements reuse their acquired client. Sample only real
+  // checkouts so those statements cannot masquerade as prospective waiters.
+  // Forward both pg callback and promise forms without changing their lifetime.
+  pool.connect = new Proxy(pool.connect, {
+    apply(connect, receiver, args) {
+      const snapshot = readDatabasePoolSnapshot(pool);
+      reportDatabasePoolPressure(pool, poolMax, snapshot);
+      const record = startPrismaPoolAcquisitionTiming(snapshot);
+      const callback = args[0];
+      if (typeof callback === "function") {
+        // A queued checkout may be fulfilled by another request's release.
+        // Restore the requesting scope, including the absence of a collector.
+        return Reflect.apply(connect, receiver, [AsyncLocalStorage.bind(function (
+          this: unknown,
+          error: Error | undefined,
+          client: PoolClient | undefined,
+          done: PoolClient["release"],
+        ) {
+          record?.();
+          if (client) closeOpenTransactionOnRelease(client);
+          return Reflect.apply(callback, this, [error, client, client?.release ?? done]);
+        })]);
+      }
+      try {
+        const pending: Promise<PoolClient> = Reflect.apply(connect, receiver, args);
+        const guarded = pending.then(closeOpenTransactionOnRelease);
+        return record ? guarded.finally(record) : guarded;
+      } catch (error) {
+        record?.();
+        throw error;
+      }
+    },
+  });
   attachDatabasePool(pool);
   return pool;
 }
@@ -242,27 +365,36 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
     query: {
       $allOperations({ args, model, operation, query }) {
         const timingActive = isPrismaOperationTimingActive();
-        const startedAtMs = timingActive ? Date.now() : null;
+        const startedAtMs = timingActive ? performance.now() : null;
         const record = () => {
           if (startedAtMs === null) {
             return;
           }
           recordPrismaOperationTiming(
             model ? `${model}.${operation}` : operation,
-            Date.now() - startedAtMs,
+            performance.now() - startedAtMs,
+            startedAtMs,
           );
         };
-        // A checkout timeout means the statement never reached Postgres, so the
-        // operation can be replayed without duplicating an effect.
+        // Checkout/establishment timeouts precede SQL dispatch. A disconnect
+        // can follow dispatch, so only standalone model reads can replay it.
+        // Raw SQL can have effects even when exposed as a query.
+        const retryableCategories: DatabasePoolFailureCategory[] = [
+          "pool_checkout_timeout",
+          "connection_establishment_timeout",
+        ];
+        if (
+          model && REPLAYABLE_MODEL_READS.has(operation)
+          && !databaseTransactionScope.getStore()
+        ) {
+          retryableCategories.push("connection_closed");
+        }
         return runWithDatabaseRetry(
           pool,
           poolMax,
           {
             operation: model ? `${model}.${operation}` : operation,
-            retryableCategories: [
-              "pool_checkout_timeout",
-              "connection_establishment_timeout",
-            ],
+            retryableCategories,
             source: "operation",
           },
           () => query(args),
@@ -284,9 +416,9 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
 }
 
 /**
- * Retries one ambiguous connection-establishment failure when the caller proves
- * the operation never began. Local pool saturation is already backpressure, so
- * it is reported and returned immediately instead of rejoining the same queue.
+ * Retries once when the caller proves replay is safe: no effect began, or the
+ * operation is a standalone model read. Local pool saturation is already
+ * backpressure, so it returns immediately instead of rejoining the same queue.
  */
 async function runWithDatabaseRetry<T>(
   pool: PgPool,
@@ -301,7 +433,6 @@ async function runWithDatabaseRetry<T>(
       beforeAttempt,
       poolMax,
     );
-    reportDatabasePoolPressure(pool, poolMax, beforeAttempt);
     try {
       return await run();
     } catch (error) {
@@ -329,7 +460,6 @@ async function runWithDatabaseRetry<T>(
 
       await delay(resolveDatabaseRetryDelayMs());
       const beforeRetry = readDatabasePoolSnapshot(pool);
-      reportDatabasePoolPressure(pool, poolMax, beforeRetry);
       if (hasLocalDatabasePoolPressure(beforeRetry, poolMax)) {
         if (category) {
           reportDatabasePoolFailure(beforeRetry, category, {
@@ -398,7 +528,10 @@ function withTransactionStartRetry(
                 ],
                 source: "transaction",
               },
-              () => Reflect.apply(value, target, args) as Promise<unknown>,
+              () => databaseTransactionScope.run(
+                true,
+                () => Reflect.apply(value, target, args) as Promise<unknown>,
+              ),
             );
           } finally {
             reportSlowDatabaseBatchTransaction(
@@ -416,6 +549,7 @@ function withTransactionStartRetry(
           {
             operation: "transaction.interactive",
             retryableCategories: [
+              "connection_closed",
               "transaction_start_timeout",
               "pool_checkout_timeout",
               "connection_establishment_timeout",
@@ -454,11 +588,10 @@ function withTransactionStartRetry(
             const transactionArgs = [wrappedCallback, ...args.slice(1)];
 
             try {
-              return await Reflect.apply(
-                value,
-                target,
-                transactionArgs,
-              ) as unknown;
+              return await databaseTransactionScope.run(
+                true,
+                () => Reflect.apply(value, target, transactionArgs) as Promise<unknown>,
+              );
             } finally {
               if (!callbackStarted) {
                 reportSlowDatabaseTransactionAcquisition(
@@ -495,9 +628,11 @@ function createPrisma(): PrismaClient {
   // The pool limit is per module runtime, so the effective ceiling is this
   // number times the live instance count. Say which number is in force and
   // whether anyone chose it, so an inherited default is never mistaken for a
-  // capacity decision.
+  // capacity decision. Process uptime at this first database use tells a
+  // freshly booted instance apart from a long-lived one.
   console.info("Hosted web database pool configured.", {
     maxConnections: configuredPoolMax ?? DEFAULT_DATABASE_POOL_MAX,
+    processUptimeMs: Math.round(process.uptime() * 1_000),
     source: configuredPoolMax === null ? "default" : "configured",
   });
 
@@ -541,6 +676,14 @@ export function normalizePrismaConnectionString(databaseUrl: string): string {
       parsed.searchParams.delete(key);
       changed = true;
     }
+  }
+
+  const options = parsed.searchParams.get("options");
+  if (options !== null) {
+    // pg gives URL options precedence over Pool.options. Keep other settings
+    // while enforcing the same timezone on this connection path.
+    parsed.searchParams.set("options", `${options} -c timezone=UTC`.trim());
+    changed = true;
   }
 
   return changed ? parsed.toString() : databaseUrl;
@@ -602,25 +745,11 @@ function resolveDatabasePoolFailureCategory(
     ) {
       return "connection_limit";
     }
-    if (message?.includes("timeout exceeded when trying to connect")) {
-      return "pool_checkout_timeout";
-    }
-    // Prisma reports every transaction-API fault as P2028, so only the message
-    // separates "never started" from a transaction that ran and then expired.
-    if (message?.includes("Unable to start a transaction in the given time")) {
-      return "transaction_start_timeout";
-    }
-    if (message?.includes("Connection terminated due to connection timeout")) {
-      return "connection_establishment_timeout";
-    }
-    // Postgres words a SQLSTATE 53300 rejection differently depending on which
-    // limit refused the connection, and some wrappers keep only the message.
-    if (
-      message?.includes("remaining connection slots are reserved")
-      || message?.includes("too many connections for role")
-      || message?.includes("sorry, too many clients already")
-    ) {
-      return "connection_limit";
+    const messageCategory = DATABASE_POOL_FAILURE_BY_MESSAGE.find(
+      ([pattern]) => pattern.test(message ?? ""),
+    )?.[1];
+    if (messageCategory) {
+      return messageCategory;
     }
 
     if (candidate.depth >= DATABASE_POOL_FAILURE_TRAVERSAL_MAX_DEPTH) {

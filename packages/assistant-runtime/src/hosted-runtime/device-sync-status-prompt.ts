@@ -23,8 +23,6 @@ type HostedDeviceSyncRuntimeConnectionSourceSnapshot = NonNullable<
 export interface HostedDeviceSyncStatusPromptReconnectTarget {
   connectionAvailable?: boolean | null;
   connectTarget: string;
-  connectTargetAmbiguous?: boolean | null;
-  connectTargetCommandSafe?: boolean | null;
   label: string;
   provider: string;
   sourceProviderSlug?: string | null;
@@ -32,7 +30,6 @@ export interface HostedDeviceSyncStatusPromptReconnectTarget {
 
 interface HostedDeviceSyncReconnectNotice {
   commandConnectTarget: string | null;
-  commandConnectTargetSafe: boolean;
   connectionAvailable: boolean | null;
   errorCode: string;
   label: string;
@@ -324,7 +321,6 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
     commandConnectTarget: reconnectTarget?.connectionAvailable === false
       ? null
       : reconnectTarget?.connectTarget ?? null,
-    commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     connectionAvailable: reconnectTarget?.connectionAvailable ?? null,
     errorCode,
     label: reconnectTarget?.label
@@ -361,7 +357,6 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
     commandConnectTarget: reconnectTarget?.connectionAvailable === false
       ? null
       : reconnectTarget?.connectTarget ?? null,
-    commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     connectionAvailable: reconnectTarget?.connectionAvailable ?? null,
     errorCode,
     label: reconnectTarget?.label
@@ -404,10 +399,8 @@ function renderHostedDeviceSyncReconnectNoticeLine(
     : "account is";
   const reconnectText = notice.connectionAvailable === false
     ? " Reconnect is not currently available for this wearable/source. Do not offer or issue a reconnect link."
-    : notice.commandConnectTarget && notice.commandConnectTargetSafe
-    ? ` To send a reconnect link, run \`vault-cli device connect ${notice.commandConnectTarget} --format json\` and use the returned \`connectUrl\`.`
     : notice.commandConnectTarget
-      ? " A reconnect target is configured, but the generic device-connect command is ambiguous for this wearable/source; use an exact reconnect flow instead of `vault-cli device connect`."
+    ? ` To send a reconnect link, run \`vault-cli device connect ${notice.commandConnectTarget} --format json\` and use the returned \`connectUrl\`.`
     : " No hosted reconnect target is configured for this wearable/source in this turn.";
 
   return `- ${notice.label} currently needs reconnect: ${subjectText} in error state \`${notice.errorCode}\`. Murph may not see newer ${notice.label} data until reconnect completes.${reconnectText}`;
@@ -462,24 +455,6 @@ function resolveHostedDeviceSyncReconnectTargetForProvider(input: {
     normalizeHostedDeviceSyncKey(target.provider) === provider
     && normalizeHostedDeviceSyncKey(target.sourceProviderSlug) === null
   ) ?? null;
-}
-
-function isHostedDeviceSyncReconnectCommandSafe(
-  reconnectTarget: HostedDeviceSyncStatusPromptReconnectTarget | null,
-): boolean {
-  if (!reconnectTarget) {
-    return false;
-  }
-
-  if (reconnectTarget.connectTargetCommandSafe === true) {
-    return true;
-  }
-
-  if (reconnectTarget.connectTargetCommandSafe === false) {
-    return false;
-  }
-
-  return reconnectTarget.connectTargetAmbiguous !== true;
 }
 
 function normalizeHostedDeviceSyncErrorCode(

@@ -21,7 +21,7 @@ index 166d5bef8d52e08f0aa7747a835df7ad3b2e5642..0b5276e64ea44ed5cc2829d64d359141
  export type GlobalsDescriptor = {
      schema: z.ZodObject<any>;
 diff --git a/dist/Cli.js b/dist/Cli.js
-index 414e8f50a05021f2c9c02e4f612db81fe490b21f..a64e0d99803332b00c030c447ed1f0c3542344f4 100644
+index 414e8f50a05021f2c9c02e4f612db81fe490b21f..8dc7aeee9c7828adb1557801f115a2205fdae619 100644
 --- a/dist/Cli.js
 +++ b/dist/Cli.js
 @@ -7,7 +7,7 @@ import { estimateTokenCount, sliceByTokens } from 'tokenx';
@@ -513,7 +513,7 @@ index 414e8f50a05021f2c9c02e4f612db81fe490b21f..a64e0d99803332b00c030c447ed1f0c3
                      command: ctx.path,
                      duration: `${Math.round(performance.now() - ctx.start)}ms`,
 diff --git a/dist/Errors.d.ts b/dist/Errors.d.ts
-index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..b5cd2cec2312935a94bb5a4b6086be54b33cbaa1 100644
+index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..ab1e8fc905f943cb2cd74bbe2abdca374069580f 100644
 --- a/dist/Errors.d.ts
 +++ b/dist/Errors.d.ts
 @@ -27,6 +27,10 @@ export declare class IncurError extends BaseError {
@@ -581,27 +581,32 @@ index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..b5cd2cec2312935a94bb5a4b6086be54
          /** The underlying cause. */
          cause?: Error | undefined;
      };
-@@ -86,13 +114,18 @@ export declare namespace ValidationError {
+@@ -86,13 +114,23 @@ export declare namespace ValidationError {
  /** Error thrown when argument parsing fails (unknown flags, missing values). */
  export declare class ParseError extends BaseError {
      name: string;
 +    /** Privacy-safe class used to render recovery guidance. */
 +    kind: ParseError.Kind;
++    /** Optional argv rejection class; non-enumerable so error envelopes and serialization are unchanged. */
++    readonly reason?: ParseError.Reason | undefined;
      constructor(options: ParseError.Options);
  }
  export declare namespace ParseError {
 +    type Kind = 'arguments' | 'config_missing' | 'config_invalid' | 'config_unavailable';
++    type Reason = 'unknown_flag' | 'missing_value';
      /** Options for constructing a ParseError. */
      type Options = {
          /** Human-readable error message. */
          message: string;
 +        /** Privacy-safe class used to render recovery guidance. */
 +        kind?: Kind | undefined;
++        /** Optional argv rejection class, set only at the parser site that detected it. */
++        reason?: Reason | undefined;
          /** The underlying cause. */
          cause?: Error | undefined;
      };
 diff --git a/dist/Errors.js b/dist/Errors.js
-index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..2ba19753eaed178e99e2a2048820de6f85ee3853 100644
+index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..1f78aa0ad269041d8694e6200baa88c0484bc2ce 100644
 --- a/dist/Errors.js
 +++ b/dist/Errors.js
 @@ -28,6 +28,10 @@ export class IncurError extends BaseError {
@@ -615,7 +620,7 @@ index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..2ba19753eaed178e99e2a2048820de6f
      /** Whether the operation can be retried. */
      retryable;
      /** Process exit code. When set, `serve()` uses this instead of `1`. */
-@@ -36,25 +40,107 @@ export class IncurError extends BaseError {
+@@ -36,25 +40,109 @@ export class IncurError extends BaseError {
          super(options.message, options.cause ? { cause: options.cause } : undefined);
          this.code = options.code;
          this.hint = options.hint;
@@ -720,6 +725,8 @@ index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..2ba19753eaed178e99e2a2048820de6f
      constructor(options) {
          super(options.message, options.cause ? { cause: options.cause } : undefined);
 +        this.kind = options.kind ?? 'arguments';
++        if (options.reason)
++            Object.defineProperty(this, 'reason', { value: options.reason });
      }
  }
  /** Walks the cause chain, returning the deepest cause or the first matching cause. */
@@ -783,7 +790,7 @@ index 37aab660515f1efba4ad1f0c7d94423a73e492c4..10969d34504e3635af171e9919b9dec3
  /** Returns true if the response body is a stream that should be consumed incrementally. */
  export function isStreamingResponse(response) {
 diff --git a/dist/Mcp.js b/dist/Mcp.js
-index 3102a678e6c37a08be9e735485e3e1187619ea88..49ff1fa86786cf402d234a001bb351587864c83c 100644
+index 3102a678e6c37a08be9e735485e3e1187619ea88..fba0397ef2ab2775600a3a08310d057d8b949f29 100644
 --- a/dist/Mcp.js
 +++ b/dist/Mcp.js
 @@ -1,7 +1,9 @@
@@ -1002,7 +1009,7 @@ index 3102a678e6c37a08be9e735485e3e1187619ea88..49ff1fa86786cf402d234a001bb35158
  export function collectTools(commands, prefix, parentMiddlewares = [], filter) {
      const tools = filterTools(collectToolEntries(commands, prefix, parentMiddlewares), filter);
 diff --git a/dist/Parser.d.ts b/dist/Parser.d.ts
-index ca608190f50ade7c31769dabdaf3e9c7dbc11e9d..8216f78f8020dae3b571e6d335dd0adf79efca2b 100644
+index ca608190f50ade7c31769dabdaf3e9c7dbc11e9d..14f9b7bc55f7ae15379241979560f95a3d16ecf5 100644
 --- a/dist/Parser.d.ts
 +++ b/dist/Parser.d.ts
 @@ -22,7 +22,13 @@ export declare namespace parse {
@@ -1021,9 +1028,63 @@ index ca608190f50ade7c31769dabdaf3e9c7dbc11e9d..8216f78f8020dae3b571e6d335dd0adf
  export declare function parseEnv<const env extends z.ZodObject<any>>(schema: env, source?: Record<string, string | undefined>): z.output<env>;
  /** Parses known global options from argv, passing unknown flags and positionals through to `rest`. */
 diff --git a/dist/Parser.js b/dist/Parser.js
-index f72f537acf0501b106f77bcdcc0411ad50404b36..a775b5ca1bb274b825cee1a1ae2d99ff4b7de995 100644
+index f72f537acf0501b106f77bcdcc0411ad50404b36..1a7825a2fac8a42038d8be0c9514de3267b32985 100644
 --- a/dist/Parser.js
 +++ b/dist/Parser.js
+@@ -14,7 +14,7 @@ export function parse(argv, options = {}) {
+             // --no-flag negation
+             const name = normalizeOptionName(token.slice(5), optionNames);
+             if (!name)
+-                throw new ParseError({ message: `Unknown flag: ${token}` });
++                throw new ParseError({ message: `Unknown flag: ${token}`, reason: 'unknown_flag' });
+             rawArgvOptions[name] = false;
+             i++;
+         }
+@@ -25,7 +25,7 @@ export function parse(argv, options = {}) {
+                 const raw = token.slice(2, eqIdx);
+                 const name = normalizeOptionName(raw, optionNames);
+                 if (!name)
+-                    throw new ParseError({ message: `Unknown flag: --${raw}` });
++                    throw new ParseError({ message: `Unknown flag: --${raw}`, reason: 'unknown_flag' });
+                 setOption(rawArgvOptions, name, token.slice(eqIdx + 1), optionsSchema);
+                 i++;
+             }
+@@ -33,7 +33,7 @@ export function parse(argv, options = {}) {
+                 // --flag [value]
+                 const name = normalizeOptionName(token.slice(2), optionNames);
+                 if (!name)
+-                    throw new ParseError({ message: `Unknown flag: ${token}` });
++                    throw new ParseError({ message: `Unknown flag: ${token}`, reason: 'unknown_flag' });
+                 if (isCountOption(name, optionsSchema)) {
+                     rawArgvOptions[name] = (rawArgvOptions[name] ?? 0) + 1;
+                     i++;
+@@ -45,7 +45,7 @@ export function parse(argv, options = {}) {
+                 else {
+                     const value = argv[i + 1];
+                     if (value === undefined)
+-                        throw new ParseError({ message: `Missing value for flag: ${token}` });
++                        throw new ParseError({ message: `Missing value for flag: ${token}`, reason: 'missing_value' });
+                     setOption(rawArgvOptions, name, value, optionsSchema);
+                     i += 2;
+                 }
+@@ -58,7 +58,7 @@ export function parse(argv, options = {}) {
+                 const short = chars[j];
+                 const name = optionNames.aliasToName.get(short);
+                 if (!name)
+-                    throw new ParseError({ message: `Unknown flag: -${short}` });
++                    throw new ParseError({ message: `Unknown flag: -${short}`, reason: 'unknown_flag' });
+                 const isLast = j === chars.length - 1;
+                 if (!isLast) {
+                     if (isCountOption(name, optionsSchema)) {
+@@ -82,7 +82,7 @@ export function parse(argv, options = {}) {
+                 else {
+                     const value = argv[i + 1];
+                     if (value === undefined)
+-                        throw new ParseError({ message: `Missing value for flag: -${short}` });
++                        throw new ParseError({ message: `Missing value for flag: -${short}`, reason: 'missing_value' });
+                     setOption(rawArgvOptions, name, value, optionsSchema);
+                     i++;
+                 }
 @@ -113,7 +113,7 @@ export function parse(argv, options = {}) {
          }
      }
@@ -1179,7 +1240,7 @@ index b937e09010355752b83b37c76b3c697d52c9440c..63968927c39f8cb79f87b7097d14ae78
          };
          cta?: CtaBlock | undefined;
 diff --git a/dist/internal/command.js b/dist/internal/command.js
-index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..77944fdff9b3103115be83b9ea7ed7908f4bec9e 100644
+index 7011ed74f3d71854e57ae8e024bcd4c2459b46ef..277ec19657ff70c22a4eaaf77363ff0d475c6f76 100644
 --- a/dist/internal/command.js
 +++ b/dist/internal/command.js
 @@ -1,5 +1,5 @@
@@ -2573,7 +2634,7 @@ index 6e40782545370dbc8cf140e93dbe3f195840e181..1a30deee0b477e4bd4643fbe15ce9a64
 +  })
 +})
 diff --git a/src/Errors.ts b/src/Errors.ts
-index 84b0b997a1ccdd02f4a847ee7135805583476224..8e42755fceba8d8a0b6580df277fae02e16a5c82 100644
+index 84b0b997a1ccdd02f4a847ee7135805583476224..04b0c7186f967daaddaff018676e3f3e1f9256cd 100644
 --- a/src/Errors.ts
 +++ b/src/Errors.ts
 @@ -39,6 +39,10 @@ export class IncurError extends BaseError {
@@ -2768,21 +2829,25 @@ index 84b0b997a1ccdd02f4a847ee7135805583476224..8e42755fceba8d8a0b6580df277fae02
      /** The underlying cause. */
      cause?: Error | undefined
    }
-@@ -114,17 +257,24 @@ export declare namespace ValidationError {
+@@ -114,17 +257,30 @@ export declare namespace ValidationError {
  /** Error thrown when argument parsing fails (unknown flags, missing values). */
  export class ParseError extends BaseError {
    override name = 'Incur.ParseError'
 +  /** Privacy-safe class used to render recovery guidance. */
 +  kind: ParseError.Kind
++  /** Optional argv rejection class; non-enumerable so error envelopes and serialization are unchanged. */
++  declare readonly reason?: ParseError.Reason | undefined
 
    constructor(options: ParseError.Options) {
      super(options.message, options.cause ? { cause: options.cause } : undefined)
 +    this.kind = options.kind ?? 'arguments'
++    if (options.reason) Object.defineProperty(this, 'reason', { value: options.reason })
    }
  }
 
  export declare namespace ParseError {
 +  type Kind = 'arguments' | 'config_missing' | 'config_invalid' | 'config_unavailable'
++  type Reason = 'unknown_flag' | 'missing_value'
 +
    /** Options for constructing a ParseError. */
    type Options = {
@@ -2790,6 +2855,8 @@ index 84b0b997a1ccdd02f4a847ee7135805583476224..8e42755fceba8d8a0b6580df277fae02
      message: string
 +    /** Privacy-safe class used to render recovery guidance. */
 +    kind?: Kind | undefined
++    /** Optional argv rejection class, set only at the parser site that detected it. */
++    reason?: Reason | undefined
      /** The underlying cause. */
      cause?: Error | undefined
    }
@@ -3214,7 +3281,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
  export function collectTools(
    commands: Map<string, any>,
 diff --git a/src/Parser.test.ts b/src/Parser.test.ts
-index 1d213851af660eb7dee9dd73f9c4cf24b854ae6d..a07251ac9806963bd046800dc9ffeb18b9bfa9fe 100644
+index 1d213851af660eb7dee9dd73f9c4cf24b854ae6d..00733e4f139e186110f3aec8fa20965dc4e1011f 100644
 --- a/src/Parser.test.ts
 +++ b/src/Parser.test.ts
 @@ -1,4 +1,4 @@
@@ -3223,7 +3290,36 @@ index 1d213851af660eb7dee9dd73f9c4cf24b854ae6d..a07251ac9806963bd046800dc9ffeb18
 
  describe('parse', () => {
    test('returns empty args and options when no schemas', () => {
-@@ -202,6 +202,55 @@ describe('parse', () => {
+@@ -152,6 +152,28 @@ describe('parse', () => {
+     ).toThrow(expect.objectContaining({ name: 'Incur.ParseError' }))
+   })
+
++  test('marks argv rejections with a private non-enumerable reason', () => {
++    const options = z.object({ state: z.string() })
++    const reasonOf = (argv: string[]) => {
++      try {
++        Parser.parse(argv, { options, alias: { state: 's' } })
++      } catch (error) {
++        const envelope = Errors.toErrorEnvelope(error)
++        expect(JSON.stringify(envelope)).not.toContain('reason')
++        expect(Object.keys(error as object)).not.toContain('reason')
++        return Object.getOwnPropertyDescriptor(error, 'reason')?.value
++      }
++      expect.unreachable()
++    }
++    expect(reasonOf(['--unknown'])).toBe('unknown_flag')
++    expect(reasonOf(['--unknown=x'])).toBe('unknown_flag')
++    expect(reasonOf(['--no-unknown'])).toBe('unknown_flag')
++    expect(reasonOf(['-x'])).toBe('unknown_flag')
++    expect(reasonOf(['--state'])).toBe('missing_value')
++    expect(reasonOf(['-s'])).toBe('missing_value')
++    expect(Object.hasOwn(new Errors.ParseError({ message: 'x' }), 'reason')).toBe(false)
++  })
++
+   test('throws ValidationError on missing required positional args', () => {
+     expect(() =>
+       Parser.parse([], {
+@@ -202,6 +224,55 @@ describe('parse', () => {
      }
    })
 
@@ -3280,9 +3376,61 @@ index 1d213851af660eb7dee9dd73f9c4cf24b854ae6d..a07251ac9806963bd046800dc9ffeb18
      const result = Parser.parse(['-vD'], {
        options: z.object({
 diff --git a/src/Parser.ts b/src/Parser.ts
-index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..9f82298748142e416fac20edbbdcea7cc1c0958c 100644
+index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..71b0045e1bb9e13c06367105afdae299dff9e9eb 100644
 --- a/src/Parser.ts
 +++ b/src/Parser.ts
+@@ -24,7 +24,7 @@ export function parse<
+     if (token.startsWith('--no-') && token.length > 5) {
+       // --no-flag negation
+       const name = normalizeOptionName(token.slice(5), optionNames)
+-      if (!name) throw new ParseError({ message: `Unknown flag: ${token}` })
++      if (!name) throw new ParseError({ message: `Unknown flag: ${token}`, reason: 'unknown_flag' })
+       rawArgvOptions[name] = false
+       i++
+     } else if (token.startsWith('--')) {
+@@ -33,13 +33,13 @@ export function parse<
+         // --flag=value
+         const raw = token.slice(2, eqIdx)
+         const name = normalizeOptionName(raw, optionNames)
+-        if (!name) throw new ParseError({ message: `Unknown flag: --${raw}` })
++        if (!name) throw new ParseError({ message: `Unknown flag: --${raw}`, reason: 'unknown_flag' })
+         setOption(rawArgvOptions, name, token.slice(eqIdx + 1), optionsSchema)
+         i++
+       } else {
+         // --flag [value]
+         const name = normalizeOptionName(token.slice(2), optionNames)
+-        if (!name) throw new ParseError({ message: `Unknown flag: ${token}` })
++        if (!name) throw new ParseError({ message: `Unknown flag: ${token}`, reason: 'unknown_flag' })
+         if (isCountOption(name, optionsSchema)) {
+           rawArgvOptions[name] = ((rawArgvOptions[name] as number) ?? 0) + 1
+           i++
+@@ -49,7 +49,7 @@ export function parse<
+         } else {
+           const value = argv[i + 1]
+           if (value === undefined)
+-            throw new ParseError({ message: `Missing value for flag: ${token}` })
++            throw new ParseError({ message: `Missing value for flag: ${token}`, reason: 'missing_value' })
+           setOption(rawArgvOptions, name, value, optionsSchema)
+           i += 2
+         }
+@@ -60,7 +60,7 @@ export function parse<
+       for (let j = 0; j < chars.length; j++) {
+         const short = chars[j]!
+         const name = optionNames.aliasToName.get(short)
+-        if (!name) throw new ParseError({ message: `Unknown flag: -${short}` })
++        if (!name) throw new ParseError({ message: `Unknown flag: -${short}`, reason: 'unknown_flag' })
+         const isLast = j === chars.length - 1
+         if (!isLast) {
+           if (isCountOption(name, optionsSchema)) {
+@@ -79,7 +79,7 @@ export function parse<
+         } else {
+           const value = argv[i + 1]
+           if (value === undefined)
+-            throw new ParseError({ message: `Missing value for flag: -${short}` })
++            throw new ParseError({ message: `Missing value for flag: -${short}`, reason: 'missing_value' })
+           setOption(rawArgvOptions, name, value, optionsSchema)
+           i++
+         }
 @@ -109,7 +109,7 @@ export function parse<
    }
 

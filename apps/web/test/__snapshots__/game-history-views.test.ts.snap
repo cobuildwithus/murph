@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`game history terms > preserves pair history JSON for seat 0 with either capability 1`] = `"{"game":{"endsOn":"2030-01-07","id":"history-game","lengthDays":7,"perfect":false,"previews":[],"result":"won","schedule":{"count":5},"tasks":{"mine":"30 lunges","theirs":"15 min walking"},"stake":{"kind":"prize","item":"  Lunch of your choice  "},"score":{"mine":4,"theirs":3},"startedOn":"2030-01-01"},"person":{"firstName":"Opponent","memberId":"player-1"}}"`;
+
+exports[`game history terms > preserves pair history JSON for seat 1 with either capability 1`] = `"{"game":{"endsOn":"2030-01-07","id":"history-game","lengthDays":7,"perfect":false,"previews":[],"result":"lost","schedule":{"count":5},"tasks":{"mine":"15 min walking","theirs":"30 lunges"},"stake":{"kind":"prize","item":"  Lunch of your choice  "},"score":{"mine":3,"theirs":4},"startedOn":"2030-01-01"},"person":{"firstName":"Challenger","memberId":"player-0"}}"`;

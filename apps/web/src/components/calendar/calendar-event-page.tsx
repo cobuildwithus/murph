@@ -1,9 +1,20 @@
-import Image from "next/image";
+import { MessageCircle } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { CalendarEventV1 } from "@murphai/contracts";
 
-import { presentCalendarEvent } from "@/src/lib/calendar-event";
-import { cn } from "@/src/lib/utils";
+import {
+  LINK_PAGE_GOLD,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageFrame,
+  LinkPageScreen,
+  LinkPageSurface,
+  linkPageHeadline,
+} from "@/src/components/link-page/link-page-shell";
+import {
+  presentCalendarEvent,
+  type CalendarEventPresentation,
+} from "@/src/lib/calendar-event";
 
 import { CalendarHandoff } from "./calendar-handoff";
 
@@ -23,117 +34,106 @@ export function CalendarEventPage({
   const presentation = presentCalendarEvent(event);
 
   return (
-    <main
-      className={cn(
-        "bg-[#f7f3e9] text-[#19231d]",
-        embedded ? "min-h-[680px]" : "min-h-svh",
-      )}
-      data-calendar-link-state="ready"
-    >
-      <div className="mx-auto flex min-h-[inherit] w-full max-w-5xl flex-col px-5 py-7 sm:px-10 sm:py-10 lg:px-14">
-        <CalendarHeader />
-
-        <div className="flex flex-1 flex-col justify-center py-14 sm:py-18">
-          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#315a40]">
-            Calendar invite
+    <CalendarFrame embedded={embedded} state="ready">
+      <LinkPageScreen
+        actions={
+          <CalendarHandoff
+            autoOpen={autoOpen}
+            downloadHref={downloadHref}
+            payload={payload}
+          />
+        }
+        announceDetail={false}
+        detail="Your calendar app will ask you to confirm before anything is added."
+        title={linkPageHeadline(event.title)}
+      >
+        <CalendarSheet presentation={presentation} />
+        <div className="mt-5 flex min-w-0 flex-col items-center gap-0.5 text-center">
+          <p className="text-[18px] font-semibold leading-6">
+            {presentation.timeLabel}{" "}
+            <span className="text-base font-medium leading-[22px] text-[#FFFCF6]/60">
+              {presentation.timeZoneLabel}
+            </span>
           </p>
-          <h1 className="mt-5 max-w-3xl font-serif text-5xl font-medium leading-[0.95] tracking-[-0.045em] text-balance [overflow-wrap:anywhere] sm:text-7xl lg:text-8xl">
-            {event.title}
-          </h1>
-
-          <div className="mt-10 grid border-y border-[#d8d1c5] sm:grid-cols-[112px_1fr]">
-            <div className="flex flex-row items-baseline gap-2 border-b border-[#d8d1c5] py-5 sm:flex-col sm:items-center sm:justify-center sm:gap-0 sm:border-r sm:border-b-0 sm:pr-6">
-              <span className="text-[11px] font-bold tracking-[0.12em] text-[#8d443b]">
-                {presentation.month}
-              </span>
-              <strong className="font-serif text-4xl font-medium leading-none">
-                {presentation.day}
-              </strong>
-            </div>
-            <dl className="grid min-w-0 gap-3 py-5 sm:pl-7">
-              <EventFact label="Date" value={presentation.dateLabel} />
-              <EventFact
-                label="Time"
-                value={`${presentation.startsLabel}–${presentation.endsLabel}`}
-              />
-              <EventFact label="Zone" value={presentation.timeZoneLabel} />
-              {event.location ? (
-                <EventFact label="Where" value={event.location} />
-              ) : null}
-            </dl>
-          </div>
-
+          {event.location ? (
+            <p className="w-full text-base font-medium leading-[22px] text-[#FFFCF6]/60 [overflow-wrap:anywhere]">
+              {event.location}
+            </p>
+          ) : null}
           {event.notes ? (
-            <div className="mt-6 max-w-2xl">
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#667168]">
-                Notes
-              </p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#4e5b52] [overflow-wrap:anywhere]">
-                {event.notes}
-              </p>
-            </div>
+            <p className="w-full whitespace-pre-wrap text-base font-medium leading-[22px] text-[#FFFCF6]/60 [overflow-wrap:anywhere]">
+              {event.notes}
+            </p>
           ) : null}
         </div>
-
-        <CalendarHandoff
-          autoOpen={autoOpen}
-          downloadHref={downloadHref}
-          payload={payload}
-        />
-      </div>
-    </main>
+      </LinkPageScreen>
+    </CalendarFrame>
   );
 }
 
 export function CalendarLinkUnavailable({ embedded = false }: { embedded?: boolean }) {
   return (
-    <main
-      className={cn(
-        "bg-[#f7f3e9] text-[#19231d]",
-        embedded ? "min-h-[520px]" : "min-h-svh",
-      )}
-      data-calendar-link-state="unavailable"
-    >
-      <div className="mx-auto flex min-h-[inherit] w-full max-w-5xl flex-col px-5 py-7 sm:px-10 sm:py-10 lg:px-14">
-        <CalendarHeader />
-        <div className="my-auto max-w-3xl py-16">
-          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8d443b]">
-            Calendar link unavailable
-          </p>
-          <h1 className="mt-5 font-serif text-5xl font-medium leading-[0.95] tracking-[-0.045em] text-balance sm:text-7xl">
-            This invite can’t be opened.
-          </h1>
-          <p className="mt-6 max-w-lg text-sm leading-6 text-[#667168]">
-            The link may be incomplete. Return to your conversation and ask
-            Murph to make a fresh calendar link.
-          </p>
-        </div>
+    <CalendarFrame embedded={embedded} state="unavailable">
+      <LinkPageScreen
+        actions={
+          // Messages has no deep link into a chat from here, so this can only
+          // open the app itself.
+          <a className={LINK_PAGE_PILL_CLASS} href="sms:">
+            <MessageCircle aria-hidden="true" className="size-5" />
+            Open Messages
+          </a>
+        }
+        detail="The link may be incomplete. Ask Murph to make a fresh calendar link."
+        title="This invite can’t be opened."
+      />
+    </CalendarFrame>
+  );
+}
+
+function CalendarFrame({
+  children,
+  embedded,
+  state,
+}: {
+  children: ReactNode;
+  embedded: boolean;
+  state: "ready" | "unavailable";
+}) {
+  const Frame = embedded ? LinkPageSurface : LinkPageFrame;
+
+  return (
+    <Frame>
+      <div className="flex flex-1 flex-col" data-calendar-link-state={state}>
+        {children}
       </div>
-    </main>
+    </Frame>
   );
 }
 
-function CalendarHeader() {
+/** A page off a wall calendar: the object on an invite to one day. */
+function CalendarSheet({
+  presentation,
+}: {
+  presentation: CalendarEventPresentation;
+}) {
   return (
-    <header className="flex items-center justify-between gap-5">
-      <Image alt="Murph" height={25} priority src="/logo.svg" width={112} />
-      <p className="flex items-center gap-2 text-[11px] text-[#667168]">
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-[#315a40]" />
-        Nothing is added yet
-      </p>
-    </header>
-  );
-}
-
-function EventFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid min-w-0 grid-cols-[62px_minmax(0,1fr)] items-baseline gap-3">
-      <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#667168]">
-        {label}
-      </dt>
-      <dd className="min-w-0 text-sm font-semibold text-[#19231d] [overflow-wrap:anywhere]">
-        {value}
-      </dd>
+    <div
+      aria-label={presentation.dateLabel}
+      className="mx-auto flex w-[188px] shrink-0 flex-col items-center overflow-hidden rounded-[18px] bg-[#FFFCF6]"
+      role="img"
+    >
+      <span
+        className="flex h-10 w-full items-center justify-center font-mono text-[13px] uppercase leading-[18px] tracking-[0.22em] text-[#3B2A12]"
+        style={{ background: LINK_PAGE_GOLD }}
+      >
+        {presentation.month}
+      </span>
+      <span className="pt-2 font-serif text-[92px] font-semibold leading-[100px] tracking-[-0.03em] text-[#2D3436]">
+        {presentation.day}
+      </span>
+      <span className="pb-4 text-[15px] font-semibold leading-5 text-[#736A58]">
+        {presentation.weekday}
+      </span>
     </div>
   );
 }

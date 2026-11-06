@@ -17,7 +17,7 @@ Success criteria:
 
 ## Constraints
 
-- Preserve unrelated dirty Murph Age, hosted-local dashboard, MinIO, README, and
+- Preserve unrelated dirty hosted-local dashboard, MinIO, README, and
   ledger edits.
 - Do not delete legacy runner state columns/projections before the documented
   compatibility window.

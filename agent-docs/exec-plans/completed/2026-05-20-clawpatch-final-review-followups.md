@@ -17,7 +17,7 @@ Fix the final issues found by the four review subagents after the medium Clawpat
 
 ## Constraints
 
-- Preserve unrelated dirty hosted-runner, hosted snapshot, web, hosted-execution, and Murph Age work.
+- Preserve unrelated dirty hosted-runner, hosted snapshot, web, hosted-execution work.
 - Do not add new dependencies.
 - Avoid hidden build coupling and broad special cases.
 - Keep package entrypoints public and composable.

@@ -18,14 +18,7 @@ export type {
 } from "./web-artifacts.ts";
 
 const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
-  "biomarker.overview",
-  "biomarker.research",
-  "biomarker.shell",
   "goal.page",
-  "experiment.protocol",
-  "experiment.research",
-  "experiment.results-public",
-  "experiment.shell",
 ];
 
 let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
@@ -48,10 +41,6 @@ export function getGeneratedHealthCommonsWebRouteIndex(
 
   cachedGeneratedWebRouteIndex ??= loadGeneratedHealthCommonsWebRouteIndex();
   return cachedGeneratedWebRouteIndex;
-}
-
-export function normalizeHealthCommonsWebRouteId(value: string): string {
-  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "").toLowerCase();
 }
 
 function assertGeneratedWebRouteIndex(
@@ -107,14 +96,6 @@ function parseJsonObject(raw: string): unknown {
     throw new Error("Health Commons generated artifact must be a JSON object.");
   }
   return parsed;
-}
-
-function safeDecodeURIComponent(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

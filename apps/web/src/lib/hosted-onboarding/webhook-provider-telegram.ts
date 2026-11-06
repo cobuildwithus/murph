@@ -15,6 +15,7 @@ import {
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  lockAndReadHostedTelegramUpdateOwnerIdsTx,
   type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
@@ -138,7 +139,18 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
-  if (summary.isDirect) {
+  const directAdmission = await readHostedDirectTelegramAdmissionTx({
+    eventId,
+    isDirect: summary.isDirect,
+    preparedRouting: input.preparedDirectTelegramRouting,
+    prisma: input.prisma,
+    senderTelegramUserId,
+  });
+  if (directAdmission === "fenced") {
+    return buildIgnoredTelegramWebhookPlan("telegram-update-already-admitted");
+  }
+
+  if (directAdmission === "fresh") {
     const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
       prisma: input.prisma,
       text: telegramMessage.text ?? null,
@@ -301,16 +313,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : undefined;
   if (
     preparedDirectAuthority
-    && (
-      preparedDirectAuthority.telegramUserId !== summary.senderTelegramUserId
-      || preparedDirectAuthority.telegramThreadId !== telegramMessage.threadId
-      || preparedDirectAuthority.senderResolution !== existingMemberLookup.status
-      || preparedDirectAuthority.memberId !== (
-        existingMemberLookup.status === "found"
-          ? existingMemberLookup.core.id
-          : null
-      )
-    )
+    && isHostedDirectTelegramPreparationStale({
+      lookup: existingMemberLookup,
+      preparation: preparedDirectAuthority,
+      telegramThreadId: telegramMessage.threadId,
+      telegramUserId: summary.senderTelegramUserId,
+    })
   ) {
     throw hostedDirectTelegramPreparationRequired("sender_route");
   }
@@ -370,30 +378,16 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
   }
 
-  if (
-    preparedDirectAuthority
-    && preparedDirectAuthority.preparedControlRoot
-  ) {
-    // Domain-root lifecycle code takes this authority lock before member rows.
-    // Preserve that global order, then hold both locks through route decrypt and
-    // rewrite so a control-root rotation cannot invalidate the prepared cache.
+  // Member before root, like activation and Starter enrollment. Hold both
+  // through route decrypt and rewrite so a control-root rotation cannot
+  // invalidate the prepared cache.
+  await lockHostedMemberRow(input.prisma, existingMember.id);
+  if (preparedDirectAuthority?.preparedControlRoot) {
     await revalidatePreparedDirectTelegramControlRootTx({
       memberId: existingMember.id,
       prepared: preparedDirectAuthority.preparedControlRoot,
       tx: input.prisma,
     });
-    if (!(await tryLockPreparedDirectTelegramMemberRowTx({
-      memberId: existingMember.id,
-      tx: input.prisma,
-    }))) {
-      // Activation and Starter enrollment lock the member before this
-      // authority lock. Never wait here while holding the reciprocal lock:
-      // the outer preparation retry rolls back, releases it, and starts from
-      // a fresh member/access snapshot.
-      throw hostedDirectTelegramPreparationRequired("sender_route");
-    }
-  } else {
-    await lockHostedMemberRow(input.prisma, existingMember.id);
   }
   const lockedMemberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
@@ -696,10 +690,60 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         : "wake-appended-active-group",
     },
     wakeHandoffs: [{
+      conversationIsGroup: !summary.isDirect,
       eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: runtimeMemberId,
       wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
     }],
   };
+}
+
+/**
+ * An admitted DM keeps its first owner even after the Telegram identity moves.
+ * Decide before any fresh effect can reinterpret the replay. Only that same
+ * owner continues, because the ordinary append returns its existing pointer. A
+ * family preparation cannot continue once the family branch is skipped.
+ */
+async function readHostedDirectTelegramAdmissionTx(input: {
+  eventId: string;
+  isDirect: boolean;
+  preparedRouting: HostedDirectTelegramRoutingPreparation | undefined;
+  prisma: Prisma.TransactionClient;
+  senderTelegramUserId: string;
+}): Promise<"fenced" | "fresh" | "not_direct" | "replay"> {
+  if (!input.isDirect) {
+    return "not_direct";
+  }
+  const ownerIds = await lockAndReadHostedTelegramUpdateOwnerIdsTx({
+    eventId: input.eventId,
+    tx: input.prisma,
+  });
+  if (ownerIds.length === 0) {
+    return "fresh";
+  }
+  const sender = await resolveHostedMemberCoreByTelegramUserId({
+    prisma: input.prisma,
+    telegramUserId: input.senderTelegramUserId,
+  });
+  return ownerIds.length === 1
+    && sender.status === "found"
+    && sender.core.id === ownerIds[0]
+    && input.preparedRouting?.kind !== "family"
+    ? "replay"
+    : "fenced";
+}
+
+function isHostedDirectTelegramPreparationStale(input: {
+  lookup: Awaited<ReturnType<typeof resolveHostedMemberCoreByTelegramUserId>>;
+  preparation: HostedDirectTelegramMemberRoutingPreparation;
+  telegramThreadId: string;
+  telegramUserId: string;
+}): boolean {
+  return input.preparation.telegramUserId !== input.telegramUserId
+    || input.preparation.telegramThreadId !== input.telegramThreadId
+    || input.preparation.senderResolution !== input.lookup.status
+    || input.preparation.memberId !== (
+      input.lookup.status === "found" ? input.lookup.core.id : null
+    );
 }
 
 async function revalidatePreparedDirectTelegramRouteTx(input: {
@@ -745,19 +789,6 @@ async function revalidatePreparedDirectTelegramRouteTx(input: {
   ) {
     throw hostedDirectTelegramPreparationRequired("sender_route");
   }
-}
-
-async function tryLockPreparedDirectTelegramMemberRowTx(input: {
-  memberId: string;
-  tx: Pick<Prisma.TransactionClient, "$queryRaw">;
-}): Promise<boolean> {
-  const rows = await input.tx.$queryRaw<Array<{ id: string }>>`
-    SELECT "id"
-    FROM "hosted_member"
-    WHERE "id" = ${input.memberId}
-    FOR UPDATE SKIP LOCKED
-  `;
-  return rows.length > 0;
 }
 
 async function revalidatePreparedDirectTelegramControlRootTx(input: {

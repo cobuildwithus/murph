@@ -1,3 +1,4 @@
+import { assertHostedConversationalControlAction } from "./events/game-chat-bootstrap.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
@@ -55,6 +56,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
       };
     },
     async request(request, context) {
+      assertHostedConversationalControlAction(request.action);
       const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
         context
           ? input.groupToolPort.request(forwardedRequest, context)
@@ -68,10 +70,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
       }
       if (request.action === "read_shared") {
-        const sharedReadRequest = {
-          action: request.action,
-          projectionScopes: request.projectionScopes,
-        };
+        const sharedReadRequest = buildSharedReadContextRequest(request, emailIngressPresent);
         // Hosted email reply aliases authenticate a route, not the human From
         // header, so email ingress never carries sender evidence.
         const senderHandles = emailIngressPresent
@@ -330,12 +329,17 @@ type HostedGroupEmailRestrictedRequest = Exclude<
   }
 >;
 
-function buildHostedGroupJournalActionUnavailable(
+function buildHostedGroupSimpleActionUnavailable(
   request: Extract<
     HostedGroupEmailRestrictedRequest,
     {
       action:
         | "prepare_email"
+        | "game_chat_bootstrap"
+        | "read_game"
+        | "update_game"
+        | "game_photo"
+        | "write_recap"
         | "record_current_sender_journal_fact"
         | "set_current_sender_journal_capture"
         | "set_journal_capture";
@@ -343,6 +347,10 @@ function buildHostedGroupJournalActionUnavailable(
   >,
   unavailableReason: "authenticated_sender_required",
 ): HostedRuntimeGroupToolResponse {
+  if (request.action === "game_chat_bootstrap") return { action: request.action, result: { status: "unavailable" } };
+  if (request.action === "read_game" || request.action === "update_game" || request.action === "game_photo" || request.action === "write_recap") {
+    return { action: request.action, result: { status: "unavailable", error: unavailableReason } };
+  }
   return {
     action: request.action,
     result: { status: "unavailable", unavailableReason },
@@ -421,7 +429,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         },
       };
     default:
-      return buildHostedGroupJournalActionUnavailable(
+      return buildHostedGroupSimpleActionUnavailable(
         request,
         unavailableReason,
       );
@@ -605,4 +613,20 @@ function normalizeHostedGroupToolLinqService(
   return normalized === "imessage" || normalized === "sms"
     ? normalized
     : null;
+}
+
+/** Retain only shared-read inputs; email route aliases cannot request sync effects. */
+function buildSharedReadContextRequest(
+  request: Extract<HostedRuntimeGroupToolRequest, { action: "read_shared" }>,
+  emailIngressPresent: boolean,
+): Extract<HostedRuntimeGroupToolRequest, { action: "read_shared" }> {
+  return {
+    action: "read_shared",
+    projectionScopes: request.projectionScopes,
+    ...(request.participantId ? { participantId: request.participantId } : {}),
+    ...(request.history ? { history: request.history } : {}),
+    ...(!emailIngressPresent && request.freshness !== undefined
+      ? { freshness: request.freshness }
+      : {}),
+  };
 }

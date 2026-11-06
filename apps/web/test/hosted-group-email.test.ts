@@ -5,6 +5,11 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
 } from "@murphai/hosted-execution/runtime-control";
 
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+} from "@murphai/hosted-execution/vault-share";
+
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -178,7 +183,7 @@ describe("hosted group email authorization", () => {
     },
   );
 
-  it("admits exactly the authorized-share maximum plus the email grant", async () => {
+  it("admits all 99 canonical non-email scopes plus the email grant through prepare and recipient recheck", async () => {
     const memberId = "member_share_boundary";
     const shares = buildGroupEmailShareSnapshot(
       memberId,
@@ -188,6 +193,9 @@ describe("hosted group email authorization", () => {
     prisma.hostedVaultShare.findMany.mockResolvedValue(shares);
     mocks.getPrisma.mockReturnValue(prisma);
 
+    expect(HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX).toBe(99);
+    expect(shares).toHaveLength(100);
+    expect(new Set(shares.map((share) => share.projectionScopeKey)).size).toBe(100);
     const prepared = await prepareHostedGroupEmail({
       runtimeMemberId: "group_runtime_member",
     });
@@ -832,11 +840,14 @@ function buildGroupEmailShareSnapshot(
     buildGroupEmailGrant(memberId),
     ...Array.from({ length: authorizedShareCount }, (_, index) => {
       const suffix = String(index).padStart(3, "0");
+      const scope = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
+        .filter((scope) => scope.projectionKind !== "group-email.v0")[index];
       return {
         grantorMemberId: memberId,
         id: `share_authorized_${suffix}`,
-        projectionKind: "steps-days.v0",
-        projectionScopeKey: `authorized-share-${suffix}`,
+        projectionKind: scope?.projectionKind ?? "steps-days.v0",
+        projectionScopeKey: scope ? buildHostedVaultShareProjectionScopeKey(scope)
+          : `overflow-share-${suffix}`,
       };
     }),
   ];

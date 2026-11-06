@@ -1,10 +1,8 @@
 import {
   assistantWebPersonalityPreferencesSchema,
   assistantWebPersonalitySettingIds,
-  isAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
-  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -36,7 +34,6 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 
 const ASSISTANT_STYLE_REQUEST_BODY_LIMIT_BYTES = 1_024;
 const ASSISTANT_STYLE_REQUEST_FIELDS = new Set([
-  "persona",
   "personality",
   "tone",
   "voice",
@@ -108,9 +105,6 @@ function parseAssistantStyleRequestBody(
     }
   }
 
-  const persona = body.persona === undefined
-    ? undefined
-    : parseAssistantPersona(body.persona);
   const personality = body.personality === undefined
     ? undefined
     : parseAssistantPersonality(body.personality);
@@ -123,43 +117,32 @@ function parseAssistantStyleRequestBody(
 
   if (
     personality !== undefined
-    && (persona !== undefined || tone !== undefined || voice !== undefined)
+    && (tone !== undefined || voice !== undefined)
   ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_STYLE_MIXED_UPDATE",
       httpStatus: 400,
-      message: "Update personality separately from persona, tone, and voice.",
+      message: "Update personality separately from tone and voice.",
     });
   }
 
   if (
-    persona === undefined
-    && personality === undefined
+    personality === undefined
     && tone === undefined
     && voice === undefined
   ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_STYLE_EMPTY_UPDATE",
       httpStatus: 400,
-      message: "Choose a persona, tone, voice, or personality setting before continuing.",
+      message: "Choose a tone, voice, or personality setting before continuing.",
     });
   }
 
   return {
-    ...(persona === undefined ? {} : { persona }),
     ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
-}
-
-function parseAssistantPersona(value: unknown): AssistantPersonaId {
-  if (isAssistantPersonaId(value)) return value;
-  throw hostedOnboardingError({
-    code: "ASSISTANT_STYLE_INVALID_PERSONA",
-    httpStatus: 400,
-    message: "Choose a valid Murph persona.",
-  });
 }
 
 function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferences {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseAssistantSessionRecord } from '../src/assistant-cli-contracts.js'
+import {
+  assistantModelTargetSchema,
+  assistantPersistedSessionSchema,
+  parseAssistantSessionRecord,
+} from '../src/assistant-cli-contracts.js'
 
 const providerSessionId = '00000000-0000-4000-8000-000000000123'
 const codexRolloutRelativePath =
@@ -230,5 +234,92 @@ describe('assistant session resume state normalization', () => {
 
     expect(session.codexResume).toBeNull()
     expect(session.resumeState).toBeNull()
+  })
+})
+
+
+describe('OpenAI-only persisted conversation migration', () => {
+  const retiredTargets = [
+    { modelProvider: 'venice', oss: false },
+    { modelProvider: 'hosted-custom-inference', oss: false },
+    { modelProvider: 'vercel-ai-gateway', oss: false },
+    { modelProvider: 'venice-local-test', oss: false },
+    { modelProvider: 'ollama', oss: true },
+    { modelProvider: null, oss: true },
+  ]
+
+  for (const version of ['v1', 'v2'] as const) {
+    it.each(retiredTargets)(
+      `preserves ${version} conversation identity while retiring $modelProvider / oss=$oss`,
+      (retiredTarget) => {
+        const original = createPersistedSessionRecord({
+          alias: 'saved-conversation',
+          lastTurnAt: '2026-04-12T00:04:00.000Z',
+          turnCount: 7,
+        })
+        const target = {
+          ...original.target,
+          ...retiredTarget,
+          model: 'retired-model',
+          profile: 'retired-profile',
+        }
+        const resume = {
+          routeFingerprint: 'old-provider-route',
+          threadCompatibilityFingerprint: 'old-provider-compatibility',
+          threadId: providerSessionId,
+          rolloutRelativePath: codexRolloutRelativePath,
+        }
+        const { sessionId, target: _target, resumeState: _resume, ...fields } = original
+        const v2 = {
+          ...fields,
+          schema: 'murph.assistant-conversation.v2',
+          conversationId: sessionId,
+          codexTarget: target,
+          codexResume: resume,
+        }
+        const session = parseAssistantSessionRecord(version === 'v1'
+          ? { ...original, target, resumeState: resume }
+          : v2)
+
+        expect(session).toMatchObject({
+          schema: 'murph.assistant-conversation.v2',
+          conversationId: original.sessionId,
+          sessionId: original.sessionId,
+          alias: original.alias,
+          binding: original.binding,
+          createdAt: original.createdAt,
+          updatedAt: original.updatedAt,
+          lastTurnAt: original.lastTurnAt,
+          turnCount: original.turnCount,
+          codexTarget: { model: null, modelProvider: 'openai', oss: false, profile: null },
+          target: { model: null, modelProvider: 'openai', oss: false, profile: null },
+          codexResume: null,
+          resumeState: null,
+          providerOptions: { model: null, modelProvider: 'openai', oss: false, profile: null },
+        })
+        expect(assistantModelTargetSchema.safeParse(target).success).toBe(false)
+        expect(assistantPersistedSessionSchema.safeParse(v2).success).toBe(false)
+        const migrated = {
+          ...v2,
+          codexTarget: session.codexTarget,
+          codexResume: session.codexResume,
+        }
+        expect(assistantPersistedSessionSchema.safeParse(migrated).success).toBe(true)
+        expect(parseAssistantSessionRecord(migrated)).toEqual(session)
+      },
+    )
+  }
+
+  it('still rejects malformed persisted conversation fields', () => {
+    const record = createPersistedSessionRecord()
+    expect(() => parseAssistantSessionRecord({
+      ...record,
+      target: { ...record.target, modelProvider: 'venice' },
+      turnCount: -1,
+    })).toThrow()
+    expect(() => parseAssistantSessionRecord({
+      ...record,
+      target: { ...record.target, adapter: 'unsupported-provider' },
+    })).toThrow()
   })
 })

@@ -105,7 +105,7 @@ test("opens one picker dialog with every channel row and closes on selection", a
     assert.ok(telegramLink);
     assert.equal(
       telegramLink.getAttribute("href"),
-      "https://t.me/withmurph_bot?text=Done+with+the+browser+task.",
+      "https://t.me/withmurph_bot?text=Done%20with%20the%20browser%20task.",
     );
     assert.match(telegramLink.textContent ?? "", /Telegram/);
     assert.equal(
@@ -144,7 +144,7 @@ test("renders a single resolved channel as a direct link without a picker", asyn
     );
     const directLink = rendered.container.querySelector("a");
     assert.ok(directLink);
-    assert.match(directLink.textContent ?? "", /Reply to Murph/);
+    assert.match(directLink.textContent ?? "", /Open Messages/);
     assert.equal(
       directLink.getAttribute("href"),
       "sms:+15555550100?body=Done%20with%20the%20browser%20task.",
@@ -168,7 +168,7 @@ function textReplyOption() {
 
 function telegramReplyOption() {
   return {
-    href: "https://t.me/withmurph_bot?text=Done+with+the+browser+task.",
+    href: "https://t.me/withmurph_bot?text=Done%20with%20the%20browser%20task.",
     kind: "telegram" as const,
     label: "Telegram",
     rel: "noopener noreferrer",

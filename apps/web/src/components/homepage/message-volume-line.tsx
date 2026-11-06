@@ -48,11 +48,3 @@ export function MessageVolumeCount({
 
   return <>{formatMessageVolume(total)}</>;
 }
-
-export function MessageVolumeLine() {
-  return (
-    <>
-      <MessageVolumeCount /> messages and counting
-    </>
-  );
-}

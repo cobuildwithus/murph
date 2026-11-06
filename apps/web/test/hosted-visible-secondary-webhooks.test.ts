@@ -1,4 +1,4 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberEmailAuthorizationLookup } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -12,9 +12,7 @@ import {
 } from "@/src/lib/hosted-onboarding/telegram";
 import {
   resolveHostedLinqVisibleSecondaryReply,
-  resolveHostedPublicGoalTelegramResumeUrl,
   resolveHostedTelegramVisibleSecondaryReply,
-  resolvePublicMurphTelegramBotUrl,
   type HostedOnboardingLinqWebhookHandler,
   type HostedOnboardingTelegramWebhookHandler,
   type HostedVisibleSecondaryLinqDependencies,
@@ -24,6 +22,71 @@ import {
 } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 
 describe("visible secondary webhook outcomes", () => {
+  it.each(["sms", "SMS", " sMs "])("skips setup reminders over %s without claiming the daily allowance", async (service) => {
+    const fixture = buildSignupReminderFixture(undefined, service);
+    for (const occurredAt of ["2026-07-25T12:00:00.000Z", "2026-07-26T12:00:00.000Z"]) {
+      await expect(fixture.receive("evt_sms_reminder", occurredAt))
+        .resolves.toEqual({ ignored: true, ok: true, reason: "signup-link-already-sent" });
+    }
+    expect(fixture.send).not.toHaveBeenCalled();
+    expect(fixture.updateDailyState).not.toHaveBeenCalled();
+  });
+
+  it.each(["iMessage", "RCS"])("sends one %s setup reminder per member per UTC day, including concurrent inbounds and webhook retries", async (service) => {
+    const fixture = buildSignupReminderFixture(undefined, service);
+    const first = await fixture.receive("evt_reminder_first", "2026-07-25T23:59:00.000Z");
+    expect(first).toMatchObject({ ignored: false, reason: "visible-secondary-reply:signup-link-already-sent" });
+    const repeats = await Promise.all([
+      fixture.receive("evt_reminder_first", "2026-07-25T23:59:00.000Z"),
+      fixture.receive("evt_reminder_second", "2026-07-25T23:59:01.000Z"),
+      fixture.receive("evt_reminder_third", "2026-07-25T23:59:02.000Z"),
+    ]);
+    for (const response of repeats) {
+      expect(response).toMatchObject({ ignored: true, reason: "signup-link-reminder-already-sent" });
+    }
+    expect(fixture.send).toHaveBeenCalledTimes(1);
+
+    // The planner still yields the reminder only after a link was sent that day.
+    const nextDay = await Promise.all([
+      fixture.receive("evt_reminder_next_day", "2026-07-26T00:00:00.000Z"),
+      fixture.receive("evt_reminder_next_day_race", "2026-07-26T00:00:00.000Z"),
+    ]);
+    expect(nextDay.filter((response) => !response.ignored)).toHaveLength(1);
+    expect(fixture.send).toHaveBeenCalledTimes(2);
+    expect(fixture.send.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+      "signup-link-reminder:member_reminder:2026-07-25",
+      "signup-link-reminder:member_reminder:2026-07-26",
+    ]);
+    expect(fixture.send).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_visible_operational",
+      message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
+    }));
+  });
+
+  it("releases a failed setup reminder claim and retries with the same daily provider key", async () => {
+    const fixture = buildSignupReminderFixture();
+    fixture.send.mockRejectedValueOnce(new Error("synthetic send failure"));
+    await expect(fixture.receive("evt_failed", "2026-07-25T12:00:00.000Z"))
+      .rejects.toThrow("synthetic send failure");
+    await expect(fixture.receive("evt_retry", "2026-07-25T12:01:00.000Z"))
+      .resolves.toMatchObject({ ignored: false });
+    expect(fixture.send).toHaveBeenCalledTimes(2);
+    expect(fixture.send.mock.calls[0][0].idempotencyKey)
+      .toBe(fixture.send.mock.calls[1][0].idempotencyKey);
+    expect(fixture.send.mock.calls[0][0]).toEqual(fixture.send.mock.calls[1][0]);
+    await fixture.receive("evt_after_retry", "2026-07-25T12:02:00.000Z");
+    expect(fixture.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays quiet when the reminder member or daily row disappeared", async () => {
+    for (const missing of ["member", "day"] as const) {
+      const fixture = buildSignupReminderFixture(missing);
+      await expect(fixture.receive("evt_missing", "2026-07-25T12:00:00.000Z"))
+        .resolves.toMatchObject({ ignored: true });
+      expect(fixture.send).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     ["stripe-effect-pending", "Billing is already changing"],
     ["family-invite-not-accepted", "Family invite"],
@@ -236,38 +299,6 @@ describe("visible secondary webhook outcomes", () => {
     })).toBeNull();
   });
 
-  it("restores only an exact published public-goal prompt", async () => {
-    const startPrompt = "Hey Murph, help me improve my deep sleep.";
-    const resumeUrl = await resolveHostedPublicGoalTelegramResumeUrl({
-      botUrl: "https://t.me/withmurph_bot?start=discard_me",
-      inboundText: startPrompt,
-    });
-
-    expect(resumeUrl).not.toBeNull();
-    expect(new URL(resumeUrl ?? "https://invalid.example").searchParams.get("text"))
-      .toBe(startPrompt);
-    expect(new URL(resumeUrl ?? "https://invalid.example").searchParams.has("start"))
-      .toBe(false);
-    await expect(resolveHostedPublicGoalTelegramResumeUrl({
-      botUrl: "https://t.me/withmurph_bot",
-      inboundText: "Here are private details that are not a public goal prompt.",
-    })).resolves.toBeNull();
-  });
-
-  it("uses the same Telegram bot precedence as the public Goal CTA", () => {
-    expect(resolvePublicMurphTelegramBotUrl({
-      MURPH_TELEGRAM_USERNAME_OVERRIDE: "@murph_preview_bot",
-      TELEGRAM_BOT_USERNAME: "murph_legacy_bot",
-    })).toBe("https://t.me/murph_preview_bot");
-    expect(resolvePublicMurphTelegramBotUrl({
-      MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
-      TELEGRAM_BOT_USERNAME: "murph_legacy_bot",
-    })).toBe("https://t.me/murph_legacy_bot");
-    expect(resolvePublicMurphTelegramBotUrl({})).toBe(
-      "https://t.me/withmurph_bot",
-    );
-  });
-
   it("maps a Family draft conflict to the exact invite recovery URL", () => {
     expect(resolveHostedTelegramVisibleSecondaryReply({
       familyInviteCode: "invite_visible_recovery",
@@ -320,7 +351,7 @@ describe("visible secondary webhook outcomes", () => {
     }));
   });
 
-  it("keeps a failed Telegram Stripe-pending reply retryable", async () => {
+  it("terminalizes an ambiguous Telegram Stripe-pending reply", async () => {
     const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
       message: {
         chat: { id: 42, type: "private" },
@@ -340,6 +371,7 @@ describe("visible secondary webhook outcomes", () => {
     }));
 
     await expect(withHostedVisibleSecondaryTelegramOutcomes(handler, {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -347,7 +379,7 @@ describe("visible secondary webhook outcomes", () => {
     })({
       rawBody: JSON.stringify(update),
       secretToken: "secret",
-    })).rejects.toBe(sendError);
+    })).resolves.toMatchObject({ ignored: false, reason: "visible-secondary-reply:stripe-effect-pending" });
     expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Billing is already changing. Try again shortly.",
@@ -356,7 +388,7 @@ describe("visible secondary webhook outcomes", () => {
     );
   });
 
-  it("turns a repeated Linq signup message into an idempotent reply", async () => {
+  it("turns a repeated iMessage signup message into an idempotent reply", async () => {
     const event = requireHostedLinqMessageReceivedEvent({
       api_version: "v3",
       created_at: "2026-07-25T12:00:00.000Z",
@@ -368,7 +400,7 @@ describe("visible secondary webhook outcomes", () => {
             handle: "+15550000000",
             id: "handle_owner",
             is_me: true,
-            service: "sms",
+            service: "iMessage",
           },
         },
         direction: "inbound",
@@ -378,16 +410,16 @@ describe("visible secondary webhook outcomes", () => {
           handle: "+15550000000",
           id: "handle_recipient",
           is_me: true,
-          service: "sms",
+          service: "iMessage",
         },
         recipient_phone: "+15550000000",
         sender_handle: {
           handle: "+15551234567",
           id: "handle_sender",
-          service: "sms",
+          service: "iMessage",
         },
         sent_at: "2026-07-25T12:00:00.000Z",
-        service: "sms",
+        service: "iMessage",
       },
       event_id: "evt_visible_signup",
       event_type: "message.received",
@@ -403,9 +435,13 @@ describe("visible secondary webhook outcomes", () => {
       reason: "signup-link-already-sent",
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({
+        hostedLinqDailyState: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
-      lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
+      lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => ({
+        core: { id: "member_reminder", suspendedAt: null },
+      }) as never),
       parseHostedLinqWebhookEvent: vi.fn(() => event),
       sendHostedLinqChatMessage,
     };
@@ -425,16 +461,16 @@ describe("visible secondary webhook outcomes", () => {
     });
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_visible_signup",
-      idempotencyKey: "visible-secondary:evt_visible_signup",
+      idempotencyKey: "signup-link-reminder:member_reminder:2026-07-25",
       message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
-      replyToMessageId: "msg_visible_signup",
+      replyToMessageId: null,
     }));
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalledWith(expect.objectContaining({
       message: expect.stringContaining("above"),
     }));
   });
 
-  it("gives an unlinked public-goal sender a signup path and restores the exact prompt", async () => {
+  it("gives an unlinked sender a signup path without copying their message into a link", async () => {
     const startPrompt = "Hey Murph, help me improve my deep sleep.";
     const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
       message: {
@@ -463,9 +499,9 @@ describe("visible secondary webhook outcomes", () => {
       reason: "unlinked-telegram",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
-      resolveMurphTelegramBotUrl: vi.fn(() => "https://t.me/withmurph_bot"),
       sendHostedTelegramTextMessage,
       summarizeHostedTelegramWebhook,
     };
@@ -483,15 +519,13 @@ describe("visible secondary webhook outcomes", () => {
       reason: "visible-secondary-reply:unlinked-telegram",
     });
     expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringMatching(/choose Telegram: https:\/\/withmurph\.ai\/.*restored goal message: https:\/\/t\.me\/withmurph_bot\?text=/s),
+      message: expect.stringMatching(/choose Telegram: https:\/\/withmurph\.ai\/.*Then message me again\./s),
       replyToMessageId: 7,
       target: expect.objectContaining({ chatId: "42" }),
     }));
     const sentMessage = sendHostedTelegramTextMessage.mock.calls[0]?.[0]?.message ?? "";
-    const resumeUrl = sentMessage.match(/https:\/\/t\.me\/[^\s]+$/u)?.[0] ?? null;
-    expect(resumeUrl).not.toBeNull();
-    expect(new URL(resumeUrl ?? "https://invalid.example").searchParams.get("text"))
-      .toBe(startPrompt);
+    expect(sentMessage).not.toContain(startPrompt);
+    expect(sentMessage).not.toContain("?text=");
   });
 
   it("gives a relink race repair guidance without a signup URL", async () => {
@@ -526,6 +560,7 @@ describe("visible secondary webhook outcomes", () => {
     const response = await withHostedVisibleSecondaryTelegramOutcomes(
       handler,
       {
+        getPrisma: createTelegramDeliveryPrisma,
         parseHostedTelegramWebhookUpdate: vi.fn(() => update),
         requireHostedOnboardingPublicBaseUrl,
         sendHostedTelegramTextMessage,
@@ -579,6 +614,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "family-invite-draft-recovery-required",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -637,6 +673,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "family-invite-draft-recovery-required",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -677,6 +714,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "family-invite-draft-recovery-required",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -723,6 +761,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "usage-referral-evidence-only",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -745,11 +784,11 @@ describe("visible secondary webhook outcomes", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("leaves unrelated silent outcomes unchanged", async () => {
+  it.each(["own-message", "blocked-first-contact-admission"])("keeps %s silent", async (reason) => {
     const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
       ignored: true,
       ok: true as const,
-      reason: "own-message",
+      reason,
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
       getPrisma: vi.fn(() => ({}) as never),
@@ -766,22 +805,77 @@ describe("visible secondary webhook outcomes", () => {
     })).resolves.toEqual({
       ignored: true,
       ok: true,
-      reason: "own-message",
+      reason,
     });
     expect(dependencies.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 });
 
+function buildSignupReminderFixture(missing?: "member" | "day", service = "iMessage") {
+  const claimedDays = new Set<string>();
+  const prisma = {
+    hostedLinqDailyState: {
+      updateMany: vi.fn(async (input: {
+        where: { dayUtc: Date; memberId: string; signupLinkReminderSentAt: null | { not: null } };
+        data: { signupLinkReminderSentAt: Date | null };
+      }) => {
+        const key = `${input.where.memberId}:${input.where.dayUtc.toISOString()}`;
+        if (missing === "day") return { count: 0 };
+        if (input.data.signupLinkReminderSentAt === null) {
+          return { count: claimedDays.delete(key) ? 1 : 0 };
+        }
+        if (claimedDays.has(key)) return { count: 0 };
+        claimedDays.add(key);
+        return { count: 1 };
+      }),
+    },
+  };
+  const send = vi.fn<HostedVisibleSecondaryLinqDependencies["sendHostedLinqChatMessage"]>()
+    .mockResolvedValue({ chatId: "chat_visible_operational", messageId: "msg_reminder" });
+  const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+    ignored: true,
+    ok: true as const,
+    reason: "signup-link-already-sent",
+  }));
+  const wrapped = withHostedVisibleSecondaryLinqOutcomes(handler, {
+    getPrisma: () => prisma as never,
+    lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
+    lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => missing === "member" ? null : ({
+      core: { id: "member_reminder", suspendedAt: null },
+    }) as never),
+    parseHostedLinqWebhookEvent,
+    sendHostedLinqChatMessage: send,
+  });
+  return {
+    send,
+    updateDailyState: prisma.hostedLinqDailyState.updateMany,
+    receive: (eventId: string, occurredAt: string) => wrapped({
+      rawBody: JSON.stringify(buildOperationalLinqEvent({
+        eventId,
+        messageId: `msg_${eventId}`,
+        messageService: service,
+        occurredAt,
+        senderHandle: "+12025550101",
+        senderService: "sms",
+      })),
+      signature: "signature",
+      timestamp: "timestamp",
+    }),
+  };
+}
+
 function buildOperationalLinqEvent(input: {
   eventId: string;
   isFromMe?: boolean;
   messageId: string;
+  messageService?: string;
+  occurredAt?: string;
   senderHandle: string;
   senderService: "email" | "sms";
 }): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
   return requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
-    created_at: "2026-07-25T12:00:00.000Z",
+    created_at: input.occurredAt ?? "2026-07-25T12:00:00.000Z",
     data: {
       chat: {
         id: "chat_visible_operational",
@@ -809,11 +903,21 @@ function buildOperationalLinqEvent(input: {
         id: "handle_sender",
         service: input.senderService,
       },
-      sent_at: "2026-07-25T12:00:00.000Z",
-      service: "sms",
+      sent_at: input.occurredAt ?? "2026-07-25T12:00:00.000Z",
+      service: input.messageService ?? "sms",
     },
     event_id: input.eventId,
     event_type: "message.received",
     webhook_version: "2026-02-03",
   });
+}
+
+function createTelegramDeliveryPrisma(): PrismaClient {
+  const tx = { hostedLinqDelivery: {
+    findUnique: vi.fn(async () => null), createMany: vi.fn(async () => ({ count: 1 })),
+    updateMany: vi.fn(async () => ({ count: 1 })),
+  } };
+  // Only delivery persistence is needed; incoming targets have no member authority.
+  // @ts-expect-error -- deliberately narrow Prisma fixture for the delivery boundary.
+  return { ...tx, $transaction: async (run: (transaction: typeof tx) => unknown) => run(tx) };
 }

@@ -150,13 +150,7 @@ describe("parseHostedAssistantRuntimeConfig", () => {
           telegramBotConfigured: false,
         },
         deviceSync: {
-          providerConfigs: {
-            strava: {
-              clientId: "strava-client-id",
-              clientSecret: "strava-client-secret",
-              scopes: ["activity:read"],
-            },
-          },
+          providerConfigs: { junction: { environment: "sandbox", region: "us" } },
           publicBaseUrl: "https://device-sync.example.test",
           secret: "codec-secret",
         },
@@ -167,11 +161,7 @@ describe("parseHostedAssistantRuntimeConfig", () => {
       publicBaseUrl: "https://device-sync.example.test",
       secret: "codec-secret",
     });
-    expect(parsed.resolvedConfig?.deviceSync?.providerConfigs.strava).toMatchObject({
-      clientId: "strava-client-id",
-      clientSecret: "strava-client-secret",
-      scopes: ["activity:read"],
-    });
+    expect(parsed.resolvedConfig?.deviceSync?.providerConfigs.junction).toMatchObject({ environment: "sandbox", region: "us" });
   });
 
   it("rejects unknown top-level hosted runtime device-sync fields", () => {
@@ -183,12 +173,7 @@ describe("parseHostedAssistantRuntimeConfig", () => {
             telegramBotConfigured: false,
           },
           deviceSync: {
-            providerConfigs: {
-              strava: {
-                clientId: "strava-client-id",
-                clientSecret: "strava-client-secret",
-              },
-            },
+            providerConfigs: { junction: { environment: "sandbox", region: "us" } },
             publicBaseUrl: "https://device-sync.example.test",
             secret: "codec-secret",
             unexpectedField: "nope",

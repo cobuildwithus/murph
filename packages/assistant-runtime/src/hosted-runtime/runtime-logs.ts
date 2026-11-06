@@ -1,3 +1,4 @@
+import type { AssistantRunEvent } from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   type HostedRuntimeLogEntry,
@@ -7,6 +8,42 @@ import {
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
+
+export function buildHostedAssistantAutomationEventLogDetails(
+  event: AssistantRunEvent,
+  requestId: string | null = null,
+): Record<string, boolean | number | string | null> {
+  return {
+    errorCode: event.errorCode ?? null,
+    failureFieldsPresent: event.failureContext !== undefined,
+    ...prefixHostedAssistantAutomationFailureContext(event.failureContext),
+    inputIdPresent: "inputId" in event ? event.inputId != null : false,
+    providerKind: event.providerKind ?? null,
+    providerState: event.providerState ?? null,
+    requestId,
+    safeDetails: event.safeDetails ?? null,
+    safeErrorLength: event.safeErrorMessage?.length ?? null,
+    safeErrorMessage: event.safeErrorMessage ?? null,
+    safeErrorPresent: event.safeErrorMessage !== undefined,
+    toolCount: event.tools?.length ?? null,
+    type: event.type,
+  };
+}
+
+function prefixHostedAssistantAutomationFailureContext(
+  context: AssistantRunEvent["failureContext"] | undefined,
+): Record<string, boolean | number | string | null> {
+  if (!context) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(context).map(([key, value]) => [
+      `failure${key.charAt(0).toUpperCase()}${key.slice(1)}`,
+      value,
+    ]),
+  );
+}
 
 export interface HostedRuntimeLogContext {
   attemptId?: string | null;

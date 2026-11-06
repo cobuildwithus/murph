@@ -34,7 +34,7 @@ const runNonce = Date.now();
 const memberId = `member_local_computer_handoff_${runNonce}`;
 const computerRunId = `hcr_local_computer_handoff_${runNonce}`;
 const chatId = `chat_local_computer_handoff_${runNonce}`;
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const linqApiToken = "linq-local-computer-handoff-token";
 const firstInboundText = "Pause the synthetic browser task so I can take over.";
 const secondInboundText = "Done. Continue from the handoff.";
@@ -65,7 +65,7 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         KERNEL_API_KEY: "kernel-local-computer-handoff-key",
         KERNEL_BASE_URL: requireKernelStub().baseUrl,
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

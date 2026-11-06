@@ -33,9 +33,6 @@ interface HostedWebWebpackContext {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
-const MURPH_SAFE_HEADER_SOURCE = "/search/:path*";
-const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = ["PRIVY_CUSTOM_AUTH_DOMAIN"] as const;
-const PRIVY_BASE_DOMAIN_ENV_KEYS = ["PRIVY_BASE_DOMAIN"] as const;
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
@@ -43,29 +40,14 @@ const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
 const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY = "DEVICE_SYNC_PUBLIC_BASE_URL";
 const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
-const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
+
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
 const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
 const HOSTED_WEB_PREPARED_TYPECHECK_ENV_KEY = "MURPH_HOSTED_WEB_PREPARED_TYPECHECK";
 const HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE = "complete";
 const WORKFLOW_NEXT_DEFAULT_LOCAL_DATA_DIR = ".next/workflow-data";
 const WORKFLOW_LOCAL_TARGET_WORLD = "local";
-const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
-  "https://auth.privy.io",
-  "https://verify.walletconnect.com",
-  "https://verify.walletconnect.org",
-] as const;
-const PRIVY_REQUIRED_CONNECT_SOURCES = [
-  "https://auth.privy.io",
-  "wss://relay.walletconnect.com",
-  "wss://relay.walletconnect.org",
-  "wss://www.walletlink.org",
-  "https://*.rpc.privy.systems",
-  "https://explorer-api.walletconnect.com",
-] as const;
-const PRIVY_REQUIRED_SCRIPT_SOURCES = [
-  "https://auth.privy.io",
-] as const;
+
 const TELEGRAM_REQUIRED_SCRIPT_SOURCES = [
   "https://telegram.org",
 ] as const;
@@ -73,38 +55,23 @@ const TELEGRAM_REQUIRED_FRAME_SOURCES = [
   "https://oauth.telegram.org",
 ] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
-const BRANDFETCH_API_SOURCES = ["https://api.brandfetch.io"] as const;
-const BRANDFETCH_IMAGE_SOURCES = ["https://cdn.brandfetch.io"] as const;
 // Brand assets that OG and share-card route handlers read from disk at render
 // time through app/font-files.ts. They must be traced into each of those
 // serverless functions or every non-prerendered render 500s with ENOENT.
 // scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
 const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
-  "public/icons/murph-mark.svg",
   "public/logo.svg",
+];
+// The App Review game seed posts these synthetic site images as its opponent's photos.
+const APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES = [
+  "public/design-assets/hero-morning-outdoor-light-exposure.jpeg",
+  "public/design-assets/hero-at-home-static-stretching-latest.jpeg",
+  "public/design-assets/hero-walking-after-every-meal.jpeg",
 ];
 const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
   "public/brand-logos/murph-logo-avatar-*.png",
   "public/murph-headshots/*-sm.png",
-];
-// The package root resolver supports several install layouts. Node file trace
-// conservatively expands that fallback search to every generated Web artifact,
-// so Goal functions must explicitly discard projection families they never read.
-const HEALTH_COMMONS_GOAL_TRACE_EXCLUDES = [
-  "../../packages/health-commons/generated/web/browse/biomarkers.json",
-  "../../packages/health-commons/generated/web/browse/experiments.json",
-  "../../packages/health-commons/generated/web/bundles/**/*.json",
-  "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-  "../../packages/health-commons/generated/web/shell/**/*.json",
-  "../../packages/health-commons/generated/web/tabs/**/*.json",
-];
-const HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES = [
-  "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-  "../../packages/health-commons/generated/web/routes/index.json",
-];
-const HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES = [
-  "../../packages/health-commons/generated/web/browse/goals.json",
 ];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
@@ -116,95 +83,26 @@ const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 export const HOSTED_WEB_NEXT_TSCONFIG_PATH = "./tsconfig.next.json";
 export const HOSTED_WEB_PRODUCTION_BUILD_CPUS = 2;
-export const HOSTED_WEB_WORKFLOW_OPTIONS = {
-  workflows: {
-    lazyDiscovery: true,
-  },
-} satisfies Parameters<typeof withWorkflow>[1];
-
-export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
-  const parsed = parseConfiguredOrigin(value);
-
-  if (!parsed || isLoopbackHostname(parsed.hostname)) {
-    return null;
-  }
-
-  const normalizedHostname = parsed.hostname.startsWith("privy.")
-    ? parsed.hostname
-    : `privy.${parsed.hostname.replace(/^www\./u, "")}`;
-
-  return buildOrigin(parsed.protocol, normalizedHostname, parsed.port);
-}
-
-export function resolveHostedPrivyOrigin(
-  environment: NodeJS.ProcessEnv = process.env,
-): string | null {
-  const configuredCustomOrigin = resolveConfiguredOrigin(readFirstConfiguredValue(environment, PRIVY_CUSTOM_DOMAIN_ENV_KEYS));
-
-  if (configuredCustomOrigin) {
-    return configuredCustomOrigin;
-  }
-
-  const configuredBaseDomainOrigin = resolvePrivyBaseDomainOrigin(
-    readFirstConfiguredValue(environment, PRIVY_BASE_DOMAIN_ENV_KEYS),
-  );
-
-  if (configuredBaseDomainOrigin) {
-    return configuredBaseDomainOrigin;
-  }
-
-  return resolvePrivyBaseDomainOrigin(readHostedPublicOriginFromEnvironment(environment));
-}
-
-export function resolveHostedPrivyOrigins(
-  environment: NodeJS.ProcessEnv = process.env,
-): string[] {
-  const configuredCustomOrigin = resolveConfiguredOrigin(readFirstConfiguredValue(environment, PRIVY_CUSTOM_DOMAIN_ENV_KEYS));
-
-  if (configuredCustomOrigin) {
-    return [configuredCustomOrigin];
-  }
-
-  const configuredBaseDomainOrigin = resolvePrivyBaseDomainOrigin(
-    readFirstConfiguredValue(environment, PRIVY_BASE_DOMAIN_ENV_KEYS),
-  );
-
-  if (configuredBaseDomainOrigin) {
-    return [configuredBaseDomainOrigin];
-  }
-
-  return resolveHostedPrivyFallbackOrigins(readHostedPublicOriginFromEnvironment(environment));
-}
 
 export function buildHostedWebContentSecurityPolicy(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
   const isDevelopment = environment.NODE_ENV === "development";
   const isProduction = environment.NODE_ENV === "production";
-  const privyOrigins = resolveHostedPrivyOrigins(environment);
-  const privyFrameSources = uniqueSources([
-    ...PRIVY_REQUIRED_CHILD_FRAME_SOURCES,
-    ...privyOrigins,
-  ]);
   const frameSources = uniqueSources([
-    ...privyFrameSources,
     ...TELEGRAM_REQUIRED_FRAME_SOURCES,
     ...TURNSTILE_SOURCES,
     ...KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
   ]);
   const connectSources = uniqueSources([
     "'self'",
-    ...PRIVY_REQUIRED_CONNECT_SOURCES,
-    ...privyOrigins,
     ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
     ...STATUS_PAGE_CONNECT_SOURCES,
-    ...BRANDFETCH_API_SOURCES,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([
     "'self'",
     "'unsafe-inline'",
-    ...PRIVY_REQUIRED_SCRIPT_SOURCES,
     ...TELEGRAM_REQUIRED_SCRIPT_SOURCES,
     ...TURNSTILE_SOURCES,
     ...(isDevelopment ? ["'unsafe-eval'", "https://ui.sh"] : []),
@@ -215,7 +113,7 @@ export function buildHostedWebContentSecurityPolicy(
     `script-src ${scriptSources.join(" ")}`,
     "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${BRANDFETCH_IMAGE_SOURCES.join(" ")}`,
+    "img-src 'self' data: blob:",
     "font-src 'self'",
     "manifest-src 'self'",
     "media-src 'self' blob:",
@@ -223,7 +121,7 @@ export function buildHostedWebContentSecurityPolicy(
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    `child-src ${privyFrameSources.join(" ")}`,
+    "child-src 'none'",
     `frame-src ${frameSources.join(" ")}`,
     `connect-src ${connectSources.join(" ")}`,
     "worker-src 'self'",
@@ -265,8 +163,7 @@ export function buildHostedWebSecurityHeaders(
     },
     {
       key: "Permissions-Policy",
-      // The Environment recorder is same-origin and still requires the
-      // browser's explicit per-site permission. Embedded origins stay blocked.
+      // Browser voice calls require same-origin microphone permission.
       value: "camera=(), geolocation=(), microphone=(self)",
     },
   ];
@@ -358,7 +255,9 @@ export function configureHostedWebWorkflowLocalDataDir(
 
   environment[WORKFLOW_LOCAL_DATA_DIR_ENV_KEY] = path.join(
     resolveHostedWebDistDir(phase, environment),
-    "workflow-data",
+    // v4 event logs cannot be replayed by the v5 local runtime. Preserve them
+    // separately rather than recovering old runs with the upgraded SDK.
+    "workflow-data-v5",
   );
 }
 
@@ -391,57 +290,7 @@ export function buildHostedWebNextConfig(
       webpackBuildWorker: true,
       webpackMemoryOptimizations: true,
     },
-    images: {
-      remotePatterns: [
-        {
-          protocol: "https",
-          hostname: "cdn.brandfetch.io",
-          pathname: "/**",
-        },
-      ],
-    },
     outputFileTracingIncludes: {
-      "/experiments": [
-        "../../packages/health-commons/generated/web/browse/experiments.json",
-      ],
-      "/experiments/[experimentId]": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/experiments/[experimentId]/research": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/experiments/[experimentId]/results": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
-      "/goals": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/goals/[goalId]": [
-        "../../packages/health-commons/generated/web/browse/goals.json",
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-      ],
-      "/api/goals/contact": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/api/hosted-onboarding/linq/webhook": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/api/hosted-onboarding/telegram/webhook": [
-        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
-      ],
-      "/biomarkers": [
-        "../../packages/health-commons/generated/web/browse/biomarkers.json",
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-      ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
@@ -449,33 +298,13 @@ export function buildHostedWebNextConfig(
       // Keys are picomatch globs matched with `contains: true` against the
       // route path (route groups stripped), so "/opengraph-image" covers every
       // `opengraph-image` metadata route: the static marketing images and the
-      // dynamic invite/group/biomarker/experiment unfurls that are never
+      // dynamic invite/group/biomarker unfurls that are never
       // prerendered. Share-card route handlers are keyed explicitly.
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
-      "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
+      "/api/ops/app-review-game": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
-    },
-    outputFileTracingExcludes: {
-      "/goals": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-      "/goals/[goalId]": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-      // Next matches trace keys with picomatch `contains: true`. This extglob
-      // matches only the directory landing route, not /goals/[goalId].
-      "/goals!(/**)": HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      "/api/goals/contact": [
-        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      ],
-      "/api/hosted-onboarding/linq/webhook": [
-        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      ],
-      "/api/hosted-onboarding/telegram/webhook": [
-        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
-        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
-      ],
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     // Temporal clients use process-bound transport state. Keep one physical
@@ -494,15 +323,6 @@ export function buildHostedWebNextConfig(
       {
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(environment),
-      },
-      {
-        source: MURPH_SAFE_HEADER_SOURCE,
-        headers: [
-          {
-            key: "Referrer-Policy",
-            value: "no-referrer",
-          },
-        ],
       },
     ],
   };
@@ -588,57 +408,12 @@ async function nextConfig(phase: string): Promise<NextConfig> {
   return buildHostedWebNextConfig(phase);
 }
 
-export const HOSTED_WEB_WORKFLOW_NEXT_CONFIG = withWorkflow(
-  nextConfig,
-  HOSTED_WEB_WORKFLOW_OPTIONS,
-);
+export const HOSTED_WEB_WORKFLOW_NEXT_CONFIG = withWorkflow(nextConfig);
 
 export default HOSTED_WEB_WORKFLOW_NEXT_CONFIG;
 
 function uniqueSources(sources: readonly (string | null | undefined)[]): string[] {
   return [...new Set(sources.filter((value): value is string => Boolean(value)))];
-}
-
-function readFirstConfiguredValue(
-  environment: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = environment[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function resolveConfiguredOrigin(value: string | null | undefined): string | null {
-  const parsed = parseConfiguredOrigin(value);
-
-  if (!parsed) {
-    return null;
-  }
-
-  return buildOrigin(parsed.protocol, parsed.hostname, parsed.port);
-}
-
-function resolveHostedPrivyFallbackOrigins(value: string | null | undefined): string[] {
-  const parsed = parseConfiguredOrigin(value);
-
-  if (!parsed || isLoopbackHostname(parsed.hostname)) {
-    return [];
-  }
-
-  const hostnames = new Set<string>([normalizePrivyHostnameCandidate(parsed.hostname)]);
-  const strippedHostname = stripHostedPublicSubdomainPrefix(parsed.hostname);
-
-  if (strippedHostname) {
-    hostnames.add(normalizePrivyHostnameCandidate(strippedHostname));
-  }
-
-  return [...hostnames].map((hostname) => buildOrigin(parsed.protocol, hostname, parsed.port));
 }
 
 function parseConfiguredOrigin(value: string | null | undefined): URL | null {
@@ -659,71 +434,6 @@ function parseConfiguredOrigin(value: string | null | undefined): URL | null {
   }
 }
 
-function stripHostedPublicSubdomainPrefix(hostname: string): string | null {
-  const labels = hostname.toLowerCase().split(".");
-
-  if (labels.length < 3) {
-    return null;
-  }
-
-  const [firstLabel, ...remainingLabels] = labels;
-
-  if (!HOSTED_PUBLIC_SUBDOMAIN_PREFIXES.includes(firstLabel as typeof HOSTED_PUBLIC_SUBDOMAIN_PREFIXES[number])) {
-    return null;
-  }
-
-  return remainingLabels.join(".");
-}
-
-function normalizePrivyHostnameCandidate(hostname: string): string {
-  const normalizedHostname = hostname.toLowerCase();
-
-  if (normalizedHostname.startsWith("privy.")) {
-    return normalizedHostname;
-  }
-
-  return `privy.${normalizedHostname.replace(/^www\./u, "")}`;
-}
-
-function readHostedPublicOriginFromEnvironment(
-  environment: NodeJS.ProcessEnv,
-): string | null {
-  const baseUrl = readHostedPublicBaseUrlFromEnvironment(environment);
-  return baseUrl ? new URL(baseUrl).origin : null;
-}
-
-function readHostedPublicBaseUrlFromEnvironment(
-  environment: NodeJS.ProcessEnv,
-): string | null {
-  const configuredBaseUrl = readFirstNormalizedBaseUrl(environment, HOSTED_PUBLIC_BASE_URL_ENV_KEYS);
-
-  if (configuredBaseUrl) {
-    return configuredBaseUrl;
-  }
-
-  return normalizeConfiguredBaseUrl(environment[HOSTED_PUBLIC_VERCEL_URL_ENV_KEY], {
-    allowHttpLoopback: true,
-  });
-}
-
-function readFirstNormalizedBaseUrl(
-  environment: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = environment[key];
-
-    const normalized = normalizeConfiguredBaseUrl(value, {
-      allowHttpLoopback: true,
-    });
-
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return null;
-}
 
 function normalizeConfiguredBaseUrl(
   value: string | null | undefined,
@@ -767,9 +477,6 @@ function normalizeConfiguredBaseUrl(
   return parsed.toString().replace(/\/$/u, "");
 }
 
-function buildOrigin(protocol: string, hostname: string, port: string): string {
-  return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
-}
 
 function isLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";

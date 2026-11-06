@@ -15,8 +15,6 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
-  selectBrowserVaultBiomarkerPanel,
-  selectBrowserVaultExperimentResults,
 } from "../src/browser.ts";
 import {
   buildMetricProjection,
@@ -28,6 +26,30 @@ import {
 
 type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
+
+test("reported VO2 aliases become daily Numbers readings while other measurements remain events", async () => {
+  const vault = createVaultReadModel({
+    entities: [createEvent("evt_reported_vo2", "measurement", {
+      occurredAt: "2026-05-02T12:00:00.000Z",
+      attributes: { source: "manual", measurements: [
+        { metric: "vo2-max", value: 52, unit: "ml/kg/min", note: "Member-reported VO2 max from WHOOP" },
+        { metric: "weight", value: 72, unit: "kg" },
+      ] },
+    })],
+    metadata: null, vaultRoot: "browser://vault",
+  });
+  const points = buildMetricProjection(vault).metricPoints;
+  assert.equal(points.find(point => point.metricKey === "estimated-vo2-max")?.grain, "day");
+  assert.equal(points.find(point => point.metricKey === "body-weight")?.grain, "event");
+  const replica = await createBrowserVaultReplica({ vault, metricPoints: points,
+    generatedAt: "2026-05-02T13:00:00.000Z", sourceBundleHash: "f".repeat(64) });
+  const rows = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)).metrics.series({
+    metricKey: "estimated-vo2-max", grain: "day", from: "2026-05-01", to: "2026-05-02",
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.value, 52);
+  assert.equal(rows[0]?.sourceLabel, "Manual");
+});
 
 async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
   return createBrowserVaultReplica({
@@ -477,21 +499,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   const unitlessClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitlessReplica));
   const unitlessSelection = unitlessClient.metricSelections.get("ldl-c");
   const unitlessGoal = unitlessClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
-  const unitlessExperiment = selectBrowserVaultExperimentResults(unitlessClient, "ldl-unit-provenance");
-  const unitlessPanel = selectBrowserVaultBiomarkerPanel({
-    biomarkerKey: "biomarker:ldl-c",
-    client: unitlessClient,
-    label: "LDL-C",
-    metricKey: "ldl-c",
-    trendDefaults: {
-      aggregation: "mean",
-      comparisonWindowDays: 30,
-      latestWindowDays: 30,
-      minimumPoints: 1,
-    },
-    unit: "mg/dL",
-    valuePrecision: 0,
-  });
 
   assert.deepEqual(
     unitlessClient.labResults.list({ metricKey: "ldl-c" }).map((row) => [
@@ -507,14 +514,9 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   assert.equal(unitlessSelection.status, "no_data");
   assert.equal(unitlessSelection.value, null);
   assert.equal(unitlessSelection.selectedMetricRowId, null);
-  assert.equal(unitlessPanel.status, "no_data");
-  assert.equal(unitlessPanel.primary, null);
   assert.ok(unitlessGoal);
   assert.equal(unitlessGoal.status, "unsupported");
   assert.equal(unitlessGoal.currentValue, null);
-  assert.ok(unitlessExperiment);
-  assert.equal(unitlessExperiment.biomarkers[0]?.status, "no_data");
-  assert.equal(unitlessExperiment.biomarkers[0]?.deltaAbs, null);
 
   const unitfulReplica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-08-02T12:00:00.000Z",
@@ -524,7 +526,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   const unitfulClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitfulReplica));
   const unitfulSelection = unitfulClient.metricSelections.get("ldl-c");
   const unitfulGoal = unitfulClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
-  const unitfulExperiment = selectBrowserVaultExperimentResults(unitfulClient, "ldl-unit-provenance");
 
   assert.deepEqual(
     unitfulClient.metrics.series({ metricKey: "ldl-c" }).map((row) => [row.value, row.unit]),
@@ -534,7 +535,6 @@ test("unitless catalog labs stay raw and cannot drive metric consumers", async (
   assert.equal(unitfulSelection?.value, 120);
   assert.equal(unitfulGoal?.status, "met");
   assert.equal(unitfulGoal?.currentValue, 120);
-  assert.equal(unitfulExperiment?.biomarkers[0]?.deltaAbs, -20);
 });
 
 test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {
@@ -1095,7 +1095,7 @@ test("query projection rebuild stores shared event and wearable metric points in
           source_kind AS sourceKind,
           source_record_id AS sourceRecordId,
           metric_point_json AS metricPointJson
-        FROM query_metric_points
+        FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
         ORDER BY metric_key ASC
       `).all() as Array<{
         biomarkerKey: string | null;

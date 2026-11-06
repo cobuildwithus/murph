@@ -1,3 +1,4 @@
+import { buildTrustedHostedImageCompletionTurnContext } from '../src/assistant/automation/reply.js'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -32,6 +33,24 @@ function completionEnvelope(value: unknown): string {
 }
 
 describe('hosted image completion', () => {
+  it('composes subscription recovery without card-only guidance or retry authority', () => {
+    const completion = readCompletion(renderAssistantHostedImageCompletionSystemText({
+      originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      originAssistantInputIdExact: true,
+      result: { media: null, runtimeIssue: null, savedImageRef: null,
+        failureDiagnostic: 'ASSISTANT_IMAGE_SUBSCRIPTION_REQUIRED: Image generation requires a subscription.' },
+    }))
+    expect(completion?.status).toBe('failed')
+    const context = buildTrustedHostedImageCompletionTurnContext([{
+      inputId: `ain_${'c'.repeat(32)}`, trustedHostedImageCompletion: completion,
+    }])
+    expect(context).toContain('start Pulse or, if eligible, Group')
+    expect(context).toContain('https://www.withmurph.ai/settings#subscription')
+    expect(context).toContain('Do not call `murph.generate_image` during this completion turn')
+    expect(context).toContain('do not offer card-only setup, promise no charge, start checkout automatically')
+    expect(context).not.toMatch(/Saving a card does not|requires a saved card|Add a card at/iu)
+  })
+
   it('binds the saved image to its originating accepted input', () => {
     const text = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId: `ain_${'a'.repeat(32)}`,

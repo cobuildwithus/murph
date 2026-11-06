@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:improve-blood-sugar-control
 slug: improve-blood-sugar-control
-title: Improve My Blood Sugar Control
-summary: Create steadier, safer glucose patterns with meals, movement, medication, sleep, and monitoring that answers real questions.
+title: Track My Blood Sugar
+summary: Organize blood sugar readings alongside meals, activity, and your existing monitoring plan.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: improve my blood sugar control
+  goalPhrase: track my blood sugar
   successSignals:
     - id: glucose_pattern
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me improve my blood sugar control.
+  startPrompt: Hey Murph, help me track my blood sugar.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -88,4 +88,4 @@ Severe low glucose, confusion, fainting, vomiting, ketones, or deep rapid breath
 
 ## Related goals
 
-[Lower My A1C](/goals/lower-a1c) · [Prevent Type 2 Diabetes](/goals/prevent-type-2-diabetes) · [Improve My Insulin Sensitivity](/goals/improve-insulin-sensitivity)
+[Understand My A1C](/goals/lower-a1c) · [Understand Type 2 Diabetes Prevention](/goals/prevent-type-2-diabetes) · [Understand Insulin Sensitivity](/goals/improve-insulin-sensitivity)

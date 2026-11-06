@@ -4,8 +4,9 @@ import { HOSTED_STANDARD_CHECKOUT_OFFER } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 
 /**
- * Product-access predicates. `billingStatus=active` means the member can use
- * Murph directly; the capacity owner can be starter usage or a paid plan.
+ * AI/runtime entitlement predicates. `billingStatus=active` enables direct
+ * access subject to usage; the capacity owner can be Starter or a paid plan.
+ * Lapsed humans retain product access through member-access.ts's product guard.
  * Sponsored Family/thread access is deliberately derived by member-access.ts.
  */
 export type HostedOwnAccessInput = {

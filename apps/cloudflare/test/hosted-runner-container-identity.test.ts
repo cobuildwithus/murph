@@ -1,29 +1,23 @@
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
-  HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedWorkspaceInvocationRequest } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantModelOverride,
-  type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
-import type {
-  HostedAssistantCustomInferenceOverride,
-} from "@murphai/hosted-execution/assistant-inference";
 import {
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
-import {
-  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
-} from "@murphai/hosted-execution/contracts";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -41,51 +35,29 @@ import type {
 } from "../src/runner-container.js";
 import {
   createHostedRunnerContainerNamespaceRouter,
-  HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
   HOSTED_STANDBY_REGION,
-  readHostedRunnerTargetIdentity,
-  type HostedRunnerRegion,
-  type HostedStandbyClaimRequest,
-  type HostedStandbyClaimResult,
-  type HostedStandbyCoordinatorNamespaceLike,
-  type HostedStandbyCoordinatorStubLike,
   type HostedStandbyRunnerContainerNamespaceLike,
   type HostedStandbyRunnerContainerStubLike,
-  type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.js";
-import {
-  buildHostedRunnerJobRuntimeConfig,
-} from "../src/runner-env.js";
-import {
-  HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
-  type HostedExecutionWorkspaceInvocationJobInput,
-} from "../src/runner-job-transport.js";
+
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
+
 import {
   RunnerSecretsService,
 } from "../src/user-runner/runner-secrets.js";
 import {
-  RunnerStateStore,
   type RunnerWriteFenceToken,
-} from "../src/user-runner/runner-state-store.js";
+} from "../src/runtime-invocation-token.ts";
 import {
-  RuntimeInvocationService,
-  type PreparedRuntimeInvocation,
-} from "../src/user-runner/runtime-invocation.js";
-import {
-  RuntimeProcessingController,
-} from "../src/user-runner/runtime-processing-controller.js";
-import {
-  openHostedInferenceRuntimeTarget,
-} from "../src/hosted-inference-target-envelope.js";
+  RuntimeInvocationPreparation,
+} from "../src/runtime-invocation-preparation.js";
+
+import { HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-injected-credential.ts";
 import {
   RunnerStoreCache,
   type RunnerUserStores,
 } from "../src/user-runner/runner-store-cache.js";
-import type {
-  DurableObjectStateLike,
-  DurableObjectStorageLike,
-} from "../src/user-runner/types.js";
+
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.js";
@@ -115,154 +87,9 @@ vi.mock("@murphai/hosted-execution", async () => {
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
-  it("keeps a ready runner when the distributed claim exceeds the former 250ms budget", async () => {
-    const stateStore = new RunnerStateStore(createRunnerDurableState().state);
-    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const standby = createAllocatingStandbyHarness({ slotName, stateStore, bindDelayMs: 100 });
-    const invocationService = new RecordingRuntimeInvocationService();
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService,
-      runnerContainerNamespace: standby.namespace,
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      },
-      standbyCoordinatorNamespace: {
-        getByName() {
-          return {
-            async claimReadyStandby() {
-              await new Promise((resolve) => setTimeout(resolve, 350));
-              return { outcome: "claimed", slotName } as const;
-            },
-            async ensureReadyStandby() { return { accepted: true } as const; },
-          };
-        },
-      },
-      stateStore,
-    });
-    await expect(controller.ensureForUser({
-      userId: TEST_USER_ID,
-      orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
-      orchestration: { triggeredByWebDirect: true },
-    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
-    const diagnostics = invocationService.invokedInputs[0]?.orchestration;
-    expect(diagnostics).toMatchObject({
-      standbyAllocationOutcome: "claimed",
-      standbyAllocationReason: "bind_completed",
-      runnerTargetReconcileElapsedMs: 0,
-    });
-    expect(diagnostics?.standbyClaimElapsedMs).toBeGreaterThanOrEqual(349);
-    expect(diagnostics?.runnerTargetBindElapsedMs).toBeGreaterThanOrEqual(99);
-    expect(standby.bindStandbySlot).toHaveBeenCalledOnce();
-    await expect(stateStore.readWriteFenceToken()).resolves.toMatchObject({ runnerContainerName: slotName });
-  });
-
-  it.each([
-    { name: "balanced reads", bindingReadMs: 100, secretReadMs: 100, recoverBindReply: false },
-    { name: "slow binding read", bindingReadMs: 180, secretReadMs: 40, recoverBindReply: false },
-    { name: "recovered bind reply", bindingReadMs: 100, secretReadMs: 40, recoverBindReply: true },
-  ])("measures the fresh standby handoff with delayed allocation and preparation reads ($name)", async ({ bindingReadMs, secretReadMs, recoverBindReply }) => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const standby = createAllocatingStandbyHarness({ slotName, stateStore, bindDelayMs: recoverBindReply ? 10 : 100, readDelayMs: bindingReadMs });
-    if (recoverBindReply) {
-      const bind = vi.mocked(standby.namespace.getByName(slotName).bindStandbySlot).getMockImplementation();
-      if (!bind) throw new Error("Expected synthetic binding implementation.");
-      standby.bindStandbySlot.mockImplementationOnce(async (input) => {
-        await bind(input);
-        throw new Error("Synthetic bind response lost after commit.");
-      });
-    }
-    const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: standby.namespace, standby: null });
-    if (!namespace) throw new Error("Expected synthetic runner namespace.");
-    const source = {
-      CF_VERSION_METADATA: { id: "release_1" },
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
-      OPENAI_API_KEY: "test-openai-key",
-    };
-    const stores = await new TestRunnerStoreCache(source).ensure(TEST_USER_ID);
-    const spans: Record<string, number> = {};
-    const startedAt = performance.now();
-    const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-    vi.spyOn(EmptyRunnerSecretsService.prototype, "readRunnerSecrets").mockImplementation(async () => {
-      await delay(secretReadMs);
-      return {};
-    });
-    vi.spyOn(TestRunnerStoreCache.prototype, "ensure").mockImplementation(async () => {
-      spans.cryptoStarted = performance.now() - startedAt;
-      await delay(300);
-      spans.cryptoFinished = performance.now() - startedAt;
-      return stores;
-    });
-    const service = createRuntimeInvocationService({
-      beforeWorkspaceRead: async () => {
-        spans.workspaceStarted = performance.now() - startedAt;
-        await delay(200);
-        spans.workspaceFinished = performance.now() - startedAt;
-      },
-      invokedContainerNames: [],
-      runnerContainerNamespace: namespace,
-      runnerRuntimeEnvSource: source,
-      state: durable.state,
-      stateStore,
-    });
-    const invoke = vi.spyOn(service, "invokePreparedWithFence").mockResolvedValue({ status: "idle", nextWakeAt: null });
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService: service,
-      runnerContainerNamespace: namespace,
-      runnerRuntimeEnvSource: source,
-      stateStore,
-      standbyCoordinatorNamespace: {
-        getByName() {
-          return {
-            async claimReadyStandby() {
-              spans.claimStarted = performance.now() - startedAt;
-              await delay(recoverBindReply ? 10 : 100);
-              spans.claimFinished = performance.now() - startedAt;
-              return { outcome: "claimed", slotName };
-            },
-            async ensureReadyStandby() { return { accepted: true }; },
-          };
-        },
-      },
-    });
-    const result = await controller.ensureForUser({
-      userId: TEST_USER_ID,
-      orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
-      orchestration: { triggeredByWebDirect: true },
-    });
-    const elapsedMs = Math.round(performance.now() - startedAt);
-    expect(result.kind).toBe("runtime_processing_accepted");
-    expect(standby.bindStandbySlot).toHaveBeenCalledOnce();
-    expect(standby.readStandbySlotBinding).toHaveBeenCalledTimes(recoverBindReply ? 1 : 0);
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(invoke.mock.calls[0]?.[0].prepared.input.orchestration).toMatchObject({
-      standbyAllocationOutcome: "claimed",
-      runtimeInvocationOrchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
-      triggeredByWebDirect: true,
-      workspaceReadElapsedMs: expect.any(Number),
-      runtimeStoreEnsureElapsedMs: expect.any(Number),
-    });
-    console.info("synthetic-standby-handoff", JSON.stringify({ elapsedMs, spans }));
-    expect(spans.workspaceStarted).toBeLessThan(spans.claimFinished!);
-    expect(spans.cryptoStarted).toBeLessThan(spans.workspaceFinished!);
-    expect(spans.cryptoStarted).toBeLessThan(spans.claimFinished!);
-  });
 
   it("loads workspace metadata and runtime crypto concurrently before fenced preparation", async () => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
+    const stateStore = createPreparationOwnerFixture();
     const token = await stateStore.beginWriteFence({
       runnerContainerName: TEST_USER_ID,
       userId: TEST_USER_ID,
@@ -276,7 +103,7 @@ describe("hosted runner container identity", () => {
       await cryptoGate.promise;
       return originalEnsure.call(this, userId);
     });
-    const service = createRuntimeInvocationService({
+    const service = createRuntimeInvocationPreparation({
       beforeWorkspaceRead: async () => {
         started.push("workspace");
         await workspaceGate.promise;
@@ -284,14 +111,12 @@ describe("hosted runner container identity", () => {
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
-      state: durable.state,
       stateStore,
     });
     const prepared = service.prepareWithFence({
-      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID },
+      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID, voiceCallId: "call-synthetic" },
       token,
     });
     try {
@@ -300,92 +125,15 @@ describe("hosted runner container identity", () => {
     } finally {
       workspaceGate.resolve();
       cryptoGate.resolve();
-      await prepared;
+      expect((await prepared).job.request.voiceCallId).toBe("call-synthetic");
     }
     expect(started).toHaveLength(2);
-  });
-
-  it.each([
-    ["foreign member", { userId: "member_other" }],
-    ["invalid claim", { claimId: "invalid-claim" }],
-    ["wrong release", { releaseId: "release_other" }],
-    ["wrong region", { region: HOSTED_STANDBY_REGION }],
-    ["wrong slot", { slotName: "runner--v-release_1--11111111111111111111111111111111" }],
-    ["retired", { state: "retired", claimId: null, userId: null }],
-  ] as const)("rejects a same-request binding receipt with %s", async (_name, altered) => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    await stateStore.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: TEST_USER_ID });
-    const token = await stateStore.beginWriteFence({ runnerContainerName: slotName, userId: TEST_USER_ID });
-    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
-    const service = createRuntimeInvocationService({
-      invokedContainerNames: [],
-      runnerContainerNamespace: standby.namespace,
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
-        OPENAI_API_KEY: "test-openai-key",
-      },
-      state: durable.state, stateStore,
-    });
-    const consume = service.prepareForFreshStart({
-      input: { orchestrationAttemptId: "invalid-binding-receipt", userId: TEST_USER_ID },
-    });
-    const verifiedSlotBinding = {
-      claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
-      releaseId: "release_1", region: readHostedRunnerTargetIdentity(slotName)!.region,
-      slotName, state: "bound" as const, userId: TEST_USER_ID,
-      ...altered,
-    };
-    await expect(consume(token, verifiedSlotBinding)).rejects.toThrow("Hosted standby slot binding did not match the runtime invocation user.");
-    expect(standby.readStandbySlotBinding).not.toHaveBeenCalled();
-  });
-
-  it("verifies the bound slot while runner secrets are still loading", async () => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
-    await stateStore.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: TEST_USER_ID });
-    await standby.namespace.getByName(slotName).bindStandbySlot({
-      claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
-      releaseId: "release_1", region: readHostedRunnerTargetIdentity(slotName)!.region,
-      slotName, userId: TEST_USER_ID,
-    });
-    const token = await stateStore.beginWriteFence({ runnerContainerName: slotName, userId: TEST_USER_ID });
-    const secretsGate = createVoidGate();
-    const readSecrets = vi.spyOn(EmptyRunnerSecretsService.prototype, "readRunnerSecrets")
-      .mockImplementation(async () => { await secretsGate.promise; return {}; });
-    const service = createRuntimeInvocationService({
-      invokedContainerNames: [],
-      runnerContainerNamespace: standby.namespace,
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
-        OPENAI_API_KEY: "test-openai-key",
-      },
-      state: durable.state, stateStore,
-    });
-    const prepared = service.prepareWithFence({
-      input: { orchestrationAttemptId: "parallel-binding", userId: TEST_USER_ID }, token,
-    });
-    try {
-      await vi.waitFor(() => expect(readSecrets).toHaveBeenCalledOnce(), { timeout: 250 });
-      expect(standby.readStandbySlotBinding).toHaveBeenCalledOnce();
-    } finally {
-      secretsGate.resolve();
-      await prepared;
-    }
   });
 
   it.each(["workspace failure", "crypto failure", "foreign crypto", "expired budget"] as const)(
     "rejects early preparation on %s without binding invocation facts",
     async (scenario) => {
-      const durable = createRunnerDurableState();
-      const stateStore = new RunnerStateStore(durable.state);
+        const stateStore = createPreparationOwnerFixture();
       const token = await stateStore.beginWriteFence({
         runnerContainerName: TEST_USER_ID,
         userId: TEST_USER_ID,
@@ -397,15 +145,14 @@ describe("hosted runner container identity", () => {
       });
       const budget = { deadlineAtMs: Date.now() + 1_000 };
       const invokedContainerNames: string[] = [];
-      const service = createRuntimeInvocationService({
+      const service = createRuntimeInvocationPreparation({
         beforeWorkspaceRead: async () => {
           if (scenario === "workspace failure") throw new Error("Synthetic workspace unavailable.");
           if (scenario === "expired budget") budget.deadlineAtMs = Date.now() - 1;
         },
         invokedContainerNames,
         runnerRuntimeEnvSource: {},
-        state: durable.state,
-        stateStore,
+          stateStore,
       });
       const consume = service.prepareForFreshStart({
         commandBudget: budget,
@@ -422,56 +169,6 @@ describe("hosted runner container identity", () => {
       expect(invokedContainerNames).toEqual([]);
     },
   );
-
-  it("observes unused preparation failure when allocation cannot prove its binding", async () => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
-    standby.bindStandbySlot.mockRejectedValue(new Error("Synthetic bind unavailable."));
-    standby.readStandbySlotBinding.mockRejectedValue(new Error("Synthetic binding unavailable."));
-    const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: standby.namespace, standby: null });
-    const source = { CF_VERSION_METADATA: { id: "release_1" }, HOSTED_EXECUTION_STANDBY_MODE: "allocate" };
-    const beforeWorkspaceRead = vi.fn(async () => { throw new Error("Synthetic unused read failure."); });
-    const service = createRuntimeInvocationService({
-      beforeWorkspaceRead,
-      invokedContainerNames: [],
-      runnerRuntimeEnvSource: source,
-      state: durable.state,
-      stateStore,
-    });
-    const invoke = vi.spyOn(service, "invokePreparedWithFence");
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService: service,
-      runnerContainerNamespace: namespace,
-      runnerRuntimeEnvSource: source,
-      stateStore,
-      standbyCoordinatorNamespace: {
-        getByName() {
-          return {
-            async claimReadyStandby() { return { outcome: "claimed", slotName }; },
-            async ensureReadyStandby() { return { accepted: true }; },
-          };
-        },
-      },
-    });
-    const result = await controller.ensureForUser({
-      userId: TEST_USER_ID,
-      orchestrationAttemptId: "allocation-failure",
-      orchestration: { triggeredByWebDirect: true },
-    });
-    expect(result.kind).toBe("retry_later");
-    expect(beforeWorkspaceRead).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(await stateStore.readWriteFenceToken()).toBeNull();
-    const pending = (await stateStore.readState()).pendingRunnerContainerName;
-    expect(pending).toBe(standby.bindStandbySlot.mock.calls.at(-1)?.[0].slotName);
-    expect(pending).toMatch(/^runner--v-release_1--/);
-  });
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -554,174 +251,30 @@ describe("hosted runner container identity", () => {
     })).toBeNull();
   });
 
-  it("stores one opaque release-scoped runner target in both preparation and the write fence", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const invocationService = new RecordingRuntimeInvocationService();
-    const readyContainerNames: string[] = [];
-    const runnerRuntimeEnvSource = {
-      CF_VERSION_METADATA: {
-        id: "worker_version-current",
-      },
-    };
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService,
-      runnerContainerNamespace: createRunnerContainerNamespace({
-        readyContainerNames,
-      }),
-      runnerRuntimeEnvSource,
-      stateStore,
-    });
-
-    const response = await controller.ensureForUser({
-      orchestrationAttemptId: "orchestration_attempt_1",
-      userId: TEST_USER_ID,
-    });
-    expect(response).toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
-    if (response.kind !== "runtime_processing_accepted") {
-      throw new Error("Expected runtime processing acceptance.");
-    }
-
-    const expectedRunnerContainerName = invocationService.prepareTokens[0]?.runnerContainerName;
-    expect(expectedRunnerContainerName).toMatch(/^runner--v-worker_version-current--[a-f0-9]{32}$/u);
-    expect(expectedRunnerContainerName).not.toContain(TEST_USER_ID);
-    expect(invocationService.prepareTokens).toHaveLength(1);
-    expect(readyContainerNames).toEqual([expectedRunnerContainerName]);
-    await expect(stateStore.readWriteFenceToken()).resolves.toEqual(
-      expect.objectContaining({
-        runnerContainerName: expectedRunnerContainerName,
-        userId: TEST_USER_ID,
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          orchestrationAttemptId: "orchestration_attempt_1",
-          standbyAllocationElapsedMs: expect.any(Number),
-          standbyAllocationOutcome: "disabled",
-          standbyAllocationReason: "mode_not_allocate",
-          workspaceAttemptId: response.runtimeAttemptId,
-        }),
-        message: "Hosted runner runtime processing accepted.",
-      }),
-    );
-  });
-
-  it("rejects a noncanonical member before allocating or starting a runner", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const invocationService = new RecordingRuntimeInvocationService();
-    const readyContainerNames: string[] = [];
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService,
-      runnerContainerNamespace: createRunnerContainerNamespace({
-        readyContainerNames,
-      }),
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: {
-          id: "version_1",
-        },
-      },
-      stateStore,
-    });
-
-    await expect(controller.ensureForUser({
-      orchestrationAttemptId: "orchestration_attempt_1",
-      userId: " member_123 ",
-    })).rejects.toThrow(
-      "Hosted runner runtime user id must be canonical.",
-    );
-
-    expect(invocationService.prepareTokens).toHaveLength(0);
-    expect(readyContainerNames).toEqual([]);
-    await expect(stateStore.readWriteFenceToken()).resolves.toBeNull();
-  });
-
-  it("uses the write-fence token's stored runner container name for runtime invocation", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const invokedContainerNames: string[] = [];
-    const runnerRuntimeEnvSource = {
-      CF_VERSION_METADATA: {
-        id: "version_1",
-      },
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        "provider-egress-signing-secret",
-      OPENAI_API_KEY: "test-openai-key",
-    };
-    const service = createRuntimeInvocationService({
-      invokedContainerNames,
-      runnerRuntimeEnvSource,
-      stateStore,
-      state: durable.state,
-    });
-    const token = await stateStore.beginWriteFence({
-      runnerContainerName: "member_123--v-version_1",
-      userId: TEST_USER_ID,
-    });
-
-    const prepared = await service.prepareWithFence({
-      input: {
-        orchestrationAttemptId: "orchestration_attempt_1",
-        userId: TEST_USER_ID,
-      },
-      token,
-    });
-    expect(prepared.runnerContainerName).toBe("member_123--v-version_1");
-
-    await expect(service.invokePreparedWithFence({
-      acceptedProcessingAttempt: false,
-      prepared,
-      runtimeWakeStartedAt: Date.now(),
-    })).resolves.toMatchObject({
-      status: "idle",
-    });
-
-    expect(invokedContainerNames).toEqual(["member_123--v-version_1"]);
-  });
-
   it.each([
     {
       expectedModel: HOSTED_ASSISTANT_LUNA_MODEL,
-      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
       name: "applies the saved Luna choice",
     },
     {
-      expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
-      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      expectedModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       name: "applies the saved Sol choice",
     },
     {
-      expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
+      expectedModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       fleetModel: "gpt-5.6-luna",
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       name: "applies the saved Sol choice independently of the platform default",
     },
     {
-      expectedModel: HOSTED_ASSISTANT_TERRA_MODEL,
-      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      expectedModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       hostedAssistantModelOverride: null,
-      name: "preserves Terra without an override",
+      name: "keeps the default model without an override",
     },
   ] as const)("$name", async ({
     expectedModel,
@@ -730,9 +283,8 @@ describe("hosted runner container identity", () => {
   }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const service = createRuntimeInvocationService({
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
       ...(hostedAssistantModelOverride
         ? { hostedAssistantModelOverride }
         : {}),
@@ -743,12 +295,9 @@ describe("hosted runner container identity", () => {
         },
         HOSTED_ASSISTANT_MODEL: fleetModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -777,20 +326,16 @@ describe("hosted runner container identity", () => {
   }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const service = createRuntimeInvocationService({
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
       hostedAssistantSubagentModelOverridesAllowed: projected,
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -812,29 +357,62 @@ describe("hosted runner container identity", () => {
     ).toBe(expected);
   });
 
-  it("applies Venice per member while retaining a scoped OpenAI tool credential", async () => {
+  it.each([
+    { list: " hbm_testOther0002, , hbm_testAllowlisted0001 ,", userId: "hbm_testAllowlisted0001", expected: "1" },
+    { list: "hbm_testOther0002,hbm_testAllowlisted0001", userId: "hbm_testNotListed0003", expected: undefined },
+    { list: "hbm_testAllowlisted0001suffix", userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: "hbm_testallowlisted0001", userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: undefined, userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: "", userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: " , , ", userId: "hbm_testAllowlisted0001", expected: undefined },
+  ])("derives the native sleep flag from exact Worker membership: $list / $userId", async ({ list, userId, expected }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-openai-key",
+        MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: list,
+        // An ambient flag must never enable members outside the Worker list.
+        [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: "1",
+      },
+      stateStore,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: `${userId}--v-version_1`,
+      userId,
+    });
+    const prepared = await service.prepareWithFence({
+      input: { orchestrationAttemptId: "orchestration_attempt_sleep_card", userId },
+      token,
+    });
+
+    expect(prepared.job.runtime?.forwardedEnv?.[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]).toBe(expected);
+    const payload = JSON.stringify(prepared.job);
+    expect(payload).not.toContain("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+    expect(payload).not.toContain("hbm_testOther0002");
+    if (list?.trim()) expect(payload).not.toContain(list);
+  });
+
+  it("forwards an OpenAI sentinel while keeping the Worker credential private", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const stateStore = createPreparationOwnerFixture();
     const sourceOpenAiKey = "test-openai-key";
-    const sourceVeniceKey = "test-venice-key";
-    const service = createRuntimeInvocationService({
-      hostedAssistantProviderOverride: "venice",
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: {
           id: "version_1",
         },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: sourceOpenAiKey,
-        VENICE_API_KEY: sourceVeniceKey,
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -843,41 +421,75 @@ describe("hosted runner container identity", () => {
 
     const prepared = await service.prepareWithFence({
       input: {
-        orchestrationAttemptId: "orchestration_attempt_provider_override",
+        orchestrationAttemptId: "orchestration_attempt_openai",
         userId: TEST_USER_ID,
       },
       token,
     });
     const forwardedEnv = prepared.job.runtime?.forwardedEnv;
 
-    expect(forwardedEnv?.HOSTED_ASSISTANT_PROVIDER).toBe("venice");
-    expect(forwardedEnv?.OPENAI_API_KEY).toEqual(expect.any(String));
+    expect(forwardedEnv?.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(forwardedEnv?.OPENAI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(forwardedEnv?.OPENAI_API_KEY).not.toBe(sourceOpenAiKey);
-    expect(forwardedEnv?.VENICE_API_KEY).toEqual(expect.any(String));
-    expect(forwardedEnv?.VENICE_API_KEY).not.toBe(sourceVeniceKey);
+  });
+
+  it.each([false, true])("preserves first-day priority through invocation parsing (existing workspace: %s)", async (existing) => {
+    const stateStore = createPreparationOwnerFixture();
+    const workspace = existing ? {
+      createdAt: FIXED_NOW,
+      snapshotRef: null,
+      updatedAt: FIXED_NOW,
+      userId: TEST_USER_ID,
+      version: "0",
+    } : null;
+    const beforeWorkspaceRead = vi.fn(async () => {});
+    for (const hostedAssistantPriorityUntil of ["2026-06-04T00:00:00.000Z", undefined]) {
+      const service = createRuntimeInvocationPreparation({
+        beforeWorkspaceRead,
+        hostedAssistantPriorityUntil,
+        invokedContainerNames: [],
+        runnerRuntimeEnvSource: {
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          OPENAI_API_KEY: "test-openai-key",
+        },
+        stateStore,
+        workspace,
+      });
+      const token = await stateStore.beginWriteFence({
+        runnerContainerName: TEST_USER_ID,
+        userId: TEST_USER_ID,
+      });
+      const prepared = await service.prepareWithFence({
+        input: { orchestrationAttemptId: "priority-prefetch", userId: TEST_USER_ID },
+        token,
+      });
+      const request = parseHostedWorkspaceInvocationRequest(JSON.parse(JSON.stringify(prepared.job.request)));
+      expect(request.hostedAssistantPriorityUntil).toBe(hostedAssistantPriorityUntil);
+      if (workspace) expect(request.workspace).toMatchObject(workspace);
+      else expect(request.workspace).toBeNull();
+      expect(Object.hasOwn(request, "workspace")).toBe(true);
+      expect(prepared.job.runtime?.forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_PRIORITY_UNTIL");
+    }
+    expect(beforeWorkspaceRead).toHaveBeenCalledTimes(2);
   });
 
   it("projects the saved reasoning effort into the next runtime invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const service = createRuntimeInvocationService({
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
       hostedAssistantReasoningEffortOverride: "xhigh",
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: {
           id: "version_1",
         },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -897,144 +509,20 @@ describe("hosted runner container identity", () => {
     ).toBe("xhigh");
   });
 
-  it("resolves a selected custom target once, pins it to the fence, and gives Codex only a sentinel", async () => {
+  it("preserves an orchestration-owned assistant block with OpenAI", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const override: HostedAssistantCustomInferenceOverride = {
-      contextWindowTokens: 131_072,
-      modelAlias: "murph-custom-r7",
-      protocol: "responses",
-      revision: 7,
-      supportsImages: false,
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-    };
-    const runtimeTarget = {
-      auth: {
-        kind: "bearer",
-        secret: "synthetic-upstream-secret",
-      },
-      contextWindowTokens: override.contextWindowTokens,
-      endpointUrl: "https://inference.example.com/v1/responses",
-      model: "synthetic-upstream-model",
-      protocol: override.protocol,
-      revision: override.revision,
-      schema: "murph.hosted-inference-runtime-target.v1",
-      supportsImages: override.supportsImages,
-      verificationProfile: override.verificationProfile,
-    };
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json(runtimeTarget)
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const runnerRuntimeEnvSource = {
-      CF_VERSION_METADATA: { id: "version_1" },
-      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        "provider-egress-signing-secret",
-      OPENAI_API_KEY: "test-openai-key",
-    };
-    const service = createRuntimeInvocationService({
-      hostedAssistantCustomInferenceOverride: override,
-      hostedAssistantSubagentModelOverridesAllowed: true,
-      invokedContainerNames: [],
-      platformAiUsageAllowed: false,
-      runnerRuntimeEnvSource,
-      stateStore,
-      state: durable.state,
-    });
-    const token = await stateStore.beginWriteFence({
-      runnerContainerName: "member_123--v-version_1",
-      userId: TEST_USER_ID,
-    });
-
-    const prepared = await service.prepareWithFence({
-      input: {
-        orchestrationAttemptId: "orchestration_attempt_custom_inference",
-        userId: TEST_USER_ID,
-      },
-      token,
-    });
-    const forwardedEnv = prepared.job.runtime?.forwardedEnv;
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(prepared.job.request.processingMode).toBeUndefined();
-    expect(forwardedEnv).toMatchObject({
-      HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-      MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
-    });
-    expect(forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_REASONING_EFFORT");
-    expect(
-      forwardedEnv?.[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV],
-    ).toBe("0");
-    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
-    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
-
-    if (!token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
-    const validation = await stateStore.validateProviderEgressToken({
-      providerEgressToken: token.providerEgressToken,
-      userId: TEST_USER_ID,
-    });
-    expect(validation).toMatchObject({ owns: true });
-    if (!validation.owns || !validation.customInferenceEnvelope) {
-      throw new Error("Expected the selected custom target on the active fence.");
-    }
-    await expect(openHostedInferenceRuntimeTarget({
-      envelope: validation.customInferenceEnvelope,
-      source: runnerRuntimeEnvSource,
-    })).resolves.toEqual(runtimeTarget);
-  });
-
-  it("preserves an orchestration-owned assistant block with custom inference", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const override: HostedAssistantCustomInferenceOverride = {
-      contextWindowTokens: 131_072,
-      modelAlias: "murph-custom-r7",
-      protocol: "responses",
-      revision: 7,
-      supportsImages: false,
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-    };
-    const runtimeTarget = {
-      auth: {
-        kind: "bearer" as const,
-        secret: "synthetic-upstream-secret",
-      },
-      contextWindowTokens: override.contextWindowTokens,
-      endpointUrl: "https://inference.example.com/v1/responses",
-      model: "synthetic-upstream-model",
-      protocol: override.protocol,
-      revision: override.revision,
-      schema: "murph.hosted-inference-runtime-target.v1" as const,
-      supportsImages: override.supportsImages,
-      verificationProfile: override.verificationProfile,
-    };
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () =>
-      Response.json(runtimeTarget)
-    ));
-    const service = createRuntimeInvocationService({
-      hostedAssistantCustomInferenceOverride: override,
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames: [],
       platformAiUsageAllowed: true,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -1044,7 +532,7 @@ describe("hosted runner container identity", () => {
     const prepared = await service.prepareWithFence({
       input: {
         assistantExecutionBlocked: true,
-        orchestrationAttemptId: "orchestration_attempt_blocked_custom_inference",
+        orchestrationAttemptId: "orchestration_attempt_blocked_openai",
         processingMode: "system_mailbox",
         userId: TEST_USER_ID,
       },
@@ -1056,30 +544,26 @@ describe("hosted runner container identity", () => {
       processingMode: "system_mailbox",
     });
     expect(prepared.job.runtime?.forwardedEnv).toMatchObject({
-      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     });
   });
 
   it("narrows a denied managed default wake to model-free system mailbox work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
+    const stateStore = createPreparationOwnerFixture();
     const invokedContainerNames: string[] = [];
-    const service = createRuntimeInvocationService({
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames,
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -1095,14 +579,9 @@ describe("hosted runner container identity", () => {
     });
     expect(invokedContainerNames).toEqual([]);
     expect(prepared.job.request.processingMode).toBe("system_mailbox");
-    if (!prepared.token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
-    await expect(stateStore.validateProviderEgressToken({
-      providerEgressToken: prepared.token.providerEgressToken,
+    await expect(stateStore.readBoundInvocation({
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
-      owns: true,
       platformAiUsageAllowed: false,
     });
   });
@@ -1110,21 +589,17 @@ describe("hosted runner container identity", () => {
   it("keeps a due delivery-only wake on its outbox-owning phase while metered egress stays denied", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const service = createRuntimeInvocationService({
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames: [],
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
       workspace: {
         createdAt: "2026-06-02T23:59:00.000Z",
         nextWakeAt: "2026-06-02T23:59:59.000Z",
@@ -1150,14 +625,9 @@ describe("hosted runner container identity", () => {
 
     expect(prepared.job.request.processingMode).toBeUndefined();
     expect(prepared.job.request.assistantExecutionBlocked).toBeUndefined();
-    if (!prepared.token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
-    await expect(stateStore.validateProviderEgressToken({
-      providerEgressToken: prepared.token.providerEgressToken,
+    await expect(stateStore.readBoundInvocation({
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
-      owns: true,
       platformAiUsageAllowed: false,
     });
   });
@@ -1165,21 +635,17 @@ describe("hosted runner container identity", () => {
   it("lets inbox media retention run under a denied allowance while metered egress stays blocked", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const service = createRuntimeInvocationService({
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames: [],
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-version_1",
@@ -1210,78 +676,29 @@ describe("hosted runner container identity", () => {
       workspaceVersion: "0",
     });
 
-    if (!token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
-    const validation = await stateStore.validateProviderEgressToken({
-      providerEgressToken: token.providerEgressToken,
+    const validation = await stateStore.readBoundInvocation({
       userId: TEST_USER_ID,
     });
     expect(validation).toMatchObject({
-      owns: true,
       platformAiUsageAllowed: false,
     });
-  });
-
-  it("wakes an active runtime through the write fence's stored runner container name", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    await stateStore.bindUser(TEST_USER_ID);
-    const token = await stateStore.beginWriteFence({
-      runnerContainerName: "member_123--v-version-a",
-      userId: TEST_USER_ID,
-    });
-    const ensuredContainerNames: string[] = [];
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService: new RecordingRuntimeInvocationService(),
-      runnerContainerNamespace: createRunnerContainerNamespace({
-        ensuredContainerNames,
-      }),
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: {
-          id: "version-b",
-        },
-      },
-      stateStore,
-    });
-
-    await expect(controller.ensureForUser({
-      orchestrationAttemptId: "orchestration_attempt_1",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      runtimeAttemptId: token.attemptId,
-    });
-
-    expect(ensuredContainerNames).toEqual(["member_123--v-version-a"]);
   });
 
   it("fails closed when runtime invocation parses a different user from the write-fence token name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
+    const stateStore = createPreparationOwnerFixture();
     const invokedContainerNames: string[] = [];
-    const service = createRuntimeInvocationService({
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: {
           id: "version_1",
         },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
-      state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: "member_456--v-version_1",
@@ -1300,572 +717,10 @@ describe("hosted runner container identity", () => {
     expect(invokedContainerNames).toEqual([]);
   });
 
-  it.each([
-    {
-      label: "Web direct",
-      request: {
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
-      },
-    },
-    {
-      label: "Temporal conversation",
-      request: {
-        conversationWorkPending: true,
-        orchestrationAttemptId: "temporal-conversation-standby",
-      },
-    },
-  ] as const)("persists an opaque stop target before binding a claimed standby and opening the write fence for $label", async ({ request }) => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const slotName =
-      "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
-    const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
-      exactUser: standby.namespace,
-      standby: null,
-    });
-    const claimReadyStandby = vi.fn(async (_request: HostedStandbyClaimRequest) => ({
-      outcome: "claimed" as const,
-      slotName,
-    }));
-    const coordinatorNamespace: HostedStandbyCoordinatorNamespaceLike = {
-      getByName() {
-        return {
-          claimReadyStandby,
-          async ensureReadyStandby() {
-            return { accepted: true } as const;
-          },
-        };
-      },
-    };
-    const invocationService = new RecordingRuntimeInvocationService();
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService,
-      runnerContainerNamespace,
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      },
-      standbyCoordinatorNamespace: coordinatorNamespace,
-      stateStore,
-    });
-
-    const response = await controller.ensureForUser({
-      ...request,
-      userId: TEST_USER_ID,
-    });
-    expect(response).toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
-    if (response.kind !== "runtime_processing_accepted") {
-      throw new Error("Expected runtime processing acceptance.");
-    }
-
-    expect(standby.bindStandbySlot).toHaveBeenCalledTimes(1);
-    expect(claimReadyStandby).toHaveBeenCalledTimes(1);
-    expect(claimReadyStandby.mock.calls[0]?.[0]).not.toHaveProperty("userId");
-    await expect(stateStore.readState()).resolves.toMatchObject({
-      writeFence: { runnerContainerName: slotName },
-    });
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          orchestrationAttemptId: request.orchestrationAttemptId,
-          standbyAllocationElapsedMs: expect.any(Number),
-          standbyAllocationOutcome: "claimed",
-          standbyAllocationReason: "bind_completed",
-          workspaceAttemptId: response.runtimeAttemptId,
-        }),
-        message: "Hosted runner runtime processing accepted.",
-      }),
-    );
-    expect(invocationService.invokedInputs[0]?.orchestration).toMatchObject({
-      standbyAllocationElapsedMs: expect.any(Number),
-      standbyAllocationOutcome: "claimed",
-      standbyAllocationReason: "bind_completed",
-    });
-    expect(invocationService.invokedInputs[0]?.orchestration?.triggeredByWebDirect)
-      .toBe("orchestration" in request ? true : false);
-  });
-
-  it.each([
-    [
-      "Temporal default work",
-      {
-        orchestrationAttemptId: "temporal-default-standby-ineligible",
-      },
-      "not_trusted_web_direct",
-    ],
-    [
-      "an untrusted direct flag",
-      {
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId: "web-ingress-invalid",
-      },
-      "not_trusted_web_direct",
-    ],
-    [
-      "a direct-shaped id without Web authentication",
-      {
-        orchestrationAttemptId:
-          "web-ingress-22222222-2222-4222-8222-222222222222",
-      },
-      "not_trusted_web_direct",
-    ],
-    [
-      "trusted Web-direct system-mailbox work",
-      {
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId:
-          "web-ingress-33333333-3333-4333-8333-333333333333",
-        processingMode: "system_mailbox",
-      },
-      "processing_mode_not_default",
-    ],
-    [
-      "trusted Web-direct retention work",
-      {
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId:
-          "web-ingress-44444444-4444-4444-8444-444444444444",
-        processingMode: "inbox_media_retention",
-      },
-      "processing_mode_not_default",
-    ],
-    [
-      "conversation marker on system-mailbox work",
-      {
-        conversationWorkPending: true,
-        orchestrationAttemptId: "temporal-conversation-system-mailbox",
-        processingMode: "system_mailbox",
-      },
-      "processing_mode_not_default",
-    ],
-    [
-      "conversation marker on retention work",
-      {
-        conversationWorkPending: true,
-        orchestrationAttemptId: "temporal-conversation-retention",
-        processingMode: "inbox_media_retention",
-      },
-      "processing_mode_not_default",
-    ],
-  ] as const)(
-    "cold-binds a new fleet target without claiming inventory for %s",
-    async (_label, ensureInput, expectedReason) => {
-      const durable = createRunnerDurableState();
-      const stateStore = new RunnerStateStore(durable.state);
-      const readyContainerNames: string[] = [];
-      const slotName =
-        "standby--v-release_1--0123456789abcdef0123456789abcdef";
-      const standby = createAllocatingStandbyHarness({ slotName, stateStore });
-      const claimReadyStandby = vi.fn(async () => ({
-        outcome: "claimed" as const,
-        slotName,
-      }));
-      const controller = new RuntimeProcessingController({
-        readHealthDataAdmission: async (userId) => ({
-          userId, consentState: "granted", processingAllowed: true,
-        }),
-        env: createHostedExecutionEnvironment(),
-        invocationService: new RecordingRuntimeInvocationService(),
-        runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
-          exactUser: createRunnerContainerNamespace({ readyContainerNames }),
-          standby: standby.namespace,
-        }),
-        runnerRuntimeEnvSource: {
-          CF_VERSION_METADATA: { id: "release_1" },
-          HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-        },
-          standbyCoordinatorNamespace: {
-          getByName() {
-            return {
-              claimReadyStandby,
-              async ensureReadyStandby() {
-                return { accepted: true } as const;
-              },
-            };
-          },
-        },
-        stateStore,
-      });
-
-      await expect(controller.ensureForUser({
-        ...ensureInput,
-        userId: TEST_USER_ID,
-      })).resolves.toMatchObject({
-        action: "started",
-        kind: "runtime_processing_accepted",
-      });
-
-      expect(claimReadyStandby).not.toHaveBeenCalled();
-      expect(standby.bindStandbySlot).not.toHaveBeenCalled();
-      expect(readyContainerNames).toHaveLength(1);
-      expect(readyContainerNames[0]).toMatch(/^runner--v-release_1--[a-f0-9]{32}$/u);
-      expect(readyContainerNames[0]).not.toContain(TEST_USER_ID);
-      await expect(stateStore.readWriteFenceToken()).resolves.toMatchObject({
-        runnerContainerName: readyContainerNames[0],
-        userId: TEST_USER_ID,
-      });
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          details: expect.objectContaining({
-            standbyAllocationOutcome: "disabled",
-            standbyAllocationReason: expectedReason,
-          }),
-          message: "Hosted runner selected a fresh container target.",
-        }),
-      );
-    },
-  );
-
-  it("caps standby claim dispatch at the foreground command budget", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const slotName =
-      "standby--v-release_1--0123456789abcdef0123456789abcdef";
-    const createController = (
-      claimReadyStandby: HostedStandbyCoordinatorStubLike["claimReadyStandby"],
-    ): {
-      controller: RuntimeProcessingController;
-      invocationService: RecordingRuntimeInvocationService;
-    } => {
-      const durable = createRunnerDurableState();
-      const stateStore = new RunnerStateStore(durable.state);
-      const invocationService = new RecordingRuntimeInvocationService();
-      return {
-        controller: new RuntimeProcessingController({
-          readHealthDataAdmission: async (userId) => ({
-            userId, consentState: "granted", processingAllowed: true,
-          }),
-          env: createHostedExecutionEnvironment(),
-          invocationService,
-          runnerContainerNamespace: createRunnerContainerNamespace({}),
-          runnerRuntimeEnvSource: {
-            CF_VERSION_METADATA: { id: "release_1" },
-            HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-          },
-          standbyCoordinatorNamespace: {
-            getByName() {
-              return {
-                claimReadyStandby,
-                async ensureReadyStandby() {
-                  return { accepted: true } as const;
-                },
-              };
-            },
-          },
-          stateStore,
-        }),
-        invocationService,
-      };
-    };
-    const commandTimeoutMs =
-      HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 100;
-    const boundedClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
-      async () => ({ outcome: "no_ready_slot" }),
-    );
-
-    const boundedController = createController(boundedClaim);
-    await boundedController.controller.ensureForUser({
-      commandTimeoutMs,
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-55555555-5555-4555-8555-555555555555",
-      userId: TEST_USER_ID,
-    });
-
-    expect(boundedClaim).toHaveBeenCalledWith(expect.objectContaining({
-      deadlineAtEpochMs: Date.now() + 100,
-    }));
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          standbyAllocationElapsedMs: 0,
-          standbyAllocationOutcome: "fallback",
-          standbyAllocationReason: "claim_no_ready_slot",
-        }),
-        message: "Hosted runner selected a fresh container target.",
-      }),
-    );
-    const expiredClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
-      async () => ({ outcome: "no_ready_slot" }),
-    );
-    await createController(expiredClaim).controller.ensureForUser({
-      commandStartedAtEpochMs: Date.now() - 101,
-      commandTimeoutMs,
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-66666666-6666-4666-8666-666666666666",
-      userId: TEST_USER_ID,
-    });
-
-    expect(expiredClaim).not.toHaveBeenCalled();
-    vi.useRealTimers();
-
-    const noReadyController = createController(async () => ({
-      outcome: "no_ready_slot",
-    }));
-    await noReadyController.controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-99999999-9999-4999-8999-999999999999",
-      userId: TEST_USER_ID,
-    });
-    expect(noReadyController.invocationService.invokedInputs[0]?.orchestration)
-      .toMatchObject({
-        standbyAllocationOutcome: "fallback",
-        standbyAllocationReason: "claim_no_ready_slot",
-      });
-
-    const failedClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
-      async () => {
-        throw new Error("synthetic coordinator failure");
-      },
-    );
-    const failedController = createController(failedClaim);
-    await failedController.controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-77777777-7777-4777-8777-777777777777",
-      userId: TEST_USER_ID,
-    });
-    expect(failedController.invocationService.invokedInputs[0]?.orchestration)
-      .toMatchObject({
-        standbyAllocationOutcome: "fallback",
-        standbyAllocationReason: "claim_failed",
-      });
-
-    let finishLateClaim: ((result: HostedStandbyClaimResult) => void) | undefined;
-    const timedOutClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
-      async () => await new Promise<HostedStandbyClaimResult>((resolve) => { finishLateClaim = resolve; }),
-    );
-    const timedOutController = createController(timedOutClaim);
-    await expect(timedOutController.controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-88888888-8888-4888-8888-888888888888",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
-    expect(timedOutClaim).toHaveBeenCalledOnce();
-    expect(timedOutController.invocationService.invokedInputs[0]?.orchestration)
-      .toMatchObject({
-        standbyAllocationElapsedMs: expect.any(Number),
-        standbyAllocationOutcome: "fallback",
-        standbyAllocationReason: "claim_timed_out",
-      });
-    // Date.now() can trail the timeout clock by one millisecond at the boundary.
-    expect(
-      timedOutController.invocationService.invokedInputs[0]?.orchestration
-        ?.standbyAllocationElapsedMs,
-    ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
-    finishLateClaim?.({ outcome: "claimed", slotName: "runner--v-release_1--0123456789abcdef0123456789abcdef" });
-    await vi.waitFor(() => expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted standby claim RPC settled.",
-        details: expect.objectContaining({
-          standbyClaimDeadlineExpired: true,
-          standbyClaimRpcOutcome: "claimed",
-          standbyClaimBudgetMs: HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
-        }),
-      }),
-    ));
-    expect(timedOutController.invocationService.invokedInputs).toHaveLength(1);
-  });
-
-  it.each([
-    { processingMode: "system_mailbox" },
-    { conversationWorkPending: true },
-  ] as const)("keeps a late standby bind as the exact retry target for %j", async (retryRequest) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const slotName =
-      "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const claimDelayMs = HOSTED_STANDBY_CLAIM_TIMEOUT_MS * 0.4;
-    const bindDelayMs = HOSTED_STANDBY_CLAIM_TIMEOUT_MS * 0.8;
-    const standby = createAllocatingStandbyHarness({
-      bindDelayMs,
-      readDelayMs: 300,
-      slotName,
-      stateStore,
-    });
-    const claimReadyStandby = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, claimDelayMs));
-      return {
-        outcome: "claimed" as const,
-        slotName,
-      };
-    });
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService: new RecordingRuntimeInvocationService(),
-      runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
-        exactUser: standby.namespace,
-        standby: null,
-      }),
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      },
-      standbyCoordinatorNamespace: {
-        getByName() {
-          return {
-            claimReadyStandby,
-            async ensureReadyStandby() {
-              return { accepted: true } as const;
-            },
-          };
-        },
-      },
-      stateStore,
-    });
-
-    const first = controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-77777777-7777-4777-8777-777777777777",
-      userId: TEST_USER_ID,
-    });
-    await vi.waitFor(() => expect(claimReadyStandby).toHaveBeenCalledOnce());
-    await vi.advanceTimersByTimeAsync(claimDelayMs);
-    await vi.waitFor(() => expect(standby.bindStandbySlot).toHaveBeenCalledOnce());
-    await vi.advanceTimersByTimeAsync(
-      HOSTED_STANDBY_CLAIM_TIMEOUT_MS - claimDelayMs,
-    );
-
-    await expect(first).resolves.toMatchObject({ kind: "retry_later" });
-    await expect(stateStore.readState()).resolves.toMatchObject({
-      pendingRunnerContainerName: slotName,
-      writeFence: null,
-    });
-
-    await vi.advanceTimersByTimeAsync(
-      claimDelayMs + bindDelayMs - HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
-    );
-    const retained = controller.ensureForUser({
-      ...retryRequest,
-      orchestrationAttemptId: "temporal-standby-bind-retained",
-      userId: TEST_USER_ID,
-    });
-    await vi.waitFor(() =>
-      expect(standby.resolveRetainedStandbySlot).toHaveBeenCalledOnce()
-    );
-    await vi.advanceTimersByTimeAsync(300);
-    await expect(retained).resolves.toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
-    expect(claimReadyStandby).toHaveBeenCalledOnce();
-    expect(standby.bindStandbySlot).toHaveBeenCalledOnce();
-    await expect(stateStore.readState()).resolves.toMatchObject({
-      writeFence: { runnerContainerName: slotName },
-    });
-  });
-
-  it("retires a stopped standby before claiming a fresh one", async () => {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    const stoppedSlotName =
-      "standby--v-release_1--11111111111111111111111111111111";
-    const freshSlotName =
-      "runner--v-release_1--22222222222222222222222222222222";
-    await stateStore.reserveRunnerContainerStopTarget({
-      runnerContainerName: stoppedSlotName,
-      userId: TEST_USER_ID,
-    });
-    const resolveStopped = vi.fn(async () => ({
-      claimId: null,
-      releaseId: "release_1",
-      region: HOSTED_STANDBY_REGION,
-      slotName: stoppedSlotName,
-      state: "retired" as const,
-      userId: null,
-    }));
-    const stopped = createStandbyNamespace({
-      resolveRetainedStandbySlot: resolveStopped,
-      slotName: stoppedSlotName,
-      userId: TEST_USER_ID,
-    });
-    const fresh = createAllocatingStandbyHarness({
-      slotName: freshSlotName,
-      stateStore,
-    });
-    const standbyContainerNamespace: HostedStandbyRunnerContainerNamespaceLike = {
-      getByName(name, options) {
-        if (name === stoppedSlotName) {
-          return stopped.getByName(name, options);
-        }
-        return fresh.namespace.getByName(name, options);
-      },
-    };
-    const claimReadyStandby = vi.fn(async () => {
-      expect((await stateStore.readState()).pendingRunnerContainerName).toBeNull();
-      return { outcome: "claimed" as const, slotName: freshSlotName };
-    });
-    const invocationService = new RecordingRuntimeInvocationService();
-    const controller = new RuntimeProcessingController({
-      readHealthDataAdmission: async (userId) => ({
-        userId, consentState: "granted", processingAllowed: true,
-      }),
-      env: createHostedExecutionEnvironment(),
-      invocationService,
-      runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
-        exactUser: fresh.namespace,
-        standby: standbyContainerNamespace,
-      }),
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      },
-      standbyCoordinatorNamespace: {
-        getByName() {
-          return {
-            claimReadyStandby,
-            async ensureReadyStandby() {
-              return { accepted: true } as const;
-            },
-          };
-        },
-      },
-      stateStore,
-    });
-
-    await expect(controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-88888888-8888-4888-8888-888888888888",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
-
-    expect(resolveStopped).toHaveBeenCalledOnce();
-    expect(claimReadyStandby).toHaveBeenCalledOnce();
-    expect(fresh.bindStandbySlot).toHaveBeenCalledOnce();
-    expect(invocationService.prepareTokens[0]?.runnerContainerName)
-      .toBe(freshSlotName);
-  });
-
   it("accepts an opaque standby target only after its durable binding proves the exact member", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
+    const stateStore = createPreparationOwnerFixture();
     const slotName =
       "standby--v-release_1--0123456789abcdef0123456789abcdef";
     const readStandbySlotBinding = vi.fn<
@@ -1881,13 +736,11 @@ describe("hosted runner container identity", () => {
         userId: TEST_USER_ID,
       };
     });
-    const service = createRuntimeInvocationService({
+    const service = createRuntimeInvocationPreparation({
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       standbyContainerNamespace: createStandbyNamespace({
@@ -1895,7 +748,6 @@ describe("hosted runner container identity", () => {
         slotName,
         userId: TEST_USER_ID,
       }),
-      state: durable.state,
       stateStore,
     });
     await stateStore.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: TEST_USER_ID });
@@ -1916,20 +768,17 @@ describe("hosted runner container identity", () => {
     await vi.advanceTimersByTimeAsync(300);
     await expect(prepared).resolves.toMatchObject({ runnerContainerName: slotName });
 
-    const mismatchedService = createRuntimeInvocationService({
+    const mismatchedService = createRuntimeInvocationPreparation({
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       standbyContainerNamespace: createStandbyNamespace({
         slotName,
         userId: "member_456",
       }),
-      state: durable.state,
       stateStore,
     });
     await expect(mismatchedService.prepareWithFence({
@@ -1944,69 +793,6 @@ describe("hosted runner container identity", () => {
   });
 
 });
-
-class RecordingRuntimeInvocationService extends RuntimeInvocationService {
-  readonly prepareTokens: RunnerWriteFenceToken[] = [];
-  readonly invokedInputs: PreparedRuntimeInvocation["input"][] = [];
-
-  constructor() {
-    const durable = createRunnerDurableState();
-    const stateStore = new RunnerStateStore(durable.state);
-    super({
-      assertWorkspaceBelongsToRunnerUser() {},
-      env: createHostedExecutionEnvironment(),
-      readHostedRuntimeStatusFromWeb: async (userId) => ({
-        mailboxLag: [],
-        userId,
-        workspace: null,
-      }),
-      readHostedWebControlBaseUrl: () => "https://web.example.test",
-      readHostedWorkspaceFromWeb: async () => ({
-        fetchedAt: FIXED_NOW,
-        workspace: null,
-      }),
-      runnerContainerNamespace: createRunnerContainerNamespace({}),
-      runnerRuntimeEnvSource: {},
-      runnerStoreCache: new TestRunnerStoreCache({}),
-      stateStore,
-      waitUntil: (promise) => durable.state.waitUntil(promise),
-    });
-  }
-
-  override prepareForFreshStart(input: Parameters<RuntimeInvocationService["prepareForFreshStart"]>[0]) {
-    return (token: RunnerWriteFenceToken) => this.prepareWithFence({ ...input, token });
-  }
-
-  override async prepareWithFence(input: {
-    input: PreparedRuntimeInvocation["input"];
-    token: RunnerWriteFenceToken;
-  }): Promise<PreparedRuntimeInvocation> {
-    this.prepareTokens.push(input.token);
-    return {
-      input: input.input,
-      job: createWorkspaceInvocationJob({
-        token: input.token,
-        userId: input.input.userId,
-      }),
-      runnerContainerName: input.token.runnerContainerName ?? input.input.userId,
-      token: input.token,
-      workspaceCheckpointedAt: null,
-      workspaceVersion: "0",
-    };
-  }
-
-  override async invokePreparedWithFence(input: {
-    acceptedProcessingAttempt: boolean;
-    prepared: PreparedRuntimeInvocation;
-    runtimeWakeStartedAt: number;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    this.invokedInputs.push(input.prepared.input);
-    return {
-      nextWakeAt: null,
-      status: "idle",
-    };
-  }
-}
 
 class TestRunnerStoreCache extends RunnerStoreCache {
   private readonly source: Readonly<Record<string, unknown>>;
@@ -2071,56 +857,39 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
   }
 }
 
-function createRuntimeInvocationService(input: {
+function createRuntimeInvocationPreparation(input: {
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
   beforeWorkspaceRead?: () => Promise<void>;
-  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
+  hostedAssistantPriorityUntil?: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
-  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   hostedAssistantSubagentModelOverridesAllowed?: boolean;
   invokedContainerNames: string[];
   platformAiUsageAllowed?: boolean;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   standbyContainerNamespace?: HostedStandbyRunnerContainerNamespaceLike;
-  state: DurableObjectStateLike;
-  stateStore: RunnerStateStore;
+  stateStore: ReturnType<typeof createPreparationOwnerFixture>;
   workspace?: HostedWorkspaceState | null;
-}): RuntimeInvocationService {
-  return new RuntimeInvocationService({
+}): RuntimeInvocationPreparation {
+  return new RuntimeInvocationPreparation({
     assertWorkspaceBelongsToRunnerUser(workspace, userId) {
       if (workspace && workspace.userId !== userId) {
         throw new Error("Workspace belonged to a different user.");
       }
     },
     env: createHostedExecutionEnvironment(),
-    readHostedRuntimeStatusFromWeb: async (userId) => ({
-      mailboxLag: [],
-      userId,
-      workspace: input.workspace ?? null,
-    }),
-    readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => {
       await input.beforeWorkspaceRead?.();
       return ({
       fetchedAt: FIXED_NOW,
+      ...(input.hostedAssistantPriorityUntil
+        ? { hostedAssistantPriorityUntil: input.hostedAssistantPriorityUntil }
+        : {}),
       ...(input.platformAiUsageAllowed === undefined
         ? {}
         : { platformAiUsageAllowed: input.platformAiUsageAllowed }),
-      ...(input.hostedAssistantCustomInferenceOverride
-        ? {
-            hostedAssistantCustomInferenceOverride:
-              input.hostedAssistantCustomInferenceOverride,
-            ...(input.platformAiUsageAllowed === undefined
-              ? { platformAiUsageAllowed: false }
-              : {}),
-          }
-        : {}),
       ...(input.hostedAssistantModelOverride
         ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
-        : {}),
-      ...(input.hostedAssistantProviderOverride
-        ? { hostedAssistantProviderOverride: input.hostedAssistantProviderOverride }
         : {}),
       ...(input.hostedAssistantReasoningEffortOverride
         ? {
@@ -2143,8 +912,7 @@ function createRuntimeInvocationService(input: {
     }),
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
-    stateStore: input.stateStore,
-    waitUntil: (promise) => input.state.waitUntil(promise),
+    bindInvocation: input.stateStore.bindInvocation,
   });
 }
 
@@ -2219,137 +987,11 @@ function createStandbyNamespace(input: {
   };
 }
 
-function createAllocatingStandbyHarness(input: {
-  bindDelayMs?: number;
-  readDelayMs?: number;
-  slotName: string;
-  stateStore: RunnerStateStore;
-}): {
-  bindStandbySlot: ReturnType<typeof vi.fn>;
-  namespace: HostedStandbyRunnerContainerNamespaceLike;
-  readStandbySlotBinding: ReturnType<typeof vi.fn>;
-  resolveRetainedStandbySlot: ReturnType<typeof vi.fn>;
-} {
-  let binding: HostedStandbySlotBinding = {
-    claimId: null,
-    releaseId: "release_1",
-    region: readHostedRunnerTargetIdentity(input.slotName)?.region ?? HOSTED_STANDBY_REGION,
-    slotName: input.slotName,
-    state: "unbound" as const,
-    userId: null,
-  };
-  const bindStandbySlot = vi.fn(async (claim: {
-    claimId: string;
-    releaseId: string;
-    region: HostedRunnerRegion;
-    slotName: string;
-    userId: string;
-  }) => {
-    const persisted = await input.stateStore.readState();
-    if (persisted.pendingRunnerContainerName !== input.slotName) {
-      throw new Error("Standby bind ran before its exact stop target was persisted.");
-    }
-    if (input.bindDelayMs) {
-      await new Promise((resolve) => setTimeout(resolve, input.bindDelayMs));
-    }
-    const bound = {
-      claimId: claim.claimId,
-      releaseId: claim.releaseId,
-      region: claim.region,
-      slotName: claim.slotName,
-      state: "bound" as const,
-      userId: claim.userId,
-    };
-    binding = bound;
-    return { bound: true as const, ...claim };
-  });
-  const readStandbySlotBinding = vi.fn(async () => {
-    if (input.readDelayMs) {
-      await new Promise((resolve) => setTimeout(resolve, input.readDelayMs));
-    }
-    return binding;
-  });
-  const resolveRetainedStandbySlot = vi.fn(async () => {
-    if (input.readDelayMs) {
-      await new Promise((resolve) => setTimeout(resolve, input.readDelayMs));
-    }
-    return binding;
-  });
-  return {
-    bindStandbySlot,
-    namespace: {
-      getByName() {
-        return {
-          bindStandbySlot,
-          async destroyInstance() {},
-          async ensureReadyForProcessing() {
-            return { kind: "ready" } as const;
-          },
-          async invoke() {
-            throw new Error("Direct invocation was not expected in this test.");
-          },
-          async prepareStandbySlot(preparation) {
-            return { prepared: true as const, ...preparation };
-          },
-          readStandbySlotBinding,
-          resolveRetainedStandbySlot,
-          async readStandbySlotCoordinatorState() {
-            return {
-              coordinatorOwned: binding.userId === null,
-              releaseId: binding.releaseId,
-              slotName: binding.slotName,
-              state: binding.state,
-            };
-          },
-          async retireStandbySlot() {
-            return { retired: true } as const;
-          },
-          async smokeHealth() {
-            return {
-              ok: true,
-              runnerBundle: null,
-              service: "test",
-              status: 200,
-            };
-          },
-        };
-      },
-    },
-    readStandbySlotBinding,
-    resolveRetainedStandbySlot,
-  };
-}
-
 function createHostedExecutionEnvironment() {
   return readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
+    HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "54000",
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
   }));
-}
-
-function createRunnerDurableState(): {
-  state: DurableObjectStateLike;
-} {
-  const sql = createTestSqlStorage();
-  const values = new Map<string, unknown>();
-  const storage: DurableObjectStorageLike = {
-    delete: async (key) => values.delete(key),
-    deleteAlarm: async () => {},
-    get: async <T,>(key: string): Promise<T | undefined> =>
-      values.get(key) as T | undefined,
-    getAlarm: async () => null,
-    put: async <T,>(key: string, value: T): Promise<void> => {
-      values.set(key, value);
-    },
-    setAlarm: async () => {},
-    sql,
-  };
-  return {
-    state: {
-      storage,
-      waitUntil() {},
-    },
-  };
 }
 
 function createRunnerContainerNamespace(input: {
@@ -2445,27 +1087,6 @@ function createRunnerContainerStub(input: {
   };
 }
 
-function createWorkspaceInvocationJob(input: {
-  token: RunnerWriteFenceToken;
-  userId: string;
-}): HostedExecutionWorkspaceInvocationJobInput {
-  return {
-    kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
-    request: {
-      attemptId: input.token.attemptId,
-      idleCheckpointDelayMs: 54_000,
-      leaseGeneration: input.token.generation,
-      userId: input.userId,
-      workspace: null,
-      workspaceVersion: input.token.workspaceVersion ?? "0",
-    },
-    runtime: buildHostedRunnerJobRuntimeConfig({
-      forwardedEnv: {},
-      runnerSecrets: {},
-    }),
-  };
-}
-
 function createEmptyR2Bucket(): R2BucketLike {
   return {
     get: async () => null,
@@ -2477,4 +1098,23 @@ function createVoidGate(): { promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+function createPreparationOwnerFixture() {
+  let token: RunnerWriteFenceToken | null = null;
+  let bound: { platformAiUsageAllowed: boolean | null } | null = null;
+  return {
+    reserveRunnerContainerStopTarget: async (_input: { runnerContainerName: string; userId: string }) => true,
+    async beginWriteFence(input: { runnerContainerName?: string; userId: string; processingMode?: RunnerWriteFenceToken["processingMode"] }): Promise<RunnerWriteFenceToken> {
+      token = { attemptId: "synthetic-attempt", generation: "1", kind: "runtime", processingMode: input.processingMode ?? "default", runnerContainerName: input.runnerContainerName ?? null, startedAt: FIXED_NOW, userId: input.userId, workspaceVersion: null };
+      return token;
+    },
+    readWriteFenceToken: async (_userId?: string) => token,
+    bindInvocation: async (input: Parameters<ConstructorParameters<typeof RuntimeInvocationPreparation>[0]["bindInvocation"]>[0]) => {
+      bound = input;
+      token = { ...input.token, workspaceVersion: input.workspaceVersion, processingMode: input.processingMode ?? input.token.processingMode };
+      return token;
+    },
+    readBoundInvocation: async (_input: unknown) => bound,
+  };
 }

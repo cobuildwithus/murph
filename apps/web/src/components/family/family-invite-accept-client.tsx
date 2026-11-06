@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
@@ -9,8 +9,14 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
+import {
+  LinkPageError,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+  LinkPageTicket,
+} from "@/src/components/link-page/link-page-shell";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
-import { Button } from "@/src/components/ui/button";
 import {
   buildHostedFamilyInviteRecoveryPath,
   HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
@@ -21,20 +27,18 @@ export type FamilyInviteWebAcceptInitialState = "draft_conflict" | "idle";
 const HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE =
   "You already have an unfinished Family setup. Resolve it in Settings, then you’ll return here to try this invite again.";
 
-export function FamilyInviteWebAcceptButton(props: {
+export function FamilyInviteWebAcceptScreen(props: {
+  children?: ReactNode;
   initialState?: FamilyInviteWebAcceptInitialState;
   inviteCode: string;
+  secondaryActions?: ReactNode;
+  title: string;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<"accepted" | "idle" | "submitting">("idle");
-  const initialDraftConflict = props.initialState === "draft_conflict";
-  const [errorMessage, setErrorMessage] = useState<string | null>(
-    initialDraftConflict
-      ? HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE
-      : null,
-  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [recoveryPath, setRecoveryPath] = useState<string | null>(
-    initialDraftConflict
+    props.initialState === "draft_conflict"
       ? buildHostedFamilyInviteRecoveryPath(props.inviteCode)
       : null,
   );
@@ -56,7 +60,6 @@ export function FamilyInviteWebAcceptButton(props: {
         && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
       ) {
         setRecoveryPath(buildHostedFamilyInviteRecoveryPath(props.inviteCode));
-        setErrorMessage(HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE);
         return;
       }
       setErrorMessage(toErrorMessage(error, "Could not accept the invite right now."));
@@ -64,44 +67,57 @@ export function FamilyInviteWebAcceptButton(props: {
   }
 
   if (status === "accepted") {
+    return <FamilyInviteJoinedScreen onOpenMurph={() => router.push("/home")} />;
+  }
+
+  if (recoveryPath) {
     return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm font-medium text-foreground">{"You're in. Welcome to Murph."}</p>
-        <Button type="button" size="xl" onClick={() => router.push("/home")}>
-          Open Murph
-        </Button>
-      </div>
+      <LinkPageScreen
+        actions={
+          <LinkPagePill onClick={() => router.push(recoveryPath)}>
+            Open Family settings
+          </LinkPagePill>
+        }
+        detail={HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE}
+        title="Finish your Family setup first."
+      />
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <Button
-        type="button"
-        size="xl"
-        onClick={() => void accept()}
-        disabled={status === "submitting"}
-      >
-        {status === "submitting" ? "Joining..." : "Accept invite"}
-      </Button>
-      {errorMessage ? (
-        <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
-            {errorMessage}
-          </p>
-          {recoveryPath ? (
-            <Button
-              type="button"
-              size="lg"
-              variant="outline"
-              onClick={() => router.push(recoveryPath)}
-            >
-              Open Family settings
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    <LinkPageScreen
+      actions={
+        <>
+          {errorMessage ? <LinkPageError>{errorMessage}</LinkPageError> : null}
+          <LinkPagePill
+            disabled={status === "submitting"}
+            onClick={() => void accept()}
+          >
+            {status === "submitting" ? "Joining..." : "Accept invite"}
+          </LinkPagePill>
+          {props.secondaryActions}
+        </>
+      }
+      title={props.title}
+    >
+      {props.children}
+    </LinkPageScreen>
+  );
+}
+
+export function FamilyInviteJoinedScreen({
+  onOpenMurph,
+}: {
+  onOpenMurph?: () => void;
+}) {
+  return (
+    <LinkPageScreen
+      actions={<LinkPagePill onClick={onOpenMurph}>Open Murph</LinkPagePill>}
+      detail="Welcome to Murph."
+      title="You're in."
+    >
+      <LinkPageTicket className="mt-0" kicker="Murph Family" title="Welcome" />
+    </LinkPageScreen>
   );
 }
 
@@ -119,19 +135,13 @@ export function FamilyInviteSignInButton(props: {
   return (
     <>
       {props.variant === "link" ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="w-fit"
-          onClick={() => setOpen(true)}
-        >
+        <LinkPageLink onClick={() => setOpen(true)}>
           Prefer not to text?
-        </Button>
+        </LinkPageLink>
       ) : (
-        <Button type="button" size="xl" onClick={() => setOpen(true)}>
+        <LinkPagePill onClick={() => setOpen(true)}>
           Sign in to join
-        </Button>
+        </LinkPagePill>
       )}
       <AuthDialog
         open={open}

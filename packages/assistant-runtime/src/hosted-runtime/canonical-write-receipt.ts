@@ -193,10 +193,12 @@ function parseHostedCanonicalWriteMediaRef(raw: unknown):
   if (raw === undefined) return undefined;
   if (!isPlainObject(raw) || !isSha256(raw.id)
     || (raw.mediaKind !== "image" && raw.mediaKind !== "video") || !isIsoDate(raw.recordedAt)
-    || (raw.expiresAt !== null && !isIsoDate(raw.expiresAt))) {
+    || (raw.expiresAt !== null && !isIsoDate(raw.expiresAt))
+    || (raw.pendingUpload !== undefined && typeof raw.pendingUpload !== "boolean")) {
     throw new Error("Hosted canonical media reference is invalid.");
   }
-  return { id: raw.id, mediaKind: raw.mediaKind, recordedAt: raw.recordedAt, expiresAt: raw.expiresAt };
+  return { id: raw.id, mediaKind: raw.mediaKind, recordedAt: raw.recordedAt, expiresAt: raw.expiresAt,
+    ...(raw.pendingUpload === undefined ? {} : { pendingUpload: raw.pendingUpload }) };
 }
 
 function isIsoDate(value: unknown): value is string {

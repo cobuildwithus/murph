@@ -123,7 +123,25 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // and node:dgram are the complete added timing subtree. node:async_hooks
     // was already loaded by vault-cli-vault-context. Admit only those three;
     // the package allowlist and startup-byte budgets remain unchanged.
-    maxResolvedModules: 303,
+    // PR #4026 measured 305: operator-config/dist/{assistant-delivery-contracts,
+    // primitive-schemas}.js are leaf splits of contract modules this probe
+    // already loads (same schemas, two more files), letting the Cloudflare
+    // Worker skip the CLI contracts. Admit only those two.
+    // PR #4211 measured base 305 / candidate 319 in built CLI probes. Zod 4.5.4
+    // adds five internal modules and ten locales; Environment removal drops
+    // contracts/dist/environment-interview.js. No new package is loaded.
+    // Native runner startup and emitted-byte budgets pass independently.
+    // PR #4255 measured base 317 / candidate 320. The only added modules are
+    // contracts/dist/{experiment-outcome,schema-primitives,sleep-session}.js:
+    // verbatim schema moves that let the Worker skip the broad schema module.
+    // Admit the measured count only; no package or byte-budget change.
+    // PR #4397 measured 320 with Zod 4.5.4 and 321 with patched Zod 4.6.6.
+    // The sole added module is zod/v4/locales/tg.js; no package is added.
+    // PR #4420 measured 322 locally and on Linux CI. The sole added module is
+    // contracts/dist/companion-meals.js, shared by the member-action schema and
+    // public contracts entrypoint. Isolating that module restores 321; no new
+    // package or transitive subtree is loaded. Admit only the measured count.
+    maxResolvedModules: 322,
   },
 ]
 

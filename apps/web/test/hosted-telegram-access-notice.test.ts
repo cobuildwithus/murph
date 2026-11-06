@@ -71,7 +71,6 @@ describe("Telegram access notice delivery", () => {
       id: "delivery_123",
     });
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(undefined);

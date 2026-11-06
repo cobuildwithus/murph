@@ -7,7 +7,6 @@ import {
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 import {
   createDeviceSyncRegistry,
-  createStravaDeviceSyncProvider,
 } from "@murphai/device-syncd/public-ingress";
 import { createConfiguredDeviceSyncRegistryFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
@@ -64,7 +63,6 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async (importOriginal) 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const junctionWebhookSecret = "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
-const stravaWebhookSigningSecret = "strava-webhook-signing-secret";
 const connectionCodec = {
   decrypt: (value: string) => value.replace(/^enc:/u, ""),
   encrypt: (value: string) => `enc:${value}`,
@@ -276,36 +274,6 @@ function signJunctionWebhook(input: {
       "svix-id": input.messageId,
       "svix-signature": `v1,${signature}`,
       "svix-timestamp": timestamp,
-    }),
-    rawBody,
-  };
-}
-
-function signStravaDeauthorization(input: {
-  externalAccountId: string;
-  receivedAt: Date;
-}): { headers: Headers; rawBody: Buffer } {
-  const athleteId = Number(input.externalAccountId);
-  if (!Number.isSafeInteger(athleteId)) {
-    throw new TypeError("Expected a safe numeric Strava athlete id.");
-  }
-  const timestamp = Math.floor(input.receivedAt.getTime() / 1_000).toString();
-  const rawBody = Buffer.from(JSON.stringify({
-    aspect_type: "update",
-    event_time: Number(timestamp),
-    object_id: athleteId,
-    object_type: "athlete",
-    owner_id: athleteId,
-    subscription_id: 444,
-    updates: { authorized: "false" },
-  }));
-  const signature = createHmac("sha256", stravaWebhookSigningSecret)
-    .update(Buffer.concat([Buffer.from(`${timestamp}.`, "utf8"), rawBody]))
-    .digest("hex");
-
-  return {
-    headers: new Headers({
-      "x-strava-signature": `t=${timestamp},v1=${signature}`,
     }),
     rawBody,
   };
@@ -1671,9 +1639,11 @@ describe.skipIf(!runPostgresProof)(
           },
           where: { connectionId: fixture.connectionId },
         })).resolves.toEqual({
-          dirtyRevision: 1n,
-          eventCount: 1n,
-          latestEventType: null,
+          // One accepted hint advances the seeded marker, including when a
+          // source-establishment wake owns the runtime handoff.
+          dirtyRevision: 2n,
+          eventCount: 2n,
+          latestEventType: "daily.data.steps.created",
         });
         await expect(fixture.prisma.deviceSyncDirtyPayload.count({
           where: { connectionId: fixture.connectionId },
@@ -1922,6 +1892,15 @@ describe.skipIf(!runPostgresProof)(
           where: { connectionId: fixture.connectionId },
         })).resolves.toBe(0);
 
+        await expect(fixture.prisma.deviceSyncDirtyConnection.findUniqueOrThrow({
+          select: { dirtyRevision: true, eventCount: true, latestEventType: true },
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toEqual({
+          dirtyRevision: 1n,
+          eventCount: 1n,
+          latestEventType: null,
+        });
+
         await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
           accepted: true,
           duplicate: false,
@@ -1954,9 +1933,11 @@ describe.skipIf(!runPostgresProof)(
           },
           where: { connectionId: fixture.connectionId },
         })).resolves.toEqual({
-          dirtyRevision: 1n,
-          eventCount: 1n,
-          latestEventType: null,
+          // One accepted hint advances the seeded marker, including when a
+          // source-establishment wake owns the runtime handoff.
+          dirtyRevision: 2n,
+          eventCount: 2n,
+          latestEventType: "daily.data.steps.created",
         });
         await expect(fixture.prisma.deviceSyncSignal.count({
           where: { connectionId: fixture.connectionId },
@@ -2621,226 +2602,6 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it(
-      "terminally settles a signed pre-reconnect Strava deauthorization against the replacement connection",
-      async () => {
-        const suffix = randomUUID().replaceAll("-", "");
-        const memberId = `member_prepared_strava_authority_${suffix}`;
-        const externalAccountId = (BigInt(`0x${suffix.slice(0, 12)}`) + 1_000_000n).toString();
-        const receivedAt = new Date(Date.now() - 120_000);
-        const originalConnectedAt = new Date(receivedAt.getTime() - 60_000);
-        const replacementConnectedAt = new Date(receivedAt.getTime() + 60_000);
-        const replacementTokenExpiresAt = new Date(receivedAt.getTime() + 24 * 60 * 60_000);
-        const prisma = createPrismaClient({ databaseUrl, poolMax: 3 });
-        const store = new PrismaDeviceSyncControlPlaneStore({
-          codec: connectionCodec,
-          prisma,
-          providerAccountBlindIndexKey: Buffer.alloc(32, 23),
-        });
-        const providerFetch = vi.fn(async () => {
-          throw new Error("Superseded Strava work must not call the provider.");
-        });
-        const registry = createDeviceSyncRegistry([
-          createStravaDeviceSyncProvider({
-            clientId: "strava-client-id",
-            clientSecret: "strava-client-secret",
-            fetchImpl: providerFetch,
-            webhookSigningSecret: stravaWebhookSigningSecret,
-          }),
-        ]);
-        let traceId: string | null = null;
-
-        setHostedSecureBoxStringTestCodecForTests({
-          decrypt: (codecInput) => codecInput.value,
-          encrypt: (codecInput) => codecInput.value,
-        });
-        try {
-          await prisma.hostedMember.create({ data: { id: memberId } });
-          await prisma.hostedConsentGrant.create({
-            data: {
-              createdAt: receivedAt,
-              documentVersionsJson: {},
-              grantedAt: receivedAt,
-              memberId,
-              scope: "launch.health-data",
-              source: "prepared-webhook-authority-test",
-              status: "granted",
-              updatedAt: receivedAt,
-            },
-          });
-          const original = await store.upsertConnection({
-            connectedAt: originalConnectedAt.toISOString(),
-            displayName: "Strava A",
-            existingAccountPolicy: "replace",
-            externalAccountId,
-            metadata: { connectionEpoch: "a" },
-            nextReconcileAt: null,
-            ownerId: memberId,
-            provider: "strava",
-            scopes: ["activity:read_all"],
-            status: "active",
-            tokens: {
-              accessToken: "access-token-a",
-              accessTokenExpiresAt: replacementTokenExpiresAt.toISOString(),
-              refreshToken: "refresh-token-a",
-            },
-          });
-          const signed = signStravaDeauthorization({
-            externalAccountId,
-            receivedAt,
-          });
-          const prepareService = createIngressService({
-            headers: signed.headers,
-            provider: "strava",
-            registry,
-            store,
-          });
-          const prepared = await prepareService.prepareWebhookForDurableEnqueue(
-            "strava",
-            signed.rawBody,
-            receivedAt,
-          );
-          traceId = prepared.traceId;
-          expect(prepared).toMatchObject({
-            acceptanceMode: "durable_webhook_work",
-            eventType: "athlete.deauthorized",
-            externalAccountId,
-            jobs: [expect.objectContaining({ kind: "deauthorize" })],
-            receivedAt: receivedAt.toISOString(),
-          });
-
-          const replacement = await store.upsertConnection({
-            connectedAt: replacementConnectedAt.toISOString(),
-            displayName: "Strava B",
-            existingAccountPolicy: "replace",
-            externalAccountId,
-            metadata: { connectionEpoch: "b" },
-            nextReconcileAt: null,
-            ownerId: memberId,
-            provider: "strava",
-            scopes: ["activity:read_all"],
-            status: "active",
-            tokens: {
-              accessToken: "access-token-b",
-              accessTokenExpiresAt: replacementTokenExpiresAt.toISOString(),
-              refreshToken: "refresh-token-b",
-            },
-          });
-          expect(replacement.id).toBe(original.id);
-          expect(replacement.connectedAt).toBe(replacementConnectedAt.toISOString());
-          expect(replacementConnectedAt.getTime()).toBeGreaterThan(receivedAt.getTime());
-
-          const connectionSelect = {
-            accessTokenEncrypted: true,
-            accessTokenExpiresAt: true,
-            connectedAt: true,
-            credentialKind: true,
-            keyVersion: true,
-            lastErrorCode: true,
-            lastErrorMessage: true,
-            lastWebhookAt: true,
-            metadataJson: true,
-            nextReconcileAt: true,
-
-            refreshTokenEncrypted: true,
-            scopesJson: true,
-            setupExpiresAt: true,
-            setupPhase: true,
-            status: true,
-            tokenVersion: true,
-            updatedAt: true,
-          } as const;
-          const replacementBefore = await prisma.deviceConnection.findUniqueOrThrow({
-            select: connectionSelect,
-            where: { id: replacement.id },
-          });
-          expect(replacementBefore).toMatchObject({
-            accessTokenEncrypted: "enc:access-token-b",
-            connectedAt: replacementConnectedAt,
-            lastWebhookAt: null,
-            metadataJson: { connectionEpoch: "b" },
-            refreshTokenEncrypted: "enc:refresh-token-b",
-            setupExpiresAt: null,
-            setupPhase: null,
-            status: "active",
-          });
-
-          const consumeService = createIngressService({
-            headers: new Headers(),
-            provider: "strava",
-            registry,
-            store,
-          });
-          await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
-            accepted: true,
-            duplicate: false,
-          });
-
-          expect(providerFetch).not.toHaveBeenCalled();
-          await expect(prisma.deviceWebhookTrace.findUniqueOrThrow({
-            select: {
-              claimToken: true,
-              processingExpiresAt: true,
-              receivedAt: true,
-              status: true,
-            },
-            where: {
-              provider_traceId: {
-                provider: "strava",
-                traceId: prepared.traceId,
-              },
-            },
-          })).resolves.toEqual({
-            claimToken: null,
-            processingExpiresAt: null,
-            receivedAt,
-            status: "processed",
-          });
-          await expect(prisma.deviceConnection.findUniqueOrThrow({
-            select: connectionSelect,
-            where: { id: replacement.id },
-          })).resolves.toEqual(replacementBefore);
-          await expect(prisma.deviceConnectionSource.count({
-            where: { connectionId: replacement.id },
-          })).resolves.toBe(0);
-          await expect(prisma.deviceSyncDirtyConnection.count({
-            where: { connectionId: replacement.id },
-          })).resolves.toBe(0);
-          await expect(prisma.deviceSyncDirtyPayload.count({
-            where: { connectionId: replacement.id },
-          })).resolves.toBe(0);
-          await expect(prisma.deviceSyncSignal.count({
-            where: { connectionId: replacement.id },
-          })).resolves.toBe(0);
-          await expect(prisma.hostedMailboxItem.count({
-            where: { userId: memberId },
-          })).resolves.toBe(0);
-
-          await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
-            accepted: true,
-            duplicate: true,
-          });
-          await expect(prisma.deviceConnection.findUniqueOrThrow({
-            select: connectionSelect,
-            where: { id: replacement.id },
-          })).resolves.toEqual(replacementBefore);
-        } finally {
-          try {
-            if (traceId) {
-              await prisma.deviceWebhookTrace.deleteMany({
-                where: { provider: "strava", traceId },
-              });
-            }
-            await prisma.deviceOauthSession.deleteMany({ where: { userId: memberId } });
-            await prisma.hostedMember.deleteMany({ where: { id: memberId } });
-          } finally {
-            await prisma.$disconnect();
-            setHostedSecureBoxStringTestCodecForTests(null);
-          }
-        }
-      },
-    );
-
     it("keeps a newer source epoch when it supersedes delayed authority during provider I/O", async () => {
       const fixture = await createFixture({ sourceLastErrorCode: null });
       const supersedingLastSeenAt = new Date(fixture.receivedAt.getTime() + 1_000);
@@ -3074,6 +2835,240 @@ describe.skipIf(!runPostgresProof)(
         await cleanupFixture(fixture);
       }
     });
+    it(
+      "terminally settles a prepared pre-reconnect synthetic deauthorization against the replacement connection",
+      async () => {
+        const suffix = randomUUID().replaceAll("-", "");
+        const memberId = `member_prepared_synthetic_authority_${suffix}`;
+        const externalAccountId = (BigInt(`0x${suffix.slice(0, 12)}`) + 1_000_000n).toString();
+        const receivedAt = new Date(Date.now() - 120_000);
+        const originalConnectedAt = new Date(receivedAt.getTime() - 60_000);
+        const replacementConnectedAt = new Date(receivedAt.getTime() + 60_000);
+        const replacementTokenExpiresAt = new Date(receivedAt.getTime() + 24 * 60 * 60_000);
+        const prisma = createPrismaClient({ databaseUrl, poolMax: 3 });
+        const store = new PrismaDeviceSyncControlPlaneStore({
+          codec: connectionCodec,
+          prisma,
+          providerAccountBlindIndexKey: Buffer.alloc(32, 23),
+        });
+        const providerFetch = vi.fn(async () => {
+          throw new Error("Superseded Synthetic work must not call the provider.");
+        });
+        const rawBody = Buffer.from(JSON.stringify({ externalAccountId, event: "deauthorize" }));
+        const registry = createDeviceSyncRegistry([{
+          provider: "synthetic",
+          descriptor: {
+            provider: "synthetic", displayName: "Synthetic", transportModes: ["webhook_push"],
+            connection: { kind: "oauth2", callbackPath: "/oauth/synthetic/callback", defaultScopes: [] },
+            webhook: { path: "/webhooks/synthetic", deliveryMode: "notification", supportsAdmin: false },
+            normalization: { metricFamilies: ["activity"], snapshotParser: "schema" },
+            sourcePriorityHints: { defaultPriority: 50, metricFamilies: { activity: 50 } },
+          },
+          connectionHandler: {
+            beginConnection: providerFetch, completeConnection: providerFetch, refreshTokens: providerFetch,
+          },
+          webhookHandler: {
+            async verifyAndParseWebhook(context) {
+              expect(context.rawBody).toEqual(rawBody);
+              return {
+                acceptanceMode: "durable_webhook_work", eventType: "athlete.deauthorized", externalAccountId,
+                traceId: `synthetic_deauthorization_${suffix}`, occurredAt: receivedAt.toISOString(),
+                jobs: [{ kind: "deauthorize", priority: 100, dedupeKey: `deauthorize:${externalAccountId}`,
+                  payload: { eventType: "athlete.deauthorized", occurredAt: receivedAt.toISOString(), resourceId: externalAccountId, resourceType: "athlete" } }],
+              };
+            },
+          },
+          jobExecutor: { executeJob: providerFetch },
+        }]);
+        let traceId: string | null = null;
+
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt: (codecInput) => codecInput.value,
+          encrypt: (codecInput) => codecInput.value,
+        });
+        try {
+          await prisma.hostedMember.create({ data: { id: memberId } });
+          await prisma.hostedConsentGrant.create({
+            data: {
+              createdAt: receivedAt,
+              documentVersionsJson: {},
+              grantedAt: receivedAt,
+              memberId,
+              scope: "launch.health-data",
+              source: "prepared-webhook-authority-test",
+              status: "granted",
+              updatedAt: receivedAt,
+            },
+          });
+          const original = await store.upsertConnection({
+            connectedAt: originalConnectedAt.toISOString(),
+            displayName: "Synthetic A",
+            existingAccountPolicy: "replace",
+            externalAccountId,
+            metadata: { connectionEpoch: "a" },
+            nextReconcileAt: null,
+            ownerId: memberId,
+            provider: "synthetic",
+            scopes: ["activity:read_all"],
+            status: "active",
+            tokens: {
+              accessToken: "access-token-a",
+              accessTokenExpiresAt: replacementTokenExpiresAt.toISOString(),
+              refreshToken: "refresh-token-a",
+            },
+          });
+          const prepareService = createIngressService({
+            headers: new Headers(),
+            provider: "synthetic",
+            registry,
+            store,
+          });
+          const prepared = await prepareService.prepareWebhookForDurableEnqueue(
+            "synthetic",
+            rawBody,
+            receivedAt,
+          );
+          traceId = prepared.traceId;
+          expect(prepared).toMatchObject({
+            acceptanceMode: "durable_webhook_work",
+            eventType: "athlete.deauthorized",
+            externalAccountId,
+            jobs: [expect.objectContaining({ kind: "deauthorize" })],
+            receivedAt: receivedAt.toISOString(),
+          });
+
+          const replacement = await store.upsertConnection({
+            connectedAt: replacementConnectedAt.toISOString(),
+            displayName: "Synthetic B",
+            existingAccountPolicy: "replace",
+            externalAccountId,
+            metadata: { connectionEpoch: "b" },
+            nextReconcileAt: null,
+            ownerId: memberId,
+            provider: "synthetic",
+            scopes: ["activity:read_all"],
+            status: "active",
+            tokens: {
+              accessToken: "access-token-b",
+              accessTokenExpiresAt: replacementTokenExpiresAt.toISOString(),
+              refreshToken: "refresh-token-b",
+            },
+          });
+          expect(replacement.id).toBe(original.id);
+          expect(replacement.connectedAt).toBe(replacementConnectedAt.toISOString());
+          expect(replacementConnectedAt.getTime()).toBeGreaterThan(receivedAt.getTime());
+
+          const connectionSelect = {
+            accessTokenEncrypted: true,
+            accessTokenExpiresAt: true,
+            connectedAt: true,
+            credentialKind: true,
+            keyVersion: true,
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            lastWebhookAt: true,
+            metadataJson: true,
+            nextReconcileAt: true,
+
+            refreshTokenEncrypted: true,
+            scopesJson: true,
+            setupExpiresAt: true,
+            setupPhase: true,
+            status: true,
+            tokenVersion: true,
+            updatedAt: true,
+          } as const;
+          const replacementBefore = await prisma.deviceConnection.findUniqueOrThrow({
+            select: connectionSelect,
+            where: { id: replacement.id },
+          });
+          expect(replacementBefore).toMatchObject({
+            accessTokenEncrypted: "enc:access-token-b",
+            connectedAt: replacementConnectedAt,
+            lastWebhookAt: null,
+            metadataJson: { connectionEpoch: "b" },
+            refreshTokenEncrypted: "enc:refresh-token-b",
+            setupExpiresAt: null,
+            setupPhase: null,
+            status: "active",
+          });
+
+          const consumeService = createIngressService({
+            headers: new Headers(),
+            provider: "synthetic",
+            registry,
+            store,
+          });
+          await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+            accepted: true,
+            duplicate: false,
+          });
+
+          expect(providerFetch).not.toHaveBeenCalled();
+          await expect(prisma.deviceWebhookTrace.findUniqueOrThrow({
+            select: {
+              claimToken: true,
+              processingExpiresAt: true,
+              receivedAt: true,
+              status: true,
+            },
+            where: {
+              provider_traceId: {
+                provider: "synthetic",
+                traceId: prepared.traceId,
+              },
+            },
+          })).resolves.toEqual({
+            claimToken: null,
+            processingExpiresAt: null,
+            receivedAt,
+            status: "processed",
+          });
+          await expect(prisma.deviceConnection.findUniqueOrThrow({
+            select: connectionSelect,
+            where: { id: replacement.id },
+          })).resolves.toEqual(replacementBefore);
+          await expect(prisma.deviceConnectionSource.count({
+            where: { connectionId: replacement.id },
+          })).resolves.toBe(0);
+          await expect(prisma.deviceSyncDirtyConnection.count({
+            where: { connectionId: replacement.id },
+          })).resolves.toBe(0);
+          await expect(prisma.deviceSyncDirtyPayload.count({
+            where: { connectionId: replacement.id },
+          })).resolves.toBe(0);
+          await expect(prisma.deviceSyncSignal.count({
+            where: { connectionId: replacement.id },
+          })).resolves.toBe(0);
+          await expect(prisma.hostedMailboxItem.count({
+            where: { userId: memberId },
+          })).resolves.toBe(0);
+
+          await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+            accepted: true,
+            duplicate: true,
+          });
+          await expect(prisma.deviceConnection.findUniqueOrThrow({
+            select: connectionSelect,
+            where: { id: replacement.id },
+          })).resolves.toEqual(replacementBefore);
+        } finally {
+          try {
+            if (traceId) {
+              await prisma.deviceWebhookTrace.deleteMany({
+                where: { provider: "synthetic", traceId },
+              });
+            }
+            await prisma.deviceOauthSession.deleteMany({ where: { userId: memberId } });
+            await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+          } finally {
+            await prisma.$disconnect();
+            setHostedSecureBoxStringTestCodecForTests(null);
+          }
+        }
+      },
+    );
+
   },
 );
 

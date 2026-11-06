@@ -274,17 +274,11 @@ export class KernelComputerClient implements ComputerKernelClient {
 
   async createAutomationBrowser(input: {
     headless: boolean;
-    profileName: string;
-    saveChanges: boolean;
     timeoutSeconds: number;
   }): Promise<KernelAutomationBrowserHandle> {
     const browser = await this.kernel.browsers.create({
       headless: input.headless,
-      profile: {
-        name: input.profileName,
-        save_changes: input.saveChanges,
-      },
-      // Profiles restore old tabs; canaries need only their saved login state.
+      // Canaries must authenticate using this run's credentials, never a saved login.
       start_url: "about:blank",
       stealth: true,
       telemetry: { enabled: false },
@@ -302,13 +296,18 @@ export class KernelComputerClient implements ComputerKernelClient {
     sessionId: string;
     timeoutMs: number;
   }): Promise<KernelPlaywrightResult> {
+    const startedAt = performance.now();
     const response = await this.kernel.browsers.playwright.execute(input.sessionId, {
       code: input.code,
       timeout_sec: Math.ceil(input.timeoutMs / 1000),
     });
 
     if (!response.success) {
-      const details = buildKernelPlaywrightFailureDetails(response);
+      const details = {
+        ...buildKernelPlaywrightFailureDetails(response),
+        kernelExecutionTimeoutMs: Math.ceil(input.timeoutMs / 1000) * 1000,
+        kernelExecutionElapsedMs: Math.round(performance.now() - startedAt),
+      };
       throw computerUseError({
         code: "HOSTED_COMPUTER_EVAL_FAILED",
         details,

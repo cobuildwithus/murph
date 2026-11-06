@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-27",
+  "order": 100,
+  "item": {
+    "id": "unblock-game-players",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep access to blocked players",
+    "summary": "Players invited to a game can still open their blocked list after blocking their only opponent.",
+    "details": "Open You, then Blocked people, to unblock someone. Games ended by a block stay ended.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4391
+    ]
+  }
+}

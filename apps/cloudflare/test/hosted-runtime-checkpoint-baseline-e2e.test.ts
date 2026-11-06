@@ -1,3 +1,7 @@
+import { randomBytes } from "node:crypto";
+import { addMeasurement, initializeVault } from "@murphai/core";
+import { runHostedWorkspaceRuntimeJobInProcess, restoreHostedWorkspaceRuntimeJobWorkspace, type HostedRuntimePlatform } from "@murphai/assistant-runtime";
+import { readHostedMediaReferenceCatalogueValue } from "@murphai/runtime-state/node";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -134,6 +138,98 @@ describe("hosted runtime checkpoint baseline", () => {
     await expect(readFile(path.join(restoreRoot, "note.md"), "utf8"))
       .resolves.toBe("idle compacted state\n");
   });
+  it("hosted-local photo-heavy checkpoints shrink and cold restores read externalized photos on demand", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const root = await mkdtemp(path.join(tmpdir(), "hosted-local-photo-producer-"));
+    cleanupPaths.push(root);
+    try {
+      const source = path.join(root, "source", "vault");
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      await initializeVault({ vaultRoot: source, timezone: "UTC" });
+      const originals = new Map<string, Buffer>();
+      for (let i = 0; i < 16; i++) {
+        const sourcePath = path.join(root, `synthetic-${i}.jpg`);
+        const bytes = randomBytes(256 * 1024);
+        await writeFile(sourcePath, bytes);
+        const created = await addMeasurement({ vaultRoot: source, attachments: [{ role: "media_1", sourcePath }],
+          draft: { title: "Synthetic photo measurement", occurredAt: "2030-01-01T12:00:00.000Z", measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+        originals.set(created.event.attachments![0]!.relativePath, bytes);
+      }
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const uploadedObjects = new Map<string, Uint8Array>();
+      const mediaObjects = new Map<string, Uint8Array>();
+      let workspace = createWorkspaceReadResponse({ version: "7" }).workspace!;
+      const platform: HostedRuntimePlatform = createPlatform({ uploadedObjects,
+        readWorkspace: async () => ({ fetchedAt: new Date().toISOString(), workspace }),
+        putArtifact: async () => {}, writeBrowserVaultReplica: async () => { throw new Error("Unexpected replica write"); } });
+      platform.workspacePort!.checkpoint = async request => {
+        workspace = { ...workspace, version: String(Number(workspace.version) + 1),
+          redactedStatus: request.redactedStatus,
+          inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? workspace.inboxMediaRetentionWakeAt };
+        return { checkpointed: true, workspace };
+      };
+      platform.mailboxPort = {
+        fetch: async request => ({ fetchedAt: new Date().toISOString(), userId: "member_1", items: [],
+          maxSeqByLane: request.lanes.map(lane => ({ lane: lane.lane, maxSeq: lane.importedSeq })) }),
+        fetchPayload: async () => { throw new Error("Unexpected payload fetch"); },
+      };
+      platform.mediaStore = {
+        get: async ({ mediaId }) => mediaObjects.get(mediaId) ?? null,
+        put: async entry => { mediaObjects.set(entry.mediaId, entry.bytes); },
+        record: async () => {}, delete: async ({ mediaId }) => { mediaObjects.delete(mediaId); },
+      };
+      const snapshots = platform.workspaceSnapshotPort!;
+      const complete = snapshots.completeSnapshotSession;
+      let loseAcknowledgement = true;
+      snapshots.completeSnapshotSession = async input => {
+        const result = await complete(input);
+        workspace = { ...result.checkpoint.workspace, version: String(Number(workspace.version) + 1),
+          inboxMediaRetentionWakeAt: input.checkpointRequest.inboxMediaRetentionWakeAt ?? null };
+        if (loseAcknowledgement) { loseAcknowledgement = false; throw new Error("Synthetic lost checkpoint acknowledgement"); }
+        return { ...result, checkpoint: { ...result.checkpoint, workspace } };
+      };
+      snapshots.restoreWorkspaceSnapshot = async ({ durableRoot, ref }) => {
+        const encryptedFilePath = path.join(root, "restore.snapshot.enc");
+        await writeFile(encryptedFilePath, uploadedObjects.get(ref.objectKey)!);
+        await restoreEncryptedWorkspaceSnapshot({ dataKey: testDataKey, durableRoot, encryptedFilePath, ref });
+      };
+      const bridge = (vaultRoot: string) => createHostedWorkspaceRuntimeBridgeJobOptions({ platform,
+        readCurrentLease: () => createLease({ workspaceVersion: workspace.version }),
+        request: { ...createInvocationRequest({ workspaceVersion: workspace.version }), workspace },
+        runtime: {}, vaultRoot, waitForBackgroundAssistantWork: async () => {} });
+      await expect(bridge(source).createCheckpointSnapshot(createCheckpointInput())).rejects.toThrow("Synthetic lost checkpoint acknowledgement");
+      const before = requireWorkspaceSnapshotV2Ref(workspace.snapshotRef);
+      expect(mediaObjects.size).toBe(0);
+      expect((await readHostedMediaReferenceCatalogueValue(source)).entries.every(entry => entry.pendingUpload)).toBe(true);
+      const pendingRestore = path.join(root, "pending", "vault");
+      await restoreHostedWorkspaceRuntimeJobWorkspace({ platform, vaultRoot: pendingRestore, workspace });
+      for (const [relativePath, bytes] of originals) expect(await readFile(path.join(pendingRestore, relativePath))).toEqual(bytes);
+      // Actual retention-only runtime invocations use the shared ten-attempt budget.
+      for (let i = 0; i < 2; i++) {
+        const vaultRoot = i === 0 ? source : path.join(root, `idle-${i}`, "vault");
+        await runHostedWorkspaceRuntimeJobInProcess({ runtime: {}, request: {
+          ...createInvocationRequest({ workspaceVersion: workspace.version }), workspace,
+          processingMode: "inbox_media_retention",
+        } }, { ...bridge(vaultRoot), platform, vaultRoot,
+          runAssistantPhase: async () => { throw new Error("Photo maintenance must not enter the assistant."); } });
+        expect(mediaObjects.size).toBe(i === 0 ? 10 : 16);
+      }
+      const after = requireWorkspaceSnapshotV2Ref(workspace.snapshotRef);
+      expect(after.archive.encryptedByteSize).toBeLessThan(before.archive.encryptedByteSize / 10);
+      const restoredRoot = path.join(root, "final", "vault");
+      const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({ platform, vaultRoot: restoredRoot, workspace });
+      const catalogue = await readHostedMediaReferenceCatalogueValue(restoredRoot);
+      expect(catalogue.entries).toHaveLength(16);
+      for (const relativePath of originals.keys()) await expect(readFile(path.join(restoredRoot, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+      const result = await restored.materializeWorkspaceArtifacts([...originals.keys()]);
+      expect(result.missingArtifactPaths.size).toBe(0);
+      for (const [relativePath, bytes] of originals) expect(await readFile(path.join(restoredRoot, relativePath))).toEqual(bytes);
+      process.stdout.write(JSON.stringify({ syntheticPhotoCount: 16, photoBytes: 16 * 256 * 1024,
+        beforeEncryptedBytes: before.archive.encryptedByteSize, afterEncryptedBytes: after.archive.encryptedByteSize,
+        beforePlainBytes: before.archive.totalPlainBytes, afterPlainBytes: after.archive.totalPlainBytes }) + "\n");
+    } finally { vi.useRealTimers(); }
+  }, 60_000);
+
 });
 
 function createWorkspaceReadResponse(input: {

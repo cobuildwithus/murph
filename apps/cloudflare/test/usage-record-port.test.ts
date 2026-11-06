@@ -18,6 +18,7 @@ import {
   CLI_TIMING_MAX_REPORT_BYTES,
   CLI_TIMING_MAX_REPORTS,
   CLI_TIMING_PHASES,
+  CLI_TIMING_PARSE_REJECTIONS,
   emptyCliTiming,
   mergeCliTiming,
   normalizeCliTiming,
@@ -35,9 +36,9 @@ const limit = HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES;
 const roots = [
   "goal list", "family list", "food list", "protocol list", "regimen list",
   "recipe list", "provider list", "genetics list", "automation list", "habitat list",
-  "allergy list", "condition list",
+  "allergy list", "condition list", "event list",
   "wearables activity list", "wearables body list", "wearables day", "wearables drift",
-  "wearables latest", "wearables metric latest", "wearables metric trend", "wearables patterns",
+  "wearables latest", "wearables metric latest", "wearables metric trend",
   "wearables recovery list", "wearables sleep list", "wearables sleep pattern", "wearables sources list",
 ];
 
@@ -87,7 +88,7 @@ function legacyRequest(noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTa
     usage: parseAssistantUsageRecord({
       schema: ASSISTANT_USAGE_SCHEMA, provider: "codex-cli", credentialSource: "platform",
       occurredAt: "2026-09-01T12:00:00.000Z", sessionId: "synthetic-session", turnId: "synthetic-turn",
-      usageId: "synthetic-turn.request-2.attempt-1", attemptCount: 1, stripeMeterSource: "murph",
+      usageId: "synthetic-turn.request-2.attempt-1", attemptCount: 1,
       inputTokens: 53, cachedInputTokens: 7, outputTokens: 29, reasoningTokens: 11,
       totalTokens: 82, cacheWriteTokens: 3, tokenPricingBasis: "openai-flex",
       providerRequestOutcome: "succeeded", providerRequestOrdinal: 2,
@@ -212,6 +213,7 @@ test("maximum admitted aggregate trims whole summaries and saturates existing dr
   const before = JSON.stringify(source);
   const kept = inspect(await send(source), legacy);
   assert.ok(kept.commands.length > 0 && kept.commands.length < 32);
+  assert.ok(kept.commands.every(command => command.phases.length === CLI_TIMING_PHASES.length));
   assert.equal(kept.droppedCalls, Number.MAX_SAFE_INTEGER);
   assert.deepEqual({ ...kept, commands: [], droppedCalls: 0 }, { ...timing, commands: [], droppedCalls: 0 });
   assert.deepEqual(kept.commands, timing.commands.slice(0, kept.commands.length));
@@ -298,4 +300,12 @@ test("failure detail survives usage fitting; trimming drops whole calls without 
   assert.equal(normalized.commands[0]!.calls, 10);
   assert.equal(normalized.commands[0]!.failures, undefined);
   assert.equal(normalized.commands[0]!.droppedFailures, undefined);
+  // Optional parser rejection detail rides the same whole-entry fitter unchanged.
+  const parser: CliTiming = { ...emptyCliTiming(), commands: [{ ...structuredClone(original.commands[0]!),
+    command: "exercise list", calls: CLI_TIMING_PARSE_REJECTIONS.length + 1, droppedFailures: 1,
+    failures: CLI_TIMING_PARSE_REJECTIONS.map((rejection) => ({
+      code: "VALIDATION_ERROR" as const, stage: "unknown" as const, count: 1, rejection,
+    })) }] };
+  assert.deepEqual(normalizeCliTiming(parser), parser);
+  assert.deepEqual(inspect(await send(withTiming(cleanLegacy, parser)), cleanLegacy), parser);
 });

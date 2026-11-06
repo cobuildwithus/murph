@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -8,20 +8,9 @@ import { promisify } from "node:util";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionBundleRef,
-} from "@murphai/hosted-execution/contracts";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotHotRef,
-} from "@murphai/hosted-execution/parsers";
-import {
-  readHostedBundleTextFile,
-} from "@murphai/runtime-state/node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -32,6 +21,7 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+import { buildAssistantProviderShellCommandCall } from "./helpers/hosted-local-e2e-support.js";
 import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
@@ -40,15 +30,21 @@ import {
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
 
+import { withHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot-restore.ts";
+
 const execFileAsync = promisify(execFile);
 const runId = Date.now();
 const userId = `member_local_vault_persistence_${runId}`;
 const chatId = `chat_local_vault_persistence_${runId}`;
 const linqWebhookSecret = "linq-local-vault-persistence-secret";
 const safeLiveAssistantModel =
-  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-5.6-terra";
+  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-6.1-sol";
 const vaultRelativePath = `bank/hosted-e2e/vault-persistence-${runId}.md`;
 const firstMarker = `first-marker-${randomUUID()}`;
+const assistantProviderMode = process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE === "live"
+  ? "live"
+  : "stub";
+const writtenReply = "The vault file was written.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const cleanupPaths: string[] = [];
@@ -57,13 +53,11 @@ let databaseUrl: string | null = null;
 let persistDir: string | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
-const describeVaultPersistence = isLiveCodexAppServerEnvironment() ? describe : describe.skip;
 
 beforeAll(async () => {
-  if (!isLiveCodexAppServerEnvironment()) {
-    return;
+  if (assistantProviderMode === "live" && !process.env.OPENAI_API_KEY?.trim()) {
+    throw new Error("Live vault-persistence requires OPENAI_API_KEY; no provider turn ran.");
   }
-  requireLiveCodexAppServerEnvironment();
   databaseName = buildDatabaseName();
   databaseUrl = await createDatabase(databaseName);
   persistDir = await mkdtemp(path.join(tmpdir(), "murph-hosted-vault-persistence-"));
@@ -89,7 +83,7 @@ afterAll(async () => {
   ));
 }, 180_000);
 
-describeVaultPersistence("hosted local vault persistence e2e", () => {
+describe("hosted local vault persistence e2e", () => {
   it("persists real Codex vault file changes across hosted-local runner restarts", async () => {
     scenario = await startVaultPersistenceScenario({
       resetLocalDatabase: true,
@@ -113,6 +107,18 @@ describeVaultPersistence("hosted local vault persistence e2e", () => {
       recipientPhone: memberPhone,
     });
 
+    const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const outboundCountBeforeWrite = requireLinqStub().countObservedSends(replyPath);
+    if (assistantProviderMode === "stub") {
+      // Script only the provider. The candidate Codex binary must execute the
+      // shell write, and the real encrypted checkpoint must survive restart.
+      requireScenario().queueAssistantResponses([
+        buildAssistantProviderShellCommandCall(
+          `mkdir -p bank/hosted-e2e && printf '%s\\n' '# Hosted vault persistence E2E' 'first_marker: ${firstMarker}' > '${vaultRelativePath}'`,
+        ),
+        writtenReply,
+      ], { matchInputContains: "Hosted vault persistence E2E setup." });
+    }
     await sendInboundLinqPrompt({
       eventId: `evt_vault_persistence_first_${runId}`,
       messageId: `msg_vault_persistence_first_${runId}`,
@@ -137,6 +143,16 @@ describeVaultPersistence("hosted local vault persistence e2e", () => {
       ],
       summary: "first-run checkpoint did not contain the expected vault file",
     });
+    if (assistantProviderMode === "stub") {
+      const send = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: outboundCountBeforeWrite,
+        expectedPath: replyPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(requireLinqStub().readObservedMessageText(send)).toBe(writtenReply);
+      expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundCountBeforeWrite + 1);
+    }
     const restartCryptoEnv = buildRestartCryptoEnv(
       requireScenario().harness.workerRuntimeEnv ?? requireScenario().runtimeEnv,
     );
@@ -176,9 +192,12 @@ async function startVaultPersistenceScenario(input: {
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      // Keep object data with the Worker state across the full stack restart.
+      MURPH_DEV_MINIO_DATA_DIR: path.join(requirePersistDir(), "minio-r2"),
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      ...(assistantProviderMode === "stub" ? { OPENAI_API_KEY: "stub-local-openai-key" } : {}),
     },
-    assistantProviderMode: "live",
+    assistantProviderMode,
     assistantProviderStubModelId: safeLiveAssistantModel,
     localDatabaseUrl: requireDatabaseUrl(),
     persistDirOverride: requirePersistDir(),
@@ -264,7 +283,6 @@ async function expectVaultSnapshotText(
   },
 ): Promise<void> {
   const actualText = await readVaultSnapshotText(status, vaultRelativePath);
-  expect(actualText, input.summary).not.toBeNull();
   for (const marker of input.presentMarkers) {
     expect(actualText, input.summary).toContain(marker);
   }
@@ -276,47 +294,13 @@ async function expectVaultSnapshotText(
 async function readVaultSnapshotText(
   status: HostedRunnerStatusResponse,
   relativePath: string,
-): Promise<string | null> {
-  const snapshotRef = status.workspace?.snapshotRef ?? null;
-  const candidateRefs = [
-    readHostedExecutionSnapshotHotRef(snapshotRef),
-    readHostedExecutionSnapshotBaseRef(snapshotRef),
-  ].filter((ref): ref is HostedExecutionBundleRef => ref !== null);
-
-  for (const ref of candidateRefs) {
-    const bytes = await readHostedBundleBytes(ref);
-    const text = readHostedBundleTextFile({
-      bytes,
-      expectedKind: "vault",
-      path: relativePath,
-      root: "vault",
-    });
-    if (text !== null) {
-      return text;
-    }
-  }
-
-  return null;
-}
-
-async function readHostedBundleBytes(ref: HostedExecutionBundleRef): Promise<Uint8Array> {
-  const search = new URLSearchParams({
-    key: ref.key,
-    sha256: ref.hash,
-    size: String(ref.size),
+): Promise<string> {
+  return withHostedLocalWorkspaceSnapshot({
+    harness: requireScenario().harness,
+    status,
     userId,
+    read: ({ vaultRoot }) => readFile(path.join(vaultRoot, relativePath), "utf8"),
   });
-  const response = await requireScenario().harness.request(
-    `/__test/artifacts?${search.toString()}`,
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "GET",
-    },
-  );
-  expect(response.status).toBe(200);
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
@@ -354,26 +338,6 @@ function buildActivationWake(memberId: string) {
     memberId,
     occurredAt: new Date().toISOString(),
   });
-}
-
-function isLiveCodexAppServerEnvironment(): boolean {
-  return (
-    process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE === "live"
-    && Boolean(process.env.OPENAI_API_KEY?.trim())
-  );
-}
-
-function requireLiveCodexAppServerEnvironment(): void {
-  if (process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE !== "live") {
-    throw new Error(
-      "hosted-local vault-persistence requires --profile e2e:live so it uses the real Codex app-server path.",
-    );
-  }
-  if (!process.env.OPENAI_API_KEY?.trim()) {
-    throw new Error(
-      "hosted-local vault-persistence requires OPENAI_API_KEY for the live Codex app-server run.",
-    );
-  }
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

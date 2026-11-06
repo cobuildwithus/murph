@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,6 @@ import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts";
 
 import { initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
 import { resolveAuditShardPath } from "../src/audit.ts";
-import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
 import {
   deleteFood,
   deleteProvider,
@@ -112,6 +112,8 @@ async function snapshotRelativeFiles(
   return snapshot.sort(([left], [right]) => left.localeCompare(right));
 }
 
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
+
 test("goals support multiple active records and preserve relationships in markdown registries", async () => {
   const vaultRoot = await makeTempDirectory("murph-goals");
   await initializeVault({ vaultRoot });
@@ -160,8 +162,8 @@ test("goals support multiple active records and preserve relationships in markdo
     relativePath: updated.auditPath,
   });
   const goalOperations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
 
@@ -264,7 +266,7 @@ test("goal update-only intent rejects an absent id before canonical or audit wri
     goalId: created.record.entity.goalId,
   });
   const auditBefore = await snapshotRelativeFiles(vaultRoot, "audit");
-  const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+  const operationsBefore = await listObservedWriteOperationPaths(vaultRoot);
 
   for (const update of [
     {
@@ -302,7 +304,7 @@ test("goal update-only intent rejects an absent id before canonical or audit wri
     auditBefore,
   );
   assert.deepEqual(
-    await listWriteOperationMetadataPaths(vaultRoot),
+    await listObservedWriteOperationPaths(vaultRoot),
     operationsBefore,
   );
 
@@ -1158,8 +1160,8 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
     relativePath: resolveAuditShardPath(new Date()),
   });
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
 
@@ -1292,8 +1294,8 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
     relativePath: auditRelativePath,
   });
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
 
@@ -2224,8 +2226,8 @@ test("conditions and allergies are stored as deterministic markdown registry pag
   );
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const conditionOperations = operations.filter((operation) => operation.operationType === "condition_upsert");
@@ -2816,8 +2818,8 @@ test("regimens support medication and supplement groups plus stop handling", asy
     relativePath: stopped.auditPath,
   });
   const regimenOperations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
 

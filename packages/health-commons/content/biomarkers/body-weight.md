@@ -15,17 +15,8 @@ categories:
   - body-composition
   - manual-log
   - nutrition
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:creatine-supplementation/creatine-monohydrate
-  -
-    type: related_protocol
-    target: protocol_variant:added-sugar-reduction/no-added-sugar-diet
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 measurementContexts:
   - creatine_self_experiment
   - added_sugar_reduction

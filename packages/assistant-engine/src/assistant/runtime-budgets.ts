@@ -6,10 +6,7 @@ import {
   type AssistantQuarantineEntry,
   type AssistantRuntimeBudgetSnapshot,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  clearAssistantAutomationRunLock,
-  inspectAssistantAutomationRunLock,
-} from './automation/runtime-lock.js'
+
 import {
   ensureAssistantState,
   pruneAssistantTranscriptRetention,
@@ -499,11 +496,6 @@ async function clearStaleAssistantLocks(input: {
   const runtimeWriteLock = await inspectAssistantRuntimeWriteLock(input.vault)
   if (runtimeWriteLock.state === 'stale') {
     await clearAssistantRuntimeWriteLock(input.vault)
-    cleared += 1
-  }
-  const automationRunLock = await inspectAssistantAutomationRunLock(input.paths)
-  if (automationRunLock.state === 'stale') {
-    await clearAssistantAutomationRunLock(input.paths)
     cleared += 1
   }
   return cleared

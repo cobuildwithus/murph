@@ -2,6 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
+  createVaultSnapshotBundle,
   createDeferred,
   createImageFailureCodexAppServerCommand,
   createMailboxItem,
@@ -12,6 +13,7 @@ import {
   createWorkspaceSnapshotV2Ref,
   createWorkspaceState,
   mocks,
+  readCapturedHostedExecutionLogs,
   removeTempRoot,
   requireEventIndex,
   stageAssistantInputEventForMailboxItem,
@@ -35,7 +37,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -45,7 +46,6 @@ import {
 } from "@murphai/core";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -143,7 +143,6 @@ import {
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -155,7 +154,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 25;
+    const runnerIdleTtlMs = 25;
     const systemFollowUpWakeAt = TEST_NOW;
     const mailboxItems = [
       createMailboxItem({
@@ -179,7 +178,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -424,7 +423,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 1,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -624,7 +623,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -768,7 +767,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 4,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -968,7 +967,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 4,
             },
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1095,7 +1094,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_unindexed_reminder",
             budget: { maxMailboxItems: 4 },
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1274,7 +1273,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             request: {
               attemptId: `attempt_foreground_delivery_image_${scenario}`,
               budget: { maxMailboxItems: 10 },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1807,7 +1806,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: runtimeAttemptId,
             budget: { maxMailboxItems: 10 },
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1911,6 +1910,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    let latencyTraceRetryObserved = false;
     const missingAcceptedInputId = "ain_00000000000000000000000000000000";
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_image_evidence_retry_origin",
@@ -2000,7 +2000,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             request: {
               attemptId: "attempt_image_evidence_retry",
               budget: { maxMailboxItems: 10 },
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2041,7 +2041,13 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               }),
               latencyTracePort: {
                 async record(request) {
-                  latencyTraceRequests.push(request);
+                  // The best-effort sender retries the same emitted request.
+                  // Count logical acceptance events separately from attempts.
+                  if (latencyTraceRequests.includes(request)) {
+                    latencyTraceRetryObserved = true;
+                  } else {
+                    latencyTraceRequests.push(request);
+                  }
                   throw new Error("Synthetic latency trace write failure.");
                 },
               },
@@ -2291,6 +2297,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       assert.equal(imageProviderInvocationCount, 2);
       assert.ok(firstCompletionInputId);
       assert.ok(secondCompletionInputId);
+      await waitUntil(() => assert.equal(latencyTraceRetryObserved, true));
       await waitUntil(() => {
         assert.equal(
           latencyTraceRequests.filter(({ event }) =>
@@ -2567,7 +2574,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         request: {
           attemptId,
           budget: { maxMailboxItems: 10 },
-          idleCheckpointDelayMs: 50,
+          runnerIdleTtlMs: 50,
           leaseGeneration,
           userId: TEST_USER_ID,
           workspaceVersion: "0",
@@ -2947,7 +2954,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3196,12 +3203,14 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         },
       );
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
 
       const firstResult = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_abort_first",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3215,6 +3224,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -3248,7 +3258,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             workspacePort: createWorkspacePort({
               checkpointRequests: [],
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           async runAssistantPhase() {
@@ -3297,7 +3307,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_abort_second",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "10",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3323,6 +3333,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({
               events,
               items: [secondMailboxItem],
@@ -3330,7 +3341,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             workspacePort: createWorkspacePort({
               checkpointRequests: [],
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           signal: secondAbortController.signal,
@@ -3365,10 +3376,19 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     }
   });
 
-  test("a definitive scope failure does not starve later scopes and withholds checkpoint effects", async () => {
+  test.each([
+    { failure: "scope-failed", expectedReason: "scope_failed" },
+    { failure: "delivery-exception", expectedReason: "delivery_exception" },
+    { failure: "discovery-exception", expectedReason: undefined },
+  ] as const)("reports $failure without private details and withholds checkpoint effects", async ({
+    failure,
+    expectedReason,
+  }) => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-projection-retry-"),
     );
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const retryAt = "2026-04-27T00:02:00.000Z";
@@ -3380,15 +3400,18 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
       vi.setSystemTime(new Date(TEST_NOW));
       mocks.summarizeWearableSleepRuntime.mockResolvedValue([]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_projection_retry",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3397,20 +3420,21 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "7".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem() {
             throw new Error("Projection retry proof should not import mailbox work.");
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
                 activeScopeReads += 1;
+                if (activeScopeReads === 1 && failure === "discovery-exception") {
+                  throw new Error("Synthetic private discovery failure.");
+                }
                 return activeScopeReads === 1
                   ? {
                       generationTokensByProjectionScopeKey: {
@@ -3435,7 +3459,13 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 projectedKinds.push(request.projectionKind);
                 projectedWorkspaceVersions.push(request.sourceWorkspaceVersion);
                 events.push(`vault-share.deliver:${request.projectionKind}`);
-                return request.projectionKind === "time-zone.v0"
+                if (failure === "delivery-exception" && request.projectionKind === "sleep-times.v0") {
+                  throw new Error(
+                    "Synthetic response-contract rejection: member=synthetic-private-member "
+                      + "vault=/private/synthetic-vault health=synthetic-private-record",
+                  );
+                }
+                return failure === "scope-failed" && request.projectionKind === "time-zone.v0"
                   ? { status: "scope-failed" as const }
                   : { status: "delivered" as const };
               },
@@ -3443,7 +3473,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           async runAssistantPhase() {
@@ -3485,22 +3515,46 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
 
       assert.equal(checkpointEffectCalls, 0);
       assert.equal(events.includes("device-sync.dirty-ack"), false);
-      assert.deepEqual(projectedKinds, [
-        "profile-name.v0",
-        "time-zone.v0",
-        "sleep-times.v0",
-      ]);
-      assert.deepEqual(projectedWorkspaceVersions, ["5", "5", "5"]);
-      assert.ok(
-        requireEventIndex(events, "workspace.checkpoint")
-          < requireEventIndex(events, "vault-share.deliver:profile-name.v0"),
-        events.join(","),
+      if (failure === "discovery-exception") {
+        assert.deepEqual(projectedKinds, []);
+        assert.deepEqual(projectedWorkspaceVersions, []);
+      } else {
+        assert.deepEqual(projectedKinds, [
+          "profile-name.v0",
+          "time-zone.v0",
+          "sleep-times.v0",
+        ]);
+        assert.deepEqual(projectedWorkspaceVersions, ["5", "5", "5"]);
+        assert.ok(
+          requireEventIndex(events, "workspace.checkpoint")
+            < requireEventIndex(events, "vault-share.deliver:profile-name.v0"),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, "vault-share.deliver:time-zone.v0")
+            < requireEventIndex(events, "vault-share.deliver:sleep-times.v0"),
+          events.join(","),
+        );
+      }
+      const projectionWarnings = readCapturedHostedExecutionLogs(consoleWarn).filter(
+        (entry) => entry.message === "Hosted vault-share projection offer failed; continuing wake.",
       );
-      assert.ok(
-        requireEventIndex(events, "vault-share.deliver:time-zone.v0")
-          < requireEventIndex(events, "vault-share.deliver:sleep-times.v0"),
-        events.join(","),
-      );
+      assert.deepEqual(projectionWarnings, [{
+        component: "runtime",
+        details: {
+          requestId: "hosted-workspace-invocation:attempt_synthetic_runtime_vault_share_projection_retry",
+          vaultShareOfferOutcome: "error",
+          ...(expectedReason === undefined ? {} : { vaultShareOfferFailureReason: expectedReason }),
+        },
+        eventId: null,
+        level: "warn",
+        message: "Hosted vault-share projection offer failed; continuing wake.",
+        phase: "wake.running",
+        schema: "murph.hosted-execution.log.v1",
+        time: TEST_NOW,
+        userId: null,
+        userIdPresent: false,
+      }]);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, retryAt);
       assert.equal(result.nextWakeReason, "device-sync.reconcile");
@@ -3509,13 +3563,19 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         && request.nextWakeReason === "device-sync.reconcile"
       ));
     } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleWarn.mockRestore();
       mocks.summarizeWearableSleepRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
 
-  test("offers checkpointed vault-share before servicing repeated device-sync wakes", async () => {
+  test("drains checkpoint-backed vault-share and hands repeated device wakes off", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-device-pressure-"),
     );
@@ -3554,6 +3614,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         sleepStartAt: "2026-04-26T22:04:00.000Z",
       }]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const baseMailboxPort = createMailboxPort({
         events,
         fetchRequests,
@@ -3580,7 +3642,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_device_pressure",
             budget: { maxMailboxItems: 3 },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3590,10 +3652,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "a".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem(item) {
@@ -3601,6 +3660,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort,
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -3653,7 +3713,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,
@@ -3743,17 +3803,10 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         events.join(","),
       );
       for (const laneSeq of ["2", "3"] as const) {
-        assert.ok(
-          requireEventIndex(events, "vault-share.deliver:done")
-            < requireEventIndex(
-              events,
-              `mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_${laneSeq}`,
-            ),
-          events.join(","),
-        );
+        assert.ok(!events.includes(`mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_${laneSeq}`));
       }
       assert.equal(vaultShareDeliverCalls, 1);
-      assert.ok(checkpointRequests.length >= 2);
+      assert.equal(checkpointRequests.length, 1);
       assert.equal(
         fetchRequests.filter((request) =>
           request.requestId.includes(":checkpoint-wake-classify:")
@@ -3774,7 +3827,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       );
       assert.equal(peakMailboxFetchesInFlight, 1);
       assert.ok(fetchRequests.every((request) => request.limitPerLane === 4));
-      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.status, "scheduled");
     } finally {
       offerRelease.resolve();
       runtimeAbortController.abort();
@@ -3860,7 +3913,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_hidden_command",
             budget: { maxMailboxItems: 3 },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3964,7 +4017,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             attemptId:
               "attempt_synthetic_runtime_vault_share_hidden_command_continuation",
             budget: { maxMailboxItems: 8 },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "10",
             userId: TEST_USER_ID,
             workspaceVersion: secondWorkspace.version,
@@ -4051,6 +4104,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       vi.setSystemTime(new Date(TEST_NOW));
       mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const baseMailboxPort = createMailboxPort({
         events,
         items: mailboxItems,
@@ -4075,7 +4130,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_classifier_fallback",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4085,10 +4140,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "d".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem(item) {
@@ -4107,6 +4159,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort,
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -4146,7 +4199,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,
@@ -4278,7 +4331,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_classifier_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4420,7 +4473,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_fallback_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4550,6 +4603,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         sleepStartAt: "2026-04-26T22:04:00.000Z",
       }]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const baseMailboxPort = createMailboxPort({
         events,
         fetchRequests,
@@ -4571,7 +4626,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_device_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4581,10 +4636,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "c".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem(item) {
@@ -4592,6 +4644,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort,
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -4653,7 +4706,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,

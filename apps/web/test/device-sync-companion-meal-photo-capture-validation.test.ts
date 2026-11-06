@@ -122,6 +122,7 @@ describe("meal photo capture validation", () => {
     expect(upload).toMatchObject({
       bytes: jpeg,
       captureId: CAPTURE_ID,
+      uploadId: CAPTURE_ID,
       capturedAt: "2026-07-12T16:30:45.000Z",
       height: 2,
       width: 3,
@@ -137,6 +138,7 @@ describe("meal photo capture validation", () => {
       request: createUploadRequest(jpeg, { idempotencyKey }),
     });
 
+    expect(upload.uploadId).toBe(idempotencyKey.toLowerCase());
     expect(upload.captureId).toBe(createHash("sha256")
       .update("murph:manual-meal-photo:v1\0")
       .update("member_1")

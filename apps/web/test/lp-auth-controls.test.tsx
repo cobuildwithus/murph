@@ -20,14 +20,13 @@ const mocks = vi.hoisted(() => ({
 
 type MockHostedAuthPanelView = "auth" | "auth-active" | "consent";
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => {
   mocks.hostedAuthPanelIslandModuleLoad();
 
   return {
-    HostedAuthPanelIsland(props: {
+    HostedFirstPartyAuthPanel(props: {
       autoSendPastedPhoneNumber?: boolean;
       onCompleted?: (payload: {
-        activationPending: boolean;
         inviteCode: string;
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
@@ -53,7 +52,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -67,7 +65,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -81,7 +78,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "checkout",

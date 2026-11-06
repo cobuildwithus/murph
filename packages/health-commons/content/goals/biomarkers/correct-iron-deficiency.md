@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:correct-iron-deficiency
 slug: correct-iron-deficiency
-title: Correct My Iron Deficiency
-summary: Restore iron stores while finding and addressing why they became low, with a replacement plan you can tolerate and complete.
+title: Understand My Iron Deficiency
+summary: Understand iron deficiency, possible causes, test results, and clinician-directed care.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: correct my iron deficiency
+  goalPhrase: understand my iron deficiency
   successSignals:
     - id: iron_stores
       kind: biomarker
@@ -34,7 +34,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - micronutrients-supplements
-  startPrompt: Hey Murph, help me correct my iron deficiency.
+  startPrompt: Hey Murph, help me understand my iron deficiency.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -90,4 +90,4 @@ Iron overdose is dangerous, especially for children, so store supplements secure
 
 ## Related goals
 
-[Recover From Iron-Deficiency Anemia](/goals/recover-from-iron-deficiency-anemia) · [Correct My Vitamin B12 Deficiency](/goals/correct-b12-deficiency)
+[Understand My Iron-Deficiency Anemia](/goals/recover-from-iron-deficiency-anemia) · [Understand My B12 Deficiency](/goals/correct-b12-deficiency)

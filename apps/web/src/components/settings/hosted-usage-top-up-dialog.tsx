@@ -6,9 +6,9 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { CheckIcon, CircleAlertIcon, MessageCircle, XIcon } from "lucide-react";
+import { CircleAlertIcon } from "lucide-react";
 
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   Dialog,
@@ -19,25 +19,22 @@ import {
   DialogTrigger,
 } from "@/src/components/ui/dialog";
 import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/src/components/ui/drawer";
-import {
   FieldDescription,
   FieldError,
   FieldLegend,
   FieldSet,
 } from "@/src/components/ui/field";
 import { RadioGroup } from "@/src/components/ui/radio-group";
-import { useIsMobile } from "@/src/hooks/use-mobile";
 import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
+import { LinkPageContactPill } from "@/src/components/link-page/link-page-contact";
+import {
+  LINK_PAGE_NIGHT_TOKENS,
+  LinkPageLink,
+  LinkPageTicket,
+} from "@/src/components/link-page/link-page-shell";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import {
@@ -45,6 +42,10 @@ import {
   shouldPollPurchaseStatus,
   type HostedUsageTopUpDialogProps,
 } from "./hosted-usage-top-up-contract";
+import {
+  readHostedUsageTopUpPurchaseActions,
+  type HostedUsageTopUpPurchaseActions,
+} from "./hosted-usage-top-up-state";
 import { useHostedUsageTopUpDialog } from "./use-hosted-usage-top-up-dialog";
 
 type HostedUsageTopUpController = ReturnType<typeof useHostedUsageTopUpDialog>;
@@ -58,21 +59,14 @@ type HostedUsageTopUpSelectionScreen = Extract<
   { kind: "selection" }
 >;
 
-interface PurchaseActions {
-  canCancel: boolean;
-  canCheckAgain: boolean;
-  canResume: boolean;
-  canRetry: boolean;
-}
-
 interface StatusPresentation {
   closeOwnedFulfilledConfirmation: boolean;
   compact: boolean;
+  chatHandoff: boolean;
   fulfilledConfirmation: boolean;
   needsRecovery: boolean;
   quietSuccessfulReturn: boolean;
   returnNeedsRecovery: boolean;
-  showGroupMessagesAction: boolean;
   statusContent: { message: string; title: string } | null;
 }
 
@@ -84,50 +78,20 @@ interface SelectionPresentation {
   selectionError: string | null;
 }
 
+// A link from Murph opens this as a full night page. The purchase is the same,
+// and the amount stays unselected: the button can charge a saved card at once.
+const USAGE_LINK_PAGE_CLASS =
+  "left-0 top-0 h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 content-start rounded-none border-0 bg-[#1C1915] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-14 text-[#FFFCF6] sm:max-w-none sm:rounded-none sm:px-[max(1.5rem,calc(50vw-13rem))] [&_[data-slot=usage-top-up-actions]]:flex [&_[data-slot=usage-top-up-actions]]:flex-col-reverse [&_button[data-slot=button]]:rounded-full";
+
 interface DialogHeaderPresentation {
   description: string | null;
   title: string;
 }
 
-function readPurchaseActions(
-  purchase: HostedUsageTopUpPurchaseScreen | null,
-  returnedFromSuccessfulCheckout: boolean,
-): PurchaseActions {
-  const canResume =
-    !returnedFromSuccessfulCheckout &&
-    purchase?.targetConflict !== true &&
-    purchase?.status === "checkout_open" &&
-    purchase.checkoutUrl !== null;
-  const canCancel =
-    !returnedFromSuccessfulCheckout &&
-    (purchase?.status === "checkout_open" ||
-      purchase?.cancelAllowed === true);
-  const canRetry =
-    purchase !== null &&
-    !purchase.targetConflict &&
-    purchase.retryOfferCode !== null &&
-    (purchase.status === "reconciling" ||
-      (purchase.status === "checkout_open" && !canResume) ||
-      (purchase.status === "payment_pending" &&
-        (purchase.poll.kind === "exhausted" ||
-          purchase.poll.kind === "failed")));
-  const canCheckAgain = Boolean(
-    purchase &&
-      !canResume &&
-      !canRetry &&
-      (purchase.poll.kind === "failed" ||
-        (purchase.poll.kind === "exhausted" &&
-          (purchase.status === null ||
-            shouldPollPurchaseStatus(purchase.status)))),
-  );
-  return { canCancel, canCheckAgain, canResume, canRetry };
-}
-
 function readPurchaseTriggerLabel(
   purchase: HostedUsageTopUpPurchaseScreen | null,
-  actions: PurchaseActions,
+  actions: HostedUsageTopUpPurchaseActions,
   returnedFromSuccessfulCheckout: boolean,
-  scope: HostedUsageTopUpDialogProps["scope"],
 ): string | null {
   if (!purchase) {
     return null;
@@ -136,7 +100,7 @@ function readPurchaseTriggerLabel(
     return "Continue checkout";
   }
   if (actions.canRetry) {
-    return purchase.status === "payment_pending" || scope === "group"
+    return purchase.status === "payment_pending"
       ? "Check payment"
       : "Continue checkout";
   }
@@ -150,25 +114,28 @@ function readPurchaseTriggerLabel(
 
 function readTriggerLabel(
   props: HostedUsageTopUpDialogProps,
-  groupPaymentMode: "monthly" | "one_time",
   purchaseTriggerLabel: string | null,
 ): string {
-  if (purchaseTriggerLabel !== null) {
-    return purchaseTriggerLabel;
-  }
-  if (props.triggerLabel !== undefined) {
-    return props.triggerLabel;
-  }
-  if (props.scope !== "group") {
-    return "Add usage";
-  }
-  return groupPaymentMode === "one_time"
-    ? "Make a one-time contribution"
-    : "Sponsor this chat";
+  return purchaseTriggerLabel ?? props.triggerLabel ?? "Add usage";
+}
+
+function purchaseNeedsRecovery(purchase: HostedUsageTopUpPurchaseScreen | null): boolean {
+  return Boolean(
+    purchase &&
+      (purchase.checkoutError ||
+        purchase.selectionConflict ||
+        purchase.targetConflict ||
+        purchase.status === "expired" ||
+        purchase.status === "payment_failed" ||
+        purchase.poll.kind === "failed" ||
+        (purchase.poll.kind === "exhausted" &&
+          (purchase.status === null ||
+            shouldPollPurchaseStatus(purchase.status)))),
+  );
 }
 
 function readStatusPresentation(input: {
-  actions: PurchaseActions;
+  actions: HostedUsageTopUpPurchaseActions;
   familyTarget: string | null;
   props: HostedUsageTopUpDialogProps;
   purchase: HostedUsageTopUpPurchaseScreen | null;
@@ -194,11 +161,16 @@ function readStatusPresentation(input: {
     purchase.status === "fulfilled" &&
     !purchase.selectionConflict &&
     !purchase.targetConflict;
+  const needsRecovery = purchaseNeedsRecovery(purchase);
+  // Only a verified purchase with nothing left to resolve ends on this page.
+  const chatHandoff =
+    fulfilledConfirmation && !needsRecovery && Boolean(props.usageAddedContactOption);
   const closeOwnedFulfilledConfirmation =
-    fulfilledConfirmation &&
-    props.scope !== "group" &&
-    props.deferTerminalRefreshUntilClose === true;
-  const statusContent = closeOwnedFulfilledConfirmation
+    fulfilledConfirmation && props.deferTerminalRefreshUntilClose === true;
+  const statusContent = chatHandoff
+    // An old return URL can reopen this, so it only says what stays true.
+    ? { message: "Go back to your chat.", title: "Usage added." }
+    : closeOwnedFulfilledConfirmation
     ? {
         message:
           props.scope === "family" && props.targetLabel
@@ -207,33 +179,18 @@ function readStatusPresentation(input: {
         title: "Usage added",
       }
     : defaultStatusContent;
-  const showGroupMessagesAction =
-    fulfilledConfirmation && props.scope === "group";
   const quietSuccessfulReturn =
     props.quietSuccessfulReturn === true &&
+    !chatHandoff &&
     (returnedFromSuccessfulCheckout || fulfilledConfirmation);
-  const needsRecovery = Boolean(
-    purchase &&
-      (purchase.checkoutError ||
-        purchase.selectionConflict ||
-        purchase.targetConflict ||
-        purchase.status === "expired" ||
-        purchase.status === "payment_failed" ||
-        purchase.poll.kind === "failed" ||
-        (purchase.poll.kind === "exhausted" &&
-          (purchase.status === null ||
-            shouldPollPurchaseStatus(purchase.status)))),
-  );
   return {
+    chatHandoff,
     closeOwnedFulfilledConfirmation,
-    compact:
-      (props.scope !== "group" && needsRecovery) ||
-      closeOwnedFulfilledConfirmation,
+    compact: needsRecovery || (closeOwnedFulfilledConfirmation && !chatHandoff),
     fulfilledConfirmation,
     needsRecovery,
     quietSuccessfulReturn,
     returnNeedsRecovery: quietSuccessfulReturn && needsRecovery,
-    showGroupMessagesAction,
     statusContent,
   };
 }
@@ -260,23 +217,25 @@ function readSelectionPresentation(
 function readDialogHeader(input: {
   compactStatusPresentation: boolean;
   familyTarget: string | null;
-  groupPaymentMode: "monthly" | "one_time";
   props: HostedUsageTopUpDialogProps;
   purchase: HostedUsageTopUpPurchaseScreen | null;
   selectionPresentation: SelectionPresentation;
-  showGroupMessagesAction: boolean;
   statusContent: StatusPresentation["statusContent"];
+  chatHandoff: boolean;
 }): DialogHeaderPresentation {
   const {
+    chatHandoff,
     compactStatusPresentation,
     familyTarget,
-    groupPaymentMode,
     props,
     purchase,
     selectionPresentation,
-    showGroupMessagesAction,
     statusContent,
   } = input;
+  if (chatHandoff && statusContent) {
+    return { description: statusContent.message, title: statusContent.title };
+  }
+
   let title: string;
   if (statusContent) {
     title = `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`;
@@ -284,21 +243,13 @@ function readDialogHeader(input: {
     title = "More credit can’t be added right now";
   } else if (props.offers.length === 0) {
     title = "Usage unavailable";
-  } else if (props.scope !== "group") {
-    title = familyTarget ? `Add usage for ${familyTarget}` : "Add usage";
   } else {
-    title =
-      groupPaymentMode === "monthly"
-        ? "Sponsor this chat"
-        : "Make a one-time contribution";
+    title = familyTarget ? `Add usage for ${familyTarget}` : "Add usage";
   }
 
   if (purchase) {
     if (compactStatusPresentation) {
       return { description: null, title };
-    }
-    if (showGroupMessagesAction && statusContent) {
-      return { description: statusContent.message, title };
     }
     if (purchase.targetConflict) {
       return {
@@ -310,16 +261,7 @@ function readDialogHeader(input: {
     if (purchase.selectionConflict) {
       return {
         description:
-          purchase.selectionConflict === "sponsorship"
-            ? "The sponsor details you just entered were not applied. Review the original purchase below."
-            : "The amount you just selected was not started. Review the earlier purchase below.",
-        title,
-      };
-    }
-    if (props.scope === "group") {
-      return {
-        description:
-          "We’ll update this group’s credit as soon as payment is complete.",
+          "The amount you just selected was not started. Review the earlier purchase below.",
         title,
       };
     }
@@ -344,20 +286,14 @@ function readDialogHeader(input: {
       title,
     };
   }
-  if (props.scope !== "group") {
-    return { description: null, title };
-  }
   return {
-    description:
-      groupPaymentMode === "monthly"
-        ? "Choose your monthly sponsorship limit."
-        : "Choose how much usage to add to this chat.",
+    description: props.linkPage ? "One payment. Nothing repeats." : null,
     title,
   };
 }
 
 interface PurchaseScreenContentProps {
-  actions: PurchaseActions;
+  actions: HostedUsageTopUpPurchaseActions;
   checkoutInFlight: boolean;
   compact: boolean;
   onCancel: () => void;
@@ -366,9 +302,6 @@ interface PurchaseScreenContentProps {
   onResume: () => void;
   onRetry: () => void;
   purchase: HostedUsageTopUpPurchaseScreen;
-  renderPurchaseDetails: ReactNode;
-  scope: HostedUsageTopUpDialogProps["scope"];
-  showGroupMessagesAction: boolean;
   statusContent: NonNullable<StatusPresentation["statusContent"]>;
 }
 
@@ -382,51 +315,29 @@ function PurchaseScreenContent({
   onResume,
   onRetry,
   purchase,
-  renderPurchaseDetails,
-  scope,
-  showGroupMessagesAction,
   statusContent,
 }: PurchaseScreenContentProps) {
   return (
     <div className="flex flex-col gap-5">
-      {!showGroupMessagesAction ? (
-        <div
-          className={
-            compact
-              ? undefined
-              : "rounded-2xl border border-border bg-muted/30 p-5"
-          }
-          role="status"
-          aria-live="polite"
-        >
-          <p className="text-pretty text-sm leading-6 text-foreground">
-            {statusContent.message}
-          </p>
-        </div>
-      ) : null}
-      {showGroupMessagesAction || compact ? null : renderPurchaseDetails}
+      <div
+        className={
+          compact
+            ? undefined
+            : "rounded-2xl border border-border bg-muted/30 p-5"
+        }
+        role="status"
+        aria-live="polite"
+      >
+        <p className="text-pretty text-sm leading-6 text-foreground">
+          {statusContent.message}
+        </p>
+      </div>
       <FieldError>{purchase.checkoutError}</FieldError>
       <div className="flex flex-col gap-2">
-        {showGroupMessagesAction ? (
-          <div className="flex flex-col gap-3 pt-1">
-            <p className="text-pretty text-sm leading-6 text-muted-foreground">
-              Open Messages, then choose this group to keep going.
-            </p>
-            {/* Messages has no deep link into an existing group thread, so the
-                group follow-up can only open the app itself. */}
-            <a
-              href="sms:"
-              className={cn(buttonVariants({ size: "xl" }), "w-full")}
-            >
-              <MessageCircle data-icon="inline-start" aria-hidden="true" />
-              Open Messages
-            </a>
-          </div>
-        ) : null}
         {actions.canResume ? (
           <Button
             type="button"
-            size="lg"
+            size="xl"
             className="w-full"
             disabled={checkoutInFlight}
             onClick={onResume}
@@ -438,7 +349,7 @@ function PurchaseScreenContent({
           <Button
             type="button"
             variant="outline"
-            size="lg"
+            size="xl"
             className="w-full"
             aria-busy={purchase.operation === "canceling_checkout"}
             disabled={checkoutInFlight}
@@ -456,17 +367,17 @@ function PurchaseScreenContent({
         {actions.canRetry ? (
           <Button
             type="button"
-            size="lg"
+            size="xl"
             className="w-full"
             aria-busy={purchase.operation === "opening_checkout"}
             disabled={checkoutInFlight}
             onClick={onRetry}
           >
             {purchase.operation === "opening_checkout"
-              ? purchase.status === "payment_pending" || scope === "group"
+              ? purchase.status === "payment_pending"
                 ? "Continuing payment…"
                 : "Opening checkout…"
-              : purchase.status === "payment_pending" || scope === "group"
+              : purchase.status === "payment_pending"
                 ? "Retry payment"
                 : "Retry checkout"}
           </Button>
@@ -474,7 +385,7 @@ function PurchaseScreenContent({
         {actions.canCheckAgain ? (
           <Button
             type="button"
-            size="lg"
+            size="xl"
             className="w-full"
             disabled={checkoutInFlight}
             onClick={onCheckAgain}
@@ -482,17 +393,15 @@ function PurchaseScreenContent({
             Check again
           </Button>
         ) : null}
-        {showGroupMessagesAction ? null : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="lg"
-            className="w-full"
-            onClick={onClose}
-          >
-            Close
-          </Button>
-        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="xl"
+          className="w-full"
+          onClick={onClose}
+        >
+          Close
+        </Button>
       </div>
     </div>
   );
@@ -514,12 +423,33 @@ function CloseScreenContent({
       <Button
         type="button"
         variant="outline"
-        size="lg"
+        size="xl"
         className="w-full"
         onClick={onClose}
       >
         Close
       </Button>
+    </div>
+  );
+}
+
+/** The end of a verified purchase: back to the chat, or back to Settings. */
+function HostedUsageAddedHandoff({
+  contactOption,
+  onClose,
+}: {
+  contactOption: MurphContactOption;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="flex min-h-[calc(100dvh-14rem)] flex-col" data-slot="usage-added-handoff">
+      <div className="flex flex-1 flex-col justify-center">
+        <LinkPageTicket className="mt-0" kicker="Added to your account" title="More Murph" />
+      </div>
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <LinkPageContactPill option={contactOption} />
+        <LinkPageLink onClick={onClose}>Back to Settings</LinkPageLink>
+      </div>
     </div>
   );
 }
@@ -530,7 +460,6 @@ interface OfferSelectorProps {
   offers: HostedUsageTopUpDialogProps["offers"];
   onSelectOffer: HostedUsageTopUpController["selectOffer"];
   requestIdentityReady: boolean;
-  scope: HostedUsageTopUpDialogProps["scope"];
   selectedOfferCode: string | null;
 }
 
@@ -540,7 +469,6 @@ function OfferSelector({
   offers,
   onSelectOffer,
   requestIdentityReady,
-  scope,
   selectedOfferCode,
 }: OfferSelectorProps) {
   return (
@@ -558,7 +486,7 @@ function OfferSelector({
           <ChoiceCard
             key={offer.offerCode}
             ref={index === 0 ? firstOfferRef : undefined}
-            id={`${scope === "group" ? "group-" : ""}usage-top-up-${index}`}
+            id={`usage-top-up-${index}`}
             value={offer.offerCode}
             disabled={hasAttempt}
             className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
@@ -613,27 +541,23 @@ function SelectionRecoveryNotice({
 
 interface SelectionActionsProps {
   checkoutInFlight: boolean;
-  groupPaymentMode: "monthly" | "one_time";
   needsRecovery: boolean;
   onChangeAmount: () => void;
   onClose: () => void;
   onStartCheckout: () => void;
   paymentNeedsRecovery: boolean;
   requestIdentityReady: boolean;
-  scope: HostedUsageTopUpDialogProps["scope"];
   selectedOffer: HostedUsageTopUpController["selectedOffer"];
 }
 
 function SelectionActions({
   checkoutInFlight,
-  groupPaymentMode,
   needsRecovery,
   onChangeAmount,
   onClose,
   onStartCheckout,
   paymentNeedsRecovery,
   requestIdentityReady,
-  scope,
   selectedOffer,
 }: SelectionActionsProps) {
   if (needsRecovery) {
@@ -680,7 +604,7 @@ function SelectionActions({
         <Button
           type="button"
           variant="ghost"
-          size="lg"
+          size="xl"
           className="w-full"
           onClick={onClose}
         >
@@ -691,21 +615,12 @@ function SelectionActions({
   }
 
   return (
-    <div
-      className={cn(
-        "grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]",
-        scope === "group" &&
-          "max-md:sticky max-md:bottom-0 max-md:z-20 max-md:-mx-6 max-md:mt-auto max-md:border-t max-md:bg-popover max-md:px-4 max-md:pt-4 max-md:pb-[max(env(safe-area-inset-bottom),1rem)]",
-      )}
-    >
+    <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]" data-slot="usage-top-up-actions">
       <Button
         type="button"
         variant="ghost"
         size="xl"
-        className={cn(
-          "w-full sm:w-auto",
-          scope === "group" && "max-md:hidden",
-        )}
+        className="w-full sm:w-auto"
         onClick={onClose}
       >
         Cancel
@@ -719,15 +634,9 @@ function SelectionActions({
         onClick={onStartCheckout}
       >
         {checkoutInFlight
-          ? scope === "group"
-            ? "Sponsoring chat…"
-            : "Adding usage…"
+          ? "Adding usage…"
           : selectedOffer
-            ? scope === "group"
-              ? groupPaymentMode === "monthly"
-                ? `Sponsor this chat · ${selectedOffer.amountLabel}`
-                : `Contribute ${selectedOffer.amountLabel}`
-              : `Add usage · ${selectedOffer.amountLabel}`
+            ? `Add usage · ${selectedOffer.amountLabel}`
             : "Choose an amount"}
       </Button>
     </div>
@@ -737,7 +646,6 @@ function SelectionActions({
 interface SelectionScreenContentProps {
   controller: HostedUsageTopUpController;
   firstOfferRef: RefObject<HTMLSpanElement | null>;
-  groupPaymentMode: "monthly" | "one_time";
   onClose: () => void;
   onStartCheckout: () => void;
   presentation: SelectionPresentation;
@@ -748,7 +656,6 @@ interface SelectionScreenContentProps {
 function SelectionScreenContent({
   controller,
   firstOfferRef,
-  groupPaymentMode,
   onClose,
   onStartCheckout,
   presentation,
@@ -756,33 +663,15 @@ function SelectionScreenContent({
   selection,
 }: SelectionScreenContentProps) {
   return (
-    <div
-      data-slot="usage-top-up-selection"
-      className={cn(
-        "flex flex-col gap-5",
-        props.scope === "group" &&
-          (groupPaymentMode === "monthly" || !presentation.needsRecovery) &&
-          "max-md:min-h-full",
-      )}
-    >
-      {groupPaymentMode === "monthly" ? null : (
-        <OfferSelector
-          firstOfferRef={firstOfferRef}
-          hasAttempt={presentation.hasAttempt}
-          offers={props.offers}
-          onSelectOffer={controller.selectOffer}
-          requestIdentityReady={controller.requestIdentityReady}
-          scope={props.scope}
-          selectedOfferCode={selection.selectedOfferCode}
-        />
-      )}
-      {props.renderSelectionDetails?.({
-        disabled:
-          presentation.hasAttempt || !controller.requestIdentityReady,
-        mobileStickyActionVisible:
-          props.scope === "group" && !presentation.needsRecovery,
-        selectedOffer: controller.selectedOffer,
-      })}
+    <div data-slot="usage-top-up-selection" className="flex flex-col gap-5">
+      <OfferSelector
+        firstOfferRef={firstOfferRef}
+        hasAttempt={presentation.hasAttempt}
+        offers={props.offers}
+        onSelectOffer={controller.selectOffer}
+        requestIdentityReady={controller.requestIdentityReady}
+        selectedOfferCode={selection.selectedOfferCode}
+      />
       <FieldError>{controller.requestIdentityError}</FieldError>
       {presentation.needsRecovery ? (
         <SelectionRecoveryNotice
@@ -792,14 +681,12 @@ function SelectionScreenContent({
       ) : null}
       <SelectionActions
         checkoutInFlight={controller.checkoutInFlight}
-        groupPaymentMode={groupPaymentMode}
         needsRecovery={presentation.needsRecovery}
         onChangeAmount={controller.changeAmount}
         onClose={onClose}
         onStartCheckout={onStartCheckout}
         paymentNeedsRecovery={presentation.paymentNeedsRecovery}
         requestIdentityReady={controller.requestIdentityReady}
-        scope={props.scope}
         selectedOffer={controller.selectedOffer}
       />
     </div>
@@ -809,7 +696,6 @@ function SelectionScreenContent({
 interface ScreenContentProps {
   controller: HostedUsageTopUpController;
   firstOfferRef: RefObject<HTMLSpanElement | null>;
-  groupPaymentMode: "monthly" | "one_time";
   onCancelPurchase: () => void;
   onCheckAgain: () => void;
   onClose: () => void;
@@ -818,7 +704,7 @@ interface ScreenContentProps {
   onStartCheckout: () => void;
   props: HostedUsageTopUpDialogProps;
   purchase: HostedUsageTopUpPurchaseScreen | null;
-  purchaseActions: PurchaseActions;
+  purchaseActions: HostedUsageTopUpPurchaseActions;
   selection: HostedUsageTopUpSelectionScreen | null;
   selectionPresentation: SelectionPresentation;
   statusPresentation: StatusPresentation;
@@ -827,7 +713,6 @@ interface ScreenContentProps {
 function ScreenContent({
   controller,
   firstOfferRef,
-  groupPaymentMode,
   onCancelPurchase,
   onCheckAgain,
   onClose,
@@ -841,6 +726,14 @@ function ScreenContent({
   selectionPresentation,
   statusPresentation,
 }: ScreenContentProps) {
+  if (statusPresentation.chatHandoff && props.usageAddedContactOption) {
+    return (
+      <HostedUsageAddedHandoff
+        contactOption={props.usageAddedContactOption}
+        onClose={onClose}
+      />
+    );
+  }
   if (purchase && statusPresentation.statusContent) {
     return (
       <PurchaseScreenContent
@@ -853,11 +746,6 @@ function ScreenContent({
         onResume={onResumePurchase}
         onRetry={onRetryPurchase}
         purchase={purchase}
-        renderPurchaseDetails={props.renderPurchaseDetails}
-        scope={props.scope}
-        showGroupMessagesAction={
-          statusPresentation.showGroupMessagesAction
-        }
         statusContent={statusPresentation.statusContent}
       />
     );
@@ -873,7 +761,6 @@ function ScreenContent({
       <SelectionScreenContent
         controller={controller}
         firstOfferRef={firstOfferRef}
-        groupPaymentMode={groupPaymentMode}
         onClose={onClose}
         onStartCheckout={onStartCheckout}
         presentation={selectionPresentation}
@@ -885,36 +772,12 @@ function ScreenContent({
   return null;
 }
 
-function ConfirmationIndicator({
-  show,
-  statusContent,
-}: {
-  show: boolean;
-  statusContent: StatusPresentation["statusContent"];
-}) {
-  if (!show || !statusContent) {
-    return null;
-  }
-  return (
-    <div
-      className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-      role="status"
-      aria-live="polite"
-      aria-label={`${statusContent.title}. ${statusContent.message}`}
-    >
-      <CheckIcon aria-hidden="true" className="size-4 stroke-[2.5]" />
-    </div>
-  );
-}
-
 interface SurfaceProps {
   canShowTrigger: boolean;
   children: ReactNode;
-  confirmationIndicator: ReactNode;
   familyTarget: string | null;
   header: DialogHeaderPresentation;
   onOpenChange: HostedUsageTopUpController["handleOpenChange"];
-  open: boolean;
   presentedOpen: boolean;
   props: HostedUsageTopUpDialogProps;
   scrollContentRef: RefObject<HTMLDivElement | null>;
@@ -923,112 +786,9 @@ interface SurfaceProps {
   triggerLabel: string;
 }
 
-function MobileTopUpDrawer({
+function HostedUsageTopUpSurface({
   canShowTrigger,
   children,
-  confirmationIndicator,
-  familyTarget,
-  header,
-  onOpenChange,
-  open,
-  props,
-  scrollContentRef,
-  statusPresentation,
-  titleRef,
-  triggerLabel,
-}: SurfaceProps) {
-  const drawerTriggerButton = (
-    <Button
-      type="button"
-      size={props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")}
-      variant={
-        props.triggerVariant ??
-        (props.scope === "group" ? "default" : "outline")
-      }
-      className={cn(
-        props.scope === "group" ? "w-full" : undefined,
-        props.triggerClassName,
-      )}
-      aria-label={
-        familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
-      }
-    >
-      {triggerLabel}
-    </Button>
-  );
-  return (
-    <Drawer handleOnly open={open} onOpenChange={onOpenChange}>
-      {canShowTrigger ? (
-        <DrawerTrigger asChild>{drawerTriggerButton}</DrawerTrigger>
-      ) : null}
-      <DrawerContent
-        className={cn(
-          "border-border data-[vaul-drawer-direction=bottom]:mt-3 data-[vaul-drawer-direction=bottom]:rounded-t-[2rem]",
-          !statusPresentation.showGroupMessagesAction &&
-            "h-[calc(100dvh-0.75rem)] data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-0.75rem)]",
-        )}
-        data-inert={props.inert ? "true" : undefined}
-        inert={props.inert ? true : undefined}
-      >
-        <DrawerHeader
-          className={cn(
-            "relative items-start gap-2 px-6 pb-2 pt-2 text-left",
-            statusPresentation.showGroupMessagesAction && "items-center gap-3",
-          )}
-        >
-          {confirmationIndicator}
-          <DrawerTitle
-            ref={titleRef}
-            tabIndex={-1}
-            className={cn(
-              "pr-10 font-serif text-3xl font-semibold leading-[1.1] tracking-tight text-foreground outline-none",
-              statusPresentation.showGroupMessagesAction &&
-                "max-w-md pr-0 text-4xl leading-[1.05] tracking-[-0.03em]",
-            )}
-          >
-            {header.title}
-          </DrawerTitle>
-          <DrawerDescription
-            className={cn(
-              "max-w-md text-left text-base leading-6",
-              statusPresentation.showGroupMessagesAction &&
-                "text-muted-foreground",
-            )}
-          >
-            {header.description}
-          </DrawerDescription>
-          <DrawerClose asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="absolute right-4 top-0"
-            >
-              <XIcon aria-hidden="true" />
-              <span className="sr-only">Close</span>
-            </Button>
-          </DrawerClose>
-        </DrawerHeader>
-        <div
-          ref={scrollContentRef}
-          className={cn(
-            "min-h-0 overflow-y-auto overscroll-contain px-6 pt-4",
-            statusPresentation.showGroupMessagesAction
-              ? "pb-[max(env(safe-area-inset-bottom),1.5rem)]"
-              : "flex-1",
-          )}
-        >
-          {children}
-        </div>
-      </DrawerContent>
-    </Drawer>
-  );
-}
-
-function DesktopTopUpDialog({
-  canShowTrigger,
-  children,
-  confirmationIndicator,
   familyTarget,
   header,
   onOpenChange,
@@ -1039,6 +799,8 @@ function DesktopTopUpDialog({
   titleRef,
   triggerLabel,
 }: SurfaceProps) {
+  const linkPage = props.linkPage || statusPresentation.chatHandoff;
+
   return (
     <>
       {props.quietSuccessfulReturn ? (
@@ -1061,18 +823,9 @@ function DesktopTopUpDialog({
             render={
               <Button
                 type="button"
-                size={
-                  props.triggerSize ??
-                  (props.scope === "group" ? "xl" : "lg")
-                }
-                variant={
-                  props.triggerVariant ??
-                  (props.scope === "group" ? "default" : "outline")
-                }
-                className={cn(
-                  props.scope === "group" ? "w-full" : undefined,
-                  props.triggerClassName,
-                )}
+                size={props.triggerSize ?? "lg"}
+                variant={props.triggerVariant ?? "outline"}
+                className={props.triggerClassName}
                 aria-label={
                   familyTarget
                     ? `${triggerLabel} for ${familyTarget}`
@@ -1090,38 +843,26 @@ function DesktopTopUpDialog({
           inert={props.inert ? true : undefined}
           className={cn(
             "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
-            statusPresentation.showGroupMessagesAction && "gap-5 sm:max-w-lg",
             statusPresentation.compact && "sm:max-w-md",
+            linkPage && USAGE_LINK_PAGE_CLASS,
           )}
+          style={linkPage ? LINK_PAGE_NIGHT_TOKENS : undefined}
           initialFocus={titleRef}
         >
-          <DialogHeader
-            className={cn(
-              "pr-10",
-              statusPresentation.showGroupMessagesAction && "gap-3",
-            )}
-          >
-            {confirmationIndicator}
+          <DialogHeader className="pr-10">
             <DialogTitle
               ref={titleRef}
               tabIndex={-1}
               className={cn(
                 "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
-                statusPresentation.showGroupMessagesAction &&
-                  "max-w-md text-4xl leading-[1.05] tracking-[-0.03em]",
+                linkPage && "text-[40px] leading-[44px] tracking-[-0.02em]",
               )}
             >
               {header.title}
             </DialogTitle>
             <DialogDescription
               className={
-                header.description
-                  ? cn(
-                      "max-w-md text-base leading-6",
-                      statusPresentation.showGroupMessagesAction &&
-                        "text-muted-foreground",
-                    )
-                  : "sr-only"
+                header.description ? "max-w-md text-base leading-6" : "sr-only"
               }
             >
               {header.description ??
@@ -1136,13 +877,12 @@ function DesktopTopUpDialog({
   );
 }
 
-function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
-  const isMobile = useIsMobile();
-  const groupPaymentMode = props.groupPaymentMode ?? "one_time";
-  const controller = useHostedUsageTopUpDialog({
-    ...props,
-    groupPaymentMode,
-  });
+function HostedUsageTopUpDialog(dialogProps: HostedUsageTopUpDialogProps) {
+  // A refresh can unmount this dialog, so it waits until the handoff page closes.
+  const props = dialogProps.usageAddedContactOption
+    ? { ...dialogProps, deferTerminalRefreshUntilClose: true }
+    : dialogProps;
+  const controller = useHostedUsageTopUpDialog(props);
   const { screen } = controller.state;
   const scrollContentRef = useRef<HTMLDivElement>(null);
   const firstOfferRef = useRef<HTMLSpanElement>(null);
@@ -1208,7 +948,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     purchase !== null &&
     props.purchaseReturn?.kind === "success" &&
     props.purchaseReturn.purchaseId === purchase.purchaseId;
-  const purchaseActions = readPurchaseActions(
+  const purchaseActions = readHostedUsageTopUpPurchaseActions(
     purchase,
     returnedFromSuccessfulCheckout,
   );
@@ -1216,15 +956,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     purchase,
     purchaseActions,
     returnedFromSuccessfulCheckout,
-    props.scope,
   );
   const familyTarget =
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
-  const triggerLabel = readTriggerLabel(
-    props,
-    groupPaymentMode,
-    purchaseTriggerLabel,
-  );
+  const triggerLabel = readTriggerLabel(props, purchaseTriggerLabel);
   const statusPresentation = readStatusPresentation({
     actions: purchaseActions,
     familyTarget,
@@ -1241,25 +976,33 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     if (
       props.quietSuccessfulReturn === true &&
       controller.state.open &&
-      statusPresentation.fulfilledConfirmation
+      statusPresentation.fulfilledConfirmation &&
+      !statusPresentation.chatHandoff
     ) {
       controller.handleOpenChange(false);
     }
   }, [
     controller,
     props.quietSuccessfulReturn,
+    statusPresentation.chatHandoff,
     statusPresentation.fulfilledConfirmation,
   ]);
 
+  // A saved card finishes in place, so nothing else announces the result.
+  useEffect(() => {
+    if (statusPresentation.chatHandoff) {
+      titleRef.current?.focus({ preventScroll: true });
+    }
+  }, [statusPresentation.chatHandoff]);
+
   const selectionPresentation = readSelectionPresentation(selection);
   const header = readDialogHeader({
+    chatHandoff: statusPresentation.chatHandoff,
     compactStatusPresentation: statusPresentation.compact,
     familyTarget,
-    groupPaymentMode,
     props,
     purchase,
     selectionPresentation,
-    showGroupMessagesAction: statusPresentation.showGroupMessagesAction,
     statusContent: statusPresentation.statusContent,
   });
   const handleClose = () => controller.handleOpenChange(false);
@@ -1286,7 +1029,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     <ScreenContent
       controller={controller}
       firstOfferRef={firstOfferRef}
-      groupPaymentMode={groupPaymentMode}
       onCancelPurchase={handleCancelPurchase}
       onCheckAgain={handleCheckAgain}
       onClose={handleClose}
@@ -1301,12 +1043,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       statusPresentation={statusPresentation}
     />
   );
-  const confirmationIndicator = (
-    <ConfirmationIndicator
-      show={statusPresentation.showGroupMessagesAction}
-      statusContent={statusPresentation.statusContent}
-    />
-  );
   const canShowTrigger =
     statusPresentation.quietSuccessfulReturn &&
     controller.state.open &&
@@ -1316,11 +1052,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const surfaceProps: SurfaceProps = {
     canShowTrigger,
     children: screenContent,
-    confirmationIndicator,
     familyTarget,
     header,
     onOpenChange: controller.handleOpenChange,
-    open: controller.state.open,
     presentedOpen,
     props,
     scrollContentRef,
@@ -1329,13 +1063,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     triggerLabel,
   };
 
-  if (isMobile && props.scope === "group") {
-    return <MobileTopUpDrawer {...surfaceProps} />;
-  }
-  return <DesktopTopUpDialog {...surfaceProps} />;
+  return <HostedUsageTopUpSurface {...surfaceProps} />;
 }
 
-export { HostedUsageTopUpDialog };
+export { HostedUsageAddedHandoff, HostedUsageTopUpDialog };
 export type {
   HostedUsageTopUpActivePurchase,
   HostedUsageTopUpDialogProps,

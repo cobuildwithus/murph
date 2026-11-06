@@ -10,6 +10,7 @@ import {
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
+  classifyClinicalFhirSourceRevision,
   countClinicalFhirPageResources,
   externalRefForFhir,
   fhirResourceTypeToSlug,
@@ -21,6 +22,7 @@ import {
   normalizeClinicalFhirPatientId,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
+  resolveClinicalFhirSourceRevision,
 } from "../src/index.ts";
 import { describe, expect, it } from "vitest";
 
@@ -664,7 +666,47 @@ describe("clinical search warning completeness", () => {
     }))).toBe(incomplete);
   });
 
+  it.each(["4101", "4119"])("separates Epic notice %s from retrieval failure without proving clinical absence", (code) => {
+    const page = JSON.stringify({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing", details: {
+        coding: [{ system: "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369", code }],
+      } }],
+    } }] });
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(page)).toBe(true);
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(page, { ignorePatientAccessNotices: true })).toBe(false);
+  });
+
+  it.each([
+    { severity: "error", code: "processing", codes: ["4119"] },
+    { severity: "warning", code: "suppressed", codes: ["59204"] },
+    { severity: "warning", code: "processing", codes: ["4119", "4122"] },
+    { severity: "warning", code: "processing", codes: ["4119"], system: "https://example.test/codes" },
+    { severity: "warning", code: "processing", codes: [] },
+  ])("does not suppress denied, unknown, or malformed outcomes %#", ({ codes, system, ...issue }) => {
+    const page = JSON.stringify({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "OperationOutcome", issue: [{ ...issue, details: {
+        coding: codes.map((code) => ({ code, system: system ?? "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369" })),
+      } }],
+    } }] });
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(page, { ignorePatientAccessNotices: true })).toBe(true);
+  });
+
   it("rejects malformed JSON at the evidence boundary", () => {
     expect(() => clinicalFhirPageHasIncompleteSearchOutcome("{")).toThrow(SyntaxError);
+  });
+});
+
+describe("clinical FHIR source revision", () => {
+  it("defers an absent meta.lastUpdated to the retrieval batch and fails closed on a non-comparable one", () => {
+    expect(classifyClinicalFhirSourceRevision(undefined)).toEqual({ source: "batch" });
+    expect(classifyClinicalFhirSourceRevision("2026-07-10T12:00:00.123456Z"))
+      .toEqual({ source: "resource", version: "2026-07-10T12:00:00.123456Z" });
+    for (const invalid of [null, "", "not-a-timestamp", "2026-07-10", `2026-01-03T00:00:00.${"1".repeat(190)}Z`, 1_720_000_000]) {
+      expect(classifyClinicalFhirSourceRevision(invalid)).toEqual({ source: "none" });
+    }
+    const fetchedAt = "2026-07-11T09:30:00.000Z";
+    expect(resolveClinicalFhirSourceRevision({ lastUpdated: undefined, fetchedAt })).toBe(fetchedAt);
+    expect(resolveClinicalFhirSourceRevision({ lastUpdated: "2026-07-10T12:00:00Z", fetchedAt })).toBe("2026-07-10T12:00:00Z");
+    expect(resolveClinicalFhirSourceRevision({ lastUpdated: "2026-07-10", fetchedAt })).toBeUndefined();
   });
 });

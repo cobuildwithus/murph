@@ -52,7 +52,7 @@ interface HostedLinqAttachmentDownloadAttemptLog {
   errorCodeDetail?: string | null;
   errorDetail?: string | null;
   errorDetailPresent?: boolean | null;
-  errorMessage?: string | null;
+  safeErrorMessage?: string | null;
   errorName?: string | null;
   errorRetryable?: boolean | null;
   errorStatus?: number | null;
@@ -741,7 +741,7 @@ function appendHostedLinqAttachmentDownloadErrorDiagnostics(
     errorCodeDetail: readHostedLinqAttachmentDiagnosticString(diagnostics.errorCodeDetail),
     errorDetail: readHostedLinqAttachmentDiagnosticString(diagnostics.errorDetail),
     errorDetailPresent: typeof diagnostics.errorDetail === "string",
-    errorMessage: readHostedLinqAttachmentDiagnosticString(diagnostics.errorMessage),
+    safeErrorMessage: readHostedLinqAttachmentDiagnosticString(diagnostics.errorMessage),
     errorName: readHostedLinqAttachmentDiagnosticString(diagnostics.errorName),
     errorRetryable: retryable,
     errorStatus: readHostedLinqAttachmentDiagnosticNumber(diagnostics.errorStatus),

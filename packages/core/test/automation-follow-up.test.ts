@@ -1,10 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializeVault } from "../src/index.ts";
 import {
-  patchAutomation, readAutomation, registerAutomationFollowUp, upsertAutomation,
+  archiveAutomationIfOccurrenceCurrent, patchAutomation, readAutomation, registerAutomationFollowUp, upsertAutomation,
   type UpsertAutomationInput,
 } from "../src/automation.ts";
 
@@ -86,7 +86,12 @@ describe("canonical follow-up registration", () => {
       ...input, followUpSourceIntentId: "outbox_parent",
       followUpParentAutomationId: parent.automationId, parentExpectedUpdatedAt: parent.updatedAt,
     });
-    await upsertAutomation({ ...parent, vaultRoot: input.vaultRoot, status: "archived", completedOccurrence: true });
+    expect(await archiveAutomationIfOccurrenceCurrent({
+      vaultRoot: input.vaultRoot, lookup: parent.automationId,
+      expectedUpdatedAt: parent.updatedAt, occurrenceAt: "2026-09-01T12:20:00.000Z",
+    })).toBe(true);
+    const archived = await readAutomation({ vaultRoot: input.vaultRoot, automationId: parent.automationId });
+    expect(archived).toMatchObject({ ...parent, status: "archived", updatedAt: expect.any(String), markdown: expect.any(String) });
     expect((await readAutomation({ vaultRoot: input.vaultRoot, automationId: child!.automationId })).status).toBe("active");
     await patchAutomation({ vaultRoot: input.vaultRoot, lookup: parent.automationId, status: "archived" });
     expect((await readAutomation({ vaultRoot: input.vaultRoot, automationId: child!.automationId })).status).toBe("archived");
@@ -109,4 +114,54 @@ describe("canonical follow-up registration", () => {
     expect((await registerAutomationFollowUp(request))?.status).toBe("archived");
   });
 
+});
+
+describe("one-shot occurrence completion", () => {
+  it.each(["revision", "occurrence", "paused", "recurring", "missing", "duplicate"] as const)(
+    "leaves parent and child files untouched for %s",
+    async (mismatch) => {
+      const input = await fixture();
+      const parent = (await upsertAutomation({ ...input, activeUntil: null })).record;
+      const child = await registerAutomationFollowUp({
+        ...input, followUpSourceIntentId: "outbox_completion",
+        followUpParentAutomationId: parent.automationId, parentExpectedUpdatedAt: parent.updatedAt,
+      });
+      expect(child).not.toBeNull();
+      const completion = {
+        vaultRoot: input.vaultRoot, lookup: parent.automationId,
+        expectedUpdatedAt: parent.updatedAt, occurrenceAt: "2026-09-01T12:20:00.000Z",
+        now: new Date("2026-09-01T12:21:00.000Z"),
+      };
+      if (mismatch === "revision") completion.expectedUpdatedAt = "2026-09-01T11:00:00.000Z";
+      if (mismatch === "occurrence") completion.occurrenceAt = "2026-09-02T12:20:00.000Z";
+      if (mismatch === "missing") completion.lookup = "automation_01K00000000000000000000000";
+      if (mismatch === "paused" || mismatch === "recurring") {
+        const edited = await patchAutomation({
+          vaultRoot: input.vaultRoot, lookup: parent.automationId,
+          ...(mismatch === "paused" ? { status: "paused" as const } : { schedule: { kind: "every" as const, everyMs: 60_000 } }),
+          now: new Date("2026-09-01T12:01:00.000Z"),
+        });
+        completion.expectedUpdatedAt = edited.record.updatedAt;
+      }
+      if (mismatch === "duplicate") {
+        expect(await archiveAutomationIfOccurrenceCurrent(completion)).toBe(true);
+        completion.expectedUpdatedAt = (await readAutomation({ vaultRoot: input.vaultRoot, automationId: parent.automationId })).updatedAt;
+      }
+      const paths = [parent.relativePath, child!.relativePath].map((relative) => path.join(input.vaultRoot, relative));
+      const snapshot = () => Promise.all(paths.map(async (file) => ({ contents: await readFile(file, "utf8"), mtime: (await stat(file)).mtimeMs })));
+      const before = await snapshot();
+      expect(await archiveAutomationIfOccurrenceCurrent(completion)).toBe(false);
+      expect(await snapshot()).toEqual(before);
+    },
+  );
+
+  it("compares occurrence instants independently of timestamp formatting", async () => {
+    const input = await fixture();
+    const parent = (await upsertAutomation(input)).record;
+    expect(await archiveAutomationIfOccurrenceCurrent({
+      vaultRoot: input.vaultRoot, lookup: parent.automationId,
+      expectedUpdatedAt: parent.updatedAt, occurrenceAt: "2026-09-01T08:20:00-04:00",
+    })).toBe(true);
+    expect((await readAutomation({ vaultRoot: input.vaultRoot, automationId: parent.automationId })).status).toBe("archived");
+  });
 });

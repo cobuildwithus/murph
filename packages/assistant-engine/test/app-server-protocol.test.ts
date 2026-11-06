@@ -35,6 +35,8 @@ describe('Codex app-server protocol boundary', () => {
       params: {
         completedAtMs: 9,
         item: {
+          startedAtMs: 8,
+          completedAtMs: 9,
           id: 'item-1',
           phase: 'final_answer',
           text: 'Done.',
@@ -248,3 +250,18 @@ describe('Codex app-server protocol boundary', () => {
     expect(tryParseJsonLine(line)).toEqual({ ok: false })
   })
 })
+
+for (const count of [0, 2]) {
+  it(`preserves twelve-hour write subset ${count}`, () => {
+    const usage = { ...minimumUsage, cacheWriteInputTokens: 3, cacheWrite12hInputTokens: count }
+    const parsed = readCodexThreadTokenUsage({ last: usage, total: usage, modelContextWindow: null })
+    expect(parsed?.last.cacheWrite12hInputTokens ?? 0).toBe(count)
+    expect(parsed?.total.cacheWrite12hInputTokens ?? 0).toBe(count)
+  })
+}
+for (const count of [-1, 4, 1.5, '2']) {
+  it(`rejects invalid twelve-hour write subset ${count}`, () => {
+    const usage = { ...minimumUsage, cacheWriteInputTokens: 3, cacheWrite12hInputTokens: count }
+    expect(readCodexThreadTokenUsage({ last: usage, total: usage, modelContextWindow: null })).toBeNull()
+  })
+}

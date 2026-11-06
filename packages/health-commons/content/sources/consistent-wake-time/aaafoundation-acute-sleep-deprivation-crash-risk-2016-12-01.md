@@ -10,14 +10,8 @@ quality: "usable"
 categories:
   - "consistent-wake-time"
   - "safety-boundaries"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:consistent-wake-time/consistent-wake-time"
-  -
-    type: "parent_family"
-    target: "experiment_family:consistent-wake-time"
 source:
   kind: "web_page"
   title: "Acute Sleep Deprivation and Risk of Motor Vehicle Crash Involvement"

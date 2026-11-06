@@ -18,6 +18,12 @@
       "@murphai/contracts": [
         "./packages/contracts/src/index.ts"
       ],
+      "@murphai/contracts/sleep-session": [
+        "./packages/contracts/src/sleep-session.ts"
+      ],
+      "@murphai/contracts/experiment-outcome": [
+        "./packages/contracts/src/experiment-outcome.ts"
+      ],
       "@murphai/contracts/browser-vault": [
         "./packages/contracts/src/browser-vault.ts"
       ],
@@ -60,8 +66,14 @@
       "@murphai/hosted-execution/auth": [
         "./packages/hosted-execution/src/auth.ts"
       ],
+      "@murphai/hosted-execution/voice-control": [
+        "./packages/hosted-execution/src/voice-control.ts"
+      ],
       "@murphai/hosted-execution/assistant-identifiers": [
         "./packages/hosted-execution/src/assistant-identifiers.ts"
+      ],
+      "@murphai/hosted-execution/codex-behavior": [
+        "./packages/hosted-execution/src/codex-behavior.ts"
       ],
       "@murphai/hosted-execution/assistant-model": [
         "./packages/hosted-execution/src/assistant-model.ts"
@@ -90,14 +102,14 @@
       "@murphai/hosted-execution/contracts": [
         "./packages/hosted-execution/src/contracts.ts"
       ],
+      "@murphai/hosted-execution/conversation-polls": [
+        "./packages/hosted-execution/src/conversation-polls.ts"
+      ],
       "@murphai/hosted-execution/connected-apps": [
         "./packages/hosted-execution/src/connected-apps.ts"
       ],
       "@murphai/hosted-execution/computer-use": [
         "./packages/hosted-execution/src/computer-use.ts"
-      ],
-      "@murphai/hosted-execution/dashboard-replica": [
-        "./packages/hosted-execution/src/dashboard-replica.ts"
       ],
       "@murphai/hosted-execution/env": [
         "./packages/hosted-execution/src/env.ts"
@@ -108,9 +120,6 @@
       "@murphai/hosted-execution/hosted-codex-subscription-auth": [
         "./packages/hosted-execution/src/hosted-codex-subscription-auth.ts"
       ],
-      "@murphai/hosted-execution/legacy-dashboard-replica": [
-        "./packages/hosted-execution/src/legacy-dashboard-replica.ts"
-      ],
       "@murphai/hosted-execution/orchestration-control": [
         "./packages/hosted-execution/src/orchestration-control.ts"
       ],
@@ -119,6 +128,9 @@
       ],
       "@murphai/hosted-execution/phone-calls": [
         "./packages/hosted-execution/src/phone-calls.ts"
+      ],
+      "@murphai/hosted-execution/usage-diagnostics": [
+        "./packages/hosted-execution/src/usage-diagnostics.ts"
       ],
       "@murphai/hosted-execution/plan-usage": [
         "./packages/hosted-execution/src/plan-usage.ts"
@@ -276,12 +288,6 @@
       "@murphai/query/browser": [
         "./packages/query/src/browser.ts"
       ],
-      "@murphai/query/browser-murph-age": [
-        "./packages/query/src/browser-murph-age.ts"
-      ],
-      "@murphai/query/murph-age": [
-        "./packages/query/src/murph-age.ts"
-      ],
       "@murphai/query/entity-families": [
         "./packages/query/src/entity-families.ts"
       ],
@@ -320,18 +326,6 @@
       ],
       "@murphai/parsers/*": [
         "./packages/parsers/src/*.ts"
-      ],
-      "@murphai/assistant-cli/commands/assistant": [
-        "./packages/assistant-cli/src/commands/assistant.ts"
-      ],
-      "@murphai/assistant-cli/run-terminal-logging": [
-        "./packages/assistant-cli/src/run-terminal-logging.ts"
-      ],
-      "@murphai/assistant-cli/*": [
-        "./packages/assistant-cli/src/*.ts"
-      ],
-      "@murphai/setup-cli/*": [
-        "./packages/setup-cli/src/*.ts"
       ],
       "@murphai/assistant-runtime": [
         "./packages/assistant-runtime/src/index.ts"
@@ -389,12 +383,6 @@
       ],
       "@murphai/operator-config/message-formatting": [
         "./packages/operator-config/src/message-formatting.ts"
-      ],
-      "@murphai/operator-config/device-daemon": [
-        "./packages/operator-config/src/device-daemon.ts"
-      ],
-      "@murphai/operator-config/device-sync-client": [
-        "./packages/operator-config/src/device-sync-client.ts"
       ],
       "@murphai/operator-config/*": [
         "./packages/operator-config/src/*.ts"

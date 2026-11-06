@@ -12,13 +12,8 @@ categories:
 - digital-sunset
 - sleep-hygiene
 - supplemental_sleep_hygiene_insomnia_context
-relations:
--
-  type: related_protocol
-  target: "protocol_variant:evening-screen-curfew/digital-sunset"
--
-  type: parent_family
-  target: "experiment_family:evening-screen-curfew"
+relations: []
+
 source:
   kind: web_page
   title: About Sleep

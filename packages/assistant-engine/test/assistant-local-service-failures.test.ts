@@ -9,6 +9,7 @@ import type { AssistantDeliveryOutcome } from '../src/assistant/service-contract
 import {
   createAssistantSession,
   createDeferred,
+  createDirectSharedPlan,
   createProviderUsage,
   createSharedPlan,
   isTraceEventWithRawType,
@@ -16,6 +17,7 @@ import {
 } from './assistant-local-service-runtime.harness.ts'
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-04-08T12:00:00.000Z') })
   const terminalError = new Error('provider failed hard')
   const failedProviderSession = createAssistantSession({
     sessionId: 'session-provider-failed',
@@ -61,9 +63,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   mocks.recordAssistantDiagnosticEvent
     .mockResolvedValueOnce(undefined)
     .mockRejectedValueOnce(new Error('ignore failed diagnostics'))
-  mocks.refreshAssistantStatusSnapshotLocal.mockRejectedValueOnce(
-    new Error('ignore failed status refresh'),
-  )
+
   mocks.maybeRunAssistantRuntimeMaintenance.mockRejectedValueOnce(
     new Error('ignore failed post-turn maintenance'),
   )
@@ -113,6 +113,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
     mocks.recordAssistantUsageEvent.mock.calls[0]?.[0],
     {
       executionContext: null,
+      occurredAt: '2026-04-08T12:00:00.000Z',
       providerRequestAcceptedInputIds: ['initial'],
       providerRequestOrdinal: 0,
       providerRequestOutcome: 'failed',
@@ -158,7 +159,6 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
     },
   )
   assert.equal(mocks.normalizeAssistantDeliveryError.mock.calls.length, 1)
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal saves progress-materialized sessions after terminal provider failures', async () => {
@@ -892,6 +892,7 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
   const stopTyping = vi.fn(async () => undefined)
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
       startTypingIndicator: vi.fn(() => typingIndicatorDeferred.promise),
     },
@@ -936,6 +937,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
     stop: stopTyping,
   }))
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
       startTypingIndicator,
     },
@@ -990,7 +992,6 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal anchors hosted reply timing to the queued delivery intent', async () => {
@@ -1027,6 +1028,10 @@ test('sendAssistantMessageLocal anchors hosted reply timing to the queued delive
       providerTurn: {
         onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
+        finalResponseCompletion: {
+          kind: 'observed',
+          observedAtMonotonicMs: performance.now() - 250,
+        },
         response: 'timed response',
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: 'timed response',
@@ -1062,9 +1067,16 @@ test('sendAssistantMessageLocal anchors hosted reply timing to the queued delive
       finalReplySelected: true,
       providerRequestOrdinal: 0,
       turnTimingDeliveryIntentId: 'intent-timed-reply',
+      turnTimingFinalResponseCompletion: 'observed',
       turnTimingProviderRequestElapsedMs: 1_200,
+      // The exact captured provider-result instant, never derived or clamped.
+      turnTimingProviderResultAtEpochMs: Date.parse('2026-07-09T12:00:01.200Z'),
       turnTimingSinceProviderResultMs: 0,
     }))
+  const completedToResultMs = (replyTiming as { rawEvent: Record<string, unknown> })
+    .rawEvent.turnTimingFinalResponseCompletedToProviderResultMs
+  expect(completedToResultMs).toBeGreaterThanOrEqual(250)
+  expect(completedToResultMs).toBeLessThan(60_000)
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {
@@ -1084,6 +1096,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     session: failedSession,
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
         stop: stopTyping,
@@ -1125,6 +1138,7 @@ test('sendAssistantMessageLocal starts typing indicators for queue-only delivery
     stop: stopTyping,
   }))
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
       startTypingIndicator,
     },
@@ -1149,6 +1163,7 @@ test('sendAssistantMessageLocal swallows typing-indicator startup failures', asy
     throw new Error('typing startup failed')
   })
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
       startTypingIndicator,
     },
@@ -1178,6 +1193,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
     retryable: true,
   }
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
       startTypingIndicator,
     },
@@ -1185,6 +1201,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
       error: queuedError,
       intentId: 'intent-queued',
       kind: 'queued',
+      media: [],
       session: queuedSession,
     },
   })
@@ -1208,11 +1225,13 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
 })
 
 test('sendAssistantMessageLocal ignores typing-indicator startup failures', async () => {
+  const startTypingIndicator = vi.fn(async () => {
+    throw new Error('typing startup failed')
+  })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: {
-      startTypingIndicator: vi.fn(async () => {
-        throw new Error('typing startup failed')
-      }),
+      startTypingIndicator,
     },
   })
 
@@ -1222,9 +1241,9 @@ test('sendAssistantMessageLocal ignores typing-indicator startup failures', asyn
     vault: '/vaults/test',
   })
 
+  expect(startTypingIndicator).toHaveBeenCalledOnce()
   assert.equal(result.status, 'completed')
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal skips typing indicators when delivery is not requested or unavailable', async () => {
@@ -1232,6 +1251,7 @@ test('sendAssistantMessageLocal skips typing indicators when delivery is not req
     startTypingIndicator: vi.fn(async () => null),
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    ...createDirectTypingContext(),
     adapter: disabledAdapter,
   })
 
@@ -1259,6 +1279,7 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
   const session = createAssistantSession({
     sessionId: 'session-fallbacks',
   })
+  session.binding.threadIsDirect = true
   session.binding.channel = null
   session.binding.delivery = null
   session.binding.identityId = null
@@ -1269,7 +1290,7 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
     bindingDelivery: null,
     channel: null,
     deliveryPolicy: 'binding-target-only',
-    threadIsDirect: false,
+    threadIsDirect: true,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
@@ -1280,6 +1301,7 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
     deliveryOutcome: {
       intentId: 'intent-not-requested',
       kind: 'not-requested',
+      media: [],
       session,
     },
     plan,
@@ -2079,3 +2101,14 @@ test('sendAssistantMessageLocal records fallback failure metadata when persisten
     'not-requested',
   )
 })
+
+function createDirectTypingContext() {
+  const session = createAssistantSession()
+  return {
+    plan: createDirectSharedPlan(),
+    session: {
+      ...session,
+      binding: { ...session.binding, threadIsDirect: true },
+    },
+  }
+}

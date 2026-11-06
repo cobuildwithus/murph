@@ -46,6 +46,9 @@ It does not own canonical health-data import, token authority, or canonical host
 - disconnect, pairing, and other hosted operational control flows
 - the signed internal runtime snapshot, runtime apply, dirty-state fetch/pending/ack, and connect-target link routes consumed by hosted execution
 - validation and durable mailbox handoff for hosted manual reconcile requests
+- bounded ordinary Junction content preflight against checkpoint-confirmed
+  imported fingerprints, with current authority/idle-work revalidation and a
+  cadence-only CAS; see the [ingestion owner](../agent-docs/operations/device-sync-ingestion-invariants.md#hosted-scheduled-content-preflight)
 
 `apps/web` must not:
 
@@ -242,7 +245,12 @@ invalid state, missing proof, malformed proof, expired proof, and binding
 mismatch. Missing proof does not establish that the browser cookie expired.
 Only the bounded provider category is included in metadata; callback URLs,
 states, cookies, and session identifiers are excluded. Diagnostic write failure
-cannot block recovery.
+cannot block recovery. A proof-verified return with `OAUTH_STATE_INVALID` uses
+that same neutral notice and records its distinct code: successful connection
+persistence retires the consumed admission, so unavailable state cannot establish
+a failed connection or prove a successful replay. The callback never resumes
+provider work, changes stored source status, or asserts success on this path.
+Provider/owner mismatch and actual provider completion failures remain errors.
 
 `device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. Every accepted dirty append advances `dirty_revision`, including payload-only durable work, so acknowledgement revision inequality is the authoritative fact that accepted work remains beyond the runtime pass's observed frontier. Ingress still coalesces wake delivery while the connection is already dirty; advancing the revision does not append another mailbox handoff. Durable companion-metadata payload IDs derive from the existing stable serialized batch identity rather than that moving progress revision, so an exact client retry remains one row while changed batch content remains distinct. The marker must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids. Each new row also stores one server-derived `credential_independent` boolean beside the ciphertext. Store-owned dirty writes classify, compress, and seal before their transaction. Consent-gated webhook and companion admissions first check consent plus exact connection/source authority in a short transaction, prepare through a request-local non-serializable dirty-store capability outside all locks, then reacquire the admission locks and require unchanged consent, authority, dirty-marker snapshot, and, for payload work, device-domain root before persistence. Clean-to-dirty mailbox crypto follows the same outside-lock preparation and exact ingress-root revalidation. One fresh-cache full replan is allowed on drift; repeated drift fails retryably. A withdrawal that commits while preparation is in flight leaves no durable payload, receipt, signal, trace-completion, or wake. The bit is required on every write. Reconnect reads no payload and resets the compact marker plus deletes credential-scoped rows with set-based writes after locking and re-reading health-data consent and then locking the dirty marker. Acknowledgement takes that same marker-before-payload order, preventing a reconnect/acknowledgement deadlock. Credential-independent payloads remain available for runtime consumption and acknowledgement.
 
@@ -366,7 +374,7 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 - `POST /device/connect/:claim`
 - `GET /device-sync/connect/complete`
 
-These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because both callback credentials are host-only. Provider callback GET requires the callback proof and active session, passes the member as `expectedOwnerId`, and redirects only after shared ingress verifies the OAuth-state owner; a missing or invalid proof burns the OAuth state and redirects to Connect without mutating.
+These are the only browser-facing wearable connection start and completion routes. The settings start route resolves the Junction manifest and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because both callback credentials are host-only. Provider callback GET requires the callback proof and active session, passes the member as `expectedOwnerId`, and redirects only after shared ingress verifies the OAuth-state owner; a missing or invalid proof burns the OAuth state and redirects to Connect without mutating.
 
 Junction accounts created for their first Link start remain `pending_link` and
 inert. They cannot admit webhook dirty work, runtime wakes, scheduled or manual
@@ -601,7 +609,7 @@ Webhook ingress separates level-triggered dirty hints from event-triggered durab
 
 Provider webhook traces remain exact for side-effect-bearing accepted deliveries. Accepted level dirty hints write sparse audit signals and upsert `device_sync_dirty_connection` only when they create fresh dirty work; later level hints for an already-pending connection can be accepted before trace claim. Durable webhook work still passes through exact trace claim and durable acceptance so provider-owned event work is not lost. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
-When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. The existing scheduled mailbox-handoff sweep selects one unconsumed `device-sync.wake` pointer per user alongside its other durable mailbox candidates, so a failed first Temporal signal is retried from mailbox truth without a pending-handoff ledger or dirty-row scan. Webhook and app paths do not send runner nudges directly to Cloudflare.
+When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Routine Junction daily totals (activity summary, heart rate, steps, distance, calories, respiratory rate, stress, HRV, floors, blood oxygen and VO2 max) are the one exception: their clean-to-dirty transition records `wake_deferred_until` thirty minutes after Web receipt and appends no handoff, and an urgent Junction hint for that dirty connection atomically clears a pending deadline and appends the ordinary deterministic dirty-transition mailbox wake in the same admission transaction. Mailbox crypto is prepared before that transaction; only the successful batch claim appends and signals, so repeated urgent hints coalesce and a failed append rolls the claim back. The scheduled recovery command releases due deadlines before its due-reconcile scan: under the health-data admission lock it rechecks consent, the active connection identity and remaining dirt, appends that same deterministic dirty-transition wake and clears the deadline in one transaction, then signals Temporal after commit. Full acknowledgement and reconnect supersession clear the deadline. It is batching bookkeeping, not a work queue; any runtime pass still drains the dirty row early. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; apart from releasing those bounded routine deadlines, there is no dirty-row recovery sweep. The existing scheduled mailbox-handoff sweep selects one unconsumed `device-sync.wake` pointer per user alongside its other durable mailbox candidates, so a failed first Temporal signal is retried from mailbox truth without a pending-handoff ledger or dirty-row scan. Webhook and app paths do not send runner nudges directly to Cloudflare.
 
 Temporal is the only normal wake orchestrator. When mailbox signals or reconciliation facts show durable work, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, active-fence alarm cleanup, and execution cleanup.
 
@@ -609,54 +617,11 @@ For accepted webhooks, provider trace completion means durable audit and dirty a
 
 ## Provider and connect-target split
 
-Provider configuration is registry-owned by `@murphai/device-syncd/config`. Hosted routes resolve provider manifests for direct providers and resolve connect targets for user-facing source choices. This keeps direct WHOOP, direct Oura and Strava, and Junction-backed source providers such as Garmin/Oura/Strava on one control-plane shape instead of branching hosted persistence by provider.
-
-### WHOOP direct provider
-
-Hosted responsibilities:
-
-- OAuth callback
-- webhook verification and dedupe
-- blind-index account mapping
-- hosted web token refresh and agent export flows
-- execution-time runtime snapshot/apply access when a hosted job needs it
-
-Local responsibilities:
-
-- fetch WHOOP collections and resources directly
-- import delete and resource changes into the vault from hosted hints
-
-### Oura direct or Junction-backed target
-
-Hosted responsibilities:
-
-- OAuth callback
-- hosted web token refresh and agent export flows
-- webhook subscription management when Oura webhooks are enabled
-- Junction connect-target link generation when Oura is routed through Junction
-- execution-time runtime snapshot/apply access when a hosted job needs it
-
-Local responsibilities:
-
-- polling-first reconcile against recent windows
-- optional use of hosted webhook signals
-- local imports into the vault
-
-### Strava direct or Junction-backed target
-
-Hosted responsibilities:
-
-- OAuth callback
-- hosted web token refresh and agent export flows
-- app-global webhook preflight and dedupe when direct Strava webhooks are enabled
-- Junction connect-target link generation when Strava is routed through Junction
-- execution-time runtime snapshot/apply access when a hosted job needs it
-
-Local responsibilities:
-
-- polling-first reconcile against recent activity windows
-- optional use of hosted webhook signals
-- local imports into the vault
+Provider configuration is registry-owned by `@murphai/device-syncd/config`.
+Junction is the sole configured transport. Connect targets select source labels
+such as WHOOP, Oura, Garmin, and Fitbit through Junction. Historical provider
+labels and source filters remain readable; they do not enable direct OAuth or
+webhook endpoints. Generic routes reject providers absent from the registry.
 
 ### Garmin via Junction
 
@@ -671,30 +636,17 @@ Local responsibilities:
 - Junction-backed reconcile of Garmin summaries, timeseries, sleep, activity, and other configured resources
 - local imports into the vault
 
-## Local-only daemon contract
-
-`device-syncd` still requires its own local daemon env contract:
-
-- `DEVICE_SYNC_SECRET` is the daemon's local bootstrap and service secret
-- `DEVICE_SYNC_CONTROL_TOKEN` is the daemon's loopback control-plane bearer token
-
-Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract. Local and tunneled daemon callback URLs remain explicitly configured on the daemon boundary and are not subject to the hosted browser app-session hostname check.
-
-Hosted execution continues to use signed internal web callbacks and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
-
 ## Fitbit migration continuation
 
 The browser owns presentation and explicit Google authorization only. Its persisted Google source `firstSeenAt` is also the authorization epoch used by both exact Google and Fitbit proof jobs. That existing epoch participates in their current job identity; stale queued, leased, retry, timeseries, or workout lineages cannot certify a later authorization. The wake-local hosted device-sync pass drains scheduled and webhook work, publishes source state, and then asks Web to attempt cutover. Web re-enters the existing connection mutation lock, rejects pending dirty state, evaluates importer-owned canonical evidence, and calls targeted provider revoke outside the transaction. A crash is recovered by probing that exact Fitbit provider source; only provider-confirmed inactivity is finalized locally. No migration table, queue, or second state owner exists.
 
 Deploy importer, Device Sync, and hosted-runtime consumers before the Web bundle so every cutover caller understands source-scoped evidence, per-resource fences, retry identity, and Google Health admission. Then deploy Web and smoke one explicit Google authorization. Temporary version skew leaves legacy Fitbit active rather than cutting over without complete evidence.
 
-
 ## Retired member-owned provider applications
 
-Hosted Strava uses the ordinary configured-provider registry. The dormant
+Strava source data arrives through Junction. The dormant
 member-owned application store, OAuth/connection bindings, and runtime snapshot
-credential overlays are retired. Ordinary Strava OAuth, refresh, polling, and
-revocation remain owned by the shared device-sync implementation.
+credential overlays are retired. Direct Strava OAuth, refresh, polling, and revocation are retired.
 
 Before deploying this retirement, confirm that no application rows or non-null
 application binding columns remain. The provisioning writer had no production

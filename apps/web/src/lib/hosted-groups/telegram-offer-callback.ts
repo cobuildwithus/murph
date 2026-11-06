@@ -137,6 +137,10 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
       }),
   });
 
+  if (result.status === "replayed") {
+    await answer(null);
+    return { handled: false, reason: "replayed-telegram-group-offer" };
+  }
   if (result.status === "accepted") {
     // Acknowledge first, then let the optional tail run after the response.
     await answer(
@@ -173,8 +177,9 @@ function readHostedTelegramGroupOfferCallbackKinds(
 
 /**
  * Uses Telegram's own callback identity, the same way the Linq adapter passes
- * the provider event id. Redelivery of one update repeats its id and stays
- * idempotent, while a genuinely new tap gets a new id. Deriving this from the
+ * the provider event id. The acceptance owner spends this id atomically with
+ * the grant, so redelivery stays spent even after leave or revocation, while
+ * a genuinely new tap gets a new id. Deriving this from the
  * chat, message, and actor instead would make every later tap look like a
  * replay of the first, so a member who revoked a grant could never restore it
  * by tapping again.

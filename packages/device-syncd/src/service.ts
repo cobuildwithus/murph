@@ -1,7 +1,7 @@
 import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import {
-  createDeviceProviderSnapshotImportSession,
   createImporters,
+  isActiveCanonicalWriteLockError,
   JunctionSparseCalendarRepairNormalizationError,
   normalizeKnownJunctionSourceProviderSlug,
 } from "@murphai/importers";
@@ -15,6 +15,7 @@ import {
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   isJunctionSparseCalendarRefreshJob,
@@ -65,6 +66,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncCanonicalImportReceipt,
   DeviceSyncImporterPort,
+  DeviceSyncJobIdentity,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncJobTimingDiagnostic,
@@ -132,6 +134,7 @@ export function resolveDeviceSyncStoreNextWakeAt(input: {
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
 const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
+const DEVICE_SYNC_IMPORT_PREPARATION_MAX_DEFER_MS = 30_000;
 // Never retain fewer diagnostics than one hosted pass can produce, and never
 // regress below the established 100-attempt observability window.
 export const DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT = Math.max(
@@ -149,7 +152,7 @@ const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
 const JUNCTION_WORKOUT_STREAM_CANDIDATE_DIAGNOSTIC_LIMIT =
   resolveJunctionTimeseriesResourcePolicy("workout_stream")?.maxRecordsPerWindow ?? 0;
-const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
+export const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
   (resolveJunctionTimeseriesResourcePolicy("electrocardiogram_voltage")?.maxSamplesPerWindow ?? 0) + 1;
 export const JUNCTION_ECG_BINDING_REASONS: ReadonlySet<string> = new Set([
   "collection_source_ambiguous",
@@ -171,6 +174,9 @@ export const JUNCTION_ECG_BINDING_REASONS: ReadonlySet<string> = new Set([
   "summary_source_inconsistent",
   "summary_window_invalid",
   "summary_windows_ambiguous",
+  "voltage_collection_empty",
+  "voltage_source_mismatch",
+  "voltage_samples_empty",
 ]);
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
@@ -220,8 +226,6 @@ export interface CreateDeviceSyncServiceInput {
   store?: SqliteDeviceSyncStore;
   clock?: DeviceSyncClock;
   schedulerMutex?: DeviceSyncTickMutex;
-  workerMutex?: DeviceSyncTickMutex;
-  workerExecutor?: DeviceSyncWorkerExecutor;
 }
 
 export interface DeviceSyncClock {
@@ -232,9 +236,6 @@ export interface DeviceSyncTickMutex {
   runIfIdle<T>(operation: () => Promise<T>): Promise<T | undefined>;
 }
 
-export interface DeviceSyncWorkerExecutor {
-  drainWorker(limit: number): Promise<number>;
-}
 
 export interface DeviceSyncService {
   readonly vaultRoot: string;
@@ -248,8 +249,6 @@ export interface DeviceSyncService {
   getAccount(accountId: string): PublicDeviceSyncAccount | null;
   listJobFailureDiagnostics(): DeviceSyncJobFailureDiagnostic[];
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[];
-  start(): void;
-  stop(): void;
   close(): void;
   startConnection(input: StartConnectionInput): Promise<BeginConnectionResult>;
   handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
@@ -261,7 +260,7 @@ export interface DeviceSyncService {
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
+  runSchedulerOnce(accountId?: string, options?: { reconcileBefore?: string }): Promise<DeviceSyncJobRecord[]>;
   runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
@@ -310,17 +309,12 @@ class DeviceSyncServiceController {
   private readonly codec: ReturnType<typeof createSecretCodec>;
   private readonly clock: DeviceSyncClock;
   private readonly schedulerMutex: DeviceSyncTickMutex;
-  private readonly workerMutex: DeviceSyncTickMutex;
-  private readonly workerExecutor: DeviceSyncWorkerExecutor;
   private readonly workerLeaseMs: number;
-  private readonly workerPollMs: number;
   private readonly workerBatchSize: number;
-  private readonly schedulerPollMs: number;
+  private readonly shouldYieldImportPreparation: (() => boolean) | null;
   private readonly shouldYieldJobExecution: (() => boolean) | null;
   private readonly workerId: string;
   private readonly ownsStore: boolean;
-  private workerTimer: NodeJS.Timeout | null = null;
-  private schedulerTimer: NodeJS.Timeout | null = null;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
   private readonly jobTimingDiagnostics: DeviceSyncJobTimingDiagnostic[] = [];
   private readonly connectionMutationStates = new Map<string, {
@@ -338,14 +332,9 @@ class DeviceSyncServiceController {
     this.logger = input.config.log ?? console;
     this.clock = input.clock ?? defaultDeviceSyncClock;
     this.schedulerMutex = input.schedulerMutex ?? createDeviceSyncTickMutex();
-    this.workerMutex = input.workerMutex ?? createDeviceSyncTickMutex();
-    this.workerExecutor = input.workerExecutor ?? {
-      drainWorker: (limit) => this.drainWorker(limit),
-    };
     this.workerLeaseMs = Math.max(60_000, input.config.workerLeaseMs ?? 5 * 60_000);
-    this.workerPollMs = Math.max(1_000, input.config.workerPollMs ?? 5_000);
     this.workerBatchSize = Math.max(1, input.config.workerBatchSize ?? 4);
-    this.schedulerPollMs = Math.max(5_000, input.config.schedulerPollMs ?? 60_000);
+    this.shouldYieldImportPreparation = input.config.shouldYieldImportPreparation ?? null;
     this.shouldYieldJobExecution = input.config.shouldYieldJobExecution ?? null;
     this.workerId = generatePrefixedId("worker");
     this.store =
@@ -626,44 +615,24 @@ class DeviceSyncServiceController {
     return this.jobFailureDiagnostics.map((entry) => ({
       ...entry,
       details: { ...entry.details },
+      ...(entry.jobIdentities
+        ? { jobIdentities: entry.jobIdentities.map((identity) => ({ ...identity })) }
+        : {}),
     }));
   }
 
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[] {
-    return this.jobTimingDiagnostics.map((entry) => ({ ...entry }));
-  }
-
-  start(): void {
-    if (!this.workerTimer) {
-      void this.runWorkerBatchOnce();
-      this.workerTimer = setInterval(() => {
-        void this.runWorkerBatchOnce();
-      }, this.workerPollMs);
-    }
-
-    if (!this.schedulerTimer) {
-      void this.runSchedulerOnce();
-      this.schedulerTimer = setInterval(() => {
-        void this.runSchedulerOnce();
-      }, this.schedulerPollMs);
-    }
-  }
-
-  stop(): void {
-    if (this.workerTimer) {
-      clearInterval(this.workerTimer);
-      this.workerTimer = null;
-    }
-
-    if (this.schedulerTimer) {
-      clearInterval(this.schedulerTimer);
-      this.schedulerTimer = null;
-    }
+    return this.jobTimingDiagnostics.map((entry) => ({
+      ...entry,
+      ...(entry.jobIdentities
+        ? { jobIdentities: entry.jobIdentities.map((identity) => ({ ...identity })) }
+        : {}),
+      snapshotImportOutcomes: { ...entry.snapshotImportOutcomes },
+      completeSourceDayImportOutcomes: { ...entry.completeSourceDayImportOutcomes },
+    }));
   }
 
   close(): void {
-    this.stop();
-
     if (this.ownsStore) {
       this.store.close();
     }
@@ -837,9 +806,15 @@ class DeviceSyncServiceController {
     return this.store.readNextJobWakeAt();
   }
 
-  async runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]> {
+  async runSchedulerOnce(
+    accountId?: string,
+    options: { reconcileBefore?: string } = {},
+  ): Promise<DeviceSyncJobRecord[]> {
     return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
+      // An already active hosted pass may pull a nearby cadence forward for
+      // this account. The same durable jobs and retry owner still perform it.
+      const reconcileBefore = accountId ? options.reconcileBefore ?? now : now;
       const queuedJobs: DeviceSyncJobRecord[] = [];
 
       try {
@@ -849,7 +824,7 @@ class DeviceSyncServiceController {
             || account.status !== "active"
             || isDeviceSyncConnectionSetupPending(account)
             || !account.nextReconcileAt
-            || Date.parse(account.nextReconcileAt) > Date.parse(now)
+            || Date.parse(account.nextReconcileAt) > Date.parse(reconcileBefore)
           ) {
             continue;
           }
@@ -887,7 +862,6 @@ class DeviceSyncServiceController {
   async runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null> {
     const result = await this.runWorkerPassOnce({
       accountId,
-      importSession: createDeviceProviderSnapshotImportSession(),
       providerExecutors: new Map(),
       maxJobRows: Number.POSITIVE_INFINITY,
     });
@@ -896,7 +870,6 @@ class DeviceSyncServiceController {
 
   private async runWorkerPassOnce(input: {
     accountId?: string;
-    importSession: ReturnType<typeof createDeviceProviderSnapshotImportSession>;
     providerExecutors: Map<string, DeviceJobExecutor>;
     maxJobRows: number;
   }): Promise<{
@@ -930,6 +903,7 @@ class DeviceSyncServiceController {
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
     let canonicalProgressCommitted = false;
+    let continuationProgressCommitted = false;
     let connectionSourceReadCount = 0;
     let connectionSourceReadElapsedMs = 0;
     let credentialRefreshCount = 0;
@@ -944,6 +918,9 @@ class DeviceSyncServiceController {
     let providerResourceRequestCount = 0;
     let providerResourceRequestElapsedMs = 0;
     let snapshotImportCount = 0;
+    let snapshotImportDeferredCount = 0;
+    const snapshotImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
+    const completeSourceDayImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
     let snapshotImportElapsedMs = 0;
     let snapshotCanonicalCoreElapsedMs = 0;
     let snapshotCanonicalWriteElapsedMs = 0;
@@ -962,6 +939,9 @@ class DeviceSyncServiceController {
         ...(canonicalProgressCommitted
           ? { canonicalProgressCommitted: true as const }
           : {}),
+        ...(continuationProgressCommitted
+          ? { continuationProgressCommitted: true as const }
+          : {}),
         connectionSourceReadCount,
         connectionSourceReadElapsedMs,
         credentialRefreshCount,
@@ -971,6 +951,7 @@ class DeviceSyncServiceController {
         ...scheduledJobDiagnostics,
         elapsedMs: nonnegativeDeviceSyncDurationMs(now, finishedAt),
         jobCount: Math.max(1, activeJobs.length),
+        jobIdentities: activeJobs.map(toDeviceSyncJobIdentity),
         jobKind: job.kind,
         outcome,
         provider: job.provider,
@@ -992,6 +973,9 @@ class DeviceSyncServiceController {
             ),
         ...(resource ? { resource } : {}),
         snapshotImportCount,
+        ...(snapshotImportDeferredCount > 0 ? { snapshotImportDeferredCount } : {}),
+        snapshotImportOutcomes,
+        completeSourceDayImportOutcomes,
         snapshotImportElapsedMs,
         snapshotCanonicalCoreElapsedMs,
         snapshotCanonicalWriteElapsedMs,
@@ -1043,6 +1027,7 @@ class DeviceSyncServiceController {
         code,
         details: {},
         jobDisposition: failureTransition.disposition,
+        jobIdentities: [toDeviceSyncJobIdentity(job)],
         jobKind: job.kind,
         maxAttempts: failureTransition.maxAttempts,
         provider: job.provider,
@@ -1075,20 +1060,6 @@ class DeviceSyncServiceController {
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
     const retainsAcceptedCalendarRefresh = isJunctionSparseCalendarRefreshJob(job);
     const retainsAcceptedWork = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh;
-    const delayRetainedJobUntilAuthorityReturns = (code: string, message: string): void => {
-      const delayedAt = currentNow();
-      const transition = this.store.failJobIfOwned(
-        job.id,
-        this.workerId,
-        delayedAt,
-        code,
-        message,
-        addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
-        true,
-        true,
-      );
-      outcome = transition ? "deferred" : "cancelled";
-    };
 
     if (
       retainsAcceptedCalendarRefresh
@@ -1103,80 +1074,51 @@ class DeviceSyncServiceController {
       return finishPass();
     }
 
-    if (
-      storedAccount.status === "active"
-      && isDeviceSyncConnectionSetupPending(storedAccount)
-      && !retainsAcceptedWork
-    ) {
-      failClaimedJob(
-        "CONNECTION_SETUP_PENDING",
-        "Device sync setup must finish before queued jobs can run.",
-        null,
-        false,
-      );
-      return finishPass();
-    }
+    const admissionBlocker = resolveWorkerAccountAdmissionBlocker({
+      account: storedAccount,
+      preservesAcceptedCompanionHrv,
+      retainsAcceptedCalendarRefresh,
+    });
+    if (admissionBlocker) {
+      const { code, message } = admissionBlocker;
+      if (retainsAcceptedCalendarRefresh) {
+        const delayedAt = currentNow();
+        const transition = this.store.failJobIfOwned(
+          job.id,
+          this.workerId,
+          delayedAt,
+          code,
+          message,
+          addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
+          true,
+          true,
+        );
+        outcome = transition ? "deferred" : "cancelled";
+      } else if (storedAccount.status === "disconnected") {
+        const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
 
-    if (
-      storedAccount.status === "active"
-      && isDeviceSyncConnectionSetupPending(storedAccount)
-      && retainsAcceptedCalendarRefresh
-    ) {
-      delayRetainedJobUntilAuthorityReturns(
-        "CONNECTION_SETUP_PENDING",
-        "Device sync setup must finish before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "disconnected" && retainsAcceptedCalendarRefresh) {
-      delayRetainedJobUntilAuthorityReturns(
-        "ACCOUNT_DISCONNECTED",
-        "Device sync account must reconnect before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "disconnected" && !preservesAcceptedCompanionHrv) {
-      const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
-
-      if (!completed) {
-        this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
-          provider: job.provider,
-          accountId: job.accountId,
-          jobId: job.id,
-        });
+        if (!completed) {
+          this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
+            provider: job.provider,
+            accountId: job.accountId,
+            jobId: job.id,
+          });
+        } else {
+          outcome = "completed";
+          durableProgressCommitted = true;
+        }
       } else {
-        outcome = "completed";
-        durableProgressCommitted = true;
-      }
-      return finishPass();
-    }
-
-    if (storedAccount.status === "reauthorization_required" && retainsAcceptedCalendarRefresh) {
-      delayRetainedJobUntilAuthorityReturns(
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account must reauthorize before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "reauthorization_required" && !preservesAcceptedCompanionHrv) {
-      const failed = failClaimedJob(
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account requires reconnection before queued jobs can run.",
-        null,
-        false,
-      );
-      if (failed) {
-        this.store.markPendingJobsDeadForAccountIfCurrent({
-          accountId: storedAccount.id,
-          code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
-          expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
-          expectedStatus: "reauthorization_required",
-          message: "Device sync account requires reconnection before queued jobs can run.",
-          now: currentNow(),
-        });
+        const failed = failClaimedJob(code, message, null, false);
+        if (failed && storedAccount.status === "reauthorization_required") {
+          this.store.markPendingJobsDeadForAccountIfCurrent({
+            accountId: storedAccount.id,
+            code,
+            expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
+            expectedStatus: "reauthorization_required",
+            message,
+            now: currentNow(),
+          });
+        }
       }
       return finishPass();
     }
@@ -1231,8 +1173,7 @@ class DeviceSyncServiceController {
       const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
       if (!currentStoredAccount || (
-        !preservesAcceptedCompanionHrv
-        && !retainsAcceptedCalendarRefresh
+        !retainsAcceptedWork
         && (
           currentStoredAccount.status !== "active"
           || currentStoredAccount.disconnectGeneration !== disconnectGeneration
@@ -1283,7 +1224,7 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      activeJobs = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh
+      activeJobs = retainsAcceptedWork
         ? [normalizedJob]
         : this.claimProviderJobBatch({
             accountId: storedAccount.id,
@@ -1343,26 +1284,64 @@ class DeviceSyncServiceController {
           }
         },
         importSnapshot: async (snapshot: unknown, options) => {
-          ensureExecutionActive();
-          const importStartedAt = currentNow();
-          snapshotImportCount += 1;
-          let importResult: Awaited<ReturnType<DeviceSyncImporterPort["importDeviceProviderSnapshot"]>>;
-          try {
-            importResult = await this.importer.importDeviceProviderSnapshot(
-              {
-                provider: provider.provider,
-                snapshot,
-                vaultRoot: this.vaultRoot,
-                ...options,
-              },
-              { importSession: input.importSession, signal: jobAbortController.signal },
-            );
-          } finally {
-            snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(
-              importStartedAt,
-              currentNow(),
-            );
-          }
+          const importWithAdmissionDeferral = async () => {
+            // One deadline per fetched snapshot, including retries. Once spent,
+            // preparation runs through despite new foreground windows; ordinary
+            // job cancellation and non-interruptible publication are unchanged.
+            let firstDeferredAt: number | null = null;
+            const shouldDeferPreparation = () => {
+              if (!this.shouldYieldImportPreparation?.()) return false;
+              firstDeferredAt ??= Date.now();
+              return Date.now() - firstDeferredAt < DEVICE_SYNC_IMPORT_PREPARATION_MAX_DEFER_MS;
+            };
+            for (;;) {
+              ensureExecutionActive();
+              while (shouldDeferPreparation()) {
+                await new Promise((resolve) => setTimeout(resolve, DEVICE_SYNC_JOB_YIELD_POLL_MS));
+                ensureExecutionActive();
+              }
+              const importDeferral = new AbortController();
+              const importSignal = AbortSignal.any([jobAbortController.signal, importDeferral.signal]);
+              const stopImportYieldPolling = startDeviceSyncJobYieldPolling({
+                abort: () => importDeferral.abort(new Error("Device import preparation deferred for conversation admission.")),
+                shouldYield: shouldDeferPreparation,
+                signal: importSignal,
+              });
+              const importStartedAt = currentNow();
+              let importOutcome: keyof typeof snapshotImportOutcomes | null = "failed";
+              try {
+                const importResult = await this.importer.importDeviceProviderSnapshot(
+                  { provider: provider.provider, snapshot, vaultRoot: this.vaultRoot, ...options },
+                  { signal: importSignal },
+                );
+                const applied = toPlainRecord(importResult)?.applied;
+                importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";
+                return importResult;
+              } catch (error) {
+                if (importDeferral.signal.aborted
+                  && isDeviceSyncJobAbortError(error, importDeferral.signal)) {
+                  // A deferred preparation is neither a failed job nor a new
+                  // provider execution. The loop's execution check propagates
+                  // any job-level abort that raced with this deferral.
+                  if (!jobAbortController.signal.aborted) snapshotImportDeferredCount += 1;
+                  importOutcome = null;
+                  continue;
+                }
+                throw error;
+              } finally {
+                stopImportYieldPolling();
+                if (importOutcome !== null) {
+                  snapshotImportCount += 1;
+                  snapshotImportOutcomes[importOutcome] += 1;
+                  if (options?.completeSourceDay) {
+                    completeSourceDayImportOutcomes[importOutcome] += 1;
+                  }
+                }
+                snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(importStartedAt, currentNow());
+              }
+            }
+          };
+          const importResult = await importWithAdmissionDeferral();
           if (toPlainRecord(importResult)?.applied === true) {
             canonicalProgressCommitted = true;
           }
@@ -1593,6 +1572,7 @@ class DeviceSyncServiceController {
 
       outcome = "completed";
       durableProgressCommitted = true;
+      continuationProgressCommitted = result.continuationProgress === true;
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
@@ -1642,15 +1622,8 @@ class DeviceSyncServiceController {
             "retry progress",
           ).payload
         : undefined;
-      const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
-        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
-      const retainsAcceptedCalendarRefreshUntilSuccess = retainsAcceptedCalendarRefresh
-        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code);
-      const retainsAcceptedWorkUntilSuccess = retainsAcceptedCompanionHrvUntilSuccess
-        || retainsAcceptedCalendarRefreshUntilSuccess;
-      const retainedFailureRetryable = failure.retryable
-        || retainsAcceptedCompanionHrvUntilSuccess
-        || retainsAcceptedCalendarRefreshUntilSuccess;
+      const { retainsAcceptedWorkUntilSuccess, retainedFailureRetryable, validationRetryDelayMs } =
+        resolveDeviceSyncFailureRetryPolicy({ job, failure, preservesAcceptedCompanionHrv, retainsAcceptedCalendarRefresh });
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1666,7 +1639,7 @@ class DeviceSyncServiceController {
 
       const failureTransitions = activeJobs.flatMap((activeJob) => {
         const retryAt = retainedFailureRetryable
-          ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
+          ? addMilliseconds(failureNow, validationRetryDelayMs ?? computeRetryDelayMs(activeJob.attempts))
           : null;
         const transition = this.store.failJobIfOwned(
           activeJob.id,
@@ -1703,6 +1676,7 @@ class DeviceSyncServiceController {
         code: failure.code,
         details: failure.details,
         jobDisposition: diagnosticTransition.transition.disposition,
+        jobIdentities: failureTransitions.map(({ activeJob }) => toDeviceSyncJobIdentity(activeJob)),
         jobKind: diagnosticTransition.activeJob.kind,
         maxAttempts: diagnosticTransition.transition.maxAttempts,
         provider: provider.provider,
@@ -1769,13 +1743,11 @@ class DeviceSyncServiceController {
   ): Promise<number> {
     const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
     let processedJobRows = 0;
-    const importSession = createDeviceProviderSnapshotImportSession();
     const providerExecutors = new Map<string, DeviceJobExecutor>();
 
     while (processedJobRows < maxJobRows) {
       const result = await this.runWorkerPassOnce({
         accountId,
-        importSession,
         providerExecutors,
         maxJobRows: maxJobRows - processedJobRows,
       });
@@ -1890,19 +1862,6 @@ class DeviceSyncServiceController {
     return [input.normalizedSeedJob, ...claimed];
   }
 
-  private async runWorkerBatchOnce(): Promise<void> {
-    await this.workerMutex.runIfIdle(async () => {
-      try {
-        await this.workerExecutor.drainWorker(this.workerBatchSize);
-      } catch (error) {
-        this.logger.error?.("Device sync worker tick failed.", {
-          failureCode: "DEVICE_SYNC_WORKER_TICK_FAILED",
-          error: summarizeError(error),
-        });
-      }
-    });
-  }
-
   private nowIso(): string {
     return toIsoTimestamp(this.clock.now());
   }
@@ -1937,7 +1896,11 @@ class DeviceSyncServiceController {
   }
 
   private recordJobTimingDiagnostic(entry: DeviceSyncJobTimingDiagnostic): void {
-    this.jobTimingDiagnostics.push({ ...entry });
+    this.jobTimingDiagnostics.push({
+      ...entry,
+      snapshotImportOutcomes: { ...entry.snapshotImportOutcomes },
+      completeSourceDayImportOutcomes: { ...entry.completeSourceDayImportOutcomes },
+    });
 
     if (this.jobTimingDiagnostics.length > DEVICE_SYNC_JOB_TIMING_DIAGNOSTIC_LIMIT) {
       this.jobTimingDiagnostics.splice(
@@ -2184,8 +2147,6 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     getAccount: (accountId) => controller.getAccount(accountId),
     listJobFailureDiagnostics: () => controller.listJobFailureDiagnostics(),
     listJobTimingDiagnostics: () => controller.listJobTimingDiagnostics(),
-    start: () => controller.start(),
-    stop: () => controller.stop(),
     close: () => controller.close(),
     startConnection: (startConnectionInput) => controller.startConnection(startConnectionInput),
     handleConnectionCallback: (callbackInput) => controller.handleConnectionCallback(callbackInput),
@@ -2196,7 +2157,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
       controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
+    runSchedulerOnce: (accountId, options) => controller.runSchedulerOnce(accountId, options),
     runWorkerOnce: (accountId) => controller.runWorkerOnce(accountId),
     drainWorker: (limit, accountId, options) =>
       controller.drainWorker(limit, accountId, options),
@@ -2222,6 +2183,10 @@ function summarizeDeviceSyncScheduledJobs(
   };
 }
 
+function toDeviceSyncJobIdentity(job: DeviceSyncJobRecord): DeviceSyncJobIdentity {
+  return { accountId: job.accountId, dedupeKey: job.dedupeKey, jobId: job.id };
+}
+
 function nonnegativeDeviceSyncDurationMs(startAt: string, endAt: string): number {
   const startMs = Date.parse(startAt);
   const endMs = Date.parse(endAt);
@@ -2235,6 +2200,47 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function resolveWorkerAccountAdmissionBlocker(input: {
+  account: StoredDeviceSyncAccount;
+  preservesAcceptedCompanionHrv: boolean;
+  retainsAcceptedCalendarRefresh: boolean;
+}): { code: string; message: string } | null {
+  // Calendar admission takes precedence when the raw job predicates overlap.
+  if (input.preservesAcceptedCompanionHrv && !input.retainsAcceptedCalendarRefresh) {
+    return null;
+  }
+
+  if (
+    input.account.status === "active"
+    && isDeviceSyncConnectionSetupPending(input.account)
+  ) {
+    return {
+      code: "CONNECTION_SETUP_PENDING",
+      message: input.retainsAcceptedCalendarRefresh
+        ? "Device sync setup must finish before retained calendar work can run."
+        : "Device sync setup must finish before queued jobs can run.",
+    };
+  }
+
+  if (input.account.status === "disconnected") {
+    return {
+      code: "ACCOUNT_DISCONNECTED",
+      message: "Device sync account must reconnect before retained calendar work can run.",
+    };
+  }
+
+  if (input.account.status === "reauthorization_required") {
+    return {
+      code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+      message: input.retainsAcceptedCalendarRefresh
+        ? "Device sync account must reauthorize before retained calendar work can run."
+        : "Device sync account requires reconnection before queued jobs can run.",
+    };
+  }
+
+  return null;
 }
 
 function resolveProviderJobExecutor(
@@ -2379,6 +2385,52 @@ function connectionChangedDuringDisconnectError(): DeviceSyncError {
   });
 }
 
+function isRetainedJunctionValidationFailure(job: DeviceSyncJobRecord, code: string): boolean {
+  if (job.provider !== "junction" || job.kind !== "resource") return false;
+  return (job.payload.resource === "blood_oxygen"
+      && code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION")
+    || (job.payload.resource === "electrocardiogram_voltage"
+      && code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+}
+
+function resolveDeviceSyncFailureRetryPolicy(input: {
+  job: DeviceSyncJobRecord;
+  failure: ReturnType<typeof normalizeExecutionError>;
+  preservesAcceptedCompanionHrv: boolean;
+  retainsAcceptedCalendarRefresh: boolean;
+}) {
+  const { job, failure, preservesAcceptedCompanionHrv, retainsAcceptedCalendarRefresh } = input;
+  const retainValidation = failure.retryable && isRetainedJunctionValidationFailure(job, failure.code);
+  const retainsAcceptedWorkUntilSuccess = (
+    preservesAcceptedCompanionHrv && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
+  ) || (
+    retainsAcceptedCalendarRefresh && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code)
+  ) || retainValidation || (failure.retryable && failure.code === "HOSTED_COLD_HISTORY_UNAVAILABLE");
+  const validationRetryDelayMs = retainValidation ? 30 * 60_000 : null;
+  if (validationRetryDelayMs !== null) failure.details.validationRetryDelayMs = validationRetryDelayMs;
+  return {
+    retainsAcceptedWorkUntilSuccess,
+    retainedFailureRetryable: failure.retryable || retainsAcceptedWorkUntilSuccess,
+    validationRetryDelayMs,
+  };
+}
+
+export function readSafeJunctionNormalizationDiagnostics(
+  input: Record<string, unknown>,
+): Pick<DeviceSyncJobFailureDiagnostic["details"],
+  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"> {
+  const allowed = (value: unknown, values: readonly string[]): string | null =>
+    typeof value === "string" && values.includes(value) ? value : null;
+  return compactFailureDiagnostics({
+    normalizationValueKind: allowed(input.normalizationValueKind,
+      ["missing", "non_numeric", "non_finite", "numeric_string", "number"]),
+    normalizationValueRange: allowed(input.normalizationValueRange,
+      ["negative", "zero", "fraction", "percentage", "above_percentage"]),
+    normalizationUnitKind: allowed(input.normalizationUnitKind,
+      ["missing", "percent", "ratio", "other"]),
+  });
+}
+
 function normalizeExecutionError(error: unknown): {
   code: string;
   details: DeviceSyncJobFailureDiagnostic["details"];
@@ -2415,6 +2467,11 @@ function normalizeExecutionError(error: unknown): {
         normalizationTimestampSemantics: readSafeDiagnosticToken(
           error.diagnostic.timestampSemantics,
         ),
+        ...readSafeJunctionNormalizationDiagnostics({
+          normalizationValueKind: error.diagnostic.valueKind,
+          normalizationValueRange: error.diagnostic.valueRange,
+          normalizationUnitKind: error.diagnostic.unitKind,
+        }),
       }),
       message: error.message,
       retryable: true,
@@ -2428,6 +2485,15 @@ function normalizeExecutionError(error: unknown): {
       message: summarizeDeviceSyncErrorMessage(error),
       retryable: error.retryable,
       accountStatus: error.accountStatus,
+    };
+  }
+
+  if (isActiveCanonicalWriteLockError(error)) {
+    return {
+      code: "CANONICAL_WRITE_LOCKED",
+      details: {},
+      message: "Canonical vault writes are temporarily busy.",
+      retryable: true,
     };
   }
 
@@ -2484,6 +2550,7 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerRequestBodyKind: readSafeDiagnosticToken(error.details?.requestBodyKind),
     ...junctionEcgContext,
     ...workoutCandidateContext,
+    ...readSafeJunctionRequestTimeoutDiagnostics(error.code, error.details),
     providerRequestContentType: readSafeDiagnosticToken(error.details?.requestContentType),
     providerRequestCredentialPresent: readSafeDiagnosticBoolean(error.details?.requestCredentialPresent),
     providerRequestEndpointKind,
@@ -2631,6 +2698,13 @@ function readSafeJunctionEcgFailureContext(
   | "junctionEcgActualRecordingCount"
   | "junctionEcgActualSampleCount"
   | "junctionEcgBindingReason"
+  | "providerHttpStatusSource"
+  | "junctionEcgPageCount"
+  | "junctionEcgGroupCount"
+  | "junctionEcgProviderMatchGroupCount"
+  | "junctionEcgInstanceMatchGroupCount"
+  | "junctionEcgInstanceMissingGroupCount"
+  | "junctionEcgMatchedGroupCount"
   | "junctionEcgExpectedRecordingCount"
   | "junctionEcgExpectedSampleCount"
   | "junctionEcgMaxRecordingCount"
@@ -2651,6 +2725,13 @@ function readSafeJunctionEcgFailureContext(
       error.details?.actualSampleCount,
     ),
     junctionEcgBindingReason: reason,
+    providerHttpStatusSource: "local_validation",
+    junctionEcgPageCount: readSafeJunctionEcgDiagnosticCount(error.details?.pageCount),
+    junctionEcgGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.groupCount),
+    junctionEcgProviderMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.providerMatchGroupCount),
+    junctionEcgInstanceMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMatchGroupCount),
+    junctionEcgInstanceMissingGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMissingGroupCount),
+    junctionEcgMatchedGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.matchedGroupCount),
     junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
       error.details?.expectedRecordingCount,
     ),

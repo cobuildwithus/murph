@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-26",
+  "order": 50,
+  "item": {
+    "id": "game-change-mind-applies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Changing your mind on a game change just works",
+    "summary": "If you turn down your partner's game change in chat and then come round to it, Murph now makes the change right away instead of asking them to agree again.",
+    "details": "It only counts when you ask for exactly what they asked for and nothing else has changed since. Changes to tasks or stakes still need a fresh yes.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4370
+    ]
+  }
+}

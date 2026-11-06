@@ -5,12 +5,17 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
-import { HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS } from "../src/vault-share.ts";
+
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+} from "../src/vault-share.ts";
 
 import {
   parseHostedExecutionDirectRoute,
@@ -112,61 +117,6 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       })
     ).toThrow(/unsupported field/u);
-  });
-
-  it("parses Codex auth runtime-control events with exact keys", () => {
-    expect(
-      parseHostedExecutionEvent({
-        action: "connect",
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "runtime.codex-auth-requested",
-        userId: "user-1",
-      }),
-    ).toEqual({
-      action: "connect",
-      attemptId: "hca_abcdefghijklmnop",
-      kind: "runtime.codex-auth-requested",
-      userId: "user-1",
-    });
-    expect(() =>
-      parseHostedExecutionEvent({
-        action: "connect",
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "runtime.codex-auth-requested",
-        userCode: "ABCD-EFGH",
-        userId: "user-1",
-      })
-    ).toThrow(/unsupported field/u);
-  });
-
-  it("parses Codex auth runtime-control wakes with exact keys", () => {
-    expect(
-      parseHostedExecutionWake({
-        action: "disconnect",
-        attemptId: "hca_abcdefghijklmnop",
-        eventId: "runtime-control:codex-auth",
-        kind: "runtime.codex-auth-requested",
-        occurredAt: "2026-04-08T00:15:00.000Z",
-        userId: "user-1",
-      }),
-    ).toEqual({
-      action: "disconnect",
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      kind: "runtime.codex-auth-requested",
-      occurredAt: "2026-04-08T00:15:00.000Z",
-      userId: "user-1",
-    });
-    expect(() =>
-      parseHostedExecutionWake({
-        action: "disconnect",
-        attemptId: "not-an-attempt",
-        eventId: "runtime-control:codex-auth",
-        kind: "runtime.codex-auth-requested",
-        occurredAt: "2026-04-08T00:15:00.000Z",
-        userId: "user-1",
-      })
-    ).toThrow(/attemptId/u);
   });
 
   it("parses explicit member channel sync events", () => {
@@ -2886,7 +2836,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           projections: [{
             ...projection,
             records: Array.from(
-              { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1 },
+              { length: 720 + 1 },
               (_, index) => {
                 const date = new Date(Date.UTC(2026, 0, index + 1))
                   .toISOString()
@@ -2902,7 +2852,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           }],
         }],
       },
-    })).toThrow(new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"));
+    })).toThrow(/at most 720/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
@@ -3920,9 +3870,26 @@ describe("parseHostedRuntimeGroupEmailEffect", () => {
   });
 
   it("bounds group email participants and per-participant authorization snapshots", () => {
+    const authorizedShares = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
+      .filter((scope) => scope.projectionKind !== "group-email.v0")
+      .map((scope, index) => ({
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(scope),
+        shareId: `share_${index}`,
+      }));
+    expect(authorizedShares).toHaveLength(99);
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
+      result: {
+        authorizationProof: AUTHORIZATION_PROOF,
+        groupId: "group_123",
+        missingEmailParticipants: [],
+        participants: [{ ...PARTICIPANT, authorizedShares }],
+        status: "ok",
+      },
+    })).toMatchObject({ result: { participants: [{ authorizedShares }] } });
     const participant = {
       ...PARTICIPANT,
-      authorizedShares: Array.from({ length: 101 }, (_, index) => ({
+      authorizedShares: Array.from({ length: HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 1 }, (_, index) => ({
         projectionScopeKey: "steps-days.v0",
         shareId: `share_${index}`,
       })),
@@ -3936,7 +3903,7 @@ describe("parseHostedRuntimeGroupEmailEffect", () => {
         participants: [participant],
         status: "ok",
       },
-    })).toThrow(/authorizedShares must contain at most 100 entries/u);
+    })).toThrow(new RegExp(`authorizedShares must contain at most ${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX} entries`, "u"));
 
     expect(() => parseHostedRuntimeGroupEmailEffectResponse({
       action: "prepare_email",
@@ -4360,6 +4327,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
 });
 
 describe("parseHostedExecutionWake", () => {
+  it.each([
+    "environment-interview.completed",
+    "environment-voice.captured",
+  ])("rejects retired %s as new executable work", (kind) => {
+    expect(() => parseHostedExecutionWake({
+      eventId: "retired-event",
+      kind,
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    })).toThrow("kind is invalid");
+  });
+
   it("parses runtime control wakes", () => {
     expect(
       parseHostedExecutionWake({
@@ -4568,3 +4547,21 @@ function parsePreMaxHostedRuntimeFamilyPlanCode(value: unknown): "edge" | "pulse
 
   throw new TypeError("Pre-Max hosted runtime Family plan code is not supported.");
 }
+
+describe("game recap lore response policy", () => {
+  const policy = { kind: "require_game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic", pairFingerprint: "a".repeat(32) };
+  const event = (responsePolicy: object) => ({ kind: "assistant.notification.requested", userId: "synthetic_room", notification: {
+    instructions: "Write the recap.", responsePolicy,
+    route: { actorId: null, channel: "linq", delivery: { kind: "explicit", target: "synthetic_chat" }, identityId: null, threadId: "synthetic_chat", threadIsDirect: false },
+  } });
+  it.each([{}, { loreAccess: "read" }])("accepts old and read-only recap policies: %j", extra => {
+    expect(parseHostedExecutionEvent(event({ ...policy, ...extra }))).toMatchObject(event({ ...policy, ...extra }));
+    if (!("loreAccess" in extra)) expect(parseHostedExecutionEvent(event(policy))).not.toHaveProperty("notification.responsePolicy.loreAccess");
+  });
+  it.each(["write", "replace", "", null, true, 1])("rejects unknown lore access %j", loreAccess => {
+    expect(() => parseHostedExecutionEvent(event({ ...policy, loreAccess }))).toThrow(/loreAccess/u);
+  });
+  it("still rejects unknown recap keys", () => {
+    expect(() => parseHostedExecutionEvent(event({ ...policy, lorePath: "arbitrary" }))).toThrow();
+  });
+});

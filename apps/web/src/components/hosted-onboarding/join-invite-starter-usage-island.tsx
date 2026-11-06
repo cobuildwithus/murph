@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
-import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
-import { ContactSupportAction } from "@/src/components/support/contact-support-action";
+import { LinkPageDots } from "@/src/components/link-page/link-page-dots";
+import {
+  LINK_PAGE_PILL_CLASS,
+  LinkPageError,
+  LinkPagePill,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
+import { buildContactSupportMailto } from "@/src/components/support/contact-support-action";
 import {
   completeHostedStarterUsageHandoff,
   consumeHostedGroupStartHandoff,
@@ -21,7 +25,7 @@ import {
 
 type StarterUsageErrorAction = "checkout" | "retry" | "setup" | "support";
 
-type StarterUsageErrorState = {
+export type StarterUsageErrorState = {
   action: StarterUsageErrorAction;
   checkoutErrorMessage: string | null;
   message: string;
@@ -106,83 +110,85 @@ export function JoinInviteStarterUsageIsland({
     void activateStarterUsage();
   }, [activateStarterUsage]);
 
+  return (
+    <JoinInviteStarterUsageScreen
+      checkoutPending={checkoutPending}
+      errorState={errorState}
+      onCheckout={() => void startPaidCheckout()}
+      onContinueSetup={() => refresh()}
+      onRetry={() => void activateStarterUsage()}
+    />
+  );
+}
+
+export function JoinInviteStarterUsageScreen({
+  checkoutPending = false,
+  errorState,
+  onCheckout,
+  onContinueSetup,
+  onRetry,
+}: {
+  checkoutPending?: boolean;
+  errorState: StarterUsageErrorState | null;
+  onCheckout?: () => void;
+  onContinueSetup?: () => void;
+  onRetry?: () => void;
+}) {
   if (errorState) {
     const copy = resolveStarterUsageErrorCopy(errorState.action);
     return (
-      <div className="w-full rounded-2xl border border-border bg-card/80 p-6">
-        <div className="space-y-4">
-          <div>
-            <p className="font-serif text-xl font-normal text-foreground">
-              {copy.title}
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              {copy.description}
-            </p>
-          </div>
-
-          <Alert variant="destructive">
-            <AlertTitle>Unable to finish setup</AlertTitle>
-            <AlertDescription>
+      <LinkPageScreen
+        actions={
+          <>
+            <LinkPageError>
+              Unable to finish setup.{" "}
               {errorState.action === "checkout"
                 ? "This account has prior billing history, so it cannot receive starter usage again."
                 : errorState.message}
-            </AlertDescription>
-          </Alert>
+            </LinkPageError>
 
-          {errorState.action === "retry" ? (
-            <Button
-              type="button"
-              onClick={() => void activateStarterUsage()}
-              variant="outline"
-              size="lg"
-            >
-              Try again
-            </Button>
-          ) : null}
+            {errorState.action === "retry" ? (
+              <LinkPagePill onClick={onRetry}>Try again</LinkPagePill>
+            ) : null}
 
-          {errorState.action === "checkout" ? (
-            <div className="space-y-2">
-              <Button
-                type="button"
-                onClick={() => void startPaidCheckout()}
-                disabled={checkoutPending}
-                size="lg"
+            {errorState.action === "checkout" ? (
+              <>
+                {errorState.checkoutErrorMessage ? (
+                  <LinkPageError>{errorState.checkoutErrorMessage}</LinkPageError>
+                ) : null}
+                <LinkPagePill disabled={checkoutPending} onClick={onCheckout}>
+                  {checkoutPending ? "Opening checkout..." : "Continue with Pulse"}
+                </LinkPagePill>
+              </>
+            ) : null}
+
+            {errorState.action === "setup" ? (
+              <LinkPagePill onClick={onContinueSetup}>Continue setup</LinkPagePill>
+            ) : null}
+
+            {errorState.action === "support" ? (
+              <a
+                className={LINK_PAGE_PILL_CLASS}
+                href={buildContactSupportMailto({
+                  body: [
+                    "Hi Murph support,",
+                    "",
+                    "I need help activating Murph from my invite.",
+                    "",
+                    `Context: ${errorState.message}`,
+                  ].join("\n"),
+                  subject: "Murph setup support",
+                })}
               >
-                {checkoutPending ? "Opening checkout..." : "Continue with Pulse"}
-              </Button>
-              {errorState.checkoutErrorMessage ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {errorState.checkoutErrorMessage}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {errorState.action === "setup" ? (
-            <Button
-              type="button"
-              onClick={() => refresh()}
-              variant="outline"
-              size="lg"
-            >
-              Continue setup
-            </Button>
-          ) : null}
-
-          {errorState.action === "support" ? (
-            <ContactSupportAction
-              body={[
-                "Hi Murph support,",
-                "",
-                "I need help activating Murph from my invite.",
-                "",
-                `Context: ${errorState.message}`,
-              ].join("\n")}
-              subject="Murph setup support"
-            />
-          ) : null}
-        </div>
-      </div>
+                Contact support
+              </a>
+            ) : null}
+          </>
+        }
+        announceDetail={false}
+        detail={copy.description}
+        title={copy.title}
+      />
     );
   }
 
@@ -190,13 +196,12 @@ export function JoinInviteStarterUsageIsland({
     <div
       aria-busy="true"
       aria-live="polite"
+      className="flex flex-1 flex-col"
       role="status"
-      className="flex w-full flex-col items-center justify-center gap-6 py-12"
     >
-      <MurphPulseLoader className="h-24 w-auto" />
-      <p className="font-serif text-2xl font-normal text-foreground">
-        Setting up your Murph
-      </p>
+      <LinkPageScreen title="Setting up your Murph.">
+        <LinkPageDots />
+      </LinkPageScreen>
     </div>
   );
 }
@@ -208,7 +213,9 @@ function buildStarterUsageErrorState(error: unknown): StarterUsageErrorState {
     return {
       action: resolveStarterUsageErrorAction(error),
       checkoutErrorMessage: null,
-      message,
+      message: error.code === "LINQ_CONVERSATION_PHONE_REQUIRED"
+        ? "Murph’s messaging connection is not ready yet. Contact support to finish setup."
+        : message,
     };
   }
 
@@ -241,23 +248,23 @@ function resolveStarterUsageErrorCopy(action: StarterUsageErrorAction): {
   if (action === "checkout") {
     return {
       description: "Continue with a paid plan or restore the existing subscription.",
-      title: "Choose your access",
+      title: "Choose your access.",
     };
   }
   if (action === "support") {
     return {
       description: "Contact support and we will help restore access.",
-      title: "Murph setup needs support",
+      title: "Murph setup needs support.",
     };
   }
   if (action === "setup") {
     return {
       description: "Finish setup so Murph can message you.",
-      title: "Continue setup",
+      title: "Continue setup.",
     };
   }
   return {
     description: "We could not activate your starter usage.",
-    title: "Setup paused",
+    title: "Setup paused.",
   };
 }

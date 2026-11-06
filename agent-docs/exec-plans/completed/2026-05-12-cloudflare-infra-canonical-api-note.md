@@ -43,6 +43,6 @@ Updated: 2026-05-12
 ## Verification
 
 - Direct readback: `AGENTS.md`, the active plan, and the coordination ledger contain the intended scoped guidance.
-- `pnpm typecheck`: failed in existing Murph Age script work outside this docs change (`scripts/murph-age/r399-midus2-biomarker-increment.ts` missing `uniqueColumns` and one argument-count mismatch).
+- `pnpm typecheck`: failed in unrelated scripts outside this docs change (code missing `uniqueColumns` and one argument-count mismatch).
 - `pnpm test`: failed in existing hosted-execution coverage (`test/hosted-execution.test.ts` expected `HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER`, received `undefined`).
 Completed: 2026-05-12

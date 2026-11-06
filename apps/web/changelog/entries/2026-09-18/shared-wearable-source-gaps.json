@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "shared-wearable-source-gaps",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer gaps in shared wearable data",
+    "summary": "Group reports distinguish missing dates for each wearable and can check recent gaps while you review older data.",
+    "details": "One wearable no longer fills another wearable\u2019s missing date. Missing historical records stay unverified, and a refresh request does not imply that a device finished syncing.",
+    "relevanceTags": [
+      "groups",
+      "wearables"
+    ],
+    "sourcePullRequests": []
+  }
+}

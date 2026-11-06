@@ -8,11 +8,14 @@ export {
   VAULT_LAYOUT,
   VAULT_SCHEMA_VERSION,
 } from "./constants.ts";
-export { VaultError, isVaultError } from "./errors.ts";
+export {
+  VaultError,
+  isVaultError,
+  isActiveCanonicalWriteLockError,
+  type CanonicalWriteLockErrorDetails,
+} from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
 export {
-  createDeviceBatchImportSession,
-  type DeviceBatchImportSession,
   type DeviceBatchImportTiming,
   type ImportDeviceBatchExecutionOptions,
   type ImportDeviceBatchInput,
@@ -254,6 +257,7 @@ export {
   withCanonicalWriteLock,
   inspectCanonicalWriteLock,
   withCanonicalWriteLockScope,
+  HostedCanonicalWriteOutcomeUnknownError,
   applyHostedCanonicalWriteReceipt,
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
@@ -287,6 +291,8 @@ export type {
   RecoverableStoredWriteOperation,
 } from "./operations/index.ts";
 export {
+  canonicalRawArtifactMatches,
+  canonicalRawArtifactIsPrivacyTombstone,
   buildRawImportManifest,
   parseRawImportManifest,
   resolveRawManifestPath,
@@ -343,6 +349,7 @@ export {
   GENERATED_IMAGE_CAPTURE_TAGS,
   findCaptureByLookup,
   findEventByExternalRef,
+  findEventsByExternalRefs,
   findEventsByRawRefs,
   readStoredCaptureLookupIndex,
   isGeneratedImageCaptureEvent,
@@ -451,3 +458,8 @@ export type {
   EventLedgerShardSource,
 } from "./event-ledger-storage.ts";
 export * from "./integration-ingest-migration.ts";
+
+export { archiveClosedAuditShards, listAuditShardPaths, listAuditShardSources, readAuditShardRows } from "./audit-storage.ts";
+
+export { runMealPhotoMaintenance, type MealPhotoMaintenanceInput, type MealPhotoMaintenanceResult } from "./domains/events/meal-photo-maintenance.ts";
+export { materializeIntegrationIngestHistory, withIntegrationIngestMaterializer } from "./integration-ingest-cold-storage.ts";

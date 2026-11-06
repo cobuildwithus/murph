@@ -27,7 +27,6 @@ import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
   defaultTimeZone?: string;
-  importSession?: DeviceBatchImportExecutionOptions["session"];
   signal?: AbortSignal | null;
   providerRegistry?: DeviceProviderRegistry;
 }
@@ -317,8 +316,8 @@ function resolveStableRawReceiptObservedAt(
   request: DeviceProviderSnapshotImportInput,
   payload: DeviceBatchImportPayload,
 ): string {
-  return firstValidTimestamp(
-    request.observedAt,
+  // An explicit receipt time is authoritative; missing times use a stable replay anchor.
+  return earliestValidTimestamp(request.observedAt) ?? earliestValidTimestamp(
     request.occurredAt,
     request.windowEnd,
     request.windowStart,
@@ -328,7 +327,7 @@ function resolveStableRawReceiptObservedAt(
 }
 
 function earliestPayloadTimestamp(payload: DeviceBatchImportPayload): string | undefined {
-  return firstValidTimestamp(
+  return earliestValidTimestamp(
     ...(payload.events ?? []).flatMap((event) => [
       event.recordedAt,
       event.occurredAt,
@@ -343,7 +342,7 @@ function earliestPayloadTimestamp(payload: DeviceBatchImportPayload): string | u
   );
 }
 
-function firstValidTimestamp(...candidates: Array<string | undefined>): string | undefined {
+function earliestValidTimestamp(...candidates: Array<string | undefined>): string | undefined {
   const validCandidates = candidates
     .filter((candidate): candidate is string =>
       typeof candidate === "string" && Number.isFinite(Date.parse(candidate))
@@ -358,7 +357,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
   {
     corePort,
     defaultTimeZone,
-    importSession,
     signal,
     providerRegistry,
   }: DeviceProviderImporterExecutionOptions = {},
@@ -380,7 +378,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
   } = {};
   const result = await writer.importDeviceBatch(payload, {
     signal,
-    ...(importSession ? { session: importSession } : {}),
     onTiming: (timing) => {
       coreTimingRef.value = timing;
     },

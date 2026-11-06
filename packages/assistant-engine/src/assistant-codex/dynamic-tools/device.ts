@@ -1,5 +1,8 @@
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
-import { toolTextResult as deviceTextResult } from '../tool-failure-diagnostics.js'
+import {
+  toolTextResult as deviceTextResult,
+  withDeviceToolFailureDetails,
+} from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -24,6 +27,7 @@ const deviceProviderSchema = z
   .regex(/^[a-z0-9][a-z0-9_-]*$/u)
 
 const deviceArgumentsSchema = z.union([
+  z.object({ action: z.literal('companion_status') }).strict(),
   z.object({
     action: z.literal('list_accounts'),
     provider: deviceProviderSchema.nullable().optional(),
@@ -54,7 +58,7 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   description:
-    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin (sourceProvider garmin), Apple Health (sourceProvider apple_health_kit), or WHOOP (sourceProvider whoop_v2) check-in timing: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. A saved result confirms the check-in preference: acknowledge it once and finish. Off stops only these check-ins; connection and syncing stay unchanged. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection or app closure; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
+    'Work with the current authenticated member’s wearable and health-device accounts. companion_status reports lastContactAt (foreground or opportunistic background contact) and lastForegroundAt; use it alongside list_accounts when debugging Apple Health. recently_active is contact evidence only, never proof of successful Health sync, granted Health permissions, or continuous background execution. unknown includes older apps without heartbeat support. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin (sourceProvider garmin), Apple Health (sourceProvider apple_health_kit), or WHOOP (sourceProvider whoop_v2) check-in timing: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. A saved result confirms the check-in preference: acknowledge it once and finish. Off stops only these check-ins; connection and syncing stay unchanged. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection or app closure; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -156,16 +160,20 @@ export async function executeDeviceDynamicTool(input: {
           text.failureReason,
         )
   } catch (error) {
-    return deviceTextResult(
-      false,
-      serializeDeviceToolError(
-        projectDeviceToolError(
-          error,
-          input.request.request.action,
-          input.abortSignal?.aborted === true,
+    return withDeviceToolFailureDetails(
+      deviceTextResult(
+        false,
+        serializeDeviceToolError(
+          projectDeviceToolError(
+            error,
+            input.request.request.action,
+            input.abortSignal?.aborted === true,
+          ),
         ),
+        'handler_exception', error,
       ),
-      'handler_exception', error,
+      input.request.request.action,
+      error,
     )
   }
 }
@@ -194,10 +202,10 @@ function projectDeviceResponseMismatch(
   return {
     code: 'device_response_mismatch',
     message: 'The device response action did not match the requested action.',
-    retryable: action === 'list_accounts',
+    retryable: action === 'list_accounts' || action === 'companion_status',
     stage: deviceToolStage(action),
-    hint: action === 'list_accounts'
-      ? 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.'
+    hint: action === 'list_accounts' || action === 'companion_status'
+      ? `Retry ${action}. If it repeats, treat device management as temporarily unavailable.`
       : `Run list_accounts and inspect the current account state before deciding whether to retry ${action}.`,
   }
 }
@@ -361,13 +369,13 @@ function projectUnclassifiedDeviceToolFailure(
       hint: 'Do not retry unless the member asks to continue.',
     }
   }
-  if (action === 'list_accounts') {
+  if (action === 'list_accounts' || action === 'companion_status') {
     return {
       code: 'device_operation_unavailable',
       message: 'The device operation could not be completed.',
       retryable: true,
       stage,
-      hint: 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.',
+      hint: `Retry ${action}. If it repeats, treat device management as temporarily unavailable.`,
     }
   }
   return {
@@ -443,7 +451,9 @@ function serializeDeviceToolError(
 function serializeDeviceToolResponse(
   response: AssistantHostedDeviceToolResponse,
 ): string | { failureReason: 'oversized_result' | 'result_serialization_failed' } {
-  const payload = response.action === 'list_accounts'
+  const payload = response.action === 'companion_status'
+      ? { action: response.action, status: response.status, lastContactAt: response.lastContactAt, lastForegroundAt: response.lastForegroundAt }
+    : response.action === 'list_accounts'
     ? {
         accounts: response.accounts.map((account) => ({
           accountId: account.accountId,

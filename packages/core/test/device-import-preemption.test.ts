@@ -9,7 +9,6 @@ import * as eventLedger from "../src/event-ledger-storage.ts";
 import * as integrationIngests from "../src/integration-ingests.ts";
 import * as writeBatch from "../src/operations/write-batch.ts";
 import {
-  createDeviceBatchImportSession,
   importDeviceBatch,
   initializeVault,
   inspectCanonicalWriteLock,
@@ -62,7 +61,7 @@ test("timer-driven device import preemption releases the canonical lock and retr
     const seedPath = seed.eventShardPaths[0];
     assert.ok(seedPath);
     const before = await fs.readFile(path.join(vaultRoot, seedPath));
-    const session = createDeviceBatchImportSession();
+    await fs.utimes(path.join(vaultRoot, seedPath), new Date(0), new Date(0));
     const controller = new AbortController();
     const reason = new Error("synthetic foreground request");
     const realVisit = eventLedger.visitEventLedgerShardRecordsInterruptible;
@@ -86,7 +85,6 @@ test("timer-driven device import preemption releases the canonical lock and retr
     };
     try {
       await assert.rejects(importDeviceBatch(request, {
-        session,
         signal: controller.signal,
       }), (error) => error === reason);
     } finally {
@@ -99,7 +97,6 @@ test("timer-driven device import preemption releases the canonical lock and retr
     assert.deepEqual(await fs.readFile(path.join(vaultRoot, seedPath)), before);
     let cacheHit: boolean | undefined;
     const resumed = await importDeviceBatch(request, {
-      session,
       onTiming: (timing) => { cacheHit = timing.eventIdentityIndexCacheHit; },
     });
     assert.equal(resumed.applied, true);

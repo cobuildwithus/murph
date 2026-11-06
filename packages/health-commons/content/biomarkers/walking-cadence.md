@@ -16,18 +16,17 @@ categories:
 - walking
 - wearable-metric
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:pmid-19362695
-- type: cites
-  target: source_artifact:pmid-28459099
-- type: cites
-  target: source_artifact:pmid-30654810
-- type: cites
-  target: source_artifact:pmid-33168018
-- type: cites
-  target: source_artifact:pmid-34556146
+  - type: cites
+    target: source_artifact:pmid-19362695
+  - type: cites
+    target: source_artifact:pmid-28459099
+  - type: cites
+    target: source_artifact:pmid-30654810
+  - type: cites
+    target: source_artifact:pmid-33168018
+  - type: cites
+    target: source_artifact:pmid-34556146
+
 measurementContexts:
 - wearable_activity_summary
 - accelerometer

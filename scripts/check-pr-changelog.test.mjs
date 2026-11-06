@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
   isChangelogContentPath,
   readChangelogItemsById,
+  readDeletedChangelogItemsById,
   validatePrChangelog,
 } from "./check-pr-changelog.mjs";
 
@@ -302,4 +306,51 @@ test("recognizes current and exceptional legacy changelog ownership paths", () =
   assert.equal(isChangelogContentPath(LEGACY_CHANGELOG_PATH), true);
   assert.equal(isChangelogContentPath("apps/web/src/lib/changelog-card.ts"), false);
   assert.equal(isChangelogContentPath("apps/web/test/changelog.test.ts"), false);
+});
+
+
+test("validates deleted fragments from the merge base without admitting unrelated history", (t) => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "changelog-deletion-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
+  const write = (id) => {
+    const file = `apps/web/changelog/entries/2030-01-01/${id}.json`;
+    mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
+    writeFileSync(path.join(cwd, file), JSON.stringify({ publishedOn: "2030-01-01", item: { id } }));
+    return file;
+  };
+  const commit = () => {
+    git("add", ".");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@users.noreply.github.com",
+      "-c", "commit.gpgsign=false", "commit", "-qm", "Synthetic fixture");
+    return git("rev-parse", "HEAD");
+  };
+  git("init", "-q");
+  const removedPath = write("removed-entry");
+  const retainedPath = write("retained-entry");
+  const ancestor = commit();
+  git("rm", removedPath);
+  const headSha = commit();
+  git("checkout", "-q", "-b", "advanced-base", ancestor);
+  write("base-only-entry");
+  const baseSha = commit();
+  const changelogItemsById = readDeletedChangelogItemsById(baseSha, headSha, { cwd });
+  assert.deepEqual([...changelogItemsById], [["removed-entry", "2030-01-01"]]);
+  const validate = (reference) => validatePrChangelog({
+    changedPaths: [removedPath], changelogItemsById,
+    prBodyHtml: section("Changelog: updated", `Items: ${reference}`),
+  });
+  assert.deepEqual(validate("2030-01-01 · removed-entry"), []);
+  for (const id of ["made-up-entry", "retained-entry", "base-only-entry"]) {
+    assert.match(validate(`2030-01-01 · ${id}`)[0], /unknown changelog item/u);
+  }
+  assert.match(validate("2030-01-02 · removed-entry")[0], /belongs to edition/u);
+  assert.deepEqual([...readDeletedChangelogItemsById(ancestor, baseSha, { cwd })], []);
+  assert.throws(() => readDeletedChangelogItemsById("missing-ref", headSha, { cwd }));
+  git("checkout", "-q", "-b", "malformed", ancestor);
+  writeFileSync(path.join(cwd, retainedPath), JSON.stringify({ publishedOn: "2030-01-02", item: { id: "retained-entry" } }));
+  const malformedBase = commit();
+  git("rm", retainedPath);
+  const malformedHead = commit();
+  assert.throws(() => readDeletedChangelogItemsById(malformedBase, malformedHead, { cwd }), /does not match/u);
 });

@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 300,
+  "item": {
+    "id": "typing-means-a-reply",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Typing means a reply is coming",
+    "summary": "In group chats, Murph shows typing only when it has a message ready to send, so reactions, edits and conversations it stays out of no longer set it off.",
+    "details": "In one-on-one chats, typing starts when Murph begins writing your reply, and it can still appear while Murph prepares a photo or voice memo you send.",
+    "relevanceTags": [
+      "messaging",
+      "groups"
+    ],
+    "sourcePullRequests": [
+      4438
+    ]
+  }
+}

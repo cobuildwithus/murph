@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 
 import {
   chromium,
+  expect,
   type Browser,
   type BrowserContext,
   type Frame,
@@ -147,7 +148,7 @@ export class HostedBillingBrowserDriver {
           isApiResponse("/api/settings/billing/checkout", "POST"),
         ),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           actor.page.getByRole("button", {
             exact: true,
             name: `Choose ${planName}`,
@@ -166,7 +167,7 @@ export class HostedBillingBrowserDriver {
     return this.runStep("family-checkout-open", "murph-settings", async () => {
       await this.openSettings(actor);
       await clickHydratedMurphControl(
-        actor.page,
+        this.timeoutMs,
         actor.page.getByRole("button", {
           exact: true,
           name: "Start your own Family plan",
@@ -177,7 +178,7 @@ export class HostedBillingBrowserDriver {
           isApiResponse("/api/settings/billing/family/checkout", "POST"),
         ),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           actor.page.getByRole("button", {
             exact: true,
             name: "Start a plan I pay for",
@@ -196,7 +197,7 @@ export class HostedBillingBrowserDriver {
     await this.runStep("settings-convert-paid-individual-to-family", "murph-settings", async () => {
       await this.openSettings(actor);
       await clickHydratedMurphControl(
-        actor.page,
+        this.timeoutMs,
         actor.page.getByRole("button", {
           exact: true,
           name: "Start your own Family plan",
@@ -207,7 +208,7 @@ export class HostedBillingBrowserDriver {
           isApiResponse("/api/settings/billing/family/checkout", "POST"),
         ),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           actor.page.getByRole("button", {
             exact: true,
             name: "Start a plan I pay for",
@@ -247,7 +248,7 @@ export class HostedBillingBrowserDriver {
           isApiResponse("/api/settings/billing/upgrade-plan", "POST"),
         ),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           actor.page.getByRole("button", {
             exact: true,
             name: "Choose Edge",
@@ -274,7 +275,7 @@ export class HostedBillingBrowserDriver {
     await this.runStep("settings-schedule-pulse", "murph-settings", async () => {
       await this.openSettings(actor);
       await clickHydratedMurphControl(
-        actor.page,
+        this.timeoutMs,
         actor.page.getByRole("button", {
           exact: true,
           name: "Choose Pulse",
@@ -287,7 +288,7 @@ export class HostedBillingBrowserDriver {
           isApiResponse("/api/settings/billing/switch-to-pulse", "POST"),
         ),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           dialog.getByRole("button", {
             exact: true,
             name: "Confirm switch",
@@ -305,7 +306,7 @@ export class HostedBillingBrowserDriver {
     return this.runStep("settings-family-invite", "murph-settings", async () => {
       await this.openSettings(actor);
       await clickHydratedMurphControl(
-        actor.page,
+        this.timeoutMs,
         actor.page.getByRole("button", {
           exact: true,
           name: "Invite member",
@@ -321,7 +322,7 @@ export class HostedBillingBrowserDriver {
           isApiResponse("/api/settings/billing/family/invite", "POST"),
         ),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           dialog.getByRole("button", {
             exact: true,
             name: "Create invite",
@@ -354,7 +355,7 @@ export class HostedBillingBrowserDriver {
             && /^\/api\/family\/invites\/[^/]+\/accept$/u.test(candidate.pathname);
         }),
         clickHydratedMurphControl(
-          actor.page,
+          this.timeoutMs,
           actor.page.getByRole("button", {
             exact: true,
             name: "Accept invite",
@@ -613,26 +614,25 @@ function assertSuccessfulNavigation(
   }
 }
 
-async function clickHydratedMurphControl(
-  page: Page,
+export async function clickHydratedMurphControl(
+  timeoutMs: number,
   control: Locator,
 ): Promise<void> {
-  await control.waitFor({ state: "visible" });
-  const element = await control.elementHandle();
-  if (!element) {
-    throw new Error("Murph browser control detached before hydration.");
-  }
-  try {
-    await page.waitForFunction((candidate) => Object.entries(candidate).some(
+  await control.waitFor({ state: "visible", timeout: timeoutMs });
+  // Hydration recovery can replace the server-rendered node. Resolve the
+  // locator again on every poll instead of holding the detached original.
+  await expect.poll(() => control.evaluateAll((candidates) =>
+    candidates.length === 1 && Object.entries(candidates[0]!).some(
       ([key, value]) => key.startsWith("__reactProps$")
         && value !== null
         && typeof value === "object"
         && typeof Reflect.get(value, "onClick") === "function",
-    ), element);
-  } finally {
-    await element.dispose();
-  }
-  await control.click();
+    )
+  ), {
+    message: "Murph browser control did not hydrate.",
+    timeout: timeoutMs,
+  }).toBe(true);
+  await control.click({ timeout: timeoutMs });
 }
 
 async function assertSuccessfulResponse(response: Response): Promise<void> {

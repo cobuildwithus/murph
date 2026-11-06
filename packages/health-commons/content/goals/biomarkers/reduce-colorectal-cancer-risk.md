@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-colorectal-cancer-risk
 slug: reduce-colorectal-cancer-risk
-title: Lower My Risk of Colorectal Cancer
-summary: Lower colorectal cancer risk with appropriate screening, activity, weight, food, tobacco, and alcohol choices.
+title: Understand Colorectal Cancer Prevention
+summary: Learn about colorectal cancer risk factors, screening options, and everyday habits.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: function
-  goalPhrase: lower my risk of colorectal cancer
+  goalPhrase: understand colorectal cancer prevention
   successSignals:
     - id: colorectal_screening
       kind: milestone
@@ -32,7 +32,7 @@ goal:
     ownerSkillIds:
       - cardiometabolic-health
       - nutrition-strategy
-  startPrompt: Hey Murph, help me lower my risk of colorectal cancer.
+  startPrompt: Hey Murph, help me understand colorectal cancer prevention.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Aspirin is not a universal colorectal-cancer prevention supplement; bleeding ris
 
 ## Related goals
 
-[Lower My Risk of Heart Disease](/goals/reduce-heart-disease-risk) · [Prevent Type 2 Diabetes](/goals/prevent-type-2-diabetes)
+[Understand Heart Disease Prevention](/goals/reduce-heart-disease-risk) · [Understand Type 2 Diabetes Prevention](/goals/prevent-type-2-diabetes)

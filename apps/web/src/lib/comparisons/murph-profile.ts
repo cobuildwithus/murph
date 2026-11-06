@@ -14,7 +14,7 @@ export const MURPH_COMPARISON_PROFILE: CompetitorProfile = {
   insightStyle:
     "Connects context across domains, explains relevant patterns, and helps test what works for one person over time.",
   platforms:
-    "Hosted messaging and web experiences, plus an open-source option that can be inspected and run locally.",
+    "Hosted messaging, web, and iOS experiences, with open source code available for inspection.",
   pricing:
     "Free starter usage is available without a card. Paid plans add more usage when needed.",
   primaryJob:

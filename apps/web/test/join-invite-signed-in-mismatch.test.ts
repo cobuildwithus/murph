@@ -18,9 +18,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-stage-server", () => ({
-  isJoinInviteAutoPulseTrialReady() {
-    return false;
-  },
   JoinInviteStageServer() {
     mocks.stageRendered = true;
     return createElement(
@@ -57,11 +54,11 @@ test("JoinInvitePageView makes a signed-in account mismatch an exclusive recover
     }),
   );
 
-  assert.match(markup, /You’re already signed in/);
-  assert.match(markup, /different Murph account/);
+  assert.match(markup, /You’re on a different account\./);
+  assert.match(markup, /This link is for another Murph account\./);
   assert.match(markup, /href="\/home"/);
   assert.match(markup, />Go to Murph home</);
-  assert.match(markup, />Sign out and use invite</);
+  assert.match(markup, />Sign out and continue</);
   assert.doesNotMatch(markup, /Add your phone/);
   assert.doesNotMatch(markup, /data-normal-invite-stage/);
   assert.doesNotMatch(markup, /data-status-refresh/);
@@ -80,7 +77,7 @@ test("JoinInvitePageView keeps terminal invite states ahead of account recovery"
     createElement(JoinInvitePageView, { model }),
   );
 
-  assert.doesNotMatch(markup, /You’re already signed in/);
+  assert.doesNotMatch(markup, /You’re on a different account/);
   assert.match(markup, /data-normal-invite-stage/);
   assert.match(markup, /data-status-refresh/);
   expect(mocks.stageRendered).toBe(true);
@@ -90,7 +87,6 @@ test("JoinInvitePageView keeps terminal invite states ahead of account recovery"
 function createMismatchModel(): JoinInvitePageModel {
   return {
     awaitingInviteSessionResolution: false,
-    expectedPrivyUserId: "privy-current-account",
     familyBillingRecovery: null,
     inviteCode: "invite-code",
     launchConsent: {
@@ -99,9 +95,7 @@ function createMismatchModel(): JoinInvitePageModel {
       status: "not_required",
     },
     preview: false,
-    privySessionMatchesAppSession: true,
     status: createMismatchStatus(),
-    telegramAccountForMessagingSetup: null,
   };
 }
 
@@ -113,7 +107,6 @@ function createMismatchStatus(): HostedInviteStatusPayload {
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: {
       code: "invite-code",

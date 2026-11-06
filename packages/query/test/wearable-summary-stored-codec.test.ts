@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
+import * as publicSummaryJson from "../src/projection/wearable-summary-public-json.ts";
+import { resolveMetric } from "../src/wearables/selection.ts";
+import { BODY_METRIC_KEYS, RECOVERY_METRIC_KEYS, SLEEP_METRIC_KEYS } from "../src/wearables/types.ts";
 
 import {
   buildWearableSummaryBundleFromDataset,
   summarizeWearableMetricLatestFromBundle,
   summarizeWearableMetricTrendFromBundle,
+  summarizeWearableSourceHealthFromBundle,
+  type WearableSummaryFilters,
 } from "../src/wearables.ts";
 import {
   buildActivitySessionAggregates,
@@ -21,6 +26,7 @@ import type {
 import { composePublicWearableSummaryBundleFromStoredRows } from "../src/projection/wearable-summary-compose.ts";
 import { buildWearableSummaryProjectionFromDataset } from "../src/projection/wearable-summary-projector.ts";
 import { stringifyPublicWearableProjectionSummary } from "../src/projection/wearable-summary-public-json.ts";
+import { normalizeWearableProviders } from "../src/projection/provider-scope.ts";
 import { parseJsonValue } from "../src/projection/schema.ts";
 import {
   parseStoredWearableActivityRow,
@@ -193,7 +199,37 @@ function activityOnlyDataset(
 }
 
 function composeStoredDataset(dataset: WearableDataset) {
-  return composeActivityRows(buildWearableSummaryProjectionFromDataset(dataset));
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
+  return composeActivityRows(rows);
+}
+
+function assertSourceHealthParity(
+  rows: ReturnType<typeof buildWearableSummaryProjectionFromDataset>,
+  filters: WearableSummaryFilters,
+) {
+  const providers = normalizeWearableProviders(filters.providers);
+  // Match the store's stable SQL ordering (also exercised through real SQLite
+  // in wearable-source-health-query.test.ts).
+  const ordered = rows.filter(row => filters.providers === undefined
+    || providers.includes(JSON.parse(row.providerScopeJson)[0])).sort((left, right) => {
+      if (left.summaryKind !== right.summaryKind) return left.summaryKind < right.summaryKind ? -1 : 1;
+      if (left.summaryDate !== right.summaryDate) {
+        if (left.summaryDate === null) return 1;
+        if (right.summaryDate === null) return -1;
+        return left.summaryDate > right.summaryDate ? -1 : 1;
+      }
+      return left.sortRank - right.sortRank;
+    });
+  const stored = { providerFilterWasProvided: filters.providers !== undefined, providers, rows: ordered };
+  const expected = summarizeWearableSourceHealthFromBundle(
+    composePublicWearableSummaryBundleFromStoredRows(stored, filters), filters,
+  );
+  const actual = summarizeWearableSourceHealthFromBundle(
+    composePublicWearableSummaryBundleFromStoredRows(stored, filters, { sourceHealthOnly: true }), filters,
+  );
+  assert.deepEqual(actual, expected, JSON.stringify(filters));
+  return actual;
 }
 
 function metricSnapshot(metric: WearableResolvedMetric) {
@@ -695,6 +731,8 @@ test("stored activity composition matches direct numeric and provenance results 
   ] as const;
 
   for (const providers of providerSubsets) {
+    assertSourceHealthParity(rows,
+      providers.length ? { providers: [...providers] } : {});
     const directDataset = activityDataset({
       metricCandidates: providers.length === 0
         ? metricCandidates
@@ -967,6 +1005,7 @@ test("compose preserves stored same-public provider conflict evidence", () => {
     workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -977,12 +1016,6 @@ test("compose preserves stored same-public provider conflict evidence", () => {
   assert.ok(steps);
   assert.deepEqual(steps.confidence.conflictingProviders, ["garmin"]);
   assert.equal(steps.confidence.level, "medium");
-  assert.equal(
-    steps.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
   assert.deepEqual(steps.candidates, []);
   assert.equal(
     composed.activityDays[0]?.summaryConfidence.conflictingMetrics.includes("steps"),
@@ -1000,10 +1033,6 @@ test("compose preserves stored same-public provider conflict evidence", () => {
 
   assert.ok(garminOnlySteps);
   assert.deepEqual(garminOnlySteps.confidence.conflictingProviders, ["garmin"]);
-  assert.equal(
-    garminOnlySteps.confidence.reasons.some((reason) => reason.includes("Junction")),
-    false,
-  );
 });
 
 test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in favor of WHOOP", () => {
@@ -1046,6 +1075,7 @@ test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in 
     workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -1104,6 +1134,7 @@ test("compose preserves stored same-public sleep-window conflict evidence", () =
     workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -1115,12 +1146,6 @@ test("compose preserves stored same-public sleep-window conflict evidence", () =
   assert.deepEqual(sleep.sessionMinutes.confidence.conflictingProviders, ["garmin"]);
   assert.deepEqual(sleep.timeInBedMinutes.confidence.conflictingProviders, ["garmin"]);
   assert.equal(sleep.sessionMinutes.confidence.level, "medium");
-  assert.equal(
-    sleep.sessionMinutes.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
   assert.equal(sleep.summaryConfidence.conflictingMetrics.includes("sessionMinutes"), true);
   assert.equal(sleep.summaryConfidence.conflictingMetrics.includes("timeInBedMinutes"), true);
   assert.equal(
@@ -1198,14 +1223,14 @@ test("stored wearable summary codec fails open when a no-evidence envelope carri
   const bundle = buildWearableSummaryBundleFromDataset(buildFixtureDataset(["whoop"]));
   const doctored = JSON.parse(stringifyPublicWearableProjectionSummary(bundle.activityDays[0]));
   assert.equal(doctored.dayStrain.selection.resolution, "none");
-  doctored.dayStrain.confidence.reasons = [...doctored.dayStrain.confidence.reasons, "non-canonical detail"];
+  doctored.dayStrain.confidence.extra = ["non-canonical detail"];
 
   const storedJson = stringifyFixtureStoredSummary("activity", doctored);
-  // The null marker would lose the extra reason, so the round-trip
+  // The null marker would lose the extra detail, so the round-trip
   // verification must keep this envelope in full form.
   assert.doesNotMatch(storedJson, /"dayStrain":null/u);
   assert.ok(storedJson.includes('"metric":"dayStrain"'), "expected the envelope to stay in full form");
-  assert.ok(storedJson.includes('"non-canonical detail"'), "expected the extra reason to survive storage");
+  assert.ok(storedJson.includes('"non-canonical detail"'), "expected the extra detail to survive storage");
   assert.equal(
     JSON.stringify(parseStoredWearableSummary("activity", storedJson)),
     stringifyPublicWearableProjectionSummary(doctored),
@@ -1251,7 +1276,6 @@ test("stored wearable summary codec decode discriminates and survives tampered e
       conflictingProviders: [],
       exactDuplicateCount: 0,
       level: "high",
-      reasons: [],
     },
     metric: "steps",
     selection: {
@@ -1290,7 +1314,109 @@ test("null-marker envelopes decode to fresh objects on every parse", () => {
   assert.equal(first.dayStrain.selection.resolution, "none");
   first.dayStrain.selection.resolution = "mutated by a careless caller";
 
-  // The codec memoizes empty envelopes by their JSON; a later parse must not
+  // Only write-side expected strings may be shared; a later decode must not
   // see another caller's mutation.
   assert.equal(JSON.stringify(parseStoredWearableSummary("activity", storedJson)), legacyJson);
+});
+
+
+test("source-only composition preserves projected counts, sparse ranks, provider scope, sleep freshness and diagnostics", () => {
+  const dataset = buildFixtureDataset(["garmin", "oura", "unknown"]);
+  const extra = candidate({ date: "2026-05-04", facet: "sleep", metric: "totalSleepMinutes", provider: "oura", unit: "minutes", value: 460 });
+  const sparse = candidate({ date: "2026-05-03", facet: "steps", metric: "steps", provider: "future_ring", unit: "count", value: 5000 });
+  const mixed: WearableDataset = {
+    ...dataset,
+    metricCandidates: [...dataset.metricCandidates, extra, sparse],
+    rawMetricCandidates: [...dataset.rawMetricCandidates, extra, sparse],
+    provenanceDiagnostics: [{
+      count: 2, dates: ["2026-05-01"], kind: "excluded", latestRecordedAt: "2026-05-01T12:00:00Z",
+      missingFields: ["sourceProviderSlug"], provider: "garmin",
+    }, {
+      count: 1, dates: ["2026-05-03"], kind: "included", latestRecordedAt: "2026-05-03T12:00:00Z",
+      missingFields: ["sourceType"], provider: "future-ring",
+    }],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(mixed);
+  for (const filters of [
+    {}, { providers: [] }, { providers: [" "] }, { providers: ["missing"] },
+    { providers: ["garmin"] }, { providers: ["garmin", "oura"] }, { providers: ["unknown"] },
+    { providers: ["future_ring", "missing"] }, { providers: [" OURA ", "oura"] },
+    { date: "2026-05-01" }, { from: "2026-05-02", to: "2026-05-03" },
+    { date: "2030-01-01" }, { from: "2026-05-03", to: "2026-05-01" },
+    { limit: 1 }, { providers: ["garmin", "oura"], date: "2026-05-04", limit: 1 },
+  ]) assertSourceHealthParity(rows, filters);
+  const raw = buildWearableSummaryBundleFromDataset(mixed).sourceHealth;
+  const projected = assertSourceHealthParity(rows, {});
+  assert.notDeepEqual(projected, raw, "the fixture must distinguish projected HRV/conflict evidence from raw canonical health");
+});
+
+
+test("source-only health keeps HRV in both sleep and recovery projected evidence", () => {
+  const metricCandidates = ["garmin", "oura", "whoop"].flatMap(provider =>
+    ["2026-05-01", "2026-05-02"].flatMap(date => ([
+      ["steps", 8000, "count"], ["activeCalories", 450, "kcal"],
+      ["totalSleepMinutes", 450, "minutes"], ["deepMinutes", 90, "minutes"],
+      ["remMinutes", 120, "minutes"], ["hrv", 50, "ms"],
+      ["restingHeartRate", 60, "bpm"], ["weightKg", 75, "kg"],
+    ] as const).map(([metric, value, unit]) =>
+      candidate({ date, provider, facet: metric, metric, value, unit, sourceKind: "observation" }))),
+  );
+  const dataset = activityOnlyDataset(metricCandidates);
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const actual = assertSourceHealthParity(rows, {});
+  assert.equal(actual.length, 3);
+  assert.deepEqual(actual.map(health => health.candidateMetrics), [18, 18, 18]);
+  assert.deepEqual(buildWearableSummaryBundleFromDataset(dataset).sourceHealth.map(health => health.candidateMetrics), [16, 16, 16]);
+});
+
+
+test("empty-envelope writes serialize each actual envelope once, with exact stored and decoded bytes", () => {
+  for (const [kind, keys] of [
+    ["body_state", BODY_METRIC_KEYS], ["recovery", RECOVERY_METRIC_KEYS], ["sleep", SLEEP_METRIC_KEYS],
+  ] as const) {
+    const summary = Object.fromEntries([...keys].map(metric => [metric, resolveMetric(metric, [])]));
+    const expectedStored = JSON.stringify(Object.fromEntries([...keys].map(metric => [metric, null])));
+    const expectedPublic = stringifyPublicWearableProjectionSummary(summary);
+    const serialize = vi.spyOn(publicSummaryJson, "stringifyPublicWearableProjectionSummary");
+    let stored = "";
+    try {
+      for (let repeat = 0; repeat < 5; repeat++) {
+        stored = stringifyStoredWearableProjectionSummary(kind, summary);
+        assert.equal(stored, expectedStored);
+      }
+      // One actual-envelope check per metric plus the outer row serialization.
+      // The prior encoder does twice as many metric-envelope serializations.
+      assert.equal(serialize.mock.calls.length, 5 * (keys.size + 1));
+      for (const envelope of Object.values(summary)) {
+        assert.equal(serialize.mock.calls.filter(([value]) => value === envelope).length, 5);
+      }
+    } finally { serialize.mockRestore(); }
+    assert.equal(JSON.stringify(parseStoredWearableSummary(kind, stored)), expectedPublic);
+    const first = parseStoredWearableSummary<Record<string, ReturnType<typeof resolveMetric>>>(kind, stored)!;
+    const second = parseStoredWearableSummary<typeof first>(kind, stored)!;
+    for (const metric of keys) {
+      assert.notEqual(first[metric], second[metric]);
+      first[metric]!.confidence.conflictingProviders.push("synthetic mutation");
+      first[metric]!.selection.paths.push("synthetic mutation");
+    }
+    assert.equal(JSON.stringify(second), expectedPublic);
+    assert.equal(JSON.stringify(parseStoredWearableSummary(kind, stored)), expectedPublic);
+  }
+});
+
+test("empty-marker verification preserves unexpected fields and noncanonical field order verbatim", () => {
+  const empty = resolveMetric("hrv", []);
+  const cases = [
+    { ...empty, syntheticExtra: "must survive" },
+    { ...empty, confidence: { ...empty.confidence, extra: ["synthetic extra detail"] } },
+    { selection: empty.selection, metric: empty.metric, confidence: empty.confidence, candidates: [] },
+    { ...empty, selection: Object.fromEntries(Object.entries(empty.selection).reverse()) },
+  ];
+  for (const envelope of cases) {
+    const summary = { hrv: envelope };
+    const expected = stringifyPublicWearableProjectionSummary(summary);
+    const stored = stringifyStoredWearableProjectionSummary("recovery", summary);
+    assert.equal(stored, expected, "The original codec's fallback stores the full public bytes");
+    assert.equal(JSON.stringify(parseStoredWearableSummary("recovery", stored)), expected);
+  }
 });

@@ -223,7 +223,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {

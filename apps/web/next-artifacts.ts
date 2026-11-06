@@ -12,7 +12,6 @@ const hostedWebSmokeDefaultDatabaseUrl = "postgresql://postgres:postgres@127.0.0
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
-const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke_placeholder1";
 
 export function isHostedWebSmokeArtifactMode(
   environment: NodeJS.ProcessEnv = process.env,
@@ -38,7 +37,8 @@ export function createHostedWebSmokeEnvironment(
     HOSTED_MAILBOX_FINGERPRINT_KEY:
       environment.HOSTED_MAILBOX_FINGERPRINT_KEY
       ?? hostedWebSmokeDefaultEncryptionKey,
-    NEXT_PUBLIC_PRIVY_APP_ID: environment.NEXT_PUBLIC_PRIVY_APP_ID ?? hostedWebSmokeDefaultPrivyAppId,
+    HOSTED_BETTER_AUTH_SECRET: environment.HOSTED_BETTER_AUTH_SECRET ?? Buffer.alloc(32, 9).toString("base64url"),
+    HOSTED_AUTH_STORAGE_KEY: environment.HOSTED_AUTH_STORAGE_KEY ?? Buffer.alloc(32, 10).toString("base64url"),
     [hostedWebDistModeEnvVarName]: hostedWebSmokeDistMode,
   };
 }

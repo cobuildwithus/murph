@@ -1,4 +1,4 @@
-# Make experiment, Habitat, and Murph Age CLI failures model-repairable
+# Make experiment and Habitat CLI failures model-repairable
 
 Status: completed
 Created: 2026-08-24
@@ -7,17 +7,11 @@ Updated: 2026-08-24
 ## Goal
 
 - Return stable, bounded, field-specific CLI failures for proven experiment,
-  Habitat, and Murph Age error paths so a model can repair its next command
+  and Habitat error paths so a model can repair its next command
   without mistaking invalid input for success or receiving raw values/paths.
 
 ## Success criteria
 
-- `age evidence` rejects invalid top-level values and malformed recognized
-  wrapper fields before analysis.
-- Age submitted-input schema failures identify bounded field paths without raw
-  Zod issue serialization or submitted values.
-- Model-card artifact warnings preserve safe failure categories without file
-  paths, artifact content, or parser prose.
 - Experiment start option and existing-record conflicts, Habitat owner errors,
   and progress-card stages return stable repair codes and guidance.
 - Focused final-envelope, non-echo, and truthful-success tests pass with the
@@ -41,7 +35,7 @@ Updated: 2026-08-24
   messages; preserve successful command envelopes and existing canonical owners.
 - Product/process constraints: Product UX Patch. Outcome: existing CLI recovery
   becomes truthful and actionable. Reaches: models/operators using failed
-  experiment, Habitat, and Murph Age commands. Proof: focused full-output
+  experiment and Habitat commands. Proof: focused full-output
   envelopes plus non-echo and success regressions. Preserve the open foundation
   PR as the exact base and do not push or open another PR.
 
@@ -53,15 +47,10 @@ Updated: 2026-08-24
 2. Risk: richer repair details could echo private input or filesystem context.
    Mitigation: construct allowlisted field paths and stage/category enums, then
    assert forbidden synthetic values and paths are absent from final envelopes.
-3. Risk: warning reclassification could turn ordinary missing model artifacts
-   into a failure.
-   Mitigation: preserve missing-directory-as-empty behavior and add a truthful
-   success regression.
-
 ## Tasks
 
 1. [x] Inspect the foundation repair contract and affected owner/test seams.
-2. [x] Implement the bounded owner-local mappings for Age, experiment, Habitat,
+2. [x] Implement the bounded owner-local mappings for experiment, Habitat,
    and progress-card failures.
 3. [x] Add focused final-envelope, non-echo, and truthful-success coverage.
 4. [x] Run focused tests, affected package typechecks, diff/privacy review, and the
@@ -73,7 +62,6 @@ Updated: 2026-08-24
 - No new broad error framework: extend the foundation repair contract only to
   let existing vault-code mappings carry repair details, and keep domain
   classification with current command/usecase owners.
-- Missing model-card artifact directories remain a normal empty state.
 - Rebased the completed patch without conflict onto foundation head
   `f7cd7a10e91f2c72ae0c71300b983fbcb93d442d` before final verification.
 
@@ -88,18 +76,15 @@ Updated: 2026-08-24
 
 ## Verification results
 
-- CLI source tests: Murph Age 23/23; Habitat and progress-card 9/9;
+- CLI source tests: Habitat and progress-card 9/9;
   experiment/journal/vault 44/44, plus the final focused recovery rerun 2/2.
-- Query Murph Age runtime tests: 35/35.
 - Vault-usecase public helper seam tests: 6/6.
 - Package typechecks: CLI, query, and vault-usecases passed after the final
   refactor and foundation rebase.
-- Product UX replay: invalid submitted Age fields identify the exact JSON field;
-  invalid experiment options and conflicts identify the repairable option or
-  slug; malformed Habitat records route to validation; model-card warnings name
-  safe artifact categories; progress-card corruption routes to the dry-run
-  repair command. Optional missing model-card directories and valid save/render
-  journeys remain successful.
+- Product UX replay: invalid experiment options and conflicts identify the
+  repairable option or slug; malformed Habitat records route to validation;
+  progress-card corruption routes to the dry-run repair command. Valid
+  save/render journeys remain successful.
 - Synthetic private values, artifact content, and paths were asserted absent
   from full error envelopes; `git diff --check` passed.
 Completed: 2026-08-24

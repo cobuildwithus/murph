@@ -37,13 +37,6 @@ const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";
 
 type TelegramWebhookHeaders = Headers | Record<string, string | string[] | undefined>;
 
-export function readTelegramWebhookHeader(
-  headers: TelegramWebhookHeaders,
-  name: string,
-): string | null {
-  return normalizeTextValue(readTelegramWebhookRawHeader(headers, name));
-}
-
 export function readTelegramWebhookSecretToken(
   headers: TelegramWebhookHeaders,
 ): string | null {

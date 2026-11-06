@@ -14,8 +14,9 @@ import {
 } from "@murphai/contracts";
 
 import type { WriteBatch } from "./write-batch.ts";
-import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from "../path-safety.ts";
-import { rawDirectoryMatchesOwner } from "../raw.ts";
+import { VaultError } from "../errors.ts";
+import { normalizeOpaquePathSegment, normalizeRelativeVaultPath, resolveVaultPathOnDisk } from "../path-safety.ts";
+import { inferRawAssetOwnerFromDirectory, rawDirectoryMatchesOwner } from "../raw.ts";
 import { toIsoTimestamp } from "../time.ts";
 
 interface RawArtifactLike {
@@ -278,4 +279,72 @@ export async function stageRawImportManifest({
   });
 
   return manifestPath;
+}
+
+function parseCanonicalRawManifest(content: string) {
+  try {
+    return rawImportManifestSchema.parse(JSON.parse(content));
+  } catch {
+    throw new VaultError("RAW_MANIFEST_INVALID", "A canonical raw manifest could not be read.");
+  }
+}
+
+/** Canonical manifest identity, not a retained remote cleanup pointer, authorizes
+ * restoring photo bytes. Call under the canonical lock when installing bytes. */
+export async function canonicalRawArtifactMatches(input: {
+  vaultRoot: string;
+  relativePath: string;
+  sha256: string;
+  byteSize: number;
+  mimeType: string | null;
+  mediaKind?: "image" | "video" | "integration-ingest";
+}): Promise<boolean> {
+  const artifacts = await readCanonicalRawArtifacts(input);
+  return artifacts.length > 0 && artifacts.every(artifact => artifact.role !== "privacy_tombstone"
+    && artifact.sha256 === input.sha256 && artifact.byteSize === input.byteSize && artifact.mediaType === input.mimeType
+    && (input.mediaKind === undefined || artifact.mediaType.startsWith(`${input.mediaKind}/`)));
+}
+
+/** Retirement remains authoritative after the hosted cleanup pointer is gone. */
+export async function canonicalRawArtifactIsPrivacyTombstone(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<boolean> {
+  return (await readCanonicalRawArtifacts(input)).some(artifact => artifact.role === "privacy_tombstone");
+}
+
+async function readCanonicalRawArtifacts(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<RawImportManifestArtifact[]> {
+  const rawDirectory = path.posix.dirname(normalizeRelativeVaultPath(input.relativePath));
+  const owner = inferRawAssetOwnerFromDirectory(rawDirectory);
+  if (!owner) return [];
+  const directory = await resolveVaultPathOnDisk(input.vaultRoot, rawDirectory);
+  let names: string[];
+  try {
+    names = await fs.readdir(directory.absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const artifacts: RawImportManifestArtifact[] = [];
+  for (const name of names.filter(isRawManifestFileName)) {
+    const resolved = await resolveVaultPathOnDisk(input.vaultRoot, path.posix.join(rawDirectory, name));
+    let content: string;
+    try {
+      content = await fs.readFile(resolved.absolutePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new VaultError("CANONICAL_WRITE_LOCKED", "A canonical raw manifest is being replaced.");
+      }
+      throw error;
+    }
+    const manifest = parseCanonicalRawManifest(content);
+    if (manifest.rawDirectory !== rawDirectory || manifest.owner.kind !== owner.kind || manifest.owner.id !== owner.id) continue;
+    for (const artifact of manifest.artifacts) {
+      if (artifact.relativePath === input.relativePath) artifacts.push(artifact);
+    }
+  }
+  return artifacts;
 }

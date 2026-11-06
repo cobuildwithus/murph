@@ -128,7 +128,6 @@ Most first-class provider additions touch both package seams plus a small set of
 
 Update these only when the provider should appear there now:
 - `apps/web/src/lib/device-sync/**`
-- `packages/cli/src/setup-cli.ts`
 - `packages/cli/src/setup-wizard.ts`
 - onboarding or hosted settings docs
 
@@ -212,6 +211,7 @@ The adapter should:
 Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
 - Declare bounded `authoritativeEventSets` only for a complete, versioned provider resource snapshot with stable resource and facet identities. Core's existing external-reference reconciliation owns revisions and tombstones for omitted facets; partial responses and unversioned snapshots must not claim authority.
+- A later valid complete snapshot reasserts provider-retracted facets through the same canonical event ID and a revision above the tombstone, including content delivered before an intervening correction. Ordinary unversioned deliveries without matching current-facet authority remain replays; member deletion and source-version protections stay with core.
 - Keep each authoritative resource at or below 514 current facets. This exact bound covers Junction's 512 admitted dated menstrual facts plus its two scalar cycle-length facets; adapters with a smaller composed maximum should keep their own narrower admission cap.
 - A public edit of an imported device event is member-owned (`source: manual`) even when the client supplies or inherits `source: device`. Preserve `externalRef` and `dataOrigin` as attribution; a later provider update or omission must reach core's existing typed conflict instead of overwriting or retracting the member revision.
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` evidence parts instead of silently discarding them.
@@ -377,11 +377,8 @@ pnpm test:coverage
 
 ## Current reference providers
 
-Use the existing providers as concrete examples of different integration shapes:
-- Junction: shared OAuth/proxy target for configured sources such as Garmin and Fitbit
-- Garmin: Junction-backed OAuth plus polling-first reconcile, activity detail descriptors, and women-health support
-- WHOOP: OAuth plus webhooks, recovery and workout payloads, and delete fan-in
-- Oura: OAuth plus polling-first reconcile, optional webhook verification and admin support, and rich daily readiness or sleep families
-- Strava: direct OAuth plus activity/workout imports and direct webhook signing
-
-Study those implementations before inventing a new provider-specific pattern.
+Junction owns hosted connection, polling, webhook verification, and ingestion.
+WHOOP, Oura, Strava, and Garmin descriptors retain identity, normalization, and
+source priority for Junction payloads and historical vault reads. They do not
+register direct OAuth/API transports. Fitbit migration remains source-data
+migration machinery, not a direct connection provider.

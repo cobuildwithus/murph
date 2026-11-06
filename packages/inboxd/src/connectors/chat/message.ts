@@ -53,11 +53,3 @@ export function createInboundCaptureFromChatMessage({
     raw: message.raw,
   };
 }
-
-export function compareInboundCaptures(left: InboundCapture, right: InboundCapture): number {
-  if (left.occurredAt !== right.occurredAt) {
-    return left.occurredAt.localeCompare(right.occurredAt);
-  }
-
-  return left.externalId.localeCompare(right.externalId);
-}

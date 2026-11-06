@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   MemberActionOutcomeV1,
   MemberActionRequestV1,
@@ -20,8 +21,6 @@ import type {
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDailyMetricReportedWake,
   HostedExecutionGroupJournalFactRecordedWake,
-  HostedExecutionEnvironmentInterviewCompletedWake,
-  HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
@@ -42,8 +41,6 @@ import type {
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
   HostedExecutionPendingEffectsReconcileRequestedWake,
-  HostedExecutionCodexAuthRequestedWake,
-  HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramExternalThreadRouteAuthority,
   HostedExecutionVaultShareDeliveryWake,
@@ -164,6 +161,8 @@ function cloneConversationMessagePayload(
   value: HostedExecutionConversationMessagePayload,
 ): HostedExecutionConversationMessagePayload {
   switch (value.channel) {
+    case "voice":
+      return { ...value };
     case "linq":
       return {
         ...value,
@@ -589,6 +588,56 @@ export function buildHostedMemberSignupWelcomeInstructions(text: string): string
   ].join("\n\n");
 }
 
+// A later phone connection gets its own welcome without colliding with the
+// original email delivery. Keep the original identity valid for queued work.
+export function buildHostedMemberPhoneWelcomeDeliveryIdentity(memberId: string): string {
+  return `signup-welcome:${memberId}:linq`;
+}
+
+export function buildHostedMemberChannelWelcomeDeliveryIdentity(input: {
+  memberId: string;
+  channel: "email" | "linq";
+  destinationLookupKey: string;
+}): string {
+  const destination = createHash("sha256")
+    .update(input.destinationLookupKey)
+    .digest("hex");
+  return `signup-welcome:${input.memberId}:${input.channel}:${destination}`;
+}
+
+export function buildHostedMemberSignupWelcomeNotificationWake(input: {
+  memberId: string;
+  occurredAt: string;
+  route: HostedExecutionAssistantNotificationRoute;
+  text: string;
+  deliveryIdentity?: string;
+  eventId?: string;
+}): HostedExecutionAssistantNotificationRequestedWake {
+  const deliveryIdentity = input.deliveryIdentity ?? `signup-welcome:${input.memberId}`;
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId ?? `assistant.notification.requested:${deliveryIdentity}`,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    notification: {
+      deliveryDedupeToken: deliveryIdentity,
+      deliveryIdempotencyKey: deliveryIdentity,
+      deliveryDispatchMode: "queue-only",
+      firstContact: { markSeenOnDeliveryAccepted: true },
+      instructions: buildHostedMemberSignupWelcomeInstructions(input.text),
+      responsePolicy: { kind: "require_send_exact_text", text: input.text },
+      route: input.route,
+    },
+  });
+}
+
+export function isHostedMemberSignupWelcomeDeliveryIdentity(
+  value: string | null | undefined,
+  memberId?: string,
+): boolean {
+  const match = /^signup-welcome:([^:]+)(?::linq|:(?:email|linq):[a-f0-9]{64})?$/u.exec(value?.trim() ?? "");
+  return match !== null && (memberId === undefined || match[1] === memberId);
+}
+
 function cloneMemberActivationSignupWelcome(
   value: HostedExecutionMemberActivationSignupWelcome,
 ): HostedExecutionMemberActivationSignupWelcome {
@@ -613,6 +662,8 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.gameChatBootstrap === undefined
+      ? {} : { gameChatBootstrap: { ...value.gameChatBootstrap } }),
     ...(value.groupContextHandoff === undefined
       ? {}
       : { groupContextHandoff: { ...value.groupContextHandoff } }),
@@ -888,38 +939,6 @@ export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: 
   };
 }
 
-export function buildHostedExecutionCodexAuthRequestedWake(input: {
-  action: HostedCodexAuthAction;
-  attemptId: string;
-  eventId: string;
-  occurredAt: string;
-  userId: string;
-}): HostedExecutionCodexAuthRequestedWake {
-  return {
-    action: input.action,
-    attemptId: input.attemptId,
-    eventId: input.eventId,
-    kind: "runtime.codex-auth-requested",
-    occurredAt: input.occurredAt,
-    userId: input.userId,
-  };
-}
-
-export function createRuntimeTimerSyntheticWake(input: {
-  acquiredAt: string;
-  timerId: string;
-  triggerKind: HostedRuntimeTimerTriggerKind;
-  userId: string;
-}): HostedExecutionRuntimeTimerWake {
-  // Runtime timers are internal continuation context, not persisted mailbox rows.
-  return buildHostedExecutionRuntimeTimerWake({
-    eventId: `hosted-runtime-timer:${input.timerId}`,
-    occurredAt: input.acquiredAt,
-    triggerKind: input.triggerKind,
-    userId: input.userId,
-  });
-}
-
 export function buildHostedExecutionDeviceSyncWake(input: {
   connectionId?: string | null;
   eventId: string;
@@ -946,6 +965,7 @@ export function buildHostedExecutionDeviceSyncWake(input: {
 }
 
 export function buildHostedExecutionMealPhotoCapturedWake(input: {
+  uploadId?: string;
   byteLength: number;
   captureId: string;
   capturedAt: string;
@@ -967,6 +987,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
     eventId: input.eventId,
     kind: "meal-photo.captured",
     mealPhoto: {
+      ...(input.uploadId === undefined ? {} : { uploadId: input.uploadId }),
       byteLength: input.byteLength,
       captureId: input.captureId,
       capturedAt: input.capturedAt,
@@ -1013,76 +1034,6 @@ export function buildHostedExecutionGroupJournalFactRecordedWake(input: {
     eventId: input.eventId,
     journalFact: parseHostedExecutionGroupJournalFactPayload(input.journalFact),
     kind: "journal.group-fact.recorded",
-    occurredAt: input.occurredAt,
-    userId: input.memberId,
-  };
-}
-
-export function buildHostedExecutionEnvironmentVoiceCapturedWake(input: {
-  audioKey: string;
-  byteLength: number;
-  captureId: string;
-  capturedAt: string;
-  contentType: HostedExecutionEnvironmentVoiceCapturedWake["environmentVoice"]["contentType"];
-  durationMs: number;
-  eventId: string;
-  memberId: string;
-  occurredAt: string;
-  sha256: string;
-}): HostedExecutionEnvironmentVoiceCapturedWake {
-  if (input.occurredAt !== input.capturedAt) {
-    throw new TypeError(
-      "Hosted environment voice wake occurredAt must match capturedAt.",
-    );
-  }
-
-  return {
-    eventId: input.eventId,
-    environmentVoice: {
-      audioKey: input.audioKey,
-      byteLength: input.byteLength,
-      captureId: input.captureId,
-      capturedAt: input.capturedAt,
-      contentType: input.contentType,
-      durationMs: input.durationMs,
-      sha256: input.sha256,
-    },
-    kind: "environment-voice.captured",
-    occurredAt: input.occurredAt,
-    userId: input.memberId,
-  };
-}
-
-export function buildHostedExecutionEnvironmentInterviewCompletedWake(input: {
-  completedAt: string;
-  completionId: string;
-  eventId: string;
-  memberId: string;
-  occurredAt: string;
-  topics: HostedExecutionEnvironmentInterviewCompletedWake["environmentInterview"]["topics"];
-}): HostedExecutionEnvironmentInterviewCompletedWake {
-  if (input.occurredAt !== input.completedAt) {
-    throw new TypeError(
-      "Hosted environment interview wake occurredAt must match completedAt.",
-    );
-  }
-
-  return {
-    environmentInterview: {
-      completedAt: input.completedAt,
-      completionId: input.completionId,
-      topics: input.topics.map((topic) => ({
-        answers: topic.answers.map((answer) => ({
-          aspectId: answer.aspectId,
-          indicatorId: answer.indicatorId,
-          ...(answer.note === undefined ? {} : { note: answer.note }),
-          value: answer.value,
-        })),
-        topicId: topic.topicId,
-      })),
-    },
-    eventId: input.eventId,
-    kind: "environment-interview.completed",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

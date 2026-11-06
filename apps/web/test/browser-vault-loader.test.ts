@@ -4,13 +4,10 @@ import { gzipSync } from "node:zlib";
 import { beforeEach, test, vi } from "vitest";
 import type { HostedBrowserVaultReplicaMetricBucketSetRef } from "@murphai/hosted-execution/browser-vault";
 import {
-  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  type BrowserVaultExperimentRunCard,
   type BrowserVaultMetricBucketId,
 } from "@murphai/query/browser-replica-client";
-import * as browserReplicaClient from "@murphai/query/browser-replica-client";
 
 const runtimeMocks = vi.hoisted(() => ({
   decryptHostedStoragePayload: vi.fn(),
@@ -552,37 +549,16 @@ test("browser vault loader rejects a legacy plaintext length mismatch before par
   );
 });
 
-test("browser vault loader rebuilds pre-bucket legacy run-card demand before cold detail selection", async () => {
-  const persistedRunCard: Omit<BrowserVaultExperimentRunCard, "requiredMetricBuckets"> = {
-    id: "run_legacy",
-    lookupKeys: {
-      experimentIds: ["run_legacy"],
-      protocolKeys: ["protocol_legacy"],
-      slugs: ["legacy-protocol"],
-    },
-    runSummary: { metrics: [] },
-    schema: BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
-    slug: "legacy-protocol",
-    startedOn: "2026-04-01",
-    status: "active",
-    statusLabel: "Active",
-    summary: null,
-    summaryDetail: null,
-    tags: [],
-    title: "Legacy protocol",
-  };
-  const derivedRunCard: BrowserVaultExperimentRunCard = {
-    ...persistedRunCard,
-    requiredMetricBuckets: ["00" as const],
-  };
-  const buildRunCards = vi.spyOn(
-    browserReplicaClient,
-    "buildBrowserVaultExperimentRunCards",
-  ).mockResolvedValue([derivedRunCard]);
+test("browser vault loader ignores run cards persisted in legacy replicas by older producers", async () => {
   const legacyReplica = {
     assistantSummary: { highlights: [], latestDate: null },
     entities: [],
-    experimentRunCards: [persistedRunCard],
+    // Shape written before run cards were removed; the loader must not depend on it.
+    experimentRunCards: [{
+      id: "run_legacy",
+      schema: "murph.browser-vault.experiment-run-card.v1",
+      title: "Legacy protocol",
+    }],
     generatedAt: createReplicaRef().generatedAt,
     generation: createReplicaRef().generation,
     labResultRows: [],
@@ -630,26 +606,19 @@ test("browser vault loader rebuilds pre-bucket legacy run-card demand before col
     state: "ready",
   }), { status: 200 });
 
-  try {
-    const result = await loadBrowserVaultReplica({
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response),
-      knownReplicaRef: null,
-      requestedMetricBuckets: ["00"],
-      requestedShards: ["core", "metricsIndex"],
-    });
+  const result = await loadBrowserVaultReplica({
+    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response),
+    knownReplicaRef: null,
+    requestedMetricBuckets: ["00"],
+    requestedShards: ["core", "metricsIndex"],
+  });
 
-    assert.equal(result.state, "ready");
-    if (result.state !== "ready") return;
-    assert.deepEqual(
-      result.client.experimentRunCards.get("run_legacy")?.requiredMetricBuckets,
-      ["00"],
-    );
-    assert.deepEqual(result.loadedMetricBuckets, ["00"]);
-    assert.equal(result.client.capability, "core+metrics-partial");
-    assert.equal(buildRunCards.mock.calls.length, 1);
-  } finally {
-    buildRunCards.mockRestore();
-  }
+  assert.equal(result.state, "ready");
+  if (result.state !== "ready") return;
+  assert.deepEqual(result.loadedMetricBuckets, ["00"]);
+  assert.equal(result.client.capability, "core+metrics-partial");
+  assert.equal("experimentRunCards" in result.client, false);
+  assert.equal("experimentRunCards" in result.client.replica, false);
 });
 
 test("browser vault loader reuses only the active same-ref bucket intersection and resets on a new ref", async () => {

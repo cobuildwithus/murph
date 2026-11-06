@@ -1,5 +1,5 @@
+import { createHash } from 'node:crypto'
 import { assistantFollowUpContextChangedCanRetry } from '../follow-ups.js'
-import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
   assistantCronJobSchema,
   type AssistantCronJob,
@@ -24,7 +24,7 @@ import {
   writeAssistantCronStore,
 } from './store.js'
 import {
-  buildCanonicalAutomationUpsertInput,
+  archiveCanonicalAssistantCronSourceIfOccurrenceCurrent,
   listCanonicalAssistantCronRecords,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalAssistantCronJobId,
@@ -39,6 +39,7 @@ import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { isRecognizedMurphOnboardingFollowupAutomation } from '../managed-automations.js'
 import { isCurrentMurphOnboardingFollowupAutomation } from '../onboarding-followup-automation.js'
+import type { AssistantRunEvent } from '../automation/shared.js'
 
 const ASSISTANT_CRON_MISSING_PENDING_DELIVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
@@ -65,6 +66,7 @@ type TerminalAssistantCronDeliveryOutcome =
 
 export async function reconcileAssistantCronDeliveryIntent(input: {
   intent: AssistantOutboxIntent
+  onEvent?: (event: AssistantRunEvent) => void
   paths?: AssistantStatePaths
   vault: string
 }): Promise<AssistantCronDeliveryReconciliationResult> {
@@ -75,6 +77,7 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
 
   return reconcileAssistantCronTerminalDelivery({
     intentId: input.intent.intentId,
+    onEvent: input.onEvent,
     paths: input.paths,
     terminal,
     vault: input.vault,
@@ -83,6 +86,7 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
 
 async function reconcileAssistantCronTerminalDelivery(input: {
   intentId: string
+  onEvent?: (event: AssistantRunEvent) => void
   paths?: AssistantStatePaths
   terminal: TerminalAssistantCronDeliveryOutcome
   vault: string
@@ -112,7 +116,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
           reason: `delivery_${input.terminal.failureStatus}`,
         }
     let reconciled = 0
-    let localChanged = false
+    const localJobIds: string[] = []
 
     for (let index = localStore.jobs.length - 1; index >= 0; index -= 1) {
       const job = localStore.jobs[index] as AssistantCronJob
@@ -121,7 +125,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       }
 
       reconciled += 1
-      localChanged = true
+      localJobIds.push(job.jobId)
       await finalizeAssistantCronPendingRunDelivery({
         jobId: job.jobId,
         paths,
@@ -142,11 +146,12 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       })
     }
 
-    if (localChanged) {
+    if (localJobIds.length > 0) {
       await writeAssistantCronStore(paths, localStore)
+      emitAssistantCronDeliveryReconciledEvents({ ...input, jobIds: localJobIds })
     }
 
-    let canonicalChanged = false
+    const canonicalJobIds: string[] = []
     for (const runtimeState of [...runtimeStore.jobs]) {
       if (runtimeState.state.pendingDeliveryIntentId !== input.intentId) {
         continue
@@ -156,7 +161,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
         (record) => resolveCanonicalAssistantCronJobId(record) === runtimeState.jobId,
       ) ?? null
       reconciled += 1
-      canonicalChanged = true
+      canonicalJobIds.push(runtimeState.jobId)
       await finalizeAssistantCronPendingRunDelivery({
         jobId: runtimeState.jobId,
         paths,
@@ -172,12 +177,13 @@ async function reconcileAssistantCronTerminalDelivery(input: {
         shouldRemoveCanonicalAssistantCronSourceAfterDelivery({
           runtimeState,
           source,
-        })
-      ) {
-        await archiveCanonicalAssistantCronSourceAfterDelivery({
+        }) &&
+        await archiveCanonicalAssistantCronSourceIfOccurrenceCurrent({
+          occurrenceAt: runtimeState.state.pendingOccurrenceAt!,
           source,
           vault: input.vault,
         })
+      ) {
         removeAssistantCronCanonicalRuntimeRecord(runtimeStore, runtimeState.jobId)
         continue
       }
@@ -193,12 +199,59 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       )
     }
 
-    if (canonicalChanged) {
+    if (canonicalJobIds.length > 0) {
       await writeAssistantCronCanonicalRuntimeStore(paths, runtimeStore)
+      emitAssistantCronDeliveryReconciledEvents({ ...input, jobIds: canonicalJobIds })
     }
 
     return { reconciled }
   })
+}
+
+export function fingerprintAssistantCronDelivery(
+  jobId: string,
+  intentId: string | null | undefined,
+): string | null {
+  // The outbox creator uses random UUIDv4 IDs; accepted legacy IDs can be
+  // predictable. Never hash a private job without the generated intent shape.
+  if (!intentId || !/^outbox_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u.test(intentId)) {
+    return null
+  }
+  return `cd1_${createHash('sha256')
+    .update(JSON.stringify(['murph.cron-delivery.v1', jobId, intentId]), 'utf8')
+    .digest('hex')
+    .slice(0, 24)}`
+}
+
+function emitAssistantCronDeliveryReconciledEvents(input: {
+  intentId: string
+  jobIds: readonly string[]
+  onEvent?: (event: AssistantRunEvent) => void
+  terminal: TerminalAssistantCronDeliveryOutcome
+}): void {
+  if (!input.onEvent) return
+  for (const jobId of input.jobIds) {
+    try {
+      // Called only after the pending reference is durably cleared, including
+      // repair after a journal write succeeded but the owner write failed.
+      void Promise.resolve(input.onEvent({
+        type: 'cron.delivery.reconciled',
+        details: 'scheduled delivery reconciled at outbox terminal boundary',
+        safeDetails: 'cron_delivery_reconciled',
+        failureContext: {
+          deliveryStatus: input.terminal.kind === 'sent'
+            ? 'sent'
+            : input.terminal.failureStatus,
+          runOutcome: input.terminal.kind === 'sent' ? 'delivered' : 'failed',
+          deliveryFingerprint: fingerprintAssistantCronDelivery(jobId, input.intentId),
+        },
+        providerKind: 'status',
+        providerState: 'completed',
+      })).catch(() => undefined)
+    } catch {
+      // Observers cannot change a persisted reconciliation or request a retry.
+    }
+  }
 }
 
 /**
@@ -233,6 +286,7 @@ export async function listAssistantCronPendingDeliveryIntentIds(
 export async function repairPendingAssistantCronDeliveries(input: {
   missingIntentStaleAfterMs?: number
   now?: Date
+  onEvent?: (event: AssistantRunEvent) => void
   paths?: AssistantStatePaths
   vault: string
 }): Promise<AssistantCronPendingDeliveryRepairResult> {
@@ -285,6 +339,7 @@ export async function repairPendingAssistantCronDeliveries(input: {
 
       const result = await reconcileAssistantCronTerminalDelivery({
         intentId,
+        onEvent: input.onEvent,
         paths,
         terminal: {
           at: now.toISOString(),
@@ -314,6 +369,7 @@ export async function repairPendingAssistantCronDeliveries(input: {
     }
     const result = await reconcileAssistantCronDeliveryIntent({
       intent,
+      onEvent: input.onEvent,
       paths,
       vault: input.vault,
     })
@@ -567,18 +623,10 @@ function shouldRemoveCanonicalAssistantCronSourceAfterDelivery(input: {
   runtimeState: AssistantCronCanonicalRuntimeRecord
   source: CanonicalAssistantCronJobRecord
 }): boolean {
-  if (input.source.schedule.kind !== 'at') {
-    return false
-  }
-  if (canonicalAssistantCronSourceChangedAfterRuntimeState(input)) {
-    return false
-  }
-
-  const pendingOccurrenceAt = input.runtimeState.state.pendingOccurrenceAt
   return (
-    pendingOccurrenceAt !== null &&
-    pendingOccurrenceAt ===
-      resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState)
+    input.source.schedule.kind === 'at' &&
+    input.runtimeState.state.pendingOccurrenceAt !== null &&
+    !canonicalAssistantCronSourceChangedAfterRuntimeState(input)
   )
 }
 
@@ -593,33 +641,6 @@ function canonicalAssistantCronSourceChangedAfterRuntimeState(input: {
     Number.isFinite(runtimeUpdatedMs) &&
     sourceUpdatedMs > runtimeUpdatedMs
   )
-}
-
-async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {
-  source: CanonicalAssistantCronJobRecord
-  vault: string
-}): Promise<void> {
-  if (input.source.kind === 'automation') {
-    await upsertAutomation(
-      { ...buildCanonicalAutomationUpsertInput({
-        vault: input.vault,
-        automationId: input.source.automationId,
-        automation: input.source,
-        title: input.source.title,
-        status: 'archived',
-        schedule: input.source.schedule,
-        route: input.source.route,
-        instructions: input.source.instructions,
-      }), completedOccurrence: true },
-    )
-    return
-  }
-
-  await setScheduledLogStatus({
-    vaultRoot: input.vault,
-    scheduledLogId: input.source.scheduledLogId,
-    status: 'archived',
-  })
 }
 
 function omitPendingDeliveryIntentId<T extends { pendingDeliveryIntentId?: string | null }>(

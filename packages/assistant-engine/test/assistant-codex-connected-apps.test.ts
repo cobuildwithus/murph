@@ -420,6 +420,33 @@ describe("murph connected-app dynamic tools", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it.each(["GOOGLECALENDAR_CREATE_EVENT", "OUTLOOK_CALENDAR_CREATE_EVENT", "GMAIL_SEND_EMAIL", "OUTLOOK_SEND_EMAIL"])(
+    "preserves existing no-replay guidance for oversized %s results",
+    async (toolSlug) => {
+      const connectedApps: AssistantConnectedAppsPort = {
+        request: vi.fn(async () => {
+          throw Object.assign(new Error("Synthetic oversized response"), {
+            code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+            detail: "Ask for fewer results, a narrower time range, or one item at a time.",
+            retryable: false, status: 413, statusCode: 413,
+          });
+        }),
+      };
+      const result = await executeMurphDynamicToolRequest({
+        env: {}, fetchImpl: fetch,
+        hostedToolContext: createHostedToolContext(connectedApps, { userActionScope: createUserActionScope("direct") }),
+        nextUsageOrdinal: () => 1, progressDelivery: createProgressDelivery(),
+        request: { kind: "connected-apps-execute", args: { account: "synthetic", agentApproved: true, arguments: {}, toolSlug } },
+      });
+      expect(connectedApps.request).toHaveBeenCalledTimes(1);
+      expect(result.rpcResult.success).toBe(false);
+      const text = result.rpcResult.contentItems[0]!.text;
+      expect(text).toContain("Do not retry");
+      expect(text).toContain("ambiguous");
+      expect(text).not.toMatch(/fewer results|narrower time range|one item at a time|will fail the same way/iu);
+    },
+  );
+
   it("reports the control-plane failure code, status, and retry posture", async () => {
     // A rejected request is not an outage. Flattening every failure to
     // "unavailable" made the assistant vouch for the account and offer a retry

@@ -1,5 +1,7 @@
 generator client {
   provider = "prisma-client-js"
+  compilerBuild = "small"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -201,6 +203,7 @@ model DeviceSyncDirtyConnection {
   sourceProviderCountsJson   Json?            @map("source_provider_counts_json")
   resourceCategoryCountsJson Json?            @map("resource_category_counts_json")
   dirtyResourcesJson         Json?            @map("dirty_resources_json")
+  wakeDeferredUntil          DateTime?        @map("wake_deferred_until")
   createdAt                  DateTime         @default(now()) @map("created_at")
   updatedAt                  DateTime         @updatedAt @map("updated_at")
   connection                 DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
@@ -209,6 +212,7 @@ model DeviceSyncDirtyConnection {
   @@index([userId, dirtyRevision, processedRevision])
   @@index([userId, firstDirtyAt, connectionId])
   @@index([latestDirtyAt])
+  @@index([wakeDeferredUntil])
   @@map("device_sync_dirty_connection")
 }
 
@@ -327,6 +331,11 @@ model ClinicalRecordConnection {
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")
   accessTokenExpiresAt     DateTime?                        @map("access_token_expires_at")
+  refreshTokenEncrypted    String?                          @map("persistent_token_encrypted")
+  refreshLeaseId           String?                          @map("refresh_lease_id")
+  refreshLeaseExpiresAt    DateTime?                        @map("refresh_lease_expires_at")
+  nextSyncAt               DateTime?                        @map("next_sync_at")
+  lastCheckedAt            DateTime?                        @map("last_checked_at")
   requestedScopesJson      Json                             @map("requested_scopes_json")
   tokenVersion             Int                              @default(1) @map("token_version")
   retrievalGeneration      Int                              @default(0) @map("retrieval_generation")
@@ -343,6 +352,7 @@ model ClinicalRecordConnection {
   @@unique([memberId, providerDirectoryEntryId])
   @@index([memberId, status, updatedAt])
   @@index([fhirBaseHash])
+  @@index([status, nextSyncAt])
   @@map("clinical_record_connection")
 }
 
@@ -565,14 +575,33 @@ enum HostedPhysicalNoteFailureReason {
   unknown
 }
 
+// Apple push address for the member's companion app and game notifications.
+model CompanionPushRoute {
+  userId         String       @id @map("user_id")
+  installationId String       @map("installation_id")
+  token          String
+  environment    String
+  topic          String
+  alertsAllowed  Boolean      @map("alerts_allowed")
+  gameSessionId  String?      @map("game_session_id")
+  updatedAt      DateTime     @map("updated_at")
+  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("companion_push_route")
+}
+
 model HostedMember {
+  gameInvitations GameInvitee[] @relation("GameInviteeMember")
+  chatHostedGames Game[] @relation("GameChatContainer")
+  companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
+  companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
+  companionPushRoute             CompanionPushRoute?
   authRecords                    HostedAuthRecord[]
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
   usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
-  assistantProviderPreference    String?                         @map("assistant_provider_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantPersona               String?                         @map("assistant_persona")
   assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
@@ -628,7 +657,6 @@ model HostedMember {
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
   groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
   groupSponsorshipsReceived      HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")
-  groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[]  @relation("HostedGroupSponsorshipMomentCreator")
   usageCreditEntries             HostedUsageCreditEntry[]
   usageReferralsAsReferrer       HostedUsageReferral[]            @relation("HostedUsageReferralReferrer")
   usageReferralsAsBeneficiary    HostedUsageReferral[]            @relation("HostedUsageReferralBeneficiary")
@@ -642,7 +670,6 @@ model HostedMember {
   hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
-  webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
   addressBookProjection          HostedAddressBookProjection?
   connectedAppsSession           HostedConnectedAppsSession?
@@ -653,9 +680,10 @@ model HostedMember {
   clinicalRecordRetrievalRuns        ClinicalRecordRetrievalRun[]
   clinicalRecordRetrievalRequests    ClinicalRecordRetrievalRequest[]
   codexAuthConnection            HostedCodexAuthConnection?
-  inferenceConnection            HostedInferenceConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  conversationPolls              HostedConversationPoll[]
+  gameProfile                    GameProfile?
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
@@ -686,23 +714,6 @@ model HostedCodexAuthConnection {
   @@map("hosted_codex_auth_connection")
 }
 
-model HostedInferenceConnection {
-  memberId            String       @id @map("member_id")
-  protocol            String
-  selected            Boolean      @default(false)
-  configEncrypted     String       @map("config_encrypted")
-  revision            Int          @default(1)
-  contextWindowTokens Int          @map("context_window_tokens")
-  supportsImages      Boolean      @default(false) @map("supports_images")
-  verificationProfile String       @map("verification_profile")
-  verifiedAt          DateTime     @map("verified_at")
-  createdAt           DateTime     @default(now()) @map("created_at")
-  updatedAt           DateTime     @updatedAt @map("updated_at")
-  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_inference_connection")
-}
-
 model HostedProductFeedback {
   operatorTasks               HostedOperatorTask[]
   id                          String       @id
@@ -716,34 +727,6 @@ model HostedProductFeedback {
   @@index([memberId, createdAt])
   @@index([createdAt, kind], map: "hosted_product_feedback_created_at_kind_idx")
   @@map("hosted_product_feedback")
-}
-
-model HostedWebSession {
-  id           String       @id
-  tokenHash    String       @unique @map("token_hash")
-  memberId     String       @map("member_id")
-  privyUserId  String       @map("privy_user_id")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-  expiresAt    DateTime     @map("expires_at")
-  lastSeenAt   DateTime?    @map("last_seen_at")
-  revokedAt    DateTime?    @map("revoked_at")
-  revokeReason String?      @map("revoke_reason")
-
-  computerHandoffViewportWidth      Int?      @map("computer_handoff_viewport_width")
-  computerHandoffViewportHeight     Int?      @map("computer_handoff_viewport_height")
-  computerHandoffViewportObservedAt DateTime? @map("computer_handoff_viewport_observed_at")
-
-  member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@index([memberId])
-  @@index([memberId, privyUserId, createdAt, id])
-  @@index([privyUserId])
-  @@index([expiresAt])
-  @@index([revokedAt])
-  @@index([expiresAt, id])
-  @@index([revokedAt, id])
-  @@map("hosted_web_session")
 }
 
 model HostedMealPhotoCaptureEnrollment {
@@ -800,6 +783,7 @@ model HostedAddressBookContact {
 model HostedMemberApprovalCredentials {
   memberId             String       @id @map("member_id")
   credentialsEncrypted String       @map("credentials_encrypted")
+  recoveryHashEncrypted String?     @map("recovery_hash_encrypted")
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
   member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -1001,13 +985,6 @@ model HostedMemberIdentity {
   phoneLookupKey                      String?      @unique @map("phone_lookup_key")
   phoneNumberEncrypted                String?      @map("phone_number_encrypted")
   phoneNumberVerifiedAt               DateTime?    @map("phone_number_verified_at")
-  privyUserLookupKey                  String?      @unique @map("privy_user_lookup_key")
-  privyUserIdEncrypted                String?      @map("privy_user_id_encrypted")
-  walletAddressLookupKey              String?      @unique @map("wallet_address_lookup_key")
-  walletAddressEncrypted              String?      @map("wallet_address_encrypted")
-  walletChainType                     String?      @map("wallet_chain_type")
-  walletProvider                      String?      @map("wallet_provider")
-  walletCreatedAt                     DateTime?    @map("wallet_created_at")
   signupPhoneNumberEncrypted          String?      @map("signup_phone_number_encrypted")
   signupPhoneCodeSentAt               DateTime?    @map("signup_phone_code_sent_at")
   signupPhoneCodeSendAttemptId        String?      @map("signup_phone_code_send_attempt_id")
@@ -1170,7 +1147,6 @@ model HostedMailboxItem {
   updatedAt               DateTime              @updatedAt @map("updated_at")
   member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
   payload                 HostedMailboxPayload?
-  latencyTrace            HostedIngressLatencyTrace?
 
   @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
@@ -1238,6 +1214,8 @@ model HostedIngressLatencyTrace {
   runtimeAttemptId         String?           @map("runtime_attempt_id")
   replyRuntimeAttemptId    String?           @map("reply_runtime_attempt_id")
   linqDeliveryId           String?           @map("linq_delivery_id")
+  webhookReceivedAt        DateTime?         @map("webhook_received_at")
+  ingressTypingAcceptedAt  DateTime?         @map("ingress_typing_accepted_at")
   acceptedAt               DateTime          @map("accepted_at")
   temporalSignalAcceptedAt DateTime?         @map("temporal_signal_accepted_at")
   runnerJobAcceptedAt      DateTime?         @map("runner_job_accepted_at")
@@ -1250,7 +1228,6 @@ model HostedIngressLatencyTrace {
   phaseBreakdownJson       Json?             @map("phase_breakdown_json")
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
-  mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
   linqDelivery             HostedLinqDelivery? @relation(fields: [linqDeliveryId], references: [id], onDelete: SetNull)
 
   @@unique([userId, mailboxItemId])
@@ -1317,6 +1294,154 @@ model HostedUserCryptoAudit {
   @@map("hosted_user_crypto_audit")
 }
 
+/// Runtime authority and exact cleanup target survive canonical member deletion.
+/// No expiry grants replacement authority; retirement requires adapter proof.
+model HostedRuntimeOwner {
+  userId                    String   @id @map("user_id")
+  // Retired migration metadata; retained for a later contract migration.
+  migrationPhase            String   @default("legacy") @map("migration_phase")
+  migrationId               String?  @map("migration_id")
+  generation                BigInt   @default(0)
+  attemptId                 String?  @map("attempt_id")
+  phase                     String   @default("idle")
+  processingMode            String?  @map("processing_mode")
+  allocationId              String?  @map("allocation_id")
+  runnerContainerName       String?  @map("runner_container_name")
+  workspaceVersion          BigInt?  @map("workspace_version")
+  providerEgressTokenHash    String?  @map("provider_egress_token_hash")
+  platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
+  // Server-owned allowance attribution, frozen for this exact invocation.
+  allowanceBeneficiaryMemberId String? @map("allowance_beneficiary_member_id")
+  startedAt                 DateTime? @map("started_at")
+  acceptedAt                DateTime? @map("accepted_at")
+  completedAt               DateTime? @map("completed_at")
+  failureCount              Int      @default(0) @map("failure_count")
+  lastErrorCode             String?  @map("last_error_code")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@index([migrationPhase, userId])
+  @@map("hosted_runtime_owner")
+}
+
+/// Retired campaign record, retained only for schema compatibility and inert triggers.
+model HostedRuntimeCutover {
+  id              String    @id
+  phase           String    @default("legacy")
+  namespaceId     String?   @map("namespace_id")
+  workerVersion   String?   @map("worker_version")
+  inventoryAfter  String    @default("") @map("inventory_after")
+  inventoryHash   String?   @map("inventory_hash")
+  inventoryCount Int       @default(0) @map("inventory_count")
+  inventorySealedAt DateTime? @map("inventory_sealed_at")
+  selectedObjectId String? @map("selected_object_id")
+  namespaceProbeId String? @map("namespace_probe_id")
+  discoveryCompletedAt DateTime? @map("discovery_completed_at")
+  creationClosedAt DateTime? @map("creation_closed_at")
+  activatedAt     DateTime? @map("activated_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("hosted_runtime_cutover")
+}
+
+/// Retired import inventory and page receipts; drop only in the contract cleanup.
+model HostedRuntimeLegacyImport {
+  objectId     String    @id @map("object_id")
+  inventoryClass String @default("baseline") @map("inventory_class")
+  admittedUserId String? @unique @map("admitted_user_id")
+  userId       String?   @unique @map("user_id")
+  generation   BigInt?
+  nextCursor   Json      @map("next_cursor")
+  lastCursor   Json?     @map("last_cursor")
+  lastHash     String?   @map("last_hash")
+  completedAt  DateTime? @map("completed_at")
+
+  @@index([completedAt, objectId])
+  @@index([inventoryClass, objectId])
+  @@map("hosted_runtime_legacy_import")
+}
+
+// Runtime resource obligations outlive member deletion until physical cleanup.
+model HostedRuntimeSnapshotUpload {
+  userId                   String    @id @map("user_id")
+  snapshotId               String    @map("snapshot_id")
+  attemptId                String    @map("attempt_id")
+  generation               BigInt
+  expectedWorkspaceVersion BigInt    @map("expected_workspace_version")
+  workspaceVersion         BigInt    @map("workspace_version")
+  objectKey                String    @map("object_key")
+  encryption               Json
+  replacedSnapshotRef      Json?     @map("replaced_snapshot_ref")
+  createdAt                DateTime  @map("created_at")
+  expiresAt                DateTime  @map("expires_at")
+  heartbeatAt              DateTime  @map("heartbeat_at")
+  completedAt              DateTime? @map("completed_at")
+  putExpiresAt             DateTime? @map("put_expires_at")
+  putDrainUntil            DateTime? @map("put_drain_until")
+
+  @@index([expiresAt, userId])
+  @@map("hosted_runtime_snapshot_upload")
+}
+
+model HostedRuntimePutDrain {
+  userId      String    @map("user_id")
+  writeId     String    @map("write_id")
+  kind        String
+  attemptId   String    @map("attempt_id")
+  generation  BigInt
+  admittedAt  DateTime  @map("admitted_at")
+  drainUntil  DateTime? @map("drain_until")
+  objectKey   String?   @map("object_key")
+  uploadId    String?   @map("upload_id")
+  encryptedByteSize BigInt? @map("encrypted_byte_size")
+  encryptedSha256 String? @map("encrypted_sha256")
+  encryptedMd5 String? @map("encrypted_md5")
+  verifiedAt DateTime? @map("verified_at")
+  reconcileAfter DateTime? @map("reconcile_after")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([completedAt, reconcileAfter])
+  @@id([userId, writeId])
+  @@index([drainUntil, userId])
+  @@map("hosted_runtime_put_drain")
+}
+
+model HostedRuntimeOrphan {
+  userId      String    @map("user_id")
+  resourceId  String    @map("resource_id")
+  kind        String
+  objectKey   String?   @map("object_key")
+  snapshotRef Json?     @map("snapshot_ref")
+  createdAt   DateTime  @map("created_at")
+  cleanupAt   DateTime  @map("cleanup_at")
+  recoveryUntil DateTime? @map("recovery_until")
+  retiredAt   DateTime? @map("retired_at")
+  purgedAt    DateTime? @map("purged_at")
+  revision    BigInt    @default(1)
+
+  @@id([userId, kind, resourceId])
+  @@index([purgedAt, cleanupAt, userId])
+  @@map("hosted_runtime_orphan")
+}
+
+model HostedRuntimeMedia {
+  userId    String    @map("user_id")
+  mediaId   String    @map("media_id")
+  mediaKind String    @map("media_kind")
+  byteSize  BigInt    @map("byte_size")
+  sha256    String
+  objectKey String    @map("object_key")
+  registered Boolean @default(true)
+  expiresAt DateTime? @map("expires_at")
+  retiredAt DateTime? @map("retired_at")
+  purgedAt  DateTime? @map("purged_at")
+  revision  BigInt    @default(1)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@id([userId, mediaId])
+  @@index([purgedAt, expiresAt, userId])
+  @@map("hosted_runtime_media")
+}
+
 model HostedWorkspace {
   userId                 String       @id @map("user_id")
   version                BigInt       @default(0)
@@ -1329,6 +1454,7 @@ model HostedWorkspace {
   systemMailboxProgressGeneration BigInt? @map("system_mailbox_progress_generation")
   inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
   inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
+  runtimeRecheckSignaledVersion BigInt? @map("runtime_recheck_signaled_version")
   acceptedAttemptFailureRecheckClaimedAt DateTime? @map("accepted_attempt_failure_recheck_claimed_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")
@@ -1613,13 +1739,13 @@ model HostedAccountDeletionCleanup {
   payloadCiphertext     String    @map("payload_ciphertext")
   kmsKeyName            String    @map("kms_key_name")
   environment           String
-  privyUserLookupKey    String?   @map("privy_user_lookup_key")
   cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
   stripeCompletedAt     DateTime? @map("stripe_completed_at")
-  privyCompletedAt      DateTime? @map("privy_completed_at")
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   temporalCompletedAt   DateTime? @map("temporal_completed_at")
   temporalNextRuntimeIndex Int     @default(0) @map("temporal_next_runtime_index")
+  // Retired census cursor; retained for a later contract migration.
+  runtimeMigrationNextIndex Int?   @default(0) @map("runtime_migration_next_index")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")
@@ -1630,7 +1756,7 @@ model HostedAccountDeletionCleanup {
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@index([nextAttemptAt, leaseExpiresAt])
-  @@index([privyUserLookupKey, privyCompletedAt])
+  @@index([runtimeMigrationNextIndex, id], map: "hosted_cleanup_runtime_enrollment_idx")
   @@map("hosted_account_deletion_cleanup")
 }
 
@@ -1684,7 +1810,6 @@ model HostedUsageCreditPurchase {
   groupSponsorshipPeriodStartedAt  DateTime?                            @map("group_sponsorship_period_started_at")
   groupSponsorshipChargeOrdinal    Int?                                 @map("group_sponsorship_charge_ordinal")
   groupSponsorshipAuthorization    HostedGroupSponsorshipAuthorization? @relation(fields: [groupSponsorshipAuthorizationId], references: [id], onDelete: Restrict)
-  groupSponsorshipMoment            HostedGroupSponsorshipMoment?
 
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
   @@unique([groupSponsorshipAuthorizationId, groupSponsorshipPeriodStartedAt, groupSponsorshipChargeOrdinal], map: "hosted_usage_credit_purchase_sponsorship_period_ordinal_key")
@@ -1718,29 +1843,6 @@ model HostedGroupSponsorshipAuthorization {
   @@index([payerMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_payer_status_idx")
   @@index([beneficiaryMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_beneficiary_status_idx")
   @@map("hosted_group_sponsorship_authorization")
-}
-
-model HostedGroupSponsorshipMoment {
-  purchaseId                 String   @id @map("purchase_id")
-  beneficiaryMemberId        String   @map("beneficiary_member_id")
-  creatorMemberId            String   @map("creator_member_id")
-  configurationDigest        String   @map("configuration_digest")
-  creativeRequestEncrypted   String?  @map("creative_request_encrypted")
-  publicAliasEncrypted       String?  @map("public_alias_encrypted")
-  fundingPageAliasConsent    String?  @map("funding_page_alias_consent")
-  sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
-  runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
-  activatedAt                DateTime? @map("activated_at")
-  fundingPageAliasPublishedAt DateTime? @map("funding_page_alias_published_at")
-  expiresAt                  DateTime? @map("expires_at")
-  createdAt                  DateTime  @default(now()) @map("created_at")
-  updatedAt                  DateTime  @updatedAt @map("updated_at")
-  purchase                   HostedUsageCreditPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  creator                    HostedMember @relation("HostedGroupSponsorshipMomentCreator", fields: [creatorMemberId], references: [id], onDelete: Cascade)
-
-  @@index([beneficiaryMemberId, expiresAt], map: "hosted_group_sponsorship_moment_active_idx")
-  @@index([creatorMemberId, createdAt], map: "hosted_group_sponsorship_moment_creator_idx")
-  @@map("hosted_group_sponsorship_moment")
 }
 
 model HostedUsageCreditEntry {
@@ -1883,10 +1985,21 @@ model HostedGroup {
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
   disclosurePermissions HostedGroupDisclosurePermission[]
+  offerGestureReceipts HostedGroupOfferGestureReceipt[]
 
   @@index([ownerMemberId])
   @@index([kind])
   @@map("hosted_group")
+}
+
+model HostedGroupOfferGestureReceipt {
+  id        String      @id
+  groupId   String      @map("group_id")
+  createdAt DateTime    @default(now()) @map("created_at")
+  group     HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([groupId])
+  @@map("hosted_group_offer_gesture_receipt")
 }
 
 model HostedGroupJoinOffer {
@@ -2018,6 +2131,8 @@ model HostedThreadContainer {
   memberId                   String              @id @map("member_id")
   ownerMemberId              String              @map("owner_member_id")
   monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")
+  /// Latest complete Linq roster observation; null means none recorded since this column was added. History is never assigned one.
+  completeRosterObservedAt   DateTime?           @map("complete_roster_observed_at")
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
@@ -2141,6 +2256,7 @@ model HostedLinqLine {
   maxOutboundPerDay          Int?      @map("max_outbound_per_day")
   warmupStartedAt            DateTime? @map("warmup_started_at")
   warmupEndsAt               DateTime? @map("warmup_ends_at")
+  /// Zero excludes automatic placement; existing routes and managed inbound remain valid.
   assignmentWeight           Int       @default(100) @map("assignment_weight")
   notes                      String?
   createdAt                  DateTime  @default(now()) @map("created_at")
@@ -2176,6 +2292,22 @@ model HostedLinqChatHealth {
   @@index([phoneNumberLookupKey, providerStatus], map: "hosted_linq_chat_health_phone_status_idx")
   @@index([providerStatus, providerUpdatedAt], map: "hosted_linq_chat_health_status_updated_idx")
   @@map("hosted_linq_chat_health")
+}
+
+/// Burst state for the Web "on it" emoji tapback on direct Linq chats.
+/// A burst is the member's messages after the chat's latest
+/// HostedLinqDelivery.attemptedAt. claimedAt reserves the burst's one tapback,
+/// reactedAt marks Linq accepting it, and heavyAt silences the burst.
+model HostedLinqAckReaction {
+  linqChatLookupKey String    @id @map("linq_chat_lookup_key")
+  claimedAt         DateTime? @map("claimed_at")
+  reactedAt         DateTime? @map("reacted_at")
+  heavyAt           DateTime? @map("heavy_at")
+  messageLookupKey  String?   @map("message_lookup_key")
+  reaction          String?   @map("reaction")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("hosted_linq_ack_reaction")
 }
 
 model HostedLinqProviderEvent {
@@ -2254,6 +2386,8 @@ model HostedLinqDelivery {
   payloadOwnerMemberId     String?  @map("payload_owner_member_id")
   payloadCiphertext        String?  @map("payload_ciphertext")
   payloadSchema            String?  @map("payload_schema")
+  // Completion evidence for generated game chat creation, separate from provider delivery status.
+  bootstrapRouteAttachedAt DateTime? @map("bootstrap_route_attached_at")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
   groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
@@ -2267,6 +2401,7 @@ model HostedLinqDelivery {
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
+  @@index([linqChatLookupKey, acceptedAt], map: "hosted_linq_delivery_chat_accepted_at_idx")
   @@index([lastReceiptAt])
   @@index([payloadOwnerMemberId])
   @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
@@ -2279,6 +2414,13 @@ model HostedLinqDeliveryMessage {
   ordinal             Int
   messageLookupKey    String   @unique @map("message_lookup_key")
   terminalRetryAttemptedAt DateTime? @map("terminal_retry_attempted_at")
+  terminalRetryCount Int @default(0) @map("terminal_retry_count")
+  terminalRetryNextAt DateTime? @map("terminal_retry_next_at")
+  terminalRetryExpiresAt DateTime? @map("terminal_retry_expires_at")
+  terminalRetryClaimedMessageLookupKey String? @map("terminal_retry_claimed_message_lookup_key")
+  terminalRetryPreviousMessageLookupKeys String[] @default([]) @map("terminal_retry_previous_message_lookup_keys")
+  terminalRetryContextCiphertext String? @map("terminal_retry_context_ciphertext")
+  terminalRetryOwnerMemberId String? @map("terminal_retry_owner_member_id")
   terminalRetryOriginalMessageLookupKey String? @unique(map: "hosted_linq_delivery_message_terminal_retry_key") @map("terminal_retry_original_message_lookup_key")
   messageIdSuffix     String?  @map("message_id_suffix")
   status              String   @default("accepted")
@@ -2297,6 +2439,7 @@ model HostedLinqDeliveryMessage {
   @@unique([deliveryId, ordinal])
   @@index([deliveryId, status])
   @@index([lastReceiptAt])
+  @@index([terminalRetryPreviousMessageLookupKeys], type: Gin, map: "hosted_linq_delivery_message_terminal_retry_history_idx")
   @@map("hosted_linq_delivery_message")
 }
 
@@ -2358,6 +2501,7 @@ model HostedAiUsage {
   triggerKind                String?      @map("trigger_kind")
   reportingUserId            String?      @map("reporting_user_id")
   gatewayTagsJson            Json?        @map("gateway_tags_json")
+  // Retired export columns: no application reads/writes; contract cleanup is deferred.
   stripeMeterSource          String       @default("murph") @map("stripe_meter_source")
   inputTokens                Int?         @map("input_tokens")
   outputTokens               Int?         @map("output_tokens")
@@ -2367,6 +2511,8 @@ model HostedAiUsage {
   totalTokens                Int?         @map("total_tokens")
   providerRequestOutcome     String       @default("succeeded") @map("provider_request_outcome")
   allowanceAccountedAt       DateTime?    @map("allowance_accounted_at")
+  // Null preserves historical attribution to memberId.
+  allowanceBeneficiaryMemberId String?    @map("allowance_beneficiary_member_id")
   allowancePeriodStart       DateTime?    @map("allowance_period_start")
   allowancePeriodEnd         DateTime?    @map("allowance_period_end")
   allowanceCostUsdMicros     BigInt       @default(0) @map("allowance_cost_usd_micros")
@@ -2474,6 +2620,7 @@ model HostedLinqDailyState {
   inboundCount         Int          @default(0) @map("inbound_count")
   outboundCount        Int          @default(0) @map("outbound_count")
   onboardingLinkSentAt DateTime?    @map("onboarding_link_sent_at")
+  signupLinkReminderSentAt DateTime? @map("signup_link_reminder_sent_at")
   quotaReplySentAt     DateTime?    @map("quota_reply_sent_at")
   firstSeenAt          DateTime     @map("first_seen_at")
   lastSeenAt           DateTime     @map("last_seen_at")
@@ -2526,4 +2673,314 @@ model HostedAuthRecord {
   @@index([model, memberId, id])
   @@index([model, expiresAt, id])
   @@map("hosted_auth_record")
+}
+
+model HostedConversationPoll {
+  resultNotifiedAt      DateTime?    @map("result_notified_at")
+  id                    String       @id
+  memberId              String       @map("member_id")
+  channel               String
+  conversationKey       String       @map("conversation_key")
+  providerPollKey       String?      @unique @map("provider_poll_key")
+  definitionEncrypted   String       @map("definition_encrypted")
+  resultEncrypted       String?      @map("result_encrypted")
+  dispatchedAt          DateTime?    @map("dispatched_at")
+  lastUpdateId          BigInt?      @map("last_update_id")
+  closedAt              DateTime?    @map("closed_at")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  votes                 HostedConversationPollVote[]
+
+  @@index([memberId, conversationKey, createdAt], map: "hosted_conversation_poll_conversation_idx")
+  @@index([channel, dispatchedAt])
+  @@map("hosted_conversation_poll")
+}
+
+model HostedConversationPollVote {
+  pollId                String       @map("poll_id")
+  voterKey              String       @map("voter_key")
+  voteEncrypted         String       @map("vote_encrypted")
+  lastUpdateId          BigInt       @map("last_update_id")
+  hasVote               Boolean      @map("has_vote")
+  poll                  HostedConversationPoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@id([pollId, voterKey])
+  @@index([pollId, hasVote, voterKey], map: "hosted_conversation_poll_vote_page_idx")
+  @@map("hosted_conversation_poll_vote")
+}
+
+// Weekly game. Words are sealed per member (see apps/web/src/lib/game/crypto.ts);
+// ids, numbers and dates stay plain.
+
+model GameProfile {
+  chatPhotoIntroducedAt DateTime? @map("chat_photo_introduced_at")
+  chatPhotoOffer Json? @map("chat_photo_offer")
+  photoKey           String?            @map("photo_key")
+  memberId           String             @id @map("member_id")
+  firstNameEncrypted String             @map("first_name_encrypted")
+  timeZone           String             @map("time_zone")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  member             HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  gamesCreated       Game[] @relation("GameCreator")
+  gamesWordsOwned    Game[] @relation("GameWordsOwner")
+  players            GamePlayer[]
+  labelsOwned        GameContactLabel[] @relation("GameContactLabelOwner")
+  labelsAbout        GameContactLabel[] @relation("GameContactLabelSubject")
+  blocksMade         GameBlock[]        @relation("GameBlockBlocker")
+  blocksReceived     GameBlock[]        @relation("GameBlockBlocked")
+  replies            GameReply[]
+  reportsMade        GameReport[]       @relation("GameReportReporter")
+  reportsReceived    GameReport[]       @relation("GameReportReported")
+
+  @@map("game_profile")
+}
+
+// One member's private name/photo/relationship for another; only its owner sees it.
+model GameContactLabel {
+  ownerMemberId         String      @map("owner_member_id")
+  subjectMemberId       String      @map("subject_member_id")
+  nameEncrypted         String?     @map("name_encrypted")
+  relationshipEncrypted String?     @map("relationship_encrypted")
+  photoKey              String?     @map("photo_key")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+  owner                 GameProfile @relation("GameContactLabelOwner", fields: [ownerMemberId], references: [memberId], onDelete: Cascade)
+  subject               GameProfile @relation("GameContactLabelSubject", fields: [subjectMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([ownerMemberId, subjectMemberId])
+  @@index([subjectMemberId])
+  @@map("game_contact_label")
+}
+
+model Game {
+  chatContainerMemberId String? @map("chat_container_member_id")
+  chatContainerMember HostedMember? @relation("GameChatContainer", fields: [chatContainerMemberId], references: [id], onDelete: SetNull)
+  pendingChange Json? @map("pending_change")
+  id                   String       @id
+  // Starter identity is independent of shared-ciphertext ownership.
+  createdBy            String?      @map("created_by")
+  // Rematches chain through previous_game_id; round counts the chain.
+  previousGameId       String?      @map("previous_game_id")
+  maxPlayers           Int          @default(2) @map("max_players")
+  audienceKey          String?      @map("audience_key")
+  wordsOwnerMemberId   String       @map("words_owner_member_id")
+  round                Int          @default(1)
+  // invited, negotiating, live, settled, or void (an invite/negotiation that expired)
+  status               String
+  terms                Json
+  termsWordsEncrypted  String       @map("terms_words_encrypted")
+  inviteTokenHash      String?      @unique @map("invite_token_hash")
+  inviteTokenEncrypted String?      @map("invite_token_encrypted")
+  inviteExpiresAt      DateTime?    @map("invite_expires_at")
+  lengthDays           Int          @default(7) @map("length_days")
+  // The challenger's picked Day 1, used when later than acceptance's eligible day.
+  startsOn             DateTime?    @map("starts_on") @db.Date
+  startedAt            DateTime?    @map("started_at")
+  // Dev time travel only: added to the database clock for this game. Null (no
+  // shift) everywhere else; production never writes it.
+  devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
+  result               Json?
+  recapEncrypted       String?      @map("recap_encrypted")
+  settledAt            DateTime?    @map("settled_at")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  creator              GameProfile? @relation("GameCreator", fields: [createdBy], references: [memberId], onDelete: SetNull)
+  wordsOwner           GameProfile  @relation("GameWordsOwner", fields: [wordsOwnerMemberId], references: [memberId], onDelete: Restrict)
+  invitees             GameInvitee[]
+  players              GamePlayer[]
+  tickets              GameTicket[]
+  events               GameEvent[]
+  reports              GameReport[]
+
+  @@index([chatContainerMemberId])
+  @@index([previousGameId])
+  @@index([createdBy])
+  @@index([audienceKey, status])
+  @@index([wordsOwnerMemberId])
+  @@map("game")
+}
+
+// Invitation identity survives acceptance; labels belong only to the inviter.
+model GameInvitee {
+  gameId             String @map("game_id")
+  seat               Int
+  memberId           String? @map("member_id")
+  recipientLookupKey String? @map("recipient_lookup_key")
+  pendingLabel       Json? @map("pending_label")
+  game               Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  member             HostedMember? @relation("GameInviteeMember", fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@id([gameId, seat])
+  @@unique([gameId, memberId])
+  @@unique([gameId, recipientLookupKey])
+  @@index([memberId, gameId])
+  @@index([recipientLookupKey, gameId])
+  @@map("game_invitee")
+}
+
+model GamePlayer {
+  gameId             String      @map("game_id")
+  memberId           String?     @map("member_id")
+  seat               Int
+  timeZone           String?     @map("time_zone")
+  dayOne             DateTime?   @map("day_one") @db.Date
+  joinedAt           DateTime?   @map("joined_at")
+  leftAt             DateTime?   @map("left_at")
+  // Bounded labels, each encrypted for and visible only to its original viewer.
+  departedLabel      Json?       @map("departed_label")
+  game               Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  profile            GameProfile? @relation(fields: [memberId], references: [memberId], onDelete: SetNull)
+  entries            GameEntry[]
+
+  @@id([gameId, seat])
+  @@unique([gameId, memberId])
+  @@index([memberId])
+  @@map("game_player")
+}
+
+model GameEntry {
+  id              String     @id
+  gameId          String     @map("game_id")
+  memberId        String     @map("member_id")
+  dayIndex        Int        @map("day_index")
+  // 1 or 2 for check-ins (2 is the retake), 0 for an excuse: caps each player-day.
+  attempt         Int
+  // photo, heart_rate, words, route, reps, or excuse (transcript text only)
+  kind            String
+  textEncrypted   String?    @map("text_encrypted")
+  payloadEncrypted String?   @map("payload_encrypted")
+  // Self-reported day correction. Null is ordinary credit; artifacts remain visible.
+  incomplete      Boolean?
+  // Deliberately visible locked-day preview; never requires opening the payload.
+  blurHash        String?    @map("blur_hash")
+  mediaKeys       String[]   @default([]) @map("media_keys")
+  captureAgeMs    Int?       @map("capture_age_ms")
+  receivedAt      DateTime   @map("received_at")
+  withdrawnAt     DateTime?  @map("withdrawn_at")
+  // "retake" (replaced by attempt 2) or "withdrawn" (taken back by its poster).
+  withdrawnReason String?    @map("withdrawn_reason")
+  player          GamePlayer @relation(fields: [gameId, memberId], references: [gameId, memberId], onDelete: Cascade)
+  reply           GameReply?
+  reports         GameReport[]
+
+  @@unique([gameId, memberId, dayIndex, attempt])
+  @@index([memberId])
+  @@map("game_entry")
+}
+
+// Private app-only notes. Ownership cascades independently from post and author.
+model GameReply {
+  id               String      @id
+  entryId          String      @unique @map("entry_id")
+  authorMemberId   String      @map("author_member_id")
+  kind             String
+  textEncrypted    String?     @map("text_encrypted")
+  audioEncrypted   String?     @map("audio_encrypted")
+  durationMs       Int?        @map("duration_ms")
+  levels           Int[]       @default([])
+  createdAt        DateTime    @default(now()) @map("created_at")
+  entry            GameEntry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  author           GameProfile @relation(fields: [authorMemberId], references: [memberId], onDelete: Cascade)
+  reports          GameReport[]
+
+  @@index([authorMemberId])
+  @@map("game_reply")
+}
+
+// One IOU. Its words come from the game's stake with the same key.
+model GameTicket {
+  id         String      @id
+  gameId     String      @map("game_id")
+  stakeKey   String      @map("stake_key")
+  owedBySeats Int[]      @map("owed_by_seats")
+  owedToSeats Int[]      @map("owed_to_seats")
+  status     String      @default("open")
+  redeemedAt DateTime?   @map("redeemed_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  game       Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId])
+  @@map("game_ticket")
+}
+
+// One member blocked another: every game they had going was called off, and
+// each sees the other as having left until the blocker unblocks.
+model GameBlock {
+  blockerMemberId String      @map("blocker_member_id")
+  blockedMemberId String      @map("blocked_member_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  blocker         GameProfile @relation("GameBlockBlocker", fields: [blockerMemberId], references: [memberId], onDelete: Cascade)
+  blocked         GameProfile @relation("GameBlockBlocked", fields: [blockedMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([blockerMemberId, blockedMemberId])
+  @@index([blockedMemberId])
+  @@map("game_block")
+}
+
+// A report on the other player's post, their name and photo, or the task and
+// stake they wrote, for the team to review within a day. The snapshot (the
+// reported words and media keys, sealed under the reporter's key) outlives the
+// post, the game and the reported account. A reported post stays hidden from
+// its reporter; a reported player's photo too.
+model GameReport {
+  id                    String       @id
+  reporterMemberId      String       @map("reporter_member_id")
+  reportedMemberId      String?      @map("reported_member_id")
+  gameId                String?      @map("game_id")
+  entryId               String?      @map("entry_id")
+  replyId               String?      @map("reply_id")
+  snapshotAudioEncrypted String?     @map("snapshot_audio_encrypted")
+  // post, player, terms, or reply
+  about                 String
+  // sexual, harassment, hate, violence, self_harm, money, or other
+  reason                String
+  // Frozen when accepted so every alert under its provider key is byte-identical.
+  // alertGameId is plain text because gameId is SET NULL. Legacy rows hold NULL.
+  alertBlocked          Boolean?     @map("alert_blocked")
+  alertEntryKind        String?      @map("alert_entry_kind")
+  alertFromInvite       Boolean?     @map("alert_from_invite")
+  alertGameId           String?      @map("alert_game_id")
+  noteEncrypted         String?      @map("note_encrypted")
+  snapshotTextEncrypted String?      @map("snapshot_text_encrypted")
+  snapshotMediaKeys     String[]     @default([]) @map("snapshot_media_keys")
+  // Set by the ops review action.
+  reviewedAt            DateTime?    @map("reviewed_at")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  reporter              GameProfile  @relation("GameReportReporter", fields: [reporterMemberId], references: [memberId], onDelete: Cascade)
+  reported              GameProfile? @relation("GameReportReported", fields: [reportedMemberId], references: [memberId], onDelete: SetNull)
+  game                  Game?        @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  entry                 GameEntry?   @relation(fields: [entryId], references: [id], onDelete: SetNull)
+
+  reply                 GameReply?   @relation(fields: [replyId], references: [id], onDelete: SetNull)
+
+  @@unique([reporterMemberId, replyId])
+  @@index([replyId])
+  @@unique([reporterMemberId, entryId])
+  @@index([reporterMemberId, createdAt])
+  @@index([reportedMemberId])
+  @@index([gameId])
+  @@index([entryId])
+  @@index([reviewedAt, createdAt])
+  @@map("game_report")
+}
+
+// Append-only history of accepted changes, one row each, in the same
+// transaction. Payloads hold ids and numbers only; words stay in their
+// encrypted columns. Nothing reads it yet.
+model GameEvent {
+  commandKey String? @unique @map("command_key")
+  id        BigInt   @id @default(autoincrement())
+  gameId    String   @map("game_id")
+  // A member id, or "murph" / "system".
+  actor     String
+  type      String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, id])
+  @@index([actor, type])
+  @@map("game_event")
 }

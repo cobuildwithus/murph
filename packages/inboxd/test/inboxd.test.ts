@@ -1,12 +1,13 @@
+import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
-import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
+import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 import {
   initializeVault,
   isVaultError,
@@ -15,16 +16,13 @@ import {
   VAULT_LAYOUT,
   walkVaultFiles,
 } from "@murphai/core";
-import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 
 import {
-  createConnectorRegistry,
   createInboxPipeline,
   listInboxCaptureMutations,
   openInboxRuntime,
   readInboxCaptureMutationHead,
   rebuildRuntimeFromVault,
-  runPollConnector,
 } from "../src/index.ts";
 import {
   sanitizeRawMetadata,

@@ -4,16 +4,21 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertCircleIcon,
-  Link2,
   MessageCircleIcon,
-  RefreshCwIcon,
   SendIcon,
   SmartphoneIcon,
 } from "lucide-react";
 
-import { WatchCheckIcon } from "@/src/components/icons/home-icons";
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { LinkPagePair } from "@/src/components/link-page/link-page-pair";
+import {
+  LINK_PAGE_LINK_CLASS,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
+import { LinkPageTakeover } from "@/src/components/link-page/link-page-takeover";
+import { buttonVariants } from "@/src/components/ui/button";
 import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 import {
   Dialog,
@@ -27,7 +32,6 @@ import type {
   DeviceSyncCompletionDialogModel,
   DeviceSyncCompletionSetupGuide,
 } from "@/src/lib/device-sync/connect-completion-types";
-import { cn } from "@/src/lib/utils";
 
 // Keys are duplicated here (rather than imported from the server-only resolver
 // modules) so this client component can preserve them for the one unverified
@@ -59,11 +63,6 @@ export function DeviceSyncCompletionDialog({
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const router = useRouter();
   const setupGuide = model.setupGuide ?? null;
-  const PrimaryIcon = model.failed
-    ? RefreshCwIcon
-    : model.contactAction?.kind === "telegram"
-      ? SendIcon
-      : MessageCircleIcon;
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
@@ -98,93 +97,79 @@ export function DeviceSyncCompletionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        data-completion-unverified={model.unverified ? "true" : undefined}
-        showCloseButton={false}
-        className="max-w-md gap-6 rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
-      >
-        <DialogHeader className="items-center gap-4 text-center">
-          <span
-            aria-hidden="true"
-            data-device-sync-icon={resolveHeaderIconKind(model)}
-            className={cn(
-              "flex size-16 items-center justify-center rounded-2xl",
-              model.failed
-                ? "bg-destructive/10 text-destructive"
-                : "bg-primary/10 text-primary",
-            )}
-          >
-            {model.failed ? (
-              <AlertCircleIcon className="size-8" />
-            ) : model.kind === "connected-app" ? (
-              <Link2 className="size-8" />
-            ) : (
-              <WatchCheckIcon className="size-10" />
-            )}
-          </span>
-          <div className="flex flex-col gap-2">
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-              {model.title}
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              {model.detail}
-            </DialogDescription>
-          </div>
-        </DialogHeader>
+    <LinkPageTakeover
+      data-completion-unverified={model.unverified ? "true" : undefined}
+      label={model.title}
+      onOpenChange={handleOpenChange}
+      open={open}
+    >
+      <DeviceSyncCompletionScreen
+        model={model}
+        onContinueExploring={() => handleOpenChange(false)}
+        onShowSetupGuide={() => setShowSetupGuide(true)}
+      />
+    </LinkPageTakeover>
+  );
+}
 
-        <div className="flex flex-col gap-2">
+export function DeviceSyncCompletionScreen({
+  model,
+  onContinueExploring,
+  onShowSetupGuide,
+}: {
+  model: DeviceSyncCompletionDialogModel;
+  onContinueExploring?: () => void;
+  onShowSetupGuide?: () => void;
+}) {
+  const setupGuide = model.setupGuide ?? null;
+  const ContactIcon = model.contactAction?.kind === "telegram"
+    ? SendIcon
+    : MessageCircleIcon;
+
+  return (
+    <LinkPageScreen
+      actions={
+        <>
           {setupGuide ? (
-            <Button
-              type="button"
+            <LinkPagePill
               aria-label={setupGuide.actionAriaLabel}
-              className="w-full"
-              size="xl"
-              onClick={() => setShowSetupGuide(true)}
+              onClick={onShowSetupGuide}
             >
-              <RefreshCwIcon data-icon="inline-start" />
               {setupGuide.actionLabel}
-            </Button>
+            </LinkPagePill>
           ) : null}
           {model.failed && model.retryHref ? (
-            <Link
-              href={model.retryHref}
-              className={buttonVariants({
-                className: "w-full",
-                size: "xl",
-              })}
-            >
-              <PrimaryIcon data-icon="inline-start" />
+            <Link className={LINK_PAGE_PILL_CLASS} href={model.retryHref}>
               Try again
             </Link>
           ) : model.contactAction ? (
             <a
               aria-label={model.contactAction.ariaLabel}
-              className={buttonVariants({
-                className: "w-full",
-                size: "xl",
-                variant: setupGuide ? "outline" : "default",
-              })}
+              className={setupGuide ? LINK_PAGE_LINK_CLASS : LINK_PAGE_PILL_CLASS}
               href={model.contactAction.href}
               rel={model.contactAction.rel}
               target={model.contactAction.target}
             >
-              <PrimaryIcon data-icon="inline-start" />
+              {setupGuide ? null : (
+                <ContactIcon aria-hidden="true" className="size-5 shrink-0" />
+              )}
               {model.contactAction.label}
             </a>
           ) : null}
-          <Button
-            type="button"
-            className="w-full"
-            size="xl"
-            variant="ghost"
-            onClick={() => handleOpenChange(false)}
-          >
-            Continue exploring
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+          <LinkPageLink onClick={onContinueExploring}>Continue exploring</LinkPageLink>
+        </>
+      }
+      detail={model.detail}
+      title={model.title}
+    >
+      {model.logo ? (
+        <LinkPagePair
+          joined={!model.failed && !model.unverified}
+          logoSrc={model.logo.src}
+          name={model.logo.name}
+        />
+      ) : null}
+    </LinkPageScreen>
   );
 }
 
@@ -292,15 +277,6 @@ export function DeviceSyncSetupGuideDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function resolveHeaderIconKind(
-  model: DeviceSyncCompletionDialogModel,
-): "alert" | "watch" | "link" {
-  if (model.failed) {
-    return "alert";
-  }
-  return model.kind === "connected-app" ? "link" : "watch";
 }
 
 function resolveContinueWithMurphAriaLabel(

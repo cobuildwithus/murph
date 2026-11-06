@@ -250,9 +250,7 @@ const hostedDataApiLabelSearchResultItemSchema = z.object({
 })
 
 export type HostedDataApiLabelSearchInput = z.infer<typeof hostedDataApiLabelSearchInputSchema>
-export type HostedDataApiLabelSearchItem = z.infer<typeof hostedDataApiLabelSearchItemSchema>
 export type HostedDataApiLabelBatchSearchInput = z.infer<typeof hostedDataApiLabelBatchSearchInputSchema>
-export type HostedDataApiLabelSearchResultItem = z.infer<typeof hostedDataApiLabelSearchResultItemSchema>
 export type HostedDataApiLabelGenericSearchInput = HostedDataApiLabelSearchInput & {
   genericOnly?: boolean
   nutritionOnly?: boolean

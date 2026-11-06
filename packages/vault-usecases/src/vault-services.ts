@@ -5,7 +5,7 @@ import {
   healthCoreServiceMethodNames,
   healthQueryServiceMethodNames,
 } from "./health-cli-descriptors.js"
-import { createUnwiredMethod } from "./usecases/runtime.js"
+import { createUnwiredMethod, timeServiceRuntimeLoad } from "./usecases/runtime.js"
 
 import type {
   CoreWriteServices,
@@ -135,7 +135,6 @@ const queryServiceMethodNames = [
   "showWearableMetricTrend",
   "showWearableDrift",
   "showWearableSleepPattern",
-  "showPersonalPatterns",
   "listWearableSleep",
   "listWearableActivity",
   "listWearableBodyState",
@@ -203,7 +202,8 @@ function createIntegratedServicesLoader(
   let servicesPromise: Promise<VaultServices> | null = null
 
   return async () => {
-    servicesPromise ??= import("./usecases/integrated-services.js")
+    // Cold module load only; the factory call and later service methods are excluded.
+    servicesPromise ??= timeServiceRuntimeLoad(() => import("./usecases/integrated-services.js"))
       .then(({ createIntegratedVaultServices }) => createIntegratedVaultServices(dependencies))
       .catch((error) => {
         servicesPromise = null

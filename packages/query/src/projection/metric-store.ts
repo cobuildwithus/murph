@@ -66,10 +66,16 @@ export function insertMetricPoints(
   database: DatabaseSync,
   metricPoints: readonly MetricPoint[],
 ): void {
+  // Full publication inserts one generation under the existing transaction.
+  // Share exact codec output without a persistent duplicate-text index.
+  const payloadIds = new Map<string, number | bigint>();
+  const pointIds = new Set<string>();
+  const insertPayload = database.prepare(`
+    INSERT INTO query_metric_payloads (metric_point_json) VALUES (?)
+  `);
   const insertMetricPoint = database.prepare(`
     INSERT INTO query_metric_points (
       id,
-      sort_rank,
       metric_key,
       biomarker_key,
       value,
@@ -90,14 +96,25 @@ export function insertMetricPoints(
       source_result_index,
       source_path,
       confidence,
-      metric_point_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      payload_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  metricPoints.forEach((point, index) => {
+  metricPoints.forEach((point) => {
+    // Identity dedupe compares full tuples; distinct tuples can hash to one ID.
+    // Preserve the old global ID constraint without a persistent unique index.
+    if (pointIds.has(point.id)) {
+      throw new Error("UNIQUE constraint failed: query_metric_points.id");
+    }
+    pointIds.add(point.id);
+    const payload = stringifyStoredMetricPointPayload(point);
+    let payloadId = payloadIds.get(payload);
+    if (payloadId === undefined) {
+      payloadId = insertPayload.run(payload).lastInsertRowid;
+      payloadIds.set(payload, payloadId);
+    }
     insertMetricPoint.run(
       point.id,
-      index,
       point.metricKey,
       point.biomarkerKey,
       point.canonicalValue ?? point.value,
@@ -118,7 +135,7 @@ export function insertMetricPoints(
       point.source.resultIndex,
       point.source.path,
       point.confidence,
-      stringifyStoredMetricPointPayload(point),
+      payloadId,
     );
   });
 }
@@ -240,6 +257,7 @@ function queryStoredMetricPoints(
       confidence,
       metric_point_json
     FROM query_metric_points
+    JOIN query_metric_payloads USING (payload_id)
     ${whereSql}
     ORDER BY effective_date DESC, observed_at DESC, id ASC
     ${limitSql}
@@ -311,11 +329,17 @@ export function extractMetricTargetsFromCanonicalEntities(
     );
 }
 
-function normalizeMetricPointLimit(value: number): number {
+export function normalizeMetricPointLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
     return 1_000;
   }
   return Math.min(value, 10_000);
+}
+
+/** Preserve the same evidence projection for direct and SQLite-backed readers. */
+export function projectMetricPointForQuery(point: MetricPoint): MetricPoint {
+  const payload = readStoredMetricPointPayload(stringifyStoredMetricPointPayload(point), point.source.kind);
+  return { ...point, context: payload.context, provenance: payload.provenance };
 }
 
 function stringifyStoredMetricPointPayload(point: MetricPoint): string {

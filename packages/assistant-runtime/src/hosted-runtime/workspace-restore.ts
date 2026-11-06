@@ -1,3 +1,6 @@
+import { withIntegrationIngestMaterializer } from "@murphai/core";
+import { resetHostedPhotoIntentsAfterColdRestore } from "./media-references.ts";
+import { resolveWorkspaceDurableRoot } from "./workspace-paths.ts";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +30,7 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  HostedColdHistoryUnavailableError,
   resolveAssistantStatePaths,
   pruneHostedCodexHomeToSessionReferencedRollouts,
 } from "@murphai/runtime-state/node";
@@ -168,13 +172,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       if (input.signal?.aborted) {
         throw input.signal.reason ?? error;
       }
-      if (
-        error instanceof HostedRuntimeArtifactReadError
-        && error.retryable
-      ) {
+      if (isOperationalHostedReceiptReplayFailure(error)) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
         await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-        throw error.cause ?? error;
+        throw error instanceof HostedRuntimeArtifactReadError && error.retryable
+          ? error.cause ?? error
+          : error;
       }
       return {
         count: 0,
@@ -215,10 +218,11 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       };
     }
     const restoreTiming = await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
-      durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
+      durableRoot: resolveWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,
       signal: input.signal ?? null,
     });
+    resetHostedPhotoIntentsAfterColdRestore(restored.vaultRoot);
     await Promise.all([
       createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
       createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
@@ -269,6 +273,35 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     restoreWasCold: true,
     restoreTiming: null,
   };
+}
+
+// System errors that describe the receipt's target tree, so replay can never succeed.
+const HOSTED_RECEIPT_REPLAY_TREE_SHAPE_ERROR_CODES = new Set([
+  "EEXIST", "EINVAL", "EISDIR", "ELOOP", "ENAMETOOLONG", "ENOENT", "ENOTDIR", "ENOTEMPTY",
+]);
+
+// Only invalid history may retire Web's acknowledged log. The nearest explicit
+// retry disposition wins, so a terminal artifact read stays terminal.
+function isOperationalHostedReceiptReplayFailure(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof HostedColdHistoryUnavailableError) {
+      return true;
+    }
+    if ("retryable" in current && typeof current.retryable === "boolean") {
+      return current.retryable;
+    }
+    // Only OS calls carry `syscall`; zlib decode errors have `errno` but prove bad data.
+    if ("code" in current && typeof current.code === "string"
+      && "syscall" in current && typeof current.syscall === "string"
+      && !HOSTED_RECEIPT_REPLAY_TREE_SHAPE_ERROR_CODES.has(current.code)) {
+      return true;
+    }
+    current = "cause" in current ? current.cause : null;
+  }
+  return false;
 }
 
 interface HostedWorkspaceCleanCheckpointMarker {
@@ -526,7 +559,7 @@ async function assertHostedWorkspaceWarmCleanRoots(
   restored: HostedRestoredExecutionContext,
 ): Promise<void> {
   await Promise.all([
-    assertHostedWorkspaceWarmCleanDirectory(resolveHostedWorkspaceDurableRoot(restored.vaultRoot)),
+    assertHostedWorkspaceWarmCleanDirectory(resolveWorkspaceDurableRoot(restored.vaultRoot)),
     assertHostedWorkspaceWarmCleanDirectory(restored.vaultRoot),
     assertHostedWorkspaceWarmCleanDirectory(restored.assistantStateRoot),
     assertHostedWorkspaceWarmCleanDirectory(restored.operatorHomeRoot),
@@ -830,6 +863,14 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
 }): Promise<number> {
+  return withIntegrationIngestMaterializer(input.vaultRoot, async (paths) => {
+    await input.materializeWorkspaceArtifacts?.(paths);
+  }, () => applyHostedCanonicalWriteReceiptsWithHistory(input));
+}
+
+async function applyHostedCanonicalWriteReceiptsWithHistory(
+  input: Parameters<typeof applyHostedCanonicalWriteReceiptsFromWorkspaceState>[0],
+): Promise<number> {
   const receiptLog = await readHostedCanonicalWriteReceiptLog({
     artifactStore: input.platform.artifactStore,
     status: input.status,
@@ -992,14 +1033,6 @@ function readHostedWorkspaceRuntimeLocalRoots(
   };
 }
 
-function resolveHostedWorkspaceDurableRoot(vaultRoot: string): string {
-  const resolvedVaultRoot = path.resolve(vaultRoot);
-  if (path.basename(resolvedVaultRoot) === "vault") {
-    return path.dirname(resolvedVaultRoot);
-  }
-  return resolvedVaultRoot;
-}
-
 function resolveHostedWorkspaceOperatorHomeRoot(vaultRoot: string): string {
   const resolvedVaultRoot = path.resolve(vaultRoot);
   const parent = path.dirname(resolvedVaultRoot);
@@ -1031,6 +1064,7 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
       recursive: true,
     }),
   ]);
+  resetHostedPhotoIntentsAfterColdRestore(restored.vaultRoot);
   await Promise.all([
     createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
     createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),

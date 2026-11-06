@@ -1,3 +1,9 @@
+import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
+import { readRuntimeTargetAdapter } from "../runtime-target-adapter.ts";
+import type {
+  HostedRuntimeCompletionReceipt,
+  HostedRuntimeCompletionReceiptReason,
+} from "../runtime-completion-receipt.ts";
 import {
   parseHostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/parsers";
@@ -10,10 +16,6 @@ import {
 } from "../json.ts";
 import type {
   RunnerOutboundEnvironmentSource,
-} from "./shared.ts";
-import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
 } from "./shared.ts";
 import {
   requireRunnerRuntimeWriteFenceHeaders,
@@ -49,18 +51,27 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
       : jsonError("Invalid request.", 400);
   }
 
-  const userRunner = await resolveRunnerOutboundUserRunnerStub(
-    input.env,
-    input.userId,
-  );
-  requireRunnerOutboundUserStubMethod(
-    userRunner,
-    "recordRuntimeCompletionFromContainer",
-  );
-  return json(await userRunner.recordRuntimeCompletionFromContainer({
-    attemptId: authority.attemptId,
-    generation: authority.generation,
-    result,
-    userId: input.userId,
-  }));
+  const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
+  const owner = state.owner;
+  if (owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) {
+    let reason: HostedRuntimeCompletionReceiptReason = "owner_unconfirmed";
+    if (owner) {
+      // Release clears the attempt, but warm reuse can retain the target.
+      // Idle alone is not completion evidence; a newer generation proves only
+      // supersession, never completion or delivery of this result.
+      if (owner.generation === authority.generation && owner.phase === "idle"
+        && owner.attemptId === null && owner.completedAt) {
+        reason = "already_completed";
+      } else if (/^[0-9]{1,19}$/u.test(authority.generation)
+        && BigInt(owner.generation) > BigInt(authority.generation)) {
+        // Headers have only presence validation here. Keep malformed values
+        // on the existing false path rather than throwing during diagnostics.
+        reason = "superseded";
+      }
+    }
+    return json({ completed: false, reason } satisfies HostedRuntimeCompletionReceipt);
+  }
+  const container = readRuntimeTargetAdapter(input.env, owner.runnerContainerName);
+  if (!container?.recordSupervisedRuntimeCompletion) throw new Error("Native runtime completion receipt is unavailable.");
+  return json(await container.recordSupervisedRuntimeCompletion({ userId: input.userId, attemptId: authority.attemptId, generation: authority.generation, result }));
 }

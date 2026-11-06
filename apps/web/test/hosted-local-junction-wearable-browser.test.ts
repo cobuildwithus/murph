@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,6 +48,9 @@ vi.mock("../src/lib/computer-use/kernel-client.ts", () => ({
 }));
 
 import {
+  runHostedLocalJunctionBrowserForTest,
+  formatHostedLocalJunctionBrowserFailureForTest,
+  readHostedLocalJunctionDiagnosticLocationForTest,
   buildKernelCliEnvironmentForTest,
   buildKernelTunnelArgumentsForTest,
   closeHostedLocalJunctionBrowserSessionForTest,
@@ -57,6 +61,7 @@ import {
   readHostedLocalJunctionBrowserConfigForTest,
   sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopHostedLocalJunctionKernelTunnelForTest,
+  waitForHostedLocalJunctionCanonicalDataCheckForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
 
 interface FakeKernelTunnelChild extends EventEmitter {
@@ -248,6 +253,101 @@ describe("hosted-local Junction wearable browser authorization", () => {
     vi.clearAllMocks();
   });
 
+  it.each([
+    ["https://private-subdomain.garmin.com/partner/oauthConfirm?token=private#private", "garmin.com/partner_consent"],
+    ["https://connect.garmin.com/private-path/private-id", "garmin.com/other"],
+    ["https://private.tryvital.io/private-path", "tryvital.io/other"],
+    ["https://garmin.com.untrusted.invalid/private", "other"],
+    ["https://private.invalid/private", "other"],
+    ["chrome-error://chromewebdata/", "browser_error"],
+    ["about:blank", "other"],
+    ["invalid", "unavailable"],
+  ])("reports only fixed location categories for %s", (url, expected) => {
+    expect(readHostedLocalJunctionDiagnosticLocationForTest({ url: () => url }))
+      .toBe(expected);
+  });
+
+  it("preserves the original authorization timeout and route before failing cleanup", async () => {
+    let url = "https://app.example.test/connect";
+    let clicks = 0;
+    const frame = authorizationFrame({
+      buttons: [{
+        text: "Continue",
+        onClick: () => {
+          clicks += 1;
+          url = "chrome-error://chromewebdata/";
+          const error = new Error("private page text and https://private.invalid/private-token");
+          error.name = "TimeoutError";
+          throw error;
+        },
+      }],
+    });
+    const page = {
+      frames: () => [frame],
+      getByRole: (...args: Parameters<typeof frame.getByRole>) =>
+        args[0] === "dialog"
+          ? { getByRole: () => ({ click: async () => { url = "https://connect.garmin.com/signin?token=private"; } }) }
+          : frame.getByRole(...args),
+      goto: vi.fn(async () => undefined),
+      locator: vi.fn(() => emptyLocator()),
+      setDefaultNavigationTimeout: vi.fn(),
+      setDefaultTimeout: vi.fn(),
+      title: vi.fn(async () => "Sign in"),
+      url: () => url,
+      waitForResponse: () => new Promise(() => undefined),
+      waitForURL: vi.fn(async () => undefined),
+    };
+    let releaseCleanup = () => {};
+    const cleanupPending = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+    const close = vi.fn(async () => {
+      await cleanupPending;
+      url = "about:blank";
+      throw new Error("private cleanup error");
+    });
+    kernelLifecycleMocks.launch.mockResolvedValue({
+      close,
+      newContext: async () => ({
+        addCookies: async () => undefined,
+        newPage: async () => page,
+      }),
+    });
+    const environment = {
+      CI: "true",
+      MURPH_E2E_WEB_BASE_URL: "https://app.example.test",
+      MURPH_E2E_CONNECT_URL: "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_HOSTED_SESSION_COOKIE: "murph_session=opaque-session",
+      MURPH_E2E_PROVIDER_EMAIL: "browser-canary@example.invalid",
+      MURPH_E2E_PROVIDER_PASSWORD: "opaque-password",
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      MURPH_E2E_PROVIDER_BROWSER: "local",
+      MURPH_E2E_PROVIDER_HEADLESS: "0",
+      MURPH_E2E_PROVIDER_TIMEOUT_MS: "30000",
+    };
+    for (const [key, value] of Object.entries(environment)) vi.stubEnv(key, value);
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const failedRun = expect(runHostedLocalJunctionBrowserForTest()).rejects.toThrow(
+      "Authorization action failed (timeout)",
+    );
+    try {
+      await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+      // The browser has not exited: cleanup is still pending. Its original
+      // authorization boundary and cleanup handoff must already be observable.
+      expect(write).toHaveBeenCalledWith("MURPH_E2E_WEARABLE_STAGE=junction_garmin_authorization\n");
+      expect(write).toHaveBeenCalledWith("MURPH_E2E_WEARABLE_STAGE=browser_cleanup\n");
+      releaseCleanup();
+      await failedRun;
+      expect(close).toHaveBeenCalledOnce();
+      expect(clicks).toBe(1);
+      expect(formatHostedLocalJunctionBrowserFailureForTest(new Error("later error")))
+        .toBe("Junction wearable browser E2E failed at junction_garmin_authorization (browser_error): Authorization action failed (timeout); action=authorization_button; before=garmin.com/other; after=browser_error.");
+    } finally {
+      releaseCleanup();
+      await failedRun;
+      write.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("uses the local browser transport unless the caller selects Kernel", () => {
     const config = createConfig();
 
@@ -373,7 +473,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
   });
 
-  it("creates and tears down the exact owned Garmin Kernel browser and tunnel", async () => {
+  it.each([false, true])("owns the Garmin Kernel browser through cleanup with canonical data=%s", async (canonicalData) => {
     const child = createKernelTunnelChild();
     const clearCookies = vi.fn(async () => undefined);
     const browser = {
@@ -382,6 +482,10 @@ describe("hosted-local Junction wearable browser authorization", () => {
     };
     const config = createConfig({
       KERNEL_API_KEY: "kernel-test-key",
+      ...(canonicalData ? {
+        MURPH_E2E_JUNCTION_WEARABLE_DATA: "1",
+        MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: "1200000",
+      } : {}),
       MURPH_E2E_CONNECT_URL:
         "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
       MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
@@ -392,7 +496,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
     const parentExitListenersBefore = process.listenerCount("exit");
 
-    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
     kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
       cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
       sessionId: "kernel-session-1",
@@ -420,14 +523,10 @@ describe("hosted-local Junction wearable browser authorization", () => {
 
     await closeHostedLocalJunctionBrowserSessionForTest(session, config);
 
-    expect(kernelLifecycleMocks.ensureProfile).toHaveBeenCalledWith(
-      "murph-junction-garmin-canary",
-    );
+    expect(kernelLifecycleMocks.ensureProfile).not.toHaveBeenCalled();
     expect(kernelLifecycleMocks.createAutomationBrowser).toHaveBeenCalledWith({
       headless: false,
-      profileName: "murph-junction-garmin-canary",
-      saveChanges: true,
-      timeoutSeconds: 90,
+      timeoutSeconds: canonicalData ? 1350 : 90,
     });
     expect(kernelLifecycleMocks.connectOverCDP).toHaveBeenCalledWith(
       "wss://cdp.example.test/session/capability-secret",
@@ -465,7 +564,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
       ReturnType<typeof openHostedLocalJunctionBrowserSessionForTest>
     > | null = null;
 
-    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
     kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
       cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
       sessionId: "kernel-session-real-child",
@@ -565,7 +663,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
     const parentExitListenersBefore = process.listenerCount("exit");
 
-    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
     kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
       cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
       sessionId: "kernel-session-2",
@@ -939,8 +1036,11 @@ describe("hosted-local Junction wearable browser authorization", () => {
     ].join(" "));
   });
 
-  it("completes Garmin's exact two-step consent flow", async () => {
-    let step: "selection" | "confirmation" | "murph" = "selection";
+  it.each(["none", "read", "fill", "unchanged"] as const)(
+    "completes Garmin consent after a login-field transition (%s)",
+    async (transition) => {
+    let step: "login" | "selection" | "confirmation" | "murph" =
+      transition === "none" ? "selection" : "login";
     let now = 0;
     let saveClicks = 0;
     let agreeClicks = 0;
@@ -995,14 +1095,34 @@ describe("hosted-local Junction wearable browser authorization", () => {
     const currentFrame = () => step === "selection"
       ? selectionFrame
       : confirmationFrame;
+    const staleFieldError = new Error("Login field is no longer available.");
+    const fill = vi.fn(async () => {
+      step = "selection";
+      throw staleFieldError;
+    });
+    const emailInput = {
+      isVisible: async () => true,
+      isEditable: async () => true,
+      inputValue: async () => {
+        if (transition === "fill") return "";
+        if (transition === "read") step = "selection";
+        throw staleFieldError;
+      },
+      fill,
+    };
     const page = {
       frames: () => [currentFrame()],
       getByRole: (...args: Parameters<typeof selectionFrame.getByRole>) =>
         currentFrame().getByRole(...args),
-      locator: vi.fn(() => emptyLocator()),
+      locator: vi.fn((selector: string) =>
+        step === "login" && selector === 'input[type="email"]'
+          ? { count: async (): Promise<number> => 1, nth: () => emailInput }
+          : emptyLocator()),
       mainFrame: currentFrame,
       title: vi.fn(async () => "Garmin Partner Auth"),
-      url: () => step === "murph"
+      url: () => step === "login"
+        ? "https://connect.garmin.com/sign-in"
+        : step === "murph"
         ? "https://app.example.test/home"
         : step === "confirmation"
         ? [
@@ -1019,7 +1139,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
     };
 
-    await expect(completeExternalJunctionAuthorizationForTest(
+    const authorization = completeExternalJunctionAuthorizationForTest(
       page as never,
       createConfig({
         MURPH_E2E_CONNECT_URL:
@@ -1027,7 +1147,15 @@ describe("hosted-local Junction wearable browser authorization", () => {
         MURPH_E2E_PROVIDER_SOURCE: "garmin",
       }),
       () => now,
-    )).resolves.toBeUndefined();
+    );
+    if (transition === "unchanged") {
+      await expect(authorization).rejects.toBe(staleFieldError);
+      expect(saveClicks).toBe(0);
+      expect(agreeClicks).toBe(0);
+      expect(fill).not.toHaveBeenCalled();
+      return;
+    }
+    await expect(authorization).resolves.toBeUndefined();
 
     expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(true);
     expect(saveClicks).toBe(1);
@@ -1035,6 +1163,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(cancelClicked).toBe(false);
     expect(disagreeClicked).toBe(false);
     expect(now).toBe(1_500);
+    expect(fill).toHaveBeenCalledTimes(transition === "fill" ? 1 : 0);
   });
 
   it("submits Garmin confirmation only once while route departure is unresolved", async () => {
@@ -1612,7 +1741,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     }).manualAuthorizationAllowed).toBe(false);
   });
 
-  it("waits for the reloaded connect page before disconnecting", async () => {
+  it.each([200, 503])("waits for page load and diagnoses disconnect HTTP %i", async (status) => {
     const events: string[] = [];
     const dialog = {
       getByRole: vi.fn((role: string) => role === "heading"
@@ -1651,13 +1780,30 @@ describe("hosted-local Junction wearable browser authorization", () => {
           events.push("notice");
         }),
       })),
+      waitForResponse: vi.fn(async (accept: (response: {
+        url: () => string;
+        request: () => { method: () => string };
+      }) => boolean) => {
+        const response = (origin: string, pathname: string, method = "POST") => ({
+          url: () => `${origin}${pathname}`,
+          request: () => ({ method: () => method }),
+        });
+        const route = "/api/settings/device-sync/connections/synthetic/disconnect";
+        expect(accept(response("https://app.example.test", route))).toBe(true);
+        expect(accept(response("https://app.example.test", route.replace("/disconnect", "/sources/garmin/disconnect")))).toBe(true);
+        expect(accept(response("https://other.example.test", route))).toBe(false);
+        expect(accept(response("https://app.example.test", route, "GET"))).toBe(false);
+        expect(accept(response("https://app.example.test", "/unrelated/disconnect"))).toBe(false);
+        events.push("response-listener");
+        return { ok: () => status === 200, status: () => status };
+      }),
       waitForLoadState: vi.fn(async (state: string) => {
         expect(state).toBe("load");
         events.push("load");
       }),
     };
 
-    await disconnectHostedLocalJunctionAccountForTest(
+    const cleanup = disconnectHostedLocalJunctionAccountForTest(
       page as never,
       createConfig({
         MURPH_E2E_CONNECT_URL:
@@ -1666,6 +1812,13 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
     );
 
+    if (status !== 200) {
+      await expect(cleanup).rejects.toThrow(`MURPH_E2E_JUNCTION_DISCONNECT_HTTP_${status}`);
+      expect(page.getByText).not.toHaveBeenCalled();
+      expect(events).not.toContain("idle");
+      return;
+    }
+    await cleanup;
     expect(page.waitForLoadState).toHaveBeenCalledWith("load", {
       timeout: 30_000,
     });
@@ -1673,6 +1826,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "load",
       "trigger",
       "dialog",
+      "response-listener",
       "confirm",
       "notice",
       "idle",
@@ -1798,5 +1952,66 @@ describe("hosted-local Junction wearable browser authorization", () => {
         "Murph did not complete the Junction callback redirect.",
       );
     }
+  });
+});
+
+
+describe("live Garmin canonical-data browser rendezvous", () => {
+  it("keeps the browser rendezvous open through the first historical retry", async () => {
+    vi.useFakeTimers();
+    const input = new PassThrough();
+    const config = createConfig({
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      MURPH_E2E_CONNECT_URL: "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+      MURPH_E2E_JUNCTION_WEARABLE_DATA: "1",
+      MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: "1200000",
+    });
+    try {
+      let settled = false;
+      const waiting = waitForHostedLocalJunctionCanonicalDataCheckForTest({
+        input, onReady: () => undefined, timeoutMs: config.dataTimeoutMs + 30_000,
+      }).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(settled).toBe(false);
+      input.end("MURPH_E2E_GARMIN_DATA_CHECK_COMPLETE=1\n");
+      await expect(waiting).resolves.toBeUndefined();
+    } finally {
+      input.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains connection-only mode unless canonical proof is explicitly selected", () => {
+    expect(createConfig().awaitCanonicalData).toBe(false);
+    expect(() => createConfig({ MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" })).toThrow("requires Garmin");
+  });
+
+  it("announces readiness after registering its pipe and accepts a split completion message", async () => {
+    const input = new PassThrough();
+    const onReady = vi.fn(() => {
+      input.write("MURPH_E2E_GARMIN_DATA_CHECK_");
+      input.end("COMPLETE=1\n");
+    });
+    await expect(waitForHostedLocalJunctionCanonicalDataCheckForTest({ input, onReady, timeoutMs: 1000 })).resolves.toBeUndefined();
+    expect(onReady).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed if the parent exits before data verification completes", async () => {
+    const input = new PassThrough();
+    await expect(waitForHostedLocalJunctionCanonicalDataCheckForTest({
+      input,
+      onReady: () => input.end(),
+      timeoutMs: 1000,
+    })).rejects.toThrow("ended before completion");
+  });
+
+  it("rejects an invalid control message without including it in the error", async () => {
+    const input = new PassThrough();
+    await expect(waitForHostedLocalJunctionCanonicalDataCheckForTest({
+      input,
+      onReady: () => input.end("private-provider-content\n"),
+      timeoutMs: 1000,
+    })).rejects.toThrow(/^Garmin canonical data control message was invalid\.$/u);
   });
 });

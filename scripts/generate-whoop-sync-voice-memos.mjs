@@ -9,7 +9,7 @@ import { generateElevenLabsSpeechMp3 } from "./elevenlabs-speech-generation.mjs"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "apps/web/public/audio/whoop-sync-memos");
-const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v3";
+const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v4";
 // Played from the WHOOP Apple Health fallback card on /connect, in the voice
 // the member picked during onboarding.
 const MEMO_TEXT =

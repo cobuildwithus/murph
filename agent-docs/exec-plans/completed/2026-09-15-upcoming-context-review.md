@@ -1,0 +1,181 @@
+# Upcoming context: silent activation and reviewed PR
+
+## Outcome
+
+Finish the morning Journal/upcoming-context change with silent first-run capture,
+then publish an owned PR with green final ReviewGPT and required CI. First obtain
+ReviewGPT advice on deeper life-context understanding using existing primitives;
+prioritize simple, composable architecture over new machinery.
+
+## Invariants and scope
+
+Remove connection heads-up messages and notice-based eligibility. Active supported
+connections can be read immediately in the next morning run. Preserve explicit
+opt-outs, private/group isolation, Journal canonical truth, source reconciliation,
+existing follow-ups, date/uncertainty semantics, and ordinary action authority.
+Historical completed plans remain immutable; this plan supersedes their notice
+policy for the new iteration. No deployment or production account mutations.
+
+## Steps and evidence
+
+- [x] Obtain and evaluate the exploratory ReviewGPT architecture/product advice.
+- [x] Remove the notice gate across skill, seed, tests, and current owner docs.
+- [x] Implement concrete accepted improvements with existing owners.
+- [x] Run focused deterministic/live proof, typechecks, complexity and parent review.
+- [x] Publish the PR with complete evidence and provider-input measurements.
+- [x] Obtain green final ReviewGPT and resolve findings; final exact-head CI remains the PR completion gate.
+- [x] Close the implementation plan and commit final evidence; retain the open PR checkout for CI completion and handoff.
+
+## Review boundary
+
+Exploratory advice is requested before publication and is not final approval.
+Use the standard final PR review on the stable pushed head. Inspect recommendations
+against source evidence; reject speculative complexity and redundant owners.
+
+## Silent activation evidence
+
+The managed seed, owning skill, routing hint, current docs, and changelog now
+remove announcements and notice-based eligibility. Historical ledger flags do
+not confer or withhold permission. Explicit global/provider/category opt-outs
+remain controlling. No extra data store or migration is needed.
+
+Focused deterministic checks passed 199 tests (seven pre-existing skips), with
+67 managed-automation tests passing after the added composed-instruction
+assertions. Engine typecheck and package build passed. Three focused Luna-high local-subscription
+journeys passed and their replies are Ready: a new Gmail connection and an
+undated baseline calendar both read in the first run, persist an empty successful
+context inventory, and return skip; a globally opted-out account clears the
+existing context and returns skip with no provider calls.
+
+Exploratory ReviewGPT was sent against commit 5605db09f242 with the silent
+activation requirement explicitly called out as the next change. The completed advice and accepted scope are recorded below. Draft PR https://github.com/cobuildwithus/murph/pull/3494 is
+published at 91cca90a05fa with local proof and provider-input measurements. Its
+initial CI failures are the expected draft-rejection gate; mark Ready only after
+the consultation is assessed and the candidate is stable, then run final review
+and exact-head CI together.
+
+## Initial provider input measurement
+
+The opt-in `MURPH_MEASURE_UPCOMING_INPUT=1` scripted-provider journey captures the
+complete first Codex request at the provider boundary for identical direct/group
+fixtures. It uses the base's exact previous Journal routing line and omission of
+the upcoming block, while retaining the same production layers, tools, and history.
+With one synthetic trip, direct input grows from 143666 to 145007 UTF-8 bytes
+(+1341, approximately 0.93%); group remains 131269 bytes. Registered tool payloads
+are unchanged (direct 56443; group 40481). Transport-only prompt_cache_key is
+excluded. An exact Terra tokenizer is unavailable; token counts are explicitly
+unreported rather than treating scripted usage or authored-text counts as tokens.
+The two first-request captures passed with no external provider calls.
+
+## Architecture consultation and accepted scope
+
+The exploratory response was recovered from its original accepted thread after
+waited capture timed out despite a complete marked Pro answer. Exact-thread
+export matched the accepted turn and requested model. Existing Frog #3213 covers
+the capture/export failure; no duplicate entry is needed. This is architecture
+advice, not the final PR approval.
+
+Accepted: use canonical Journal plan metadata and the existing context snapshot
+for deterministic projection, dirty invalidation, restore/replay, and read-time
+expiry. Delete the separate model-written upcoming-context page. Normalize only
+the negative controls in the existing connected-source ledger so opt-outs and
+disconnections filter rebuilt context. Keep aliases and dedupe mappings there.
+Canonical writes and ledger policy writes invalidate the projection through the
+existing write-receipt path; unrelated snapshot sections remain usable.
+
+Also accept source-identity retry handling at the canonical note owner, explicit
+event timezone on typed note creation, compact navigation before detail expansion,
+and clear distinction between planned travel, observed arrival, and freshness.
+Keep the separate authorized reminder-availability owner unchanged. Defer generic
+memory input tuning and broad relevance scoring because they are independent of
+this feature. No new scheduler, database, agent, or generic context framework.
+
+These changes supersede the earlier derived-page proof. Focused engine suites
+passed 293 tests (seven existing skips), core import tests passed 42, and typed
+CLI tests passed four. Engine, core, CLI, contracts, and runtime typechecks passed;
+the full incremental workspace build and contract artifact generation passed.
+The complexity guard passed. Canonical retry, correction, deletion, policy
+suppression, expiry, bounds, preemption, timezone, and audience isolation have
+focused deterministic coverage. Provider input measurements above use the final
+canonical projection. Live calendar retry and direct/scheduled tentative travel
+journeys passed. All seven final live journeys passed and replies were reviewed
+Ready: calendar retry, grouped email itinerary, new mailbox, undated calendar,
+global opt-out, and ordinary/scheduled tentative travel use. Capture returned
+skip without notices; opt-out performed zero provider reads; context use made no
+schedule changes. The final focused readback passed 40 tests, including complete
+provider input capture, skill discovery, and canonical projection. Runtime receipt
+wake proof passed. Parent diff/privacy review and complexity guard passed.
+
+The PR remains unmerged and undeployed. Updated strict contract consumers must
+precede writers of optional canonical plan metadata; keep compatible readers
+after new metadata is persisted. Final ReviewGPT and exact-head CI remain pending.
+
+
+## Final review round 1
+
+ReviewGPT reviewed pushed head `17ae7989a50e08b2ac7362d19c9d18d10ae34b4d`
+in the Eragon lane with verified `gpt-6-pro`, exact accepted-turn capture, attached
+guarded archive, completion marker, and over eight minutes of response time.
+It returned one ORIGINAL_PR high finding, accepted: adding source-identity lookup
+before new Journal writes made unrelated supported legacy wearable rows fail
+strict validation and block creation/retry. The typed CLI regression reproduced
+`Stored event record is invalid` before correction.
+
+Within the requested green-PR remediation scope, narrow the existing lookup
+before validation: inspect source identity on discovery and candidate event id on
+revision recovery. Preserve matching-record validation, latest revision selection,
+member edits, and tombstones. No schema relaxation, history migration, new owner,
+or compatibility store. Core lookup/import/scheduled-log suites passed 185 tests;
+core/CLI typechecks and complexity passed. The extended typed CLI proof exercises
+legacy rows on initial creation and retry, destination timezone, member correction,
+and deleted-plan refusal. Round 2 will review the complete corrected patch.
+
+
+## Round 2 and CI packaging correction
+
+Verified Pro round 2 passed on `4cb5f93fdf696d79c39a83a5f99be09f6f316f39`:
+no remaining Critical, High, or Complexity Collapse findings. The marked response
+confirmed the accepted lookup correction and reviewed the full corrected patch,
+including restore/replay and audience boundaries. Same accepted conversation,
+exact captured turn/model, full guarded snapshot, and minimum response time passed.
+
+CI identified a direct Zod root import in the new projector. It violated the
+existing workspace boundary and pulled the locale catalog into runner startup.
+Use the existing `@murphai/contracts/zod-runtime` namespace instead; no schema or
+product behavior changes. All 32 focused snapshot/projector tests and engine
+typecheck passed. Full production runner assembly passed: entry 71430 bytes,
+static closure 2050664 bytes across 24 chunks, total 12170868 bytes. The workspace
+boundary check passed after assembly. Concurrent scanning had raced a generated
+old-output directory; task-owned Frog entry records that independent tooling issue.
+Round 3 reviews this final packaging correction on its pushed head; CI must still
+pass on the final authored head.
+
+
+## Final review and implementation closure
+
+Verified Pro round 3 returned PASS on
+`18e1dbd709123e5f14bfdc52fa626b4c2d0e4026`, with zero unresolved accepted
+findings. The captured response matched the exact accepted turn, requested
+`gpt-6-pro`, completion marker, and minimum response time. The archived round
+metadata was read during capture: full sensitive snapshot, correct immutable
+first head, previous head, current head, and both ancestry checks true. The
+review confirmed the one-line bounded schema import preserves the previously
+approved projector and independently passed the workspace boundary guard.
+
+Parent final review found no further behavior changes needed. The original
+legacy-record finding is fixed with a smaller lookup, and CI's packaging issue
+is fixed by reusing the established schema primitive. Canonical metadata,
+projection, scheduling, opt-outs, and audience behavior retain focused and live
+proof. This closure changes documentation only and does not require another
+substantive review under the completion runbook.
+
+At closure, 29 CI checks had passed, five remained running, and one PostgreSQL
+job had failed before tests because Docker Hub rate-limited its image pull.
+No application test failed on this head. GitHub refused a job-only retry while
+the workflow remained active. The final documentation commit triggers a fresh
+exact-head CI run; its results and mergeability are the remaining external PR
+completion gate and must be confirmed before reporting the task complete.
+The branch remains unmerged and undeployed.
+Status: completed
+Updated: 2026-09-16
+Completed: 2026-09-16

@@ -467,6 +467,16 @@ describe("murph contact card route", () => {
     });
   });
 
+  it("does not issue a browser handoff before the member has a text line", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    const response = await route.POST(buildIssuanceRequest("rancher"));
+    expect(response.status).toBe(409);
+    const payload = await response.json();
+    expect(payload.error.code).toBe("MURPH_TEXT_LINE_NOT_READY");
+    expect(payload.claim).toBeUndefined();
+    expect(mocks.readMurphContactCardAvatarPhoto).not.toHaveBeenCalled();
+  });
+
   it("returns 409 when the member has no conversation line", async () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 

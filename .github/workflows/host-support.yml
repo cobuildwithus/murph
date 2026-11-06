@@ -7,10 +7,10 @@ on:
     branches:
       - main
 
-# One CI run per ref per workflow: a new push to a PR or main cancels the
-# superseded run immediately, freeing org-level concurrency slots.
+# PR updates supersede their previous proof. Main commits keep independent
+# proof so later merges cannot cancel a production candidate.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -26,8 +26,6 @@ env:
   HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
-  NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
-  PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
 
 jobs:
   markdown-docs-scope:
@@ -142,7 +140,7 @@ jobs:
 
       - name: Run cross-platform CLI coverage
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
-        run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1
+        run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/cli-entry.test.ts packages/cli/test/vault-cli-routing.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1
 
   markdown-docs-proof:
     name: Markdown documentation proof
@@ -263,18 +261,22 @@ jobs:
           MURPH_COMPLEXITY_HEAD_SHA: ${{ github.sha }}
         run: pnpm complexity:diff
 
-      - name: Validate release metadata
+      # Exercise owner history before the broad build. A first reply alone
+      # cannot prove that later wakes still preempt checkpoints.
+      - name: Gate foreground priority across runtime transitions
+        timeout-minutes: 5
+        run: >-
+          pnpm --dir packages/assistant-runtime test
+          test/hosted-runtime-promoted-foreground-priority.test.ts
+
+      - name: Validate runtime artifact guards
         run: |
-          bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh
           node --check scripts/release-artifact-secret-guard.mjs
-          node --check scripts/release-helpers.mjs
-          node --check scripts/verify-release-target.mjs
-          node --check scripts/pack-publishables.mjs
-          node --check scripts/publish-publishables.mjs
           node --test scripts/release-artifact-secret-guard.test.mjs
           node --test scripts/check-runner-bundle-budget-ci.test.mjs
+          node --test scripts/benchmark-event-list.test.mjs
+          node --test scripts/benchmark-event-read-import.test.mjs
           node scripts/check-runner-bundle-budget-ci.mjs
-          node scripts/verify-release-target.mjs
 
       - name: Clean workspace build
         run: pnpm build:workspace:clean
@@ -290,11 +292,13 @@ jobs:
             packages/*/*typecheck*.tsbuildinfo
             apps/cloudflare/typecheck.tsbuildinfo
             apps/web/.next/cache/tsconfig.tsbuildinfo
-          key: tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
+          key: tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/run-typescript.mjs', '.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
           restore-keys: |
-            tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
+            tsbuildinfo-release-build-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/run-typescript.mjs', '.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
 
       - name: Typecheck
+        env:
+          MURPH_TYPECHECK_COMPILER: tsrs
         run: pnpm typecheck
 
       - name: Verify built package boundaries
@@ -304,6 +308,9 @@ jobs:
           pnpm --dir packages/hosted-local-harness verify:package-boundary:prepared
 
       - name: Test repo verification tools
+        env:
+          MURPH_VITEST_FILE_PARALLELISM: "1"
+          MURPH_VITEST_MAX_WORKERS: "2"
         run: pnpm test:repo-tools
 
       - name: Artifact hygiene
@@ -321,11 +328,10 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      # The validated release plan keeps the measured CLI and Assistant Engine
-      # floors isolated, splits the platform owners across two bounded runners,
-      # and retains dedicated Health Commons and Hosted Local Harness lanes.
-      # Package commands remain serial; the isolated Assistant Engine lane
-      # runs two test files at a time within its two-core runner.
+      # The validated release plan isolates CLI, Assistant Engine, Assistant
+      # Runtime, and Hosted Local Harness, with three platform groups.
+      # Package commands remain serial; Assistant Engine and Assistant Runtime
+      # each run two isolated test files at a time with serial in-file suites.
       matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.package_matrix) }}
     steps:
       - name: Reject draft pull request proof
@@ -355,12 +361,12 @@ jobs:
         run: pnpm health-commons:generate
 
       - name: Prepare built CLI runtime artifacts
-        if: ${{ matrix.shard == 'cli' }}
+        if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}
         run: pnpm build:test-runtime:prepared
 
-      - name: Verify CLI package shape
+      - name: Verify CLI runtime artifacts
         if: ${{ matrix.shard == 'cli' }}
-        run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts
+        run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts
 
       - name: Run package coverage shard
         shell: bash
@@ -375,8 +381,8 @@ jobs:
           while IFS= read -r package_dir; do
             [[ -n "$package_dir" ]] || continue
             if [[ "$package_dir" == "packages/cli" ]]; then
-              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
-            elif [[ "$package_dir" == "packages/assistant-engine" ]]; then
+              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+            elif [[ "$package_dir" == "packages/assistant-engine" || "$package_dir" == "packages/assistant-runtime" ]]; then
               env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir "$package_dir" test:coverage
             else
               env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
@@ -433,7 +439,7 @@ jobs:
       matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:17
+        image: postgres:17
         env:
           POSTGRES_DB: murph_search_test
           POSTGRES_PASSWORD: postgres
@@ -480,6 +486,69 @@ jobs:
 
       - name: Run hosted-Web test shard
         run: pnpm --dir apps/web verify
+
+  release-web-postgres-linux:
+    name: Release Web PostgreSQL (${{ matrix.shard }}/4)
+    needs: markdown-docs-scope
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: murph_test_gate
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_test_gate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test_gate
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma clients
+        run: pnpm --dir apps/web prisma:generate
+
+      - name: Verify PostgreSQL discovery and execution receipts
+        run: node --test scripts/run-postgres-tests.test.mjs
+
+      - name: Apply production database migrations
+        run: pnpm --dir apps/web prisma:migrate:deploy
+
+      - name: Run discovered PostgreSQL test shard
+        run: node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/4
 
   release-cloudflare-verification-linux:
     name: Release Cloudflare verification (ubuntu)
@@ -610,7 +679,12 @@ jobs:
         run: node candidate/scripts/check-runner-bundle-budget-ci.mjs compare base candidate
 
       - name: Check one-vCPU container latency
-        timeout-minutes: 15
+        # Two bounded native source builds, then the unchanged benchmark budget.
+        timeout-minutes: 195
+        env:
+          # Match the proven native permission gate while both checkouts are installed.
+          # This bounds compilation only; the benchmark still runs with one vCPU.
+          CODEX_CARGO_JOBS: "2"
         run: |
           node --test candidate/scripts/check-container-latency-ci.test.mjs
           node candidate/scripts/check-container-latency-ci.mjs base candidate
@@ -659,6 +733,7 @@ jobs:
       - release-package-coverage-linux
       - release-web-build-linux
       - release-web-tests-linux
+      - release-web-postgres-linux
       - release-cloudflare-verification-linux
       - release-fixture-coverage-linux
       - production-runner-bundle-budget-linux
@@ -681,6 +756,7 @@ jobs:
           PACKAGE_RESULT: ${{ needs.release-package-coverage-linux.result }}
           WEB_BUILD_RESULT: ${{ needs.release-web-build-linux.result }}
           WEB_TEST_RESULT: ${{ needs.release-web-tests-linux.result }}
+          WEB_POSTGRES_RESULT: ${{ needs.release-web-postgres-linux.result }}
           CLOUDFLARE_RESULT: ${{ needs.release-cloudflare-verification-linux.result }}
           FIXTURE_RESULT: ${{ needs.release-fixture-coverage-linux.result }}
           BUNDLE_RESULT: ${{ needs.production-runner-bundle-budget-linux.result }}
@@ -698,7 +774,7 @@ jobs:
                 echo "Markdown documentation proof did not succeed." >&2
                 exit 1
               fi
-              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
                 if [[ "$result" != "skipped" ]]; then
                   echo "Markdown documentation proof requires every release shard to remain skipped." >&2
                   exit 1
@@ -711,7 +787,7 @@ jobs:
                 echo "Full release proof requires the documentation-only job to remain skipped." >&2
                 exit 1
               fi
-              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
                 if [[ "$result" != "success" ]]; then
                   echo "Full release proof requires every release shard to succeed." >&2
                   exit 1

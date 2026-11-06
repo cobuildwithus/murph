@@ -1,4 +1,12 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from '@murphai/core'
+import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
+import { types } from 'node:util'
+import {
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS,
+  type HostedUsageOptimizationAuditRejection,
+} from '@murphai/hosted-execution/runtime-control'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantHostedDeviceToolRequest } from '../assistant/execution-context.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import type {
   MurphDynamicToolExecutionResult,
@@ -10,6 +18,210 @@ export interface ToolFailureDiagnostic {
   failureStage: 'admission' | 'execution' | 'result' | 'validation' | 'delivery'
   failureReason: ToolFailureReason
   errorCategory?: ToolErrorCategory
+  automationAction?: Extract<MurphDynamicToolRequest, { kind: 'automation' }>['request']['action']
+  automationErrorCode?: AutomationToolFailureCode
+  deviceAction?: AssistantHostedDeviceToolRequest['action']
+  deviceErrorCode?: DeviceToolFailureCode
+  deviceHttpStatus?: number
+  connectedAppsHttpStatus?: number
+  vaultFileErrorCode?: VaultFileToolFailureCode
+  productFeedbackAuditRejection?: HostedUsageOptimizationAuditRejection
+}
+
+// Core patch/reconciliation owners called by the hosted automation adapter.
+// These are diagnostic evidence only; unknown error categories stay unknown.
+const AUTOMATION_FAILURE_CODES = [
+  'VAULT_AUTOMATION_EMPTY_PATCH',
+  'VAULT_AUTOMATION_MISSING',
+  'VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED',
+] as const
+
+type AutomationToolFailureCode = typeof AUTOMATION_FAILURE_CODES[number]
+
+/** Private evidence only at the automation adapter's caught handler failure. */
+export function withAutomationToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  action: NonNullable<ToolFailureDiagnostic['automationAction']>,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  const automationErrorCode = readAutomationFailureCode(error)
+  return {
+    ...result,
+    failureDiagnostic: {
+      ...result.failureDiagnostic,
+      // Includes inspect_models, whose port calls use the inspect action.
+      automationAction: action,
+      ...(automationErrorCode === undefined ? {} : { automationErrorCode }),
+    },
+  }
+}
+
+function readAutomationFailureCode(error: unknown): AutomationToolFailureCode | undefined {
+  // Reject proxies before descriptors and accept only an own data code.
+  // Never invoke accessors, coerce values, or follow prototypes/context/causes.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return undefined
+    return AUTOMATION_FAILURE_CODES.find((known) => known === descriptor.value)
+  } catch {
+    return undefined
+  }
+}
+
+// Exactly the source-owned codes recognized by the device adapter, not a
+// provider catalogue. The diagnostic records evidence, not retry authority.
+const DEVICE_FAILURE_CODES = [
+  'device_connect_provider_unavailable',
+  'device_reconcile_unavailable',
+  'ACCOUNT_DISCONNECTED',
+  'ACCOUNT_REAUTHORIZATION_REQUIRED',
+  'CONNECTION_NOT_FOUND',
+  'RECONCILE_WAKE_NOT_ACCEPTED',
+  'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
+  'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED',
+  'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED',
+  'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET',
+  'INVALID_REQUEST',
+] as const
+
+type DeviceToolFailureCode = typeof DEVICE_FAILURE_CODES[number]
+
+/** Add private evidence only at the device adapter's existing caught failure. */
+export function withDeviceToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  action: AssistantHostedDeviceToolRequest['action'],
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  return {
+    ...result,
+    failureDiagnostic: {
+      ...result.failureDiagnostic,
+      // The caller supplies the already parsed request action, never raw args.
+      deviceAction: action,
+      ...readDeviceFailureErrorDetails(error),
+    },
+  }
+}
+
+function readDeviceFailureErrorDetails(error: unknown): Pick<
+  ToolFailureDiagnostic, 'deviceErrorCode' | 'deviceHttpStatus'
+> {
+  // Descriptor reads on a Proxy can execute traps even inside try/catch.
+  // Reject it before inspection; do not walk prototypes, contexts or causes.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return {}
+  try {
+    const read = (key: 'code' | 'status' | 'statusCode'): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(error, key)
+      return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
+    }
+    const code = read('code')
+    const deviceErrorCode = DEVICE_FAILURE_CODES.find((known) => known === code)
+    const status = read('status') ?? read('statusCode')
+    return {
+      ...(deviceErrorCode === undefined ? {} : { deviceErrorCode }),
+      ...(typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+        ? { deviceHttpStatus: status } : {}),
+    }
+  } catch {
+    return {}
+  }
+}
+
+/** Private status evidence only at the connected-app adapter's caught failure. */
+export function withConnectedAppsToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  // Match device telemetry's own-data discipline without changing its reader.
+  // Reject proxies before descriptors; never inspect causes, context or prose.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const read = (key: 'status' | 'statusCode'): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(error, key)
+      return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
+    }
+    const status = read('status') ?? read('statusCode')
+    if (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, connectedAppsHttpStatus: status },
+    }
+  } catch {
+    return result
+  }
+}
+
+// Request/file-preparation owners only; delivery-time and provider codes do not
+// belong here. Missing files retain their existing not_found category.
+const VAULT_FILE_FAILURE_CODES = [
+  'ASSISTANT_EXPORT_PACK_RETIREMENT_INVALID',
+  'ASSISTANT_GENERATED_DELIVERY_IDENTITY_REQUIRED',
+  'ASSISTANT_PATH_OUTSIDE_VAULT',
+  'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+  'ASSISTANT_VAULT_FILE_REF_INVALID',
+  'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
+  'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
+  'ASSISTANT_VAULT_FILE_PERMISSIONS_UNSAFE',
+  'ASSISTANT_VAULT_FILE_CHANGED_DURING_READ',
+] as const
+
+type VaultFileToolFailureCode = typeof VAULT_FILE_FAILURE_CODES[number]
+
+/** Recognize the existing active-send outcome without invoking a code getter. */
+export function isAlreadyActiveVaultFileSendError(error: unknown): boolean {
+  if (types.isProxy(error) || !(error instanceof VaultCliError)) return false
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+  return descriptor !== undefined
+    && Object.hasOwn(descriptor, 'value')
+    && descriptor.value === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
+}
+
+/** Private source-owned evidence only at the vault-file preparation catch. */
+export function withVaultFileToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return result
+    const vaultFileErrorCode = VAULT_FILE_FAILURE_CODES.find((known) => known === descriptor.value)
+    if (vaultFileErrorCode === undefined) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, vaultFileErrorCode },
+    }
+  } catch {
+    return result
+  }
+}
+
+/** Private source-owned audit evidence only at the feedback adapter's catch. */
+export function withProductFeedbackAuditFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'productFeedbackAuditRejection')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return result
+    const rejection = HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS.find((known) => known === descriptor.value)
+    if (rejection === undefined) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, productFeedbackAuditRejection: rejection },
+    }
+  } catch {
+    return result
+  }
 }
 
 export type ToolFailureReason =
@@ -69,8 +281,16 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['invalid_payload', 'invalid_input'],
   ['invalid_path', 'invalid_input'],
   ['not_found', 'not_found'],
+  ['exercise_not_found', 'not_found'],
+  ['exercise_catalog_unavailable', 'unavailable'],
+  ['exercise_catalog_invalid', 'invalid_result'],
+  ['memory_not_found', 'not_found'],
+  ['memory_document_invalid', 'invalid_result'],
   ['automation_not_found', 'not_found'],
   ['knowledge_page_not_found', 'not_found'],
+  ['knowledge_source_unreadable', 'unavailable'],
+  ['knowledge_invalid_source_path', 'invalid_input'],
+  ['knowledge_invalid_library_slug', 'invalid_input'],
   ['ENOENT', 'not_found'],
   ['conflict', 'conflict'],
   ['knowledge_page_conflict', 'conflict'],
@@ -99,6 +319,7 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['CONNECTED_APPS_MEMBER_INACTIVE', 'authority_rejected'],
   ['CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED', 'authority_rejected'],
   ['CONNECTED_APPS_REQUEST_INVALID', 'invalid_input'],
+  ['CONNECTED_APPS_RESPONSE_SCHEMA_INVALID', 'invalid_result'],
   ['CONNECTED_APPS_TOOLKIT_MISMATCH', 'invalid_input'],
   ['CONNECTED_APPS_TOOLKIT_NOT_CONFIGURED', 'unavailable'],
   ['CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED', 'invalid_input'],
@@ -290,4 +511,17 @@ export function createDynamicToolRuntimeIssueInput(input: {
     input.request,
     toolFailureDiagnostic('handler_exception', input.error),
   )
+}
+
+// The publication owner fences through the turn's abort signal, so this one check
+// outranks every generic tool catch: no queued tool runs and no result is reported.
+export function assertCanonicalWriteOutcomeKnown(signal: AbortSignal | undefined): void {
+  if (signal?.reason instanceof HostedCanonicalWriteOutcomeUnknownError) throw signal.reason
+}
+
+// Interruption and owner loss must unwind the turn. Reporting them to the model
+// as an ordinary tool failure would let a stale invocation keep working.
+export function dynamicToolFailureEndsTurn(requestSettled: boolean, error: unknown): boolean {
+  return requestSettled || error instanceof AssistantWorkspaceArtifactMaterializationError
+    || error instanceof HostedCanonicalWriteOutcomeUnknownError
 }

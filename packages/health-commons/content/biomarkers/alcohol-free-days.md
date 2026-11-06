@@ -62,24 +62,15 @@ biomarker:
     - different day-boundary definitions
     - research verification versus self-guided logging
 relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
--
-  type: cites
-  target: source_artifact:pmid-32021698
--
-  type: cites
-  target: source_artifact:pmid-39489405
--
-  type: cites
-  target: source_artifact:pmid-26690637
--
-  type: cites
-  target: source_artifact:pmid-41110619
+  - type: cites
+    target: source_artifact:pmid-32021698
+  - type: cites
+    target: source_artifact:pmid-39489405
+  - type: cites
+    target: source_artifact:pmid-26690637
+  - type: cites
+    target: source_artifact:pmid-41110619
+
 claims:
 -
   claimId: adherence-endpoint

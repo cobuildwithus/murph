@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-execution/runtime-control";
 
@@ -27,6 +28,51 @@ describe("recordHostedProductFeedback", () => {
   beforeEach(() => {
     prismaMocks.createMany.mockReset();
     prismaMocks.findThreadContainer.mockReset().mockResolvedValue(null);
+  });
+
+  it("keeps weekly usage audits anonymous even with a bound member", async () => {
+    prismaMocks.createMany.mockResolvedValue({ count: 1 });
+    const result = await recordHostedProductFeedback({
+      memberId: "synthetic-member",
+      env: { HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 7).toString("base64url") },
+      feedback: makeFeedback({ kind: "feature_request", relatedChangelogItemIds: [],
+        summary: "Usage optimization audit: Repeated large tool outputs increased context cost." }),
+    });
+    expect(result.recorded).toBe(true);
+    expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ memberId: null, kind: "feature_request" })],
+    }));
+  });
+
+  it("dedupes weekly audits with a server-keyed member-bound id and fails closed without the key", async () => {
+    const stored = new Set<string>();
+    prismaMocks.createMany.mockImplementation(async ({ data }: { data: Array<{ id: string }> }) => {
+      const id = data[0]!.id;
+      const count = stored.has(id) ? 0 : 1;
+      stored.add(id);
+      return { count };
+    });
+    const feedback = makeFeedback({ kind: "feature_request", relatedChangelogItemIds: [],
+      summary: "Usage optimization audit: Compact large tool outputs." });
+    const input = { feedback, memberId: "synthetic-member",
+      env: { HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 7).toString("base64url") } };
+    const first = await recordHostedProductFeedback(input);
+    const again = await recordHostedProductFeedback({ ...input,
+      feedback: { ...feedback, summary: "Usage optimization audit: Reworded report." } });
+    expect(again).toEqual({ feedbackId: first.feedbackId, recorded: false });
+    const other = await recordHostedProductFeedback({ ...input, memberId: "other-synthetic-member" });
+    expect(other.feedbackId).not.toBe(first.feedbackId);
+    const unkeyedId = `product_feedback_${createHash("sha256").update(feedback.idempotencyKey).digest("hex").slice(0, 32)}`;
+    expect(first.feedbackId).not.toBe(unkeyedId);
+    const changedKey = await recordHostedProductFeedback({ ...input,
+      env: { HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 8).toString("base64url") } });
+    expect(changedKey.feedbackId).not.toBe(first.feedbackId);
+    prismaMocks.createMany.mockClear();
+    await expect(recordHostedProductFeedback({ ...input, env: {} })).rejects.toThrow("HOSTED_APP_SESSION_HMAC_KEY");
+    expect(prismaMocks.createMany).not.toHaveBeenCalled();
+    prismaMocks.findThreadContainer.mockResolvedValue({ memberId: "synthetic-group" });
+    await expect(recordHostedProductFeedback(input)).rejects.toMatchObject({ code: "HOSTED_USAGE_FEEDBACK_PRIVATE_MEMBER_REQUIRED" });
+    expect(prismaMocks.createMany).not.toHaveBeenCalled();
   });
 
   it("stores anonymous feedback by default and is idempotent by runtime key", async () => {

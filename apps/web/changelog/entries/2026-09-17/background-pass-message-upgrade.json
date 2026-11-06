@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "background-pass-message-upgrade",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster replies during scheduled background work",
+    "summary": "When your message arrives while Murph is starting a scheduled background pass, that pass now picks up your message directly instead of restarting.",
+    "details": "This applies to every messaging channel. Accounts with paused AI usage keep their existing background-only behavior.",
+    "relevanceTags": ["messaging", "performance"],
+    "sourcePullRequests": [3518]
+  }
+}

@@ -14,9 +14,13 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 
 import {
+  buildIntegrationIngestAppendPlan,
+  stageIntegrationIngestAppendPlan,
+  runCanonicalWrite,
+  type HostedCanonicalWritePort,
   buildIntegrationEvidencePart,
   buildIntegrationIngestRecord,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
@@ -26,6 +30,9 @@ import {
 } from "@murphai/core";
 
 import {
+  HOSTED_MEDIA_REFS_SCHEMA,
+  snapshotHostedBundleRoots,
+  restoreHostedBundleRoots,
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
 } from "@murphai/runtime-state/node";
@@ -48,6 +55,10 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
+
+import { writeHostedMediaReferenceCatalogue, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { appendHostedCanonicalWriteReceiptToArtifactLog, hostedCanonicalWriteReceiptLogStatusFields } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
+import { createHostedRuntimeArtifactStoreStub } from "./hosted-runtime-test-helpers.ts";
 
 describe("hosted workspace restore Codex continuity", () => {
   test("rejects pre-v2 refs before touching local roots or reading artifacts", async () => {
@@ -1077,6 +1088,104 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
+  test.each(["available", "unavailable"] as const)(
+    "sparse snapshot replays newer ingest and journal receipts without losing durable metadata (%s)",
+    async (availability) => {
+      const root = await mkdtemp(path.join(tmpdir(), "cold-floor-receipts-"));
+      const vaultRoot = path.join(root, "durable", "vault");
+      const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+      const journalPath = "journal/cold-floor-receipt.md";
+      const archived = makeIntegrationIngestRecord({ id: "xfm_FloorBase", eventId: "evt_FloorBase",
+        importedAt: "2025-10-12T09:00:00.000Z" });
+      const appended = makeIntegrationIngestRecord({ id: "xfm_FloorAppend", eventId: "evt_FloorAppend",
+        importedAt: "2025-10-13T09:00:00.000Z" });
+      const bytes = brotliCompressSync(Buffer.from(`${JSON.stringify(archived)}\n`));
+      const sha256 = sha256HostedBundleHex(bytes);
+      const cold = { relativePath: `${logicalPath}.br`, mediaKind: "integration-ingest" as const,
+        mediaId: sha256, sha256, byteSize: bytes.length, expiresAt: null,
+        mimeType: "application/octet-stream", recordedAt: "2025-10-01T00:00:00.000Z" };
+      const { artifactStore, storedBytesByHash } = createHostedRuntimeArtifactStoreStub();
+      const workspace = createWorkspaceState({ snapshotRef: createWorkspaceSnapshotV2Ref() });
+      const persist: HostedCanonicalWritePort = {
+        async persistCanonicalWrite(input) {
+          const update = await appendHostedCanonicalWriteReceiptToArtifactLog({ artifactStore,
+            payloads: input.payloads, receipt: input.receipt, previousStatus: workspace.redactedStatus });
+          // canonical_runtime_commit advances receipts while keeping snapshotRef.
+          workspace.redactedStatus = hostedCanonicalWriteReceiptLogStatusFields(update);
+        },
+      };
+      try {
+        await initializeVault({ vaultRoot });
+        await writeHostedMediaReferenceCatalogue({ vaultRoot,
+          catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [cold] } });
+        // Explicit sparse input works even before discovery is enabled.
+        const sparseSnapshot = await snapshotHostedBundleRoots({ kind: "vault",
+          roots: [{ root: vaultRoot, rootKey: "vault" }] });
+        assert.ok(sparseSnapshot);
+        const snapshotRef = structuredClone(workspace.snapshotRef);
+        // Model the producer's already-verified thaw for the receipt publisher.
+        // Replay below starts from the original sparse snapshot, never this state.
+        await mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+        await writeFile(path.join(vaultRoot, `${logicalPath}.br`), bytes);
+        await writeHostedMediaReferenceCatalogue({ vaultRoot,
+          catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [] } });
+        await runCanonicalWrite({ vaultRoot, hostedCanonicalWritePort: persist,
+          operationType: "cold_floor_journal", summary: "Persist a synthetic journal entry.",
+          mutate: async ({ batch }) => { await batch.stageTextWrite(journalPath, "durable journal entry\n"); },
+        });
+        const appendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, [appended], { allowArchivedShardAmendments: true });
+        await runCanonicalWrite({ vaultRoot, hostedCanonicalWritePort: persist,
+          operationType: "cold_floor_ingest", summary: "Persist synthetic historical evidence.",
+          mutate: async ({ batch }) => { await stageIntegrationIngestAppendPlan(batch, appendPlan); },
+        });
+        assert.deepEqual(workspace.snapshotRef, snapshotRef);
+        const durableStatus = structuredClone(workspace.redactedStatus)!;
+        const logSha = String(durableStatus.hostedCanonicalWriteReceiptLogSha256);
+        const logBytes = storedBytesByHash.get(logSha)!;
+        assert.equal(logBytes.length, durableStatus.hostedCanonicalWriteReceiptLogByteSize);
+        await rm(path.join(root, "durable"), { recursive: true, force: true });
+        let restores = 0;
+        let available = availability === "available";
+        const logRequests: HostedRuntimeLogRequest[] = [];
+        const platform: HostedRuntimePlatform = {
+          ...createRestorePlatform({ artifactBytesByHash: storedBytesByHash, logRequests }),
+          artifactStore,
+          mediaStore: { put: async () => { throw new Error("Restore cannot publish cold objects."); },
+            get: async () => available ? bytes : null },
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() { throw new Error("No new snapshot expected."); },
+            async completeSnapshotSession() { throw new Error("No new snapshot expected."); },
+            async putSnapshotObjectDirect() { throw new Error("No new snapshot expected."); },
+            async startSnapshotSession() { throw new Error("No new snapshot expected."); },
+            async restoreWorkspaceSnapshot() {
+              restores += 1;
+              await restoreHostedBundleRoots({ bytes: sparseSnapshot, expectedKind: "vault", roots: { vault: vaultRoot } });
+            },
+          },
+        };
+        const restore = () => restoreHostedWorkspaceRuntimeJobWorkspace({ platform, vaultRoot, workspace });
+        if (!available) {
+          await assert.rejects(restore(), { code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
+          assert.equal(restores, 1, "must not restore last-known-good without receipts");
+          assert.deepEqual(workspace.redactedStatus, durableStatus);
+          assert.deepEqual(storedBytesByHash.get(logSha), logBytes);
+          await assert.rejects(readFile(path.join(vaultRoot, journalPath)), { code: "ENOENT" });
+          available = true;
+        }
+        const recovered = await restore();
+        assert.equal(recovered.canonicalWriteReceiptRecoveryFailed, false);
+        assert.equal(recovered.canonicalWriteReceiptCount, 2);
+        assert.equal(restores, availability === "available" ? 1 : 2);
+        assert.equal(await readFile(path.join(vaultRoot, journalPath), "utf8"), "durable journal entry\n");
+        assert.deepEqual((await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id), [archived.id, appended.id]);
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries, []);
+        assert.deepEqual(workspace.redactedStatus, durableStatus);
+        assert.deepEqual(storedBytesByHash.get(logSha), logBytes);
+        assert.ok(!JSON.stringify(logRequests).includes("canonical_write_receipt_recovery_failed"));
+      } finally { await rm(root, { recursive: true, force: true }); }
+    },
+  );
+
   test("v2 restore replays archived integration ingest amendment receipts", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-archived-ingest-receipt-"));
 
@@ -1374,7 +1483,7 @@ function createHostedCodexSessionTarget(): AssistantModelTarget {
     approvalPolicy: "never",
     codexCommand: null,
     codexHome: null,
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     modelProvider: "openai",
     oss: false,
     profile: null,

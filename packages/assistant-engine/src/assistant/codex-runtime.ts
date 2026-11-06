@@ -7,7 +7,6 @@ import {
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
@@ -18,12 +17,11 @@ import {
   CODEX_ASSISTANT_CAPABILITIES,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   preinitializeCodexAssistantProcess as preinitializeCodexAssistantProcessUnchecked,
+  startCodexAssistantVoice,
   resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
 } from './providers/codex-cli.js'
-import { createCatalogModel } from './providers/catalog.js'
+
 import type {
-  AssistantCatalogModel,
-  AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderTurnAttemptResult,
@@ -31,6 +29,7 @@ import type {
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
 } from './providers/types.js'
+import type { CodexRealtimeOptions, CodexRealtimeSession } from '../assistant-codex.js'
 
 export function resolveCodexAssistantCapabilities(): AssistantProviderCapabilities {
   return cloneAssistantProviderCapabilities(CODEX_ASSISTANT_CAPABILITIES)
@@ -45,6 +44,24 @@ export interface HostedCodexAssistantProcessPreparationInput {
 
 export interface HostedCodexAssistantProcessPreparation {
   cancelPending(): Promise<void>
+}
+
+export interface HostedCodexAssistantVoiceInput
+  extends Omit<HostedCodexAssistantProcessPreparationInput, 'signal'>, CodexRealtimeOptions {
+  mediaModel: string
+  mediaModelProvider: string
+}
+
+/** Keep the member's process identity; only the tool-free media thread uses OpenAI. */
+export async function startHostedCodexAssistantVoice(
+  input: HostedCodexAssistantVoiceInput,
+): Promise<CodexRealtimeSession> {
+  return await startCodexAssistantVoice({
+    ...input,
+    providerConfig: normalizeAssistantProviderConfig(
+      assistantModelTargetToProviderConfigInput(input.target),
+    ),
+  })
 }
 
 /**
@@ -71,15 +88,12 @@ export function resolveCodexAssistantTargetCapabilities(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
-  const modelProvider = resolveStrictAssistantCodexModelProvider(
-    normalized.target.modelProvider,
-  ).id
+  resolveStrictAssistantCodexModelProvider(normalized.target.modelProvider)
 
   return cloneAssistantProviderCapabilities({
     ...CODEX_ASSISTANT_CAPABILITIES,
     supportsNativeResume: true,
-    supportsReasoningEffort:
-      modelProvider !== HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+    supportsReasoningEffort: true,
   })
 }
 
@@ -153,10 +167,7 @@ function toAssistantProviderTurnExecutionInput(
   }
 }
 
-export { createCatalogModel }
 export type {
-  AssistantCatalogModel,
-  AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderTurnAttemptResult,

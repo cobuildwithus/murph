@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 300,
+  "item": {
+    "id": "multiple-games-with-a-friend",
+    "kind": "feature",
+    "priority": 3,
+    "title": "More than one game with a friend",
+    "summary": "You can keep up to ten games open with the same person, each with its own days, check-ins and prize.",
+    "details": "Start another with an invite link. In your shared chat, name the task you want to change; each game's rematches and recap stay separate.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [
+      4439
+    ]
+  }
+}

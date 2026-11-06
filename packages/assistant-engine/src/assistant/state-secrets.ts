@@ -134,6 +134,7 @@ export async function stageAssistantSessionSecretsForPersistence(input: {
   sessionId: string
 }): Promise<AssistantSessionSecretsPersistenceStage> {
   const secretsPath = resolveAssistantSessionSecretsPath(input.paths, input.sessionId)
+  await ensureAssistantStateDirectory(path.dirname(secretsPath))
   if (!input.secrets) {
     return {
       abort: async () => undefined,
@@ -149,7 +150,6 @@ export async function stageAssistantSessionSecretsForPersistence(input: {
     secrets: input.secrets,
   })
 
-  await ensureAssistantStateDirectory(path.dirname(secretsPath))
   const stagedPath = `${secretsPath}.tmp-${process.pid}-${randomUUID()}`
   await writeJsonFileAtomic(stagedPath, input.secrets)
 

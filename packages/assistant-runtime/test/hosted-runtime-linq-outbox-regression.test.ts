@@ -1,8 +1,11 @@
+import { renderAssistantResponseCardText } from "@murphai/operator-config/assistant-response-cards";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, expect, it, vi } from "vitest";
+
+import { buildHostedLinqLinkDelayNotice } from "../src/hosted-runtime/linq-link-delay-notice.ts";
 
 import {
   createAssistantOutboxIntent,
@@ -1796,6 +1799,103 @@ it.each([
   ]);
 });
 
+it.each([
+  { label: "successful notice", partial: true, noticeFails: false, foreground: true, direct: true, expectedNotices: 1 },
+  { label: "failed notice", partial: true, noticeFails: true, foreground: true, direct: true, expectedNotices: 1 },
+  { label: "normal delivery", partial: false, noticeFails: false, foreground: true, direct: true, expectedNotices: 0 },
+  { label: "background retry", partial: true, noticeFails: false, foreground: false, direct: true, expectedNotices: 0 },
+  { label: "group delivery", partial: true, noticeFails: false, foreground: true, direct: false, expectedNotices: 0 },
+])("acknowledges a newly delayed Linq link once: $label", async (scenario) => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const fixture = await createHostedLinqAttachmentFixture({
+    imageCount: 0,
+    key: "link-delay-notice",
+    answeredMailboxItemIds: ["mailbox_item_link_delay"],
+    message: "Your calendar is ready https://calendar.example.test/view",
+    target: "linq_chat_link_delay",
+  });
+  const intent = { ...fixture.intent, threadIsDirect: scenario.direct };
+  await saveAssistantOutboxIntent(fixture.vaultRoot, intent);
+  fixture.effect = {
+    ...fixture.effect,
+    deliveryPhase: scenario.foreground ? "foreground_current_turn" : "background_retry",
+    payload: { ...fixture.effect.payload, threadIsDirect: scenario.direct },
+  };
+  fixture.linqDeliveryContext.threadIsDirect = scenario.direct;
+  let linkFails = scenario.partial;
+  const sends: Array<{ key: string; kind: "primary" | "link" | "notice" }> = [];
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    expect(String(request)).toContain(`/chats/${fixture.target}/messages`);
+    const body = JSON.parse(await readFetchRequestBody(request, init));
+    const part = body.message.parts[0];
+    const kind = part.type === "link"
+      ? "link"
+      : part.value === "Your calendar is ready" ? "primary" : "notice";
+    sends.push({ key: body.message.idempotency_key, kind });
+    if (kind === "notice") {
+      expect(part.value).toBe(buildHostedLinqLinkDelayNotice(intent.intentId));
+      expect(await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId))
+        .toMatchObject({ status: "retryable", nextAttemptAt: expect.any(String) });
+    }
+    if ((kind === "link" && linkFails) || (kind === "notice" && scenario.noticeFails)) {
+      return new Response(JSON.stringify({ error: "Temporarily unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ message: { id: `linq_${kind}_accepted` } }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const recordLinqDeliveryOutcome = vi.fn<
+    NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+  >(async () => {});
+  const drainInput = {
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch: vi.fn<typeof fetch>(),
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({ recordLinqDeliveryOutcome }),
+  };
+  const first = await drainHostedPreparedAssistantDeliveries(drainInput);
+  expect(first[0]?.deliveryStatus).toBe(scenario.partial ? "retryable" : "sent");
+  const noticeAttempts = sends.filter((send) => send.kind === "notice");
+  expect(new Set(noticeAttempts.map((send) => send.key)).size).toBe(scenario.expectedNotices);
+  const noticeAttemptCount = noticeAttempts.length;
+  if (scenario.partial) {
+    for (const retrySucceeds of [false, true]) {
+      const pending = await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId);
+      expect(pending?.deliveryConfirmationPending).toBe(false);
+      if (!pending?.nextAttemptAt) throw new Error("Expected durable link retry");
+      vi.setSystemTime(new Date(pending.nextAttemptAt));
+      linkFails = !retrySucceeds;
+      const retried = await drainHostedPreparedAssistantDeliveries(drainInput);
+      expect(retried[0]?.deliveryStatus).toBe(retrySucceeds ? "sent" : "retryable");
+    }
+  }
+  expect(sends.filter((send) => send.kind === "notice")).toHaveLength(noticeAttemptCount);
+  for (const kind of ["primary", "link"] as const) {
+    expect(new Set(sends.filter((send) => send.kind === kind).map((send) => send.key)).size).toBe(1);
+  }
+  const completed = await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId);
+  expect(completed).toMatchObject({
+    status: "sent",
+    delivery: { providerMessageIds: ["linq_primary_accepted", "linq_link_accepted"] },
+  });
+  const noticeOutcomes = recordLinqDeliveryOutcome.mock.calls
+    .map(([outcome]) => outcome)
+    .filter((outcome) => outcome.idempotencyKey?.startsWith("assistant-link-delay:"));
+  if (scenario.expectedNotices && !scenario.noticeFails) {
+    expect(noticeOutcomes).toHaveLength(1);
+  }
+  for (const outcome of noticeOutcomes) {
+    expect(outcome.intentId).toBeNull();
+    expect(outcome.answeredMailboxItemIds ?? []).toEqual([]);
+  }
+});
+
 async function createHostedLinqAttachmentFixture(input: {
   answeredMailboxItemIds?: readonly string[];
   autoReply?: boolean;
@@ -2067,3 +2167,54 @@ async function readFetchRequestBody(
   }
   return request instanceof Request ? await request.clone().text() : "";
 }
+
+const SYNTHETIC_SLEEP_CARD = {
+  kind: "sleep_summary", version: 1, localDate: "2026-11-03",
+  bedtime: null, wakeTime: null, totalSleepMinutes: 436, score: null,
+  stages: null, awakeMinutes: null, efficiencyPercent: null,
+  hrv: null, restingHeartRate: null, wakeUps: null,
+} as const;
+
+
+it("keeps a hosted sleep-note partial unconsumed with no link notice and completes both identities on replay", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const note = "Synthetic sleep context.";
+  const fixture = await createHostedLinqAttachmentFixture({
+    card: SYNTHETIC_SLEEP_CARD, imageCount: 0, key: "synthetic-sleep-note",
+    answeredMailboxItemIds: ["synthetic-mailbox"], message: renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note),
+    homeRoute: { directRecipientPhoneNumber: "+12025550100", fromPhoneNumber: "+12025550101" }, target: "synthetic-sleep-chat",
+  });
+  fixture.effect = { ...fixture.effect, deliveryPhase: "foreground_current_turn" };
+  let failNote = true;
+  const accepted = new Map<string, string>();
+  const sends: string[] = [];
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    if (String(request).endsWith("/capability/check_imessage")) return new Response(JSON.stringify({ available: true }));
+    const { message } = JSON.parse(await readFetchRequestBody(request, init));
+    const isCard = message.parts[0].type === "imessage_app";
+    if (!isCard) expect(message.parts).toEqual([{ type: "text", value: note }]);
+    sends.push(message.idempotency_key);
+    if (!isCard && failNote) return new Response("{}", { status: 422 });
+    const id = accepted.get(message.idempotency_key) ?? (isCard ? "synthetic-card" : "synthetic-note");
+    accepted.set(message.idempotency_key, id);
+    return new Response(JSON.stringify({ message: { id } }));
+  });
+  const recordLinqDeliveryOutcome = vi.fn<NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>>(async () => {});
+  const drainInput = { ...buildHostedLinqDrainInput({ fixture, providerFetch, publicInternetFetch: vi.fn<typeof fetch>() }), effectsPort: createHostedRuntimeEffectsPortStub({ recordLinqDeliveryOutcome }) };
+  const first = await drainHostedPreparedAssistantDeliveries(drainInput);
+  expect(first[0]?.deliveryStatus).toBe("retryable");
+  const pending = await readAssistantOutboxIntent(fixture.vaultRoot, fixture.intent.intentId);
+  expect(pending).toMatchObject({ card: SYNTHETIC_SLEEP_CARD, deliveryConfirmationPending: false, delivery: { providerMessageIds: ["synthetic-card"] } });
+  expect(recordLinqDeliveryOutcome.mock.calls.map(([outcome]) => outcome)).toEqual([expect.objectContaining({ failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY", providerMessageIds: ["synthetic-card"] })]);
+  for (const [outcome] of recordLinqDeliveryOutcome.mock.calls) expect(outcome.answeredMailboxItemIds ?? []).toEqual([]);
+  if (!pending?.nextAttemptAt) throw new Error("Expected sleep-note retry.");
+  vi.setSystemTime(new Date(pending.nextAttemptAt));
+  failNote = false;
+  const recovered = await drainHostedPreparedAssistantDeliveries(drainInput);
+  expect(recovered[0]?.deliveryStatus).toBe("sent");
+  expect(accepted.size).toBe(2);
+  const key = `assistant-outbox:${fixture.intent.intentId}`;
+  expect(sends).toEqual([key, `${key}:note`, key, `${key}:note`]);
+  expect(recordLinqDeliveryOutcome.mock.calls.at(-1)?.[0]).toMatchObject({ providerMessageIds: ["synthetic-card", "synthetic-note"], answeredMailboxItemIds: ["synthetic-mailbox"] });
+});

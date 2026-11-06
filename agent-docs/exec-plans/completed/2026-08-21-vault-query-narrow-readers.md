@@ -41,7 +41,7 @@ Updated: 2026-08-22
     narrow readers already landed by PR #2070 and later work.
   - Remaining generic show, audit show, manifest, intake, vault, journal,
     experiment, protocol, capture, blood-test, immunization, measurement-list,
-    Murph Age input, and personal-pattern paths that still hydrate the complete
+    and personal-pattern paths that still hydrate the complete
     vault for an exact, family-scoped, or duplicate aggregate read.
   - Small public query/core/vault-usecases seams and tests needed to express
     exact-record, family-scoped, and aggregate-projection capabilities.
@@ -132,8 +132,8 @@ Updated: 2026-08-22
   forward apply check, and post-apply reverse check.
 - 2026-08-22: Accept the exact/family-reader phase and its shared identity,
   visibility, lifecycle, bounded-source, filtered-collection, and architecture
-  guard changes. Keep the three genuinely aggregate follow-ups separate:
-  measurement-entry composition, Murph Age batch inputs, and wearable personal
+  guard changes. Keep the remaining aggregate follow-ups separate:
+  measurement-entry composition and wearable personal
   patterns need a command-scoped projection freshness design rather than an
   exact-reader substitution.
 - 2026-08-22: Reject the attempted filtered projection substitution for the

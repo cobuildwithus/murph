@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-25",
+  "order": 100,
+  "item": {
+    "id": "quieter-setup-reminders",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer setup reminders",
+    "summary": "Texting Murph before finishing setup no longer repeats the setup-link reminder with every message.",
+    "details": "After sending your setup link, Murph sends at most one reminder in response to your messages each UTC day.",
+    "relevanceTags": ["messaging", "onboarding"],
+    "sourcePullRequests": []
+  }
+}

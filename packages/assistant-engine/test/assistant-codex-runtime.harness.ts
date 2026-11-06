@@ -14,10 +14,9 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
 } from '@murphai/hosted-execution/assistant-model'
@@ -43,6 +42,12 @@ import {
 } from 'vitest'
 
 export const cliTimingLaunchArgs = ['--config', expect.stringMatching(/^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="\d+:[a-f0-9]{32}"$/u)]
+export const codexSteeringLaunchArgs = [
+  '--config',
+  'features.instant_interrupt=true',
+  '--config',
+  'features.code_mode_interrupt=true',
+]
 
 const codexMocks: {
   fakeHome: string
@@ -69,10 +74,8 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
@@ -173,8 +176,8 @@ const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: { target: 220, status: 'on_target' },
-    fatGrams: { target: 40, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'under_target' },
+    fatGrams: { target: 40, status: 'under_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
 }
@@ -489,7 +492,7 @@ async function runCodexResponseMediaToolTurn(
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+    expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
@@ -609,7 +612,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+    expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
@@ -787,14 +790,6 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
     workingDirectory,
   })
 }
-
-
-
-
-
-
-
-
 
 class MockChildProcess extends EventEmitter {
   exitCode: number | null = null

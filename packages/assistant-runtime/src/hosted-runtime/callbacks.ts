@@ -1,3 +1,6 @@
+import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
+import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import { createHash } from "node:crypto";
 
 import type {
@@ -20,12 +23,13 @@ import {
   HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   sanitizeHostedExecutionStructuredLogDetails,
+  isHostedMemberSignupWelcomeDeliveryIdentity,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
-  type HostedAssistantDeliveryEffect,
+  type HostedAssistantDeliveryEffect as HostedExecutionAssistantDeliveryEffect,
   type HostedAssistantDeliveryPhase,
 } from "@murphai/hosted-execution/side-effects";
 import type {
@@ -41,7 +45,11 @@ import {
   type HostedPhoneCallResultDeliveryOutcomeRequest,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
+  AssistantWorkspaceArtifactMaterializationError,
   applyAssistantVaultFileSendApprovalResult,
+  assistantOutboxAcceptedDeliveryRequiresConfirmation,
+  assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
   compareAssistantOutboxDeliverySequenceOrder,
@@ -51,6 +59,7 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
   hasPendingAssistantOutboxMessageVolumeReceipt,
+  isAssistantOutboxRetryableError,
   isAssistantOutboxReplyBubbleSuccessor,
   listAssistantCronPendingDeliveryIntentIds,
   listAssistantOutboxIntents,
@@ -74,6 +83,7 @@ import {
   type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
   type AssistantOutboxTerminalOutcome,
+  type AssistantRunEvent,
 } from "@murphai/assistant-engine";
 import {
   parseHostedEmailThreadTarget,
@@ -95,6 +105,7 @@ import {
 } from "@murphai/operator-config/telegram-runtime";
 import {
   assistantChannelDeliverySchema,
+  assistantVaultFileMaxBytes,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -117,6 +128,7 @@ import type {
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
 import {
+  buildHostedAssistantAutomationEventLogDetails,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
@@ -138,6 +150,7 @@ import {
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import { buildHostedLinqLinkDelayNotice } from "./linq-link-delay-notice.ts";
 import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
@@ -146,6 +159,11 @@ import {
   recordHostedAssistantMilestonesBestEffort,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
+import {
+  recordHostedDeliveryCommittedBestEffort,
+  type HostedDeliveryTraceContext,
+  writeHostedLinqDispatchEnteredTiming,
+} from "./delivery-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with
@@ -156,12 +174,19 @@ const HOSTED_MESSAGE_VOLUME_RECEIPT_RETRY_DELAY_MS = 60_000;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
+export const HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS =
+  HOSTED_SENDING_STALE_RECONCILIATION_MS - HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS;
 const HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
 const HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX = "phone-call-result:";
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
+
+export type HostedAssistantDeliveryEffect = HostedExecutionAssistantDeliveryEffect & {
+  /** Dispatch only after this effect's exact prepared claim is in a published snapshot. */
+  publishBeforeDispatch?: true;
+};
 
 interface HostedAssistantDeliveryBoundaryFields {
   actorId: string | null;
@@ -178,6 +203,7 @@ interface HostedAssistantDeliveryBoundaryFields {
 }
 
 export interface CollectHostedAssistantDeliverySideEffectsInput {
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
   messageVolumeReceiptPort?: Pick<
@@ -187,11 +213,13 @@ export interface CollectHostedAssistantDeliverySideEffectsInput {
   preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
+  workspace?: Pick<HostedWorkspaceState, "checkpointedAt"> | null;
 }
 
 export async function collectHostedAssistantDeliverySideEffects(
   input: CollectHostedAssistantDeliverySideEffectsInput,
 ): Promise<HostedAssistantDeliveryEffect[]> {
+  const onEvent = createHostedCronDeliveryReconciliationObserver(input.platform);
   const request = {
     includeBackgroundDueIntents: input.includeBackgroundDueIntents,
     preferredEffectIds: input.preferredEffectIds ?? [],
@@ -223,6 +251,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       continue;
     }
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
+      onEvent,
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedApprovalCycle: reconcileTargets.get(intent.intentId) ?? null,
       intent,
@@ -239,6 +268,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   const blockedGroupEmailRecipientIntentIds = causalOnly
     ? new Set<string>()
     : await reconcileHostedGroupEmailRecipientParents({
+        onEvent,
         intents: approvalReconciledIntents,
         vaultRoot: request.vaultRoot,
       });
@@ -344,6 +374,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     : [];
   const filteredBackgroundCandidates =
     await abandonStaleSignupWelcomeCandidatesAfterReplyEvidence({
+      onEvent,
       backgroundCandidates,
       causalOnly,
       foregroundCandidates,
@@ -384,16 +415,82 @@ export async function collectHostedAssistantDeliverySideEffects(
       backgroundBacklogBudget -= 1;
     }
   }
-  const effects = [
-    ...foregroundCandidates.map((intent) =>
-      buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
-    ),
-    ...cappedBackgroundCandidates.map((intent) =>
-      buildHostedAssistantDeliveryEffectFromIntent(intent, "background_retry")
-    ),
-  ];
+  return buildHostedAssistantDeliveryEffects({
+    foregroundCandidates,
+    cappedBackgroundCandidates,
+    intents,
+    workspace: input.workspace,
+  });
+}
+
+function buildHostedAssistantDeliveryEffects({
+  foregroundCandidates,
+  cappedBackgroundCandidates,
+  intents,
+  workspace,
+}: {
+  foregroundCandidates: readonly AssistantOutboxIntent[];
+  cappedBackgroundCandidates: readonly AssistantOutboxIntent[];
+  intents: readonly AssistantOutboxIntent[];
+  workspace: Pick<HostedWorkspaceState, "checkpointedAt"> | null | undefined;
+}): HostedAssistantDeliveryEffect[] {
+  const obligationBoundaryKeys = new Set(
+    intents.filter(hostedLinqIntentCarriesDurableObligation)
+      .map(readHostedAssistantDeliveryBoundaryKey),
+  );
+  const claimedBoundaryKeys = new Set<string>();
+  const effects: HostedAssistantDeliveryEffect[] = [];
+  for (const [candidates, phase] of [
+    [foregroundCandidates, "foreground_current_turn"],
+    [cappedBackgroundCandidates, "background_retry"],
+  ] as const) {
+    for (const intent of candidates) {
+      const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
+      if (claimedBoundaryKeys.has(boundaryKey)) continue;
+      const effect = buildHostedAssistantDeliveryEffectFromIntent(intent, phase);
+      if (
+        hostedAssistantIntentRetryNeedsPublishedClaim(intent, workspace?.checkpointedAt)
+        || (hostedAssistantIntentOwesProviderSend(intent) && (
+          (intent.channel === "telegram" && intent.media.some((media) => media.kind === "vault_file"))
+          || obligationBoundaryKeys.has(boundaryKey)
+        ))
+      ) {
+        effect.publishBeforeDispatch = true;
+        // A blocked successor must get its own published claim in a later pass.
+        if (!intent.deliveryTransportIdempotent) claimedBoundaryKeys.add(boundaryKey);
+      }
+      effects.push(effect);
+    }
+  }
 
   return effects;
+}
+
+function hostedAssistantIntentOwesProviderSend(intent: AssistantOutboxIntent): boolean {
+  return (intent.status === "pending" || intent.status === "retryable")
+    && intent.delivery === null
+    && !intent.deliveryConfirmationPending;
+}
+
+function hostedAssistantIntentRetryNeedsPublishedClaim(
+  intent: AssistantOutboxIntent,
+  workspaceCheckpointedAt: string | null | undefined,
+): boolean {
+  return !intent.deliveryTransportIdempotent
+    && intent.operation?.kind !== "message-reaction"
+    && hostedAssistantIntentOwesProviderSend(intent)
+    && (intent.status === "retryable"
+      || intent.attemptCount > 0
+      || Date.parse(intent.createdAt) <= Date.parse(workspaceCheckpointedAt ?? ""));
+}
+
+function hostedLinqIntentCarriesDurableObligation(intent: AssistantOutboxIntent): boolean {
+  return intent.channel === "linq" && (
+    (intent.status === "awaiting_approval"
+      && parseHostedActionApprovalCycleOwnerKey(intent.deliveryIdempotencyKey) !== null)
+    || (hostedAssistantIntentOwesProviderSend(intent)
+      && assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent))
+  );
 }
 
 /**
@@ -489,6 +586,7 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
 }
 
 async function reconcileHostedAssistantVaultFileApproval(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   expectedApprovalCycle: HostedAssistantApprovalCycleIdentity | null;
   intent: AssistantOutboxIntent;
@@ -501,6 +599,7 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     file = readAssistantVaultFileMedia(input.intent);
   } catch (error) {
     const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      onEvent: input.onEvent,
       error,
       intentId: input.intent.intentId,
       status: "failed",
@@ -594,6 +693,7 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     approvalRequest = buildAssistantVaultFileSendApprovalRequest(input.intent);
   } catch (error) {
     const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      onEvent: input.onEvent,
       error: createAssistantDeliveryTerminalError(
         "ASSISTANT_VAULT_FILE_APPROVAL_TARGET_INVALID",
         "Secure vault-file approval could not be requested because the delivery target is invalid.",
@@ -685,12 +785,14 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
 }
 
 async function preflightHostedAssistantVaultFileDispatch(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   intent: AssistantOutboxIntent;
   now: Date;
   vaultRoot: string;
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const reconciled = await reconcileHostedAssistantVaultFileApproval({
+    onEvent: input.onEvent,
     actionApprovalPort: input.actionApprovalPort,
     expectedApprovalCycle: readHostedAssistantApprovalCycleIdentity(input.intent),
     intent: input.intent,
@@ -709,6 +811,7 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
 }
 
 async function preflightHostedAssistantDispatch(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement">;
   intent: AssistantOutboxIntent;
@@ -719,6 +822,7 @@ async function preflightHostedAssistantDispatch(input: {
   vaultRoot: string;
 }): Promise<AssistantOutboxDispatchPreflightResult> {
   const vaultFile = await preflightHostedAssistantVaultFileDispatch({
+    onEvent: input.onEvent,
     actionApprovalPort: input.actionApprovalPort,
     intent: input.intent,
     now: input.now,
@@ -740,6 +844,7 @@ async function preflightHostedAssistantDispatch(input: {
       return { action: "continue" };
     } catch (error) {
       const failed = await markAssistantOutboxIntentMirrorTerminalById({
+        onEvent: input.onEvent,
         error,
         intentId: input.intent.intentId,
         onlyCurrentStatuses: ["pending", "retryable"],
@@ -1017,6 +1122,19 @@ function isHostedReviewedAssistantAskFallbackPayload(input: {
     && (input.media?.length ?? 0) === 0;
 }
 
+async function supersedeHostedAssistantAskCompletionAndRetry(input: {
+  intentId: string;
+  now: Date;
+  vaultRoot: string;
+}): Promise<never> {
+  await persistHostedAssistantAskFallbackSupersession(input);
+  throw new VaultCliError(
+    "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+    "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+    { retryable: true },
+  );
+}
+
 async function persistHostedAssistantAskFallbackSupersession(input: {
   intentId: string;
   now: Date;
@@ -1094,6 +1212,7 @@ async function persistHostedAssistantVaultFileApprovalState(input: {
 }
 
 async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   backgroundCandidates: readonly AssistantOutboxIntent[];
   causalOnly: boolean;
   foregroundCandidates: readonly AssistantOutboxIntent[];
@@ -1143,6 +1262,7 @@ async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
       )
     ) {
       const terminalIntent = await markAssistantOutboxIntentMirrorTerminalById({
+        onEvent: input.onEvent,
         error: new VaultCliError(
           "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
           "Stale signup welcome suppressed after first contact was already accepted.",
@@ -1208,12 +1328,33 @@ function hostedDirectEmailReplySupersedesSignupWelcome(
   reply: HostedAssistantDeliveryPayload,
   welcome: HostedAssistantDeliveryPayload,
 ): boolean {
-  // The vault is already scoped to one member. Direct email therefore identifies
-  // the same conversation even when a recovered welcome has no provider thread yet.
+  // Legacy welcomes predate destination identity. New welcomes must not be
+  // suppressed by a conversation held on a different, previously linked email.
   return reply.channel?.trim() === "email"
     && welcome.channel?.trim() === "email"
     && reply.threadIsDirect === true
-    && welcome.threadIsDirect === true;
+    && welcome.threadIsDirect === true
+    && hostedEmailWelcomeSharesRecipient(reply, welcome);
+}
+
+function isHostedDestinationEmailWelcome(payload: HostedAssistantDeliveryPayload): boolean {
+  return /^signup-welcome:[^:]+:email:[a-f0-9]{64}$/u.test(payload.idempotencyKey);
+}
+
+function hostedEmailWelcomeSharesRecipient(
+  reply: HostedAssistantDeliveryPayload,
+  welcome: HostedAssistantDeliveryPayload,
+): boolean {
+  if (!isHostedDestinationEmailWelcome(welcome)) return true;
+  const recipient = readHostedDirectEmailTargetRecipient(welcome);
+  return recipient !== null && recipient === readHostedDirectEmailTargetRecipient(reply);
+}
+
+function readHostedDirectEmailTargetRecipient(payload: HostedAssistantDeliveryPayload): string | null {
+  const target = payload.explicitTarget ?? payload.bindingDeliveryTarget;
+  const thread = parseHostedEmailThreadTarget(target);
+  const recipient = thread ? thread.to.length === 1 ? thread.to[0] : null : target;
+  return recipient?.trim().toLowerCase() || null;
 }
 
 function hostedAssistantReplyTargetsSignupWelcomeRecipient(
@@ -1257,14 +1398,7 @@ function isHostedSignupWelcomeDeliveryPayload(
 function isHostedSignupWelcomeDeliveryIdempotencyKey(
   idempotencyKey: string | null | undefined,
 ): boolean {
-  const normalized = idempotencyKey?.trim() ?? "";
-  if (!normalized.startsWith(HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX)) {
-    return false;
-  }
-  const tokenTarget = normalized.slice(
-    HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX.length,
-  );
-  return tokenTarget.length > 0 && !tokenTarget.includes(":");
+  return isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey);
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(
@@ -1365,6 +1499,13 @@ function buildPreferredHostedAssistantDeliveryBoundaryOrder(input: {
   return order;
 }
 
+// Accepted delivery already reached the provider. Its remaining clock settles
+// local work, so it cannot be an outbound predecessor on this boundary.
+function hostedAssistantIntentAwaitsOnlySettlement(intent: AssistantOutboxIntent): boolean {
+  return intent.status === "sent"
+    || assistantOutboxAcceptedDeliveryRequiresConfirmation(intent);
+}
+
 function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
   candidateIntentIds: ReadonlySet<string>;
   intents: readonly AssistantOutboxIntent[];
@@ -1385,9 +1526,8 @@ function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
         // hide a ready approval-link reply queued later on the same boundary.
         continue;
       }
-      if (intent.status === "sent") {
-        // Receipt recovery shares the wake clock but is not an outbound
-        // delivery predecessor on this conversation boundary.
+      if (hostedAssistantIntentAwaitsOnlySettlement(intent)) {
+        // Receipt recovery and accepted confirmation do not block later sends.
         continue;
       }
       if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
@@ -1503,6 +1643,7 @@ function isHostedGroupEmailDeliveryIdempotencyKey(value: string): boolean {
 }
 
 async function reconcileHostedGroupEmailRecipientParents(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   intents: readonly AssistantOutboxIntent[];
   vaultRoot: string;
 }): Promise<Set<string>> {
@@ -1548,6 +1689,7 @@ async function reconcileHostedGroupEmailRecipientParents(input: {
     }
 
     await markAssistantOutboxIntentMirrorTerminalById({
+      onEvent: input.onEvent,
       error: new VaultCliError(
         "ASSISTANT_GROUP_EMAIL_PARENT_UNAVAILABLE",
         "Group email recipient delivery was abandoned because its parent manifest was not sent.",
@@ -1781,7 +1923,7 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   now: Date,
 ): string | null {
   let approvalFallbackWakeAt: string | null = null;
-  let receiptFallbackWakeAt: string | null = null;
+  let settlementFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
     if (!wakeAt) {
@@ -1793,17 +1935,17 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
       }
       continue;
     }
-    if (intent.status === "sent") {
-      if (!receiptFallbackWakeAt || wakeAt < receiptFallbackWakeAt) {
-        receiptFallbackWakeAt = wakeAt;
+    if (hostedAssistantIntentAwaitsOnlySettlement(intent)) {
+      if (!settlementFallbackWakeAt || wakeAt < settlementFallbackWakeAt) {
+        settlementFallbackWakeAt = wakeAt;
       }
       continue;
     }
-    return [approvalFallbackWakeAt, receiptFallbackWakeAt, wakeAt]
+    return [approvalFallbackWakeAt, settlementFallbackWakeAt, wakeAt]
       .filter((candidate): candidate is string => candidate !== null)
       .sort()[0] ?? null;
   }
-  return [approvalFallbackWakeAt, receiptFallbackWakeAt]
+  return [approvalFallbackWakeAt, settlementFallbackWakeAt]
     .filter((candidate): candidate is string => candidate !== null)
     .sort()[0] ?? null;
 }
@@ -1867,21 +2009,24 @@ function hasHostedAssistantOutboxConfirmationRetryPath(
   if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
     return true;
   }
-  return intent.deliveryConfirmationPending === true
-    && intent.delivery !== null
-    && parseHostedPhoneCallResultDeliveryKey(
-      intent.deliveryIdempotencyKey,
-    ) !== null;
+  return assistantOutboxAcceptedDeliveryRequiresConfirmation(
+    intent,
+    parseHostedPhoneCallResultDeliveryKey(intent.deliveryIdempotencyKey) !== null,
+  );
 }
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
   selectedNonIdempotentEffectIds?: readonly string[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
+  const onEvent = createHostedCronDeliveryReconciliationObserver(input.platform);
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
   const selectedNonIdempotentEffectIds = new Set(
@@ -1902,7 +2047,13 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
       contexts: linqDeliveryContexts,
       effect,
     });
+    await hydrateHostedTelegramVaultFilesBeforeClaim({
+      effect,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      signal: input.signal,
+    });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+      onEvent,
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       ...(linqDeliveryContext?.routeAuthority
@@ -1936,10 +2087,36 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   };
 }
 
+async function hydrateHostedTelegramVaultFilesBeforeClaim(input: {
+  effect: HostedAssistantDeliveryEffect;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
+}): Promise<void> {
+  const { payload } = input.effect;
+  if (payload.channel !== "telegram" || payload.threadIsDirect !== true) {
+    return;
+  }
+  const paths = payload.media
+    .filter((media) => media.kind === "vault_file")
+    .map((file) => `vault:${file.ref}`);
+  if (paths.length === 0 || !input.materializeWorkspaceArtifacts) {
+    return;
+  }
+  // Warm bytes before Telegram's non-idempotent sending claim, so an owner loss
+  // on the remote read leaves the intent claimable. This only warms: the read
+  // after the checkpoint reports per-file outcomes, because a throw here would
+  // stop every other delivery in this batch. Interruption still propagates.
+  await input.materializeWorkspaceArtifacts(paths, {
+    maxFileBytes: assistantVaultFileMaxBytes,
+    signal: input.signal,
+  });
+}
+
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
   explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
+  if (effect.publishBeforeDispatch === true) return true;
   if (hasHostedAssistantVaultFileMedia(effect.payload)) {
     return effect.payload.channel === "telegram";
   }
@@ -2052,6 +2229,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       telegramEnv,
     }),
     sendLinq: createHostedAssistantLinqSendDependency({
+      deliveryPurpose: "progress_update",
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
@@ -2163,6 +2341,7 @@ function createHostedAssistantEmailSendDependency(input: {
 }
 
 export async function drainHostedPreparedAssistantDeliveries(input: {
+  deliveryTraceContext?: HostedDeliveryTraceContext | null;
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
@@ -2174,7 +2353,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   onBackgroundDeliveryYield?: (input: {
     yieldedEffectCount: number;
   }) => void;
-  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -2198,8 +2378,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
-    context: input.linqDeliveryContext ?? null,
-    contexts: input.linqDeliveryContexts ?? null,
+    context: input.linqDeliveryContext,
+    contexts: input.linqDeliveryContexts,
     wake: input.wake,
   });
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
@@ -2212,6 +2392,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     ]),
   );
   let pendingTypingStopEffectIndex = 0;
+  let replyBubblePacingMs = 0;
   try {
     for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
       pendingTypingStopEffectIndex = index;
@@ -2270,6 +2451,9 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       let currentEffectTypingStopRecorded = false;
       try {
         outcome = await deliverHostedPreparedAssistantDelivery({
+          deliveryTraceContext: input.deliveryTraceContext
+            ? { ...input.deliveryTraceContext, replyBubblePacingMs }
+            : input.deliveryTraceContext,
           actionApprovalPort: input.actionApprovalPort ?? null,
           wake: input.wake,
           effectsPort: input.effectsPort,
@@ -2280,6 +2464,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
           linqEnv,
           linqDeliveryContexts,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
           platform: input.platform ?? null,
           preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
           telegramEnv,
@@ -2376,6 +2561,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       })) {
         try {
           await waitForHostedAssistantReplyBubblePause(input.signal ?? null);
+          // Credit only the configured wait, not timer overshoot or other work.
+          replyBubblePacingMs += HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS;
         } catch (error) {
           await resetHostedPreparedAssistantDeliveryEffects({
             effects: input.assistantDeliveryEffects.slice(index + 1),
@@ -2384,6 +2571,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           });
           throw error;
         }
+      } else {
+        replyBubblePacingMs = 0;
       }
     }
   } catch (error) {
@@ -2596,13 +2785,13 @@ function markHostedPhoneCallResultRouteRevocationRetryable(input: {
   return markHostedDeliveryPreProviderRetryable(input.error);
 }
 
-function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
+function createHostedEmailRecipientAmbiguityError(): VaultCliError & {
   deliveryMayHaveSucceeded: true;
   retryable: false;
 } {
   const error = new VaultCliError(
-    "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
-    "Group email recipient delivery may have started; automatic retry is disabled to avoid duplicate email.",
+    "ASSISTANT_DELIVERY_AMBIGUOUS",
+    "Email delivery may have started; automatic retry is disabled to avoid duplicate email.",
   );
 
   return Object.assign(error, {
@@ -2653,20 +2842,13 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
       method === "POST"
       && error.context.failureStage === "http"
       && typeof status === "number"
-      && status >= 200
-      && status <= 299
     ) {
-      return true;
-    }
-    if (
-      method === "POST"
-      && error.context.failureStage === "http"
-      && typeof status === "number"
-      && status >= 400
-      && status <= 499
-      && status !== 408
-    ) {
-      return false;
+      if (status >= 200 && status <= 299) {
+        return true;
+      }
+      if (status >= 400 && status <= 499 && status !== 408) {
+        return false;
+      }
     }
   }
   if (
@@ -2733,6 +2915,14 @@ function isHostedBackgroundDeliveryDeferredError(error: unknown): boolean {
   ) === "fresh_foreground_input";
 }
 
+function shouldRethrowHostedAssistantDispatchError(
+  error: unknown,
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null,
+): boolean {
+  return error instanceof AssistantWorkspaceArtifactMaterializationError
+    || (preparedDispatch !== null && isHostedBackgroundDeliveryDeferredError(error));
+}
+
 function assertHostedBackgroundDeliveryNotYielded(input: {
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
 }): void {
@@ -2794,18 +2984,14 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     ? input.intent
     : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
-  if (
-    !authority
-    && !reviewedCompletion
-    && (
-      payload.threadIsDirect === true
-      || !input.intent?.automationAuthority
-    )
-  ) {
-    return null;
-  }
   if (!authority) {
-    if (!input.intent?.automationAuthority && !reviewedCompletion) {
+    if (
+      !reviewedCompletion
+      && (
+        payload.threadIsDirect === true
+        || !input.intent?.automationAuthority
+      )
+    ) {
       return null;
     }
     throw new VaultCliError(
@@ -2887,16 +3073,11 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
         { retryable: false },
       );
     }
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: reviewedCompletion.intentId,
       now: new Date(),
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   return target;
 }
@@ -2941,6 +3122,13 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
       "Hosted direct email delivery requires current verified-email authority before provider work.",
       { retryable: true },
     ));
+  }
+  if (isHostedSignupWelcomeDeliveryPayload(payload)
+    && readHostedDirectEmailTargetRecipient(payload) !== recipient.toLowerCase()) {
+    throw markHostedDeliveryPreProvider(Object.assign(new VaultCliError(
+      "ASSISTANT_CHANNEL_WELCOME_DESTINATION_CHANGED",
+      "Channel welcome destination is no longer the current verified email.",
+    ), { retryable: false }));
   }
   if (input.targetKind === "explicit") {
     return recipient;
@@ -3284,7 +3472,55 @@ async function confirmHostedAcceptedLinqReactionDelivery(input: {
   return confirmation.delivery;
 }
 
+async function maybeSendHostedLinqLinkDelayNotice(input:
+  Parameters<typeof deliverHostedPreparedAssistantDelivery>[0] & {
+    intent: AssistantOutboxIntent;
+    previousIntent: AssistantOutboxIntent | null;
+  },
+): Promise<void> {
+  const { intent } = input;
+  const delivery = intent.delivery;
+  if (
+    input.assistantDeliveryEffect.deliveryPhase !== "foreground_current_turn"
+    || intent.card !== null
+    || intent.threadIsDirect !== true
+    || intent.channel !== "linq"
+    || intent.status !== "retryable"
+    || !intent.nextAttemptAt
+    || intent.deliveryConfirmationPending
+    || input.previousIntent?.delivery
+    || delivery?.channel !== "linq"
+    || delivery.kind === "message-reaction"
+    || delivery.providerMessageIds?.length !== 1
+  ) {
+    return;
+  }
+
+  // The newly persisted partial receipt owns this best-effort notice. Replays
+  // already have that receipt, so they only retry the original delivery.
+  try {
+    await createHostedAssistantLinqSendDependency({
+      assertLiveness: input.assertLiveness,
+      effectsPort: input.effectsPort,
+      linqEnv: input.linqEnv,
+      linqDeliveryContexts: input.linqDeliveryContexts,
+      platform: input.platform,
+      providerFetch: input.providerFetch,
+      signal: input.signal,
+    })({
+      idempotencyKey: `assistant-link-delay:${intent.intentId}`,
+      message: buildHostedLinqLinkDelayNotice(intent.intentId),
+      target: delivery.target,
+      targetKind: delivery.targetKind,
+    });
+  } catch {
+    // A failed notice must neither change the original retry nor enqueue more
+    // notices when the messaging transport is itself unavailable.
+  }
+}
+
 async function deliverHostedPreparedAssistantDelivery(input: {
+  deliveryTraceContext?: HostedDeliveryTraceContext | null;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending: boolean;
   wake: HostedRuntimeEvent;
@@ -3295,7 +3531,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  platform: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -3307,6 +3544,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     outcome: HostedAssistantDeliveryOutcome,
   ) => void;
 }): Promise<HostedAssistantDeliveryOutcome> {
+  const onEvent = createHostedCronDeliveryReconciliationObserver(input.platform);
   const now = new Date();
   const mirrorState = await readAssistantOutboxIntentMirrorState({
     intentId: input.assistantDeliveryEffect.effectId,
@@ -3326,6 +3564,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       now,
+      preparedDispatch: input.preparedDispatch,
       userId: input.userId,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
@@ -3337,6 +3576,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     assertHostedDeliveryLiveness(input.signal);
     assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
     const disabledAutoReplyOutcome = await maybeFailHostedDisabledAutoReplyDelivery({
+      onEvent,
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       userId: input.userId,
@@ -3356,6 +3596,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
+        onEvent,
         confirmTerminalIntent: async ({ intent, outcome }) => {
           await recordHostedPhoneCallResultTerminalConfirmationRequired({
             effectsPort: input.effectsPort,
@@ -3382,6 +3623,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             return { action: "continue" };
           }
           return preflightHostedAssistantDispatch({
+            onEvent,
             actionApprovalPort: input.actionApprovalPort,
             effectsPort: input.effectsPort,
             intent,
@@ -3408,12 +3650,24 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             intent.deliveryIdempotencyKey,
           ) !== null,
         shouldRethrowDispatchError: ({ error }) =>
-          input.preparedDispatch !== null
-          && isHostedBackgroundDeliveryDeferredError(error),
+          shouldRethrowHostedAssistantDispatchError(error, input.preparedDispatch),
       },
       trackMessageVolumeReceipt:
         input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
       dependencies: {
+        sendVoice: async (request) => {
+          const voicePort = input.platform?.voicePort;
+          if (!voicePort) {
+            throw Object.assign(new VaultCliError(
+              "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE",
+              "The accepted voice call is no longer available.",
+            ), { deliveryMayHaveSucceeded: false, retryable: false });
+          }
+          await assertHostedDeliveryCanEnterProvider(input);
+          providerDispatchEntered = true;
+          await voicePort.speak(request);
+          await assertHostedDeliveryLiveNow(input);
+        },
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
             throw new VaultCliError(
@@ -3422,7 +3676,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             );
           }
 
-          await assertHostedDeliveryCanEnterProvider(input);
           const providerTarget =
             await resolveHostedDirectEmailRecipientAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -3431,16 +3684,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               target: request.target,
               targetKind: request.targetKind,
             });
+          await assertHostedDeliveryCanEnterProvider(input);
           const hostedEmailThreadTarget = request.targetKind === "thread"
             ? parseHostedEmailThreadTarget(request.target)
             : null;
           const plansGroupFanout = Boolean(
             hostedEmailThreadTarget?.targetKind === "group"
             && !hostedEmailThreadTarget.recipientMemberId,
-          );
-          const sendsGroupRecipient = Boolean(
-            hostedEmailThreadTarget?.targetKind === "group"
-            && hostedEmailThreadTarget.recipientMemberId,
           );
           providerDispatchEntered = !plansGroupFanout;
           // The binding identityId is a privacy-blinded conversation identifier,
@@ -3468,13 +3718,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               }
             } else if (hostedDeliveryErrorProvesProviderWasSkipped(error)) {
               providerDispatchEntered = false;
-            } else if (sendsGroupRecipient) {
-              throw createHostedEmailGroupRecipientAmbiguityError();
+            } else {
+              throw createHostedEmailRecipientAmbiguityError();
             }
             throw error;
           }
           const providerWasSkipped =
-            sendsGroupRecipient && hostedEmailResultProvesProviderWasSkipped(result);
+            !plansGroupFanout && hostedEmailResultProvesProviderWasSkipped(result);
           if (providerWasSkipped) {
             providerDispatchEntered = false;
           }
@@ -3489,8 +3739,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           try {
             await assertHostedDeliveryLiveNow(input);
           } catch (error) {
-            if (sendsGroupRecipient && !providerWasSkipped) {
-              throw createHostedEmailGroupRecipientAmbiguityError();
+            if (!plansGroupFanout && !providerWasSkipped) {
+              throw createHostedEmailRecipientAmbiguityError();
             }
             throw error;
           }
@@ -3614,14 +3864,24 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           if (!privateCompletion && !trackedPhoneCallResult) {
             providerDispatchEntered = true;
           }
-          const result = await sendTelegramMessage(request, dependencies);
-          if (trackedPhoneCallResult) {
-            // Telegram has accepted the non-idempotent result; preserve the
-            // receipt through the existing outbox confirmation path.
-            return result;
-          }
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return sendTelegramMessage(request, {
+            ...dependencies,
+            onTextSendAccepted: (acceptance) => {
+              if (!input.platform?.logPort) return;
+              void writeHostedRuntimeLogBestEffort({
+                entry: {
+                  at: acceptance.responseReceivedAt,
+                  component: "outbox",
+                  eventCode: "outbox.telegram_text_accepted",
+                  level: "info",
+                  ...(mirrorState.intent ? { outboxIntentRef: mirrorState.intent.intentId } : {}),
+                  phase: "outbox",
+                  redactedJson: { ...acceptance },
+                },
+                platform: input.platform,
+              });
+            },
+          });
         },
         sendTelegramRich: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
@@ -3710,9 +3970,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           if (!privateCompletion) {
             providerDispatchEntered = true;
           }
-          const result = await sendTelegramRichMessage(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return sendTelegramRichMessage(request, dependencies);
         },
         sendTelegramFile: async (request) => {
           const intent = mirrorState.intent;
@@ -3735,6 +3993,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
             intentId: intent.intentId,
             media: [request.file],
+            signal: input.signal,
+            materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
             vaultRoot: input.vaultRoot,
           });
           const dependencies = requireHostedProviderFetchDependencies({
@@ -3763,12 +4023,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               return bytes;
             },
           }, "Hosted assistant Telegram file delivery");
-          const result = await sendTelegramFileMessage(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return sendTelegramFileMessage(request, dependencies);
         },
         sendTelegramImage: async (request) => {
           const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+            materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+            signal: input.signal,
             media: request.media,
             vaultRoot: input.vaultRoot,
           });
@@ -3814,15 +4074,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               : {}),
           }, "Hosted assistant Telegram image delivery");
           providerDispatchEntered = true;
-          const result = await sendTelegramImageMessage({
+          return sendTelegramImageMessage({
             idempotencyKey: request.idempotencyKey ?? null,
             media: request.media,
             message: request.message,
             replyToMessageId: request.replyToMessageId ?? null,
             target: request.target,
           }, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
         },
         setTelegramMessageReaction: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
@@ -3843,9 +4101,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram reaction delivery");
           providerDispatchEntered = true;
-          const result = await setTelegramMessageReaction(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return setTelegramMessageReaction(request, dependencies);
         },
         telegramVoiceMemoRuntime: {
           ...(telegramAuthorityBoundTarget
@@ -3853,7 +4109,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             : {}),
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
-            assertLive: () => assertHostedDeliveryLiveNow(input),
             assertProviderEntryLive: async () => {
               await assertHostedDeliveryCanEnterProvider(input);
               const target = readHostedAssistantDeliveryPayloadTarget(
@@ -3879,7 +4134,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
           assertLiveness: input.assertLiveness,
+          dispatchTimingContext: input.deliveryTraceContext,
           deliveryRouteContext: {
             actorId: input.assistantDeliveryEffect.payload.actorId,
             identityId: input.assistantDeliveryEffect.payload.identityId,
@@ -4080,6 +4337,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : {}),
       vault: input.vaultRoot,
     });
+    await maybeSendHostedLinqLinkDelayNotice({
+      ...input,
+      intent: dispatched.intent,
+      linqDeliveryContexts,
+      previousIntent: mirrorState.intent,
+    });
     const resetDispatchResult = await maybeResetHostedPreparedDeliveryAfterPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
@@ -4126,6 +4389,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
       });
     }
+    recordHostedDeliveryCommittedBestEffort({
+      context: input.deliveryTraceContext,
+      intent: dispatched.intent,
+    });
     const trackedPhoneCallResultSent =
       dispatched.intent.status === "sent"
       && readHostedPhoneCallResultDeliveryFromEffect(
@@ -4476,8 +4743,7 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 }
 
 function createHostedProviderFetchBoundary(input: {
-  assertLive?: () => Promise<void>;
-  assertProviderEntryLive?: () => Promise<void>;
+  assertProviderEntryLive: () => Promise<void>;
   onProviderDispatchEntered?: () => Promise<void> | void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
@@ -4495,7 +4761,7 @@ function createHostedProviderFetchBoundary(input: {
   };
 
   return (async (request, init) => {
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
+    await input.assertProviderEntryLive();
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,
@@ -4507,9 +4773,7 @@ function createHostedProviderFetchBoundary(input: {
     ) {
       input.onTelegramVoiceMemoDispatchEntered();
     }
-    const response = await fetchImplementation(request, init);
-    await input.assertLive?.();
-    return response;
+    return fetchImplementation(request, init);
   }) as typeof fetch;
 }
 
@@ -4602,6 +4866,10 @@ function createHostedAssistantLinqSendDependency(input: {
     HostedAssistantDeliveryPayload,
     "actorId" | "identityId" | "threadId" | "threadIsDirect"
   > | null;
+  /** Progress sends ask Web whether a burst tapback already covers them. */
+  deliveryPurpose?: "progress_update" | null;
+  /** Enables one timing row per existing provider-dispatch boundary. */
+  dispatchTimingContext?: HostedDeliveryTraceContext | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     | "assertAssistantAskPrivateCompletionAuthority"
@@ -4618,6 +4886,7 @@ function createHostedAssistantLinqSendDependency(input: {
   }) => void;
   onProviderDispatchEntered?: () => void;
   onProviderDispatchSettledWithoutEffect?: () => void;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -4631,6 +4900,7 @@ function createHostedAssistantLinqSendDependency(input: {
     platform: input.platform ?? null,
   });
   return async (request) => {
+    const sendStartedAtMonotonicMs = performance.now();
     await assertHostedDeliveryLiveNow(input);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
     const privateAssistantAskCompletion = idempotencyKey?.startsWith(
@@ -4708,6 +4978,7 @@ function createHostedAssistantLinqSendDependency(input: {
         target: deliveryContext?.target ?? request.target,
       });
     }
+    const routeAuthorityStartedAtMonotonicMs = performance.now();
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
         answeredMailboxItemIds: request.answeredMailboxItemIds,
@@ -4730,6 +5001,8 @@ function createHostedAssistantLinqSendDependency(input: {
         target: deliveryContext?.target ?? request.target,
         targetKind: request.targetKind ?? null,
       });
+    const routeAuthorityCheckMs =
+      performance.now() - routeAuthorityStartedAtMonotonicMs;
     const resolvedRoute = requireHostedAssistantLinqResolvedRoute(engagement);
     const directRecipientPhoneNumber = resolvedRoute.directRecipientPhoneNumber;
     const fromPhoneNumber = resolvedRoute.fromPhoneNumber;
@@ -4763,9 +5036,13 @@ function createHostedAssistantLinqSendDependency(input: {
       expectedDedupeKey: input.expectedDedupeKey ?? null,
       intentId: input.intentId ?? null,
       media: request.media ?? [],
+      signal: input.signal,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot ?? null,
     });
     const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      signal: input.signal,
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
@@ -4778,6 +5055,7 @@ function createHostedAssistantLinqSendDependency(input: {
     const readProviderAttempt = () => providerAttempt;
     const readResolvedEngagementInput = () => ({
       answeredMailboxItemIds: request.answeredMailboxItemIds,
+      deliveryPurpose: input.deliveryPurpose ?? null,
       assistantAskFallback: reviewedAssistantAskCompletion
         ? isHostedReviewedAssistantAskFallbackPayload({
             media: request.media,
@@ -4814,6 +5092,7 @@ function createHostedAssistantLinqSendDependency(input: {
         }
       },
       onProviderDispatchEntered: async () => {
+        const providerEntryFenceStartedAtMonotonicMs = performance.now();
         try {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
@@ -4840,21 +5119,27 @@ function createHostedAssistantLinqSendDependency(input: {
                 { retryable: true },
               );
             }
-            await persistHostedAssistantAskFallbackSupersession({
+            await supersedeHostedAssistantAskCompletionAndRetry({
               intentId: input.intentId,
               now: new Date(),
               vaultRoot: input.vaultRoot,
             });
-            throw new VaultCliError(
-              "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-              "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-              { retryable: true },
-            );
           }
           providerAttempt = {
             attemptedAt: new Date(),
             idempotencyKey: deliveryIdempotencyKey,
           };
+          // One row per provider boundary: a primary and a fallback entry
+          // each write their own row, which the reader treats as ambiguous.
+          writeHostedLinqDispatchEnteredTiming({
+            context: input.dispatchTimingContext,
+            dispatchEnteredAtMonotonicMs: performance.now(),
+            intentId: input.intentId,
+            platform: input.platform,
+            providerEntryFenceStartedAtMonotonicMs,
+            routeAuthorityCheckMs,
+            sendStartedAtMonotonicMs,
+          });
           input.onProviderDispatchEntered?.();
         } catch (error) {
           if (isHostedLinqProviderOutcomeAmbiguous(error)) {
@@ -5125,16 +5410,11 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     (currentContainsFallbackText && !currentIsFallback)
     || (requestContainsFallbackText && !requestIsFallback)
   ) {
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: input.intentId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   if (current.message !== input.message) {
     throw new VaultCliError(
@@ -5146,16 +5426,11 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     );
   }
   if (!currentIsFallback && Date.parse(expiresAt) <= input.now.getTime()) {
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: input.intentId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   return expiresAt;
 }
@@ -5245,6 +5520,8 @@ function hostedPrivateAssistantAskCompletionRoutesEqual(
 }
 
 async function preloadHostedAssistantVaultImages(input: {
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
   media: readonly AssistantResponseMedia[];
   vaultRoot: string | null;
 }): Promise<Map<string, Uint8Array>> {
@@ -5266,6 +5543,8 @@ async function preloadHostedAssistantVaultImages(input: {
     verified.set(
       buildHostedVaultImageMediaIdentity(image),
       await readVerifiedAssistantVaultImageBytes({
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        signal: input.signal,
         image,
         vaultRoot: input.vaultRoot,
       }),
@@ -5275,6 +5554,8 @@ async function preloadHostedAssistantVaultImages(input: {
 }
 
 async function preloadApprovedHostedAssistantVaultFiles(input: {
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   expectedDedupeKey: string | null;
   intentId: string | null;
@@ -5339,6 +5620,9 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
       request: buildAssistantVaultFileSendApprovalRequest(intent),
     });
   } catch (error) {
+    if (isAssistantOutboxRetryableError(error)) {
+      throw markHostedDeliveryPreProviderRetryable(error);
+    }
     throw createAssistantDeliveryTerminalError(
       "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
       "Secure vault-file approval could not be consumed at provider dispatch.",
@@ -5363,6 +5647,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   }
 
   const bytes = await readVerifiedAssistantVaultFileBytes({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     file: persistedFile,
     vaultRoot: input.vaultRoot,
   });
@@ -6071,6 +6357,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   assistantAskCompletionExpiresAt?: string;
   assistantAskFallback?: boolean;
   authorityCheckOnly: boolean;
+  deliveryPurpose?: "progress_update" | "reaction" | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute;
@@ -6109,6 +6396,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
               input.assistantAskCompletionExpiresAt,
           }),
       authorityCheckOnly: input.authorityCheckOnly,
+      ...readHostedAssistantLinqDeliveryPurposeField(input.deliveryPurpose),
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       ...(input.expectedResolvedRoute
         ? { expectedResolvedRoute: input.expectedResolvedRoute }
@@ -6140,7 +6428,9 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       idempotencyKey: input.idempotencyKey,
     });
   }
-  const normalized = normalizeHostedAssistantLinqEngagementResult(result);
+  const normalized: HostedRuntimeLinqRecentInboundEngagementResult = result ?? {};
+  assertHostedAssistantProgressUpdateNotAcknowledged({ ...input, result: normalized });
+  assertGameRematchEgressSupported(input.idempotencyKey, normalized);
   if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
     const code = `ASSISTANT_LINQ_EGRESS_${
       normalized.deliveryBlockCode.toUpperCase()
@@ -6153,12 +6443,13 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     }
     throw createAssistantDeliveryBlockedError(
       code,
-      "Hosted Linq delivery is blocked by current line or chat health.",
+      "Hosted Linq delivery is blocked by current outreach or delivery policy.",
       {
         blockKind: normalized.deliveryBlockCode,
         resume: normalized.deliveryBlockCode === "operator_disabled"
           ? "manual_ops"
           : normalized.deliveryBlockCode === "chat_critical"
+            || normalized.deliveryBlockCode === "automation_engagement_paused"
             ? "recipient_inbound"
             : "line_health_change",
       },
@@ -6246,36 +6537,89 @@ function assertHostedAssistantLinqProviderDispatchClaim(input: {
   }
 }
 
-function normalizeHostedAssistantLinqEngagementResult(
-  result: HostedRuntimeLinqRecentInboundEngagementResult | void,
-): HostedRuntimeLinqRecentInboundEngagementResult {
-  const normalized: HostedRuntimeLinqRecentInboundEngagementResult = {};
-  if (typeof result?.assistantAskFallbackRequired === "boolean") {
-    normalized.assistantAskFallbackRequired =
-      result.assistantAskFallbackRequired;
+/** Older Web cannot acknowledge the revision fence, even for two-human group rooms. */
+function assertGameRematchEgressSupported(idempotencyKey: string | null | undefined, result: HostedRuntimeLinqRecentInboundEngagementResult): void {
+  if (idempotencyKey?.startsWith("game-rematch:") && result.gameRematchAuthorityChecked !== true) {
+    throw new VaultCliError("ASSISTANT_GAME_REMATCH_AUTHORITY_UNAVAILABLE", "Web must confirm current rematch revision authority before delivery.", { retryable: true });
   }
-  if (result?.deliveryBlockCode) {
-    normalized.deliveryBlockCode = result.deliveryBlockCode;
+}
+
+/**
+ * Asks Web, when Murph calls `react_to_message`, whether Linq already accepted
+ * Web's "on it" tapback on this exact member message. iMessage keeps one
+ * tapback per sender per message, so Murph's reaction replaces it and Murph
+ * is told which emoji was there.
+ * Read-only (authority-only engagement, no dispatch fence). Returns the emoji
+ * or null; errors fall open so the reaction is queued as before. The caller
+ * bounds the wait.
+ */
+export async function readHostedAssistantLinqMessageAckReaction(input: {
+  context: HostedAssistantLinqDeliveryContext;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
+  signal?: AbortSignal | null;
+}): Promise<string | null> {
+  const target = input.context.target?.trim();
+  const messageId = input.context.replyToMessageId?.trim();
+  if (!target || !messageId || input.context.threadIsDirect !== true) {
+    return null;
   }
-  if (result?.deliveryPosture) {
-    normalized.deliveryPosture = result.deliveryPosture;
+  try {
+    const result = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      authorityCheckOnly: true,
+      deliveryPurpose: "reaction",
+      directRecipientPhoneNumber: normalizeHostedLinqDirectRecipient(
+        input.context.directRecipientPhoneNumber,
+      ),
+      effectsPort: input.effectsPort,
+      fromPhoneNumber: normalizeHostedLinqDirectRecipient(input.context.fromPhoneNumber),
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: null,
+      intentId: null,
+      replyToMessageId: messageId,
+      signal: input.signal ?? null,
+      target,
+      targetKind: "thread",
+    });
+    return typeof result.ackReaction === "string" && result.ackReaction.trim()
+      ? result.ackReaction.trim()
+      : null;
+  } catch {
+    return null;
   }
-  if (typeof result?.providerDispatchClaimed === "boolean") {
-    normalized.providerDispatchClaimed = result.providerDispatchClaimed;
+}
+
+function readHostedAssistantLinqDeliveryPurposeField(
+  deliveryPurpose: "progress_update" | "reaction" | null | undefined,
+): { deliveryPurpose?: "progress_update" | "reaction" } {
+  return deliveryPurpose ? { deliveryPurpose } : {};
+}
+
+/**
+ * Web skips a progress update's dispatch fence once Linq accepted the burst's
+ * tapback; nothing reached the provider, so this is a pre-provider skip.
+ */
+function assertHostedAssistantProgressUpdateNotAcknowledged(input: {
+  authorityCheckOnly: boolean;
+  deliveryPurpose?: "progress_update" | "reaction" | null;
+  result: HostedRuntimeLinqRecentInboundEngagementResult;
+}): void {
+  if (
+    input.authorityCheckOnly !== true
+    && input.deliveryPurpose === "progress_update"
+    && input.result.progressUpdateSuppressed === true
+  ) {
+    throw new VaultCliError(
+      ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
+      "The member already got an emoji reaction for this burst.",
+      { retryable: false },
+    );
   }
-  const resolvedRoute = normalizeHostedAssistantLinqResolvedRoute(
-    result?.resolvedRoute,
-  );
-  if (resolvedRoute) {
-    normalized.resolvedRoute = resolvedRoute;
-  }
-  return normalized;
 }
 
 function requireHostedAssistantLinqResolvedRoute(
   result: HostedRuntimeLinqRecentInboundEngagementResult,
 ): HostedExecutionResolvedLinqDeliveryRoute {
-  const resolvedRoute = normalizeHostedAssistantLinqResolvedRoute(
+  const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(
     result.resolvedRoute,
   );
   if (!resolvedRoute) {
@@ -6286,71 +6630,6 @@ function requireHostedAssistantLinqResolvedRoute(
     );
   }
   return resolvedRoute;
-}
-
-function normalizeHostedAssistantLinqResolvedRoute(
-  value: HostedExecutionResolvedLinqDeliveryRoute | null | undefined,
-): HostedExecutionResolvedLinqDeliveryRoute | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const target = value.target?.trim() ?? "";
-  const conversationThreadId = normalizeHostedLinqRouteNullableText(
-    value.conversationThreadId,
-  );
-  const directRecipientPhoneNumber = normalizeHostedLinqDirectRecipient(
-    value.directRecipientPhoneNumber,
-  );
-  const fromPhoneNumber = normalizeHostedLinqDirectRecipient(
-    value.fromPhoneNumber,
-  );
-  if (
-    !target
-    || !("conversationThreadId" in value)
-    || !("directRecipientPhoneNumber" in value)
-    || !("fromPhoneNumber" in value)
-    || (value.targetKind !== "participant" && value.targetKind !== "thread")
-    || typeof value.threadIsDirect !== "boolean"
-    || (
-      value.conversationThreadId !== null
-      && conversationThreadId === null
-    )
-    || (
-      value.directRecipientPhoneNumber !== null
-      && directRecipientPhoneNumber === null
-    )
-    || (value.fromPhoneNumber !== null && fromPhoneNumber === null)
-    || (
-      value.targetKind === "participant"
-      && (
-        value.threadIsDirect !== true
-        || directRecipientPhoneNumber === null
-        || directRecipientPhoneNumber !== target
-      )
-    )
-    || (
-      value.targetKind === "thread"
-      && value.threadIsDirect === false
-      && directRecipientPhoneNumber !== null
-    )
-  ) {
-    return null;
-  }
-  return {
-    conversationThreadId,
-    directRecipientPhoneNumber,
-    fromPhoneNumber,
-    target,
-    targetKind: value.targetKind,
-    threadIsDirect: value.threadIsDirect,
-  };
-}
-
-function normalizeHostedLinqRouteNullableText(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeHostedAssistantLinqTargetKind(
@@ -6400,11 +6679,26 @@ function assertHostedDeliveryLiveness(signal: AbortSignal | null | undefined): v
   throw new Error("Hosted assistant delivery was aborted.");
 }
 
+function maybeDeferHostedAssistantDeliveryUntilPrepared(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
+}): HostedAssistantDeliveryOutcome | null {
+  if (input.assistantDeliveryEffect.publishBeforeDispatch === true && !input.preparedDispatch) {
+    return buildHostedAssistantDeliveryOutcome({
+      deliveryStatus: "pending",
+      effect: input.assistantDeliveryEffect,
+      retryable: true,
+    });
+  }
+  return null;
+}
+
 async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
   allowPreparedSending?: boolean;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   now: Date;
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   userId: string;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
@@ -6508,7 +6802,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
     }
     case "retryable": {
       if (shouldDispatchAssistantOutboxIntent(intent, input.now)) {
-        return null;
+        return maybeDeferHostedAssistantDeliveryUntilPrepared(input);
       }
       const retryableError = normalizeHostedAssistantDeliveryMirrorFailure({
         fallbackMessage: "The assistant outbox mirror scheduled the next retry attempt.",
@@ -6589,11 +6883,12 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
     }
     default:
-      return null;
+      return maybeDeferHostedAssistantDeliveryUntilPrepared(input);
   }
 }
 
 async function maybeFailHostedDisabledAutoReplyDelivery(input: {
+  onEvent?: (event: AssistantRunEvent) => void;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   userId: string;
@@ -6604,7 +6899,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
   if (!intent) {
     return null;
   }
-  if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
+  if (hasHostedAssistantOutboxConfirmationRetryPath(intent)) {
     return null;
   }
   if (!await hostedAssistantDeliveryIntentIsAutoReply({
@@ -6632,6 +6927,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
     { retryable: false },
   );
   const failedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+    onEvent: input.onEvent,
     error,
     intentId: intent.intentId,
     status: "failed",
@@ -7106,6 +7402,21 @@ function buildHostedAssistantDeliveryErrorDetailLogFields(
     details,
     ["errorCause", "cause"],
   ));
+  for (const [suffix, key] of [
+    ["ProviderRequestId", "providerRequestId"],
+    ["ProviderFieldHints", "providerErrorFieldHints"],
+    ["ProviderReasonHints", "providerErrorReasonHints"],
+    ["ProviderMediaTypeHints", "providerErrorMediaTypeHints"],
+    ["ProviderMessageLength", "providerErrorMessageLength"],
+    ["RequestBodyShape", "requestBodyShape"],
+    ["RequestMessagePartCount", "requestMessagePartCount"],
+    ["RequestPublicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+    ["RequestPublicUrlMediaFormatSummary", "requestPublicUrlMediaFormatSummary"],
+    ["RequestAttachmentMediaPartCount", "requestAttachmentMediaPartCount"],
+    ["HasReplyToMessageId", "hasReplyToMessageId"],
+  ] as const) {
+    appendHostedAssistantDeliveryErrorLogValue(output, suffix, details[key]);
+  }
   output.deliveryErrorDetailFieldCount = Object.keys(details).length;
   return output;
 }
@@ -7350,6 +7661,27 @@ function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | nul
   }
 
   return null;
+}
+
+function createHostedCronDeliveryReconciliationObserver(
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null | undefined,
+): ((event: AssistantRunEvent) => void) | undefined {
+  if (!platform) return undefined;
+  return (event) => {
+    if (event.type !== "cron.delivery.reconciled") return;
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: "info",
+        phase: "outbox",
+        redactedJson: buildHostedAssistantAutomationEventLogDetails(event),
+      },
+      platform,
+    }).catch(() => {
+      // An observation cannot change the persisted cron or outbox result.
+    });
+  };
 }
 
 function buildHostedAssistantDeliveryDetails(input: {

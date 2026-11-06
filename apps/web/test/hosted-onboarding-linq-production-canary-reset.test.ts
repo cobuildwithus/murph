@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
-  deleteHostedAccountData: mocks.deleteAccountData,
+  deleteHostedLinqProductionCanaryAccountData: mocks.deleteAccountData,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -183,7 +183,6 @@ describe("Hosted Linq production canary reset", () => {
       projection: "core",
     });
     expect(mocks.deleteAccountData).toHaveBeenCalledWith({
-      exitFeedback: null,
       memberId: "member_canary",
       prisma,
       request,

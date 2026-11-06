@@ -13,11 +13,8 @@ aliases:
 - PMC10201453
 categories:
 - daily-step-floor
-relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: parent_family
-  target: experiment_family:daily-step-floor
+relations: []
+
 source:
   kind: journal_article
   title: 'Consensus-based recommendations on physical activity and exercise in patients with diabetes at risk of foot ulcerations: a Delphi study'

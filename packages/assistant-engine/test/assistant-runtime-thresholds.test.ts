@@ -14,7 +14,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
   vi.resetModules()
   vi.doUnmock('node:fs/promises')
-  vi.doUnmock('../src/assistant/automation/runtime-lock.js')
+
   vi.doUnmock('../src/assistant/diagnostics.js')
   vi.doUnmock('../src/assistant/cron/store.js')
   vi.doUnmock('../src/assistant/outbox/store.js')
@@ -119,18 +119,7 @@ describe('assistant runtime thresholds', () => {
         ),
       }
     })
-    vi.doMock('../src/assistant/automation/runtime-lock.js', async () => {
-      const actual = await vi.importActual<
-        typeof import('../src/assistant/automation/runtime-lock.ts')
-      >('../src/assistant/automation/runtime-lock.ts')
-      return {
-        ...actual,
-        clearAssistantAutomationRunLock: vi.fn(async () => undefined),
-        inspectAssistantAutomationRunLock: vi.fn(async () => ({
-          state: 'active' as const,
-        })),
-      }
-    })
+
     vi.doMock('../src/assistant/runtime-cache.js', async (importOriginal) => {
       const actual =
         await importOriginal<typeof import('../src/assistant/runtime-cache.js')>()
@@ -299,12 +288,7 @@ describe('assistant runtime thresholds', () => {
           await run(paths),
       ),
     }))
-    vi.doMock('../src/assistant/automation/runtime-lock.js', () => ({
-      clearAssistantAutomationRunLock: vi.fn(async () => undefined),
-      inspectAssistantAutomationRunLock: vi.fn(async () => ({
-        state: 'active' as const,
-      })),
-    }))
+
     vi.doMock('../src/assistant/runtime-cache.js', async (importOriginal) => {
       const actual =
         await importOriginal<typeof import('../src/assistant/runtime-cache.js')>()
@@ -599,12 +583,7 @@ describe('assistant runtime thresholds', () => {
           await run(paths),
       ),
     }))
-    vi.doMock('../src/assistant/automation/runtime-lock.js', () => ({
-      clearAssistantAutomationRunLock: vi.fn(async () => undefined),
-      inspectAssistantAutomationRunLock: vi.fn(async () => ({
-        state: 'stale' as const,
-      })),
-    }))
+
     vi.doMock('../src/assistant/runtime-cache.js', async (importOriginal) => {
       const actual =
         await importOriginal<typeof import('../src/assistant/runtime-cache.js')>()
@@ -659,9 +638,9 @@ describe('assistant runtime thresholds', () => {
           '3 terminal outbox intent(s) were pruned.',
           '4 older cron response(s) were redacted.',
           '5 stale cron run record(s) were pruned.',
-          '2 stale runtime lock(s) were cleared.',
+          '1 stale runtime lock(s) were cleared.',
         ],
-        staleLocksCleared: 2,
+        staleLocksCleared: 1,
         staleQuarantinePruned: 1,
       },
     })
@@ -932,12 +911,7 @@ function mockRuntimeBudgetDependencies(
         await run(paths),
     ),
   }))
-  vi.doMock('../src/assistant/automation/runtime-lock.js', () => ({
-    clearAssistantAutomationRunLock: vi.fn(async () => undefined),
-    inspectAssistantAutomationRunLock: vi.fn(async () => ({
-      state: 'active' as const,
-    })),
-  }))
+
   vi.doMock('../src/assistant/runtime-cache.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/runtime-cache.ts')

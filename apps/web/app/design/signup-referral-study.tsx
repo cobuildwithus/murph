@@ -4,8 +4,12 @@ import {
   HostedSignupReferralLanding,
   type HostedSignupReferralLandingState,
 } from "@/src/components/hosted-onboarding/hosted-signup-referral-landing";
-import { JoinInviteSignedInMismatchView } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
-import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { JoinInviteSignedInMismatchScreen } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
+import {
+  LINK_PAGE_LINK_CLASS,
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
+import { HostedLoginMethodSettingsView } from "@/src/components/settings/hosted-login-method-settings";
 import {
   HostedSignupReferralLinkButtonView,
   type HostedSignupReferralLinkButtonState,
@@ -24,11 +28,6 @@ const DESIGN_ACCOUNT: HostedAccountSettingsSnapshot = {
     number: "+15555550100",
     verifiedAt: "2026-08-01T00:00:00.000Z",
   },
-  privySignInStates: {
-    email: { removable: true, status: "matched" },
-    phone: { removable: true, status: "matched" },
-    telegram: { removable: true, status: "matched" },
-  },
   referralIdentityKey: "design-referral-member",
   telegram: {
     telegramUserId: "design-telegram-user",
@@ -40,11 +39,6 @@ const DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL: HostedAccountSettingsSnapshot = {
   email: {
     address: "billing@example.test",
     verifiedAt: null,
-  },
-  privySignInStates: {
-    email: { removable: false, status: "absent" },
-    phone: { removable: true, status: "matched" },
-    telegram: { removable: true, status: "matched" },
   },
 };
 
@@ -111,22 +105,22 @@ export function SignupReferralFlowStudy() {
           Settings · Messaging
         </p>
         <div inert>
-          <HostedAccountSettingsCards
+          <HostedLoginMethodSettingsView
             account={DESIGN_ACCOUNT}
             murphPhoneNumber="+15555550101"
-            privySessionMatchesAppSession
-            signupReferralUrl={DESIGN_REFERRAL_URL}
+            onSelect={() => undefined}
+            referralAction={<HostedSignupReferralLinkButtonView onAction={() => undefined} status="ready" />}
           />
         </div>
         <p className="mb-4 mt-8 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Settings · After email removal
         </p>
         <div inert>
-          <HostedAccountSettingsCards
+          <HostedLoginMethodSettingsView
             account={DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL}
             murphPhoneNumber="+15555550101"
-            privySessionMatchesAppSession
-            signupReferralUrl={DESIGN_REFERRAL_URL}
+            onSelect={() => undefined}
+            referralAction={<HostedSignupReferralLinkButtonView onAction={() => undefined} status="ready" />}
           />
         </div>
       </section>
@@ -142,21 +136,25 @@ export function SignupReferralFlowStudy() {
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Recipient landing states
         </p>
-        <div className="grid gap-5">
+        <div className="grid gap-5 lg:grid-cols-3">
           {LANDING_STATES.map(({ label, state }) => (
             <article
-              className="overflow-hidden rounded-3xl border border-border bg-background"
+              className="flex min-w-0 max-w-[402px] flex-col gap-3"
               data-design-state={state}
               inert
               key={state}
             >
-              <p className="border-b border-border px-5 py-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 {label}
               </p>
-              <HostedSignupReferralLanding
-                referralCode="design-referral"
-                state={state}
-              />
+              <div className="flex min-h-[46rem] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]">
+                <LinkPageSurface>
+                  <HostedSignupReferralLanding
+                    referralCode="design-referral"
+                    state={state}
+                  />
+                </LinkPageSurface>
+              </div>
             </article>
           ))}
         </div>
@@ -167,19 +165,26 @@ export function SignupReferralFlowStudy() {
           Signed-in invite recovery
         </p>
         <div
-          className="overflow-hidden rounded-3xl border border-border bg-background"
+          className="flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]"
           data-design-section="signup-referral-signed-in-recovery"
           data-design-state="signed-in-account-mismatch"
           id="signup-referral-signed-in-recovery"
           inert
         >
-          <JoinInviteSignedInMismatchView
-            signOutAction={
-              <Button size="lg" type="button" variant="outline">
-                Sign out and use invite
-              </Button>
-            }
-          />
+          <LinkPageSurface>
+            <JoinInviteSignedInMismatchScreen
+              signOutAction={
+                <Button
+                  className={LINK_PAGE_LINK_CLASS}
+                  size="unstyled"
+                  type="button"
+                  variant="unstyled"
+                >
+                  Sign out and use invite
+                </Button>
+              }
+            />
+          </LinkPageSurface>
         </div>
       </section>
     </div>

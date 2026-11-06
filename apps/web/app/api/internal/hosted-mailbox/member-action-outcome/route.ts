@@ -8,7 +8,7 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { recordMemberActionOutcome } from "@/src/lib/member-actions/outcome";
 import { getPrisma } from "@/src/lib/prisma";
 
-const MEMBER_ACTION_OUTCOME_BODY_LIMIT_BYTES = 4 * 1_024;
+const MEMBER_ACTION_OUTCOME_BODY_LIMIT_BYTES = 1_024 * 1_024;
 
 export const POST = withJsonError(async (request: Request) => {
   const authenticated = await requireHostedCloudflareCallbackJsonRequest(request, {

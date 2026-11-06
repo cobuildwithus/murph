@@ -261,6 +261,23 @@ function collectInvalidAppleZeroSleepMetricCandidates(
   candidates: readonly WearableMetricCandidate[],
   sleepWindows: readonly WearableSleepWindowCandidate[],
 ): WearableMetricCandidate[] {
+  // Only zero-valued asleep metrics and positive awake evidence can trigger
+  // this repair. Do not associate the rest of the metric history with every window.
+  const repairCandidates = candidates.filter((candidate) =>
+    candidate.metric === "awakeMinutes"
+      ? candidate.value > 0
+      : candidate.value === 0 && INVALID_ZERO_SLEEP_METRICS.has(candidate.metric)
+  );
+  const zeroTotalCandidates = repairCandidates.filter((candidate) =>
+    candidate.metric === "totalSleepMinutes"
+    && resolveSleepCandidateProvider(candidate) === APPLE_HEALTH_KIT_PROVIDER
+  );
+  if (zeroTotalCandidates.length === 0) {
+    return [];
+  }
+  const appleRepairCandidates = repairCandidates.filter((candidate) =>
+    resolveSleepCandidateProvider(candidate) === APPLE_HEALTH_KIT_PROVIDER
+  );
   const invalidCandidates: WearableMetricCandidate[] = [];
 
   for (const window of sleepWindows) {
@@ -268,15 +285,18 @@ function collectInvalidAppleZeroSleepMetricCandidates(
       continue;
     }
 
-    const windowCandidates = candidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
-    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
-    const invalidZeroTotalCandidates = windowCandidates.filter((candidate) =>
-      candidate.metric === "totalSleepMinutes" &&
-      candidate.value === 0 &&
-      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window)
+    // A window without an owned zero total cannot be repaired. Avoid scanning
+    // its entire awake/stage history until that necessary condition holds.
+    const invalidZeroTotalCandidates = zeroTotalCandidates.filter((candidate) =>
+      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) &&
+      sleepMetricAssociatedWithWindow(candidate, window)
     );
+    if (invalidZeroTotalCandidates.length === 0) {
+      continue;
+    }
+    const windowCandidates = appleRepairCandidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
+    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
     if (
-      invalidZeroTotalCandidates.length === 0 ||
       awakeMinutes === null ||
       window.durationMinutes <= awakeMinutes + 1
     ) {
@@ -1316,10 +1336,11 @@ export function createMetricCandidateBase(
   sourceFamily: WearableCandidateSourceFamily,
   sourceKind: string,
 ): Omit<WearableMetricCandidate, "metric" | "unit" | "value"> {
+  const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
   return {
     candidateId: buildCandidateId([
       provider,
-      wearableDataOriginKey(readWearableDataOrigin(entity.attributes.dataOrigin, externalRef)),
+      wearableDataOriginKey(dataOrigin),
       date,
       sourceFamily,
       sourceKind,
@@ -1328,7 +1349,7 @@ export function createMetricCandidateBase(
       externalRef?.facet ?? "",
       normalizeNullableString(entity.occurredAt) ?? normalizeNullableString(entity.attributes.recordedAt) ?? "",
     ]),
-    dataOrigin: readWearableDataOrigin(entity.attributes.dataOrigin, externalRef),
+    dataOrigin,
     date,
     externalRef,
     occurredAt: entity.occurredAt ?? null,
@@ -1807,14 +1828,16 @@ function buildSleepWindowCandidate(
     sourceFamily: "event",
     sourceKind: "sleep_session",
     sleepType,
+    sleepState: entity.attributes.sleepState === "tentative" || entity.attributes.sleepState === "confirmed"
+      ? entity.attributes.sleepState : undefined,
     startAt: normalizeNullableString(entity.attributes.startAt) ?? entity.occurredAt ?? null,
     timeZone: normalizeNullableString(entity.attributes.timeZone),
     title,
   };
 }
 
-function resolveSleepSessionType(value: unknown): "main_sleep" | "nap" | "unknown" {
-  return value === "main_sleep" || value === "nap" ? value : "unknown";
+function resolveSleepSessionType(value: unknown): WearableSleepWindowCandidate["sleepType"] {
+  return value === "main_sleep" || value === "short_sleep" || value === "nap" ? value : "unknown";
 }
 
 function buildSleepStageCandidate(
@@ -2052,6 +2075,7 @@ function readWearableDataOrigin(
 }
 
 function normalizeDeviceDataOrigin(value: unknown): DeviceDataOrigin | null {
+  if (value === undefined || value === null) return null;
   const parsed = deviceDataOriginSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }

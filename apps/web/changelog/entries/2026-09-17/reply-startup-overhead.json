@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 90,
+  "item": {
+    "id": "reply-startup-overhead",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before replies start",
+    "summary": "Murph now does less startup work before beginning a reply after an idle period.",
+    "details": "Repeated startup checks have been combined while keeping protection against duplicate replies.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3532
+    ]
+  }
+}

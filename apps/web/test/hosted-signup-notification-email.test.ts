@@ -10,6 +10,18 @@ const nextServerMocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
 }));
 
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("next/server", () => ({
   after: nextServerMocks.after,
 }));

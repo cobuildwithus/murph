@@ -125,15 +125,6 @@ export async function hasHostedLinqInboundWithinDays(input: {
   return row !== null;
 }
 
-export async function claimHostedLinqOnboardingLinkNotice(input: {
-  memberId: string;
-  occurredAt: Date | string;
-  prisma: HostedLinqDailyStateClient;
-  sentAt?: Date;
-}): Promise<boolean> {
-  return markHostedLinqOnboardingLinkNoticeSent(input);
-}
-
 export async function markHostedLinqOnboardingLinkNoticeSent(input: {
   memberId: string;
   occurredAt: Date | string;
@@ -171,6 +162,43 @@ export async function releaseHostedLinqOnboardingLinkNoticeClaim(input: {
     },
     data: {
       onboardingLinkSentAt: null,
+    },
+  });
+}
+
+export async function claimHostedLinqSignupLinkReminderNotice(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+  sentAt?: Date;
+}): Promise<boolean> {
+  const claimed = await input.prisma.hostedLinqDailyState.updateMany({
+    where: {
+      dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+      memberId: input.memberId,
+      signupLinkReminderSentAt: null,
+    },
+    data: {
+      signupLinkReminderSentAt: input.sentAt ?? new Date(),
+    },
+  });
+
+  return claimed.count === 1;
+}
+
+export async function releaseHostedLinqSignupLinkReminderNoticeClaim(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+}): Promise<void> {
+  await input.prisma.hostedLinqDailyState.updateMany({
+    where: {
+      dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+      memberId: input.memberId,
+      signupLinkReminderSentAt: { not: null },
+    },
+    data: {
+      signupLinkReminderSentAt: null,
     },
   });
 }

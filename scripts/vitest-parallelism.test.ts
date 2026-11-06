@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMurphPackageVitestConfig } from "../config/vitest-package.js";
 import {
   resolveMurphAppVitestMaxWorkers,
   resolveMurphVitestMaxWorkers,
 } from "../config/vitest-parallelism.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("Vitest worker budgeting", () => {
   const packageConfigUrl = new URL(
@@ -14,6 +18,32 @@ describe("Vitest worker budgeting", () => {
 
   it("uses the explicit worker override", () => {
     expect(resolveMurphVitestMaxWorkers({ MURPH_VITEST_MAX_WORKERS: "2" })).toBe("2");
+  });
+
+  it.each([
+    [undefined, false],
+    ["1", true],
+    ["0", false],
+  ] as const)("keeps assistant-runtime suites serial with file override %s", async (override, fileParallelism) => {
+    vi.stubEnv("CI", "1");
+    vi.stubEnv("MURPH_VITEST_FILE_PARALLELISM", override);
+    vi.stubEnv("MURPH_VITEST_MAX_WORKERS", "2");
+    vi.stubEnv("MURPH_VITEST_SUITE_CONCURRENCY", undefined);
+    vi.stubEnv("MURPH_VITEST_MAX_CONCURRENCY", undefined);
+    vi.stubEnv("MURPH_CLI_VITEST_MAX_CONCURRENCY", undefined);
+    vi.resetModules();
+
+    const { default: config } = await import("../packages/assistant-runtime/vitest.config.js");
+    expect(config).toMatchObject({
+      test: {
+        fileParallelism,
+        maxWorkers: "2",
+        maxConcurrency: 1,
+        sequence: { concurrent: false },
+        include: ["test/**/*.test.ts"],
+        coverage: { include: ["src/**/*.ts"] },
+      },
+    });
   });
 
   it("uses one worker for Codex while preserving human and CI defaults", () => {

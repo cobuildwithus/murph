@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import { getVercelOidcToken } from "@vercel/oidc";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface CapturedAuthRequest {
   kind: "iam" | "sts";
@@ -15,83 +15,35 @@ interface CapturedKmsCall {
   request: Record<PropertyKey, unknown>;
 }
 
-type FakeKmsApiCall = (
-  request: Record<PropertyKey, unknown>,
-  options: Record<PropertyKey, unknown>,
-) => Promise<[unknown, null, null]> & { cancel(): void };
-
 const googleSdkMocks = vi.hoisted(() => ({
   authClients: [] as object[],
   authRequest: null as null | ((input: CapturedAuthRequest) => Promise<unknown>),
   authRequests: [] as CapturedAuthRequest[],
   kmsCall: null as null | ((input: CapturedKmsCall) => Promise<unknown>),
   kmsCalls: [] as CapturedKmsCall[],
-  kmsClients: [] as Array<{ options: Record<PropertyKey, unknown> }>,
 }));
 
-vi.mock("@google-cloud/kms", () => {
-  class KeyManagementServiceClient {
-    readonly innerApiCalls: Record<string, FakeKmsApiCall>;
-
-    constructor(readonly options: Record<PropertyKey, unknown>) {
-      googleSdkMocks.kmsClients.push(this);
-      this.innerApiCalls = Object.fromEntries(
-        ["asymmetricSign", "decrypt", "encrypt", "macSign"].map((method) => [
-          method,
-          (request: Record<PropertyKey, unknown>, options: Record<PropertyKey, unknown>) => {
-            const captured: CapturedKmsCall = {
-              canceled: false,
-              method,
-              options,
-              request,
-            };
-            googleSdkMocks.kmsCalls.push(captured);
-            let rejectCall: (error: unknown) => void = () => undefined;
-            let settled = false;
-            const promise = new Promise<[unknown, null, null]>((resolve, reject) => {
-              rejectCall = reject;
-              void (async () => {
-                const authClient = this.options.authClient;
-                if (!isRecord(authClient) || typeof authClient.getRequestHeaders !== "function") {
-                  throw new Error("Fake KMS client requires an auth client.");
-                }
-                await authClient.getRequestHeaders();
-                if (settled) {
-                  return;
-                }
-                const response = googleSdkMocks.kmsCall
-                  ? await googleSdkMocks.kmsCall(captured)
-                  : defaultKmsResponse(captured);
-                if (!settled) {
-                  settled = true;
-                  resolve([response, null, null]);
-                }
-              })().catch((error: unknown) => {
-                if (!settled) {
-                  settled = true;
-                  reject(error);
-                }
-              });
-            }) as Promise<[unknown, null, null]> & { cancel(): void };
-            promise.cancel = () => {
-              if (!settled) {
-                captured.canceled = true;
-                settled = true;
-                rejectCall(Object.assign(new Error("cancelled"), { code: 1 }));
-              }
-            };
-            return promise;
-          },
-        ]),
-      );
-    }
-
-    async initialize(): Promise<Record<string, FakeKmsApiCall>> {
-      return this.innerApiCalls;
-    }
-  }
-
-  return { KeyManagementServiceClient, protos: {} };
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async (url: URL, options: RequestInit) => {
+    const method = url.pathname.split(":").at(-1)!;
+    const name = url.pathname.slice(4).split(":")[0];
+    const captured: CapturedKmsCall = {
+      canceled: false, method, options: { ...options },
+      request: { ...JSON.parse(String(options.body)), name },
+    };
+    googleSdkMocks.kmsCalls.push(captured);
+    return new Promise<Response>((resolve, reject) => {
+      const abort = () => {
+        captured.canceled = true;
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      options.signal?.addEventListener("abort", abort, { once: true });
+      void Promise.resolve().then(() => googleSdkMocks.kmsCall
+        ? googleSdkMocks.kmsCall(captured) : defaultKmsResponse(captured))
+        .then((response) => resolve(Response.json(toRestJson(response), { status: 200 })), reject)
+        .finally(() => options.signal?.removeEventListener("abort", abort));
+    });
+  }));
 });
 
 vi.mock("google-auth-library", () => {
@@ -257,6 +209,7 @@ const WORKLOAD_IDENTITY_ENV = {
 const mockedGetVercelOidcToken = vi.mocked(getVercelOidcToken);
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   mockedGetVercelOidcToken.mockReset();
   mockedGetVercelOidcToken.mockResolvedValue(
@@ -269,8 +222,19 @@ afterEach(() => {
   googleSdkMocks.kmsCalls.length = 0;
 });
 
-describe("official Google Cloud KMS SDK boundary", () => {
-  it("uses the official client resources with cancellable no-retry unary calls and CRC wrappers", async () => {
+describe("Google Cloud KMS REST boundary", () => {
+  it("defers SDK construction and shares one client across concurrent first operations", async () => {
+    const before = googleSdkMocks.authClients.length;
+    const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
+    expect(googleSdkMocks.authClients).toHaveLength(before);
+    const input = { additionalAuthenticatedData: "domain=control", keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1, 2, 3]) };
+    await Promise.all([client.encrypt(input), client.encrypt(input)]);
+    expect(googleSdkMocks.authClients).toHaveLength(before + 1);
+    expect(googleSdkMocks.kmsCalls).toHaveLength(2);
+  });
+
+  it("uses exact REST resources, base64 bytes, CRC strings and abortable requests", async () => {
     const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
 
     await expect(client.encrypt({
@@ -295,14 +259,7 @@ describe("official Google Cloud KMS SDK boundary", () => {
       keyVersionName: MAC_KEY_VERSION_NAME,
     });
 
-    expect(googleSdkMocks.kmsClients).toHaveLength(1);
-    expect(googleSdkMocks.kmsClients[0]?.options).toMatchObject({
-      apiEndpoint: "cloudkms.googleapis.com",
-      fallback: false,
-      port: 443,
-      scopes: ["https://www.googleapis.com/auth/cloudkms"],
-      universeDomain: "googleapis.com",
-    });
+    expect(googleSdkMocks.authClients).toHaveLength(1);
     expect(googleSdkMocks.kmsCalls.map((call) => call.method)).toEqual([
       "encrypt",
       "decrypt",
@@ -310,19 +267,17 @@ describe("official Google Cloud KMS SDK boundary", () => {
       "macSign",
     ]);
     expect(googleSdkMocks.kmsCalls.every((call) =>
-      call.options.retry === null
-      && typeof call.options.timeout === "number"
-      && call.options.timeout > 0
+      call.options.signal instanceof AbortSignal
+      && call.options.redirect === "error"
       && !call.canceled
     )).toBe(true);
     const encryptRequest = googleSdkMocks.kmsCalls[0]?.request;
-    expect(googleSdkMocks.kmsCalls[0]?.options.otherArgs).toEqual({
-      headers: {
-        "x-goog-request-params": `name=${encodeURIComponent(KMS_KEY_NAME)}`,
-      },
-    });
-    expect(encryptRequest?.plaintextCrc32c).toEqual({ value: 0xf130f21e });
-    expect(encryptRequest?.additionalAuthenticatedDataCrc32c).toEqual({ value: 0x481d3603 });
+    expect(new Headers(googleSdkMocks.kmsCalls[0]?.options.headers as HeadersInit).get("x-goog-request-params"))
+      .toBe(`name=${encodeURIComponent(KMS_KEY_NAME)}`);
+    expect(encryptRequest?.plaintextCrc32c).toEqual(String(0xf130f21e));
+    expect(encryptRequest?.additionalAuthenticatedDataCrc32c).toEqual(String(0x481d3603));
+    expect(encryptRequest?.plaintext).toBe("AQID");
+
   });
 
   it("rejects malformed high-bit CRC wrappers and missing provider verification flags", async () => {
@@ -403,10 +358,8 @@ describe("official Google Cloud KMS SDK boundary", () => {
       expect(googleSdkMocks.kmsCalls).toHaveLength(2);
       expect(googleSdkMocks.kmsCalls.every((call) =>
         call.method === "decrypt"
-        && call.options.retry === null
-        && typeof call.options.timeout === "number"
-        && Number(call.options.timeout) > 0
-        && Number(call.options.timeout) <= 10_000
+        && call.options.signal instanceof AbortSignal
+        && call.options.redirect === "error"
       )).toBe(true);
       expect(warning).toHaveBeenCalledWith(
         "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
@@ -687,7 +640,8 @@ describe("official Google Cloud KMS SDK boundary", () => {
     expect(authSignal.aborted).toBe(false);
     releaseSts({ data: { access_token: "federated-token" } });
     await expect(second).resolves.toMatchObject({ keyName: KMS_KEY_NAME });
-    expect(googleSdkMocks.kmsCalls[0]?.canceled).toBe(true);
+    expect(googleSdkMocks.kmsCalls).toHaveLength(1);
+    expect(googleSdkMocks.kmsCalls[0]?.canceled).toBe(false);
     expect(googleSdkMocks.authRequests.map((request) => request.kind)).toEqual(["sts", "iam"]);
   });
 
@@ -748,7 +702,7 @@ function defaultKmsResponse(call: CapturedKmsCall): Record<PropertyKey, unknown>
     const ciphertext = new Uint8Array([4, 5, 6]);
     return {
       ciphertext,
-      ciphertextCrc32c: { high: 0, low: crc32c(ciphertext) | 0 },
+      ciphertextCrc32c: String(crc32c(ciphertext)),
       name: `${String(call.request.name)}/cryptoKeyVersions/1`,
       verifiedAdditionalAuthenticatedDataCrc32c: true,
       verifiedPlaintextCrc32c: true,
@@ -758,7 +712,7 @@ function defaultKmsResponse(call: CapturedKmsCall): Record<PropertyKey, unknown>
     const plaintext = new Uint8Array([1, 2, 3]);
     return {
       plaintext,
-      plaintextCrc32c: { high: 0, low: crc32c(plaintext) | 0 },
+      plaintextCrc32c: String(crc32c(plaintext)),
       usedPrimary: true,
     };
   }
@@ -767,14 +721,14 @@ function defaultKmsResponse(call: CapturedKmsCall): Record<PropertyKey, unknown>
     return {
       name: call.request.name,
       signature,
-      signatureCrc32c: { high: 0, low: crc32c(signature) | 0 },
+      signatureCrc32c: String(crc32c(signature)),
       verifiedDigestCrc32c: true,
     };
   }
   const mac = new Uint8Array(32).fill(7);
   return {
     mac,
-    macCrc32c: { high: 0, low: crc32c(mac) | 0 },
+    macCrc32c: String(crc32c(mac)),
     name: call.request.name,
     verifiedDataCrc32c: true,
   };
@@ -801,3 +755,122 @@ function crc32c(value: Uint8Array): number {
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+function toRestJson(value: unknown): unknown {
+  if (value instanceof Uint8Array) return Buffer.from(value).toString("base64");
+  if (Array.isArray(value)) return value.map(toRestJson);
+  if (isRecord(value)) {
+    if ("value" in value) return String(value.value);
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, toRestJson(child)]));
+  }
+  return value;
+}
+
+describe("KMS REST wire failures", () => {
+  const decryptInput = {
+    additionalAuthenticatedData: "domain=control",
+    ciphertext: "BwgJ", keyName: KMS_KEY_NAME,
+  };
+
+  it.each([403, 429, 503])("preserves HTTP %s and redacts provider prose", async (status) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () => new Response("private-provider-prose", { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
+    await expect(client.encrypt({ ...decryptInput, plaintext: new Uint8Array([1]) }))
+      .rejects.toMatchObject({ status, providerReason: status === 503 ? "UNAVAILABLE" : `http_${status}` });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-provider-prose");
+  });
+
+  it("retries an HTTP unavailable decrypt once without a transport retry", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: { status: "UNAVAILABLE", message: "private" } }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ plaintext: "AQID", plaintextCrc32c: String(0xf130f21e), usedPrimary: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createHostedGcpKmsClientFromEnv(STATIC_ENV).decrypt(decryptInput))
+      .resolves.toEqual({ plaintext: new Uint8Array([1, 2, 3]) });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["oversized", "invalid-json", "non-object", "crc-wrapper"])("rejects a %s response", async (kind) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = kind === "oversized" ? new Response("x".repeat(128 * 1024 + 1))
+      : kind === "invalid-json" ? new Response("{")
+      : kind === "non-object" ? Response.json([])
+      : Response.json({ plaintext: "AQID", plaintextCrc32c: { low: 0xf130f21e, high: 0 }, usedPrimary: true });
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createHostedGcpKmsClientFromEnv(STATIC_ENV).decrypt(decryptInput)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["connection-reset", "http-unavailable", "http-deadline"])(
+    "preserves bounded decrypt retry for %s at the REST boundary",
+    async (failure) => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const fetchMock = vi.fn();
+      if (failure === "connection-reset") {
+        fetchMock.mockRejectedValueOnce(new TypeError("fetch failed", {
+          cause: Object.assign(new Error("private socket detail"), { code: "ECONNRESET" }),
+        }));
+      } else {
+        fetchMock.mockResolvedValueOnce(new Response("upstream unavailable", {
+          status: failure === "http-unavailable" ? 503 : 504,
+        }));
+      }
+      fetchMock.mockResolvedValueOnce(Response.json({
+        plaintext: "AQID", plaintextCrc32c: String(0xf130f21e), usedPrimary: true,
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(createHostedGcpKmsClientFromEnv(STATIC_ENV).decrypt(decryptInput))
+        .resolves.toEqual({ plaintext: new Uint8Array([1, 2, 3]) });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["encrypt", "decrypt"])("keeps %s TLS failures terminal", async (operation) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed", {
+      cause: Object.assign(new Error("private certificate detail"), { code: "CERT_HAS_EXPIRED" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
+    const result = operation === "encrypt"
+      ? client.encrypt({ ...decryptInput, plaintext: new Uint8Array([1]) })
+      : client.decrypt(decryptInput);
+    await expect(result).rejects.toMatchObject({ providerReason: "UNKNOWN" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds persistent connection failures and never retries encrypt", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed", {
+      cause: Object.assign(new Error("private socket detail"), { code: "ECONNRESET" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
+    await expect(client.decrypt(decryptInput)).rejects.toMatchObject({ providerReason: "UNAVAILABLE" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fetchMock.mockClear();
+    await expect(client.encrypt({ ...decryptInput, plaintext: new Uint8Array([1]) }))
+      .rejects.toMatchObject({ providerReason: "UNAVAILABLE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels response consumption when the caller aborts", async () => {
+    const cancel = vi.fn();
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream({ cancel })));
+    vi.stubGlobal("fetch", fetchMock);
+    const caller = new AbortController();
+    const result = createHostedGcpKmsClientFromEnv(STATIC_ENV).decrypt({ ...decryptInput, signal: caller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    caller.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});

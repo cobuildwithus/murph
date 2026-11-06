@@ -11,6 +11,7 @@ import {
 
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
+import { VaultError } from "./errors.ts";
 import {
   listEventLedgerShardPathsInterruptible,
   visitEventLedgerShardRecordsInterruptible,
@@ -22,6 +23,7 @@ import {
 } from "./operations/raw-manifests.ts";
 import {
   acquireCanonicalWriteLock,
+  type CanonicalWriteLockHandle,
   withCanonicalWriteLockScope,
 } from "./operations/canonical-write-lock.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
@@ -84,6 +86,7 @@ export interface RunWearableStorageMigrationPassInput {
   maxFiles?: number;
   maxBytes?: number;
   deadlineMs?: number;
+  shouldYield?: () => boolean;
   now?: Date;
   pruneDenseRaw?: boolean;
   repairClasses?: readonly WearableStorageMigrationRepairClass[];
@@ -96,6 +99,7 @@ export interface PruneWearableDenseRawTimeseriesInput {
   maxFiles?: number;
   maxBytes?: number;
   deadlineMs?: number;
+  shouldYield?: () => boolean;
   now?: Date;
   validateAfter?: boolean;
 }
@@ -270,6 +274,7 @@ export async function runWearableStorageMigrationPass({
   maxFiles = DEFAULT_MAX_FILES,
   maxBytes = DEFAULT_MAX_BYTES,
   deadlineMs,
+  shouldYield,
   now = new Date(),
   pruneDenseRaw = false,
   repairClasses,
@@ -287,6 +292,8 @@ export async function runWearableStorageMigrationPass({
   const shouldTombstoneDenseRaw = pruneDenseRaw
     && enabledRepairClasses.has("dense_raw_timeseries");
   const startedAtMs = Date.now();
+  const shouldContinue = () => !deadlineExceeded(startedAtMs, deadlineMs)
+    && shouldYield?.() !== true;
   let remainingFiles = Math.max(0, Math.trunc(maxFiles));
   let remainingBytes = Math.max(0, Math.trunc(maxBytes));
   let hasMore = false;
@@ -307,7 +314,7 @@ export async function runWearableStorageMigrationPass({
     shouldCompactReceipts
     && remainingFiles > 0
     && remainingBytes > 0
-    && !deadlineExceeded(startedAtMs, deadlineMs)
+    && shouldContinue()
   ) {
     attemptedReceiptCompaction = true;
     const receiptResult = await compactLegacyWearableReceiptEnvelopes({
@@ -337,7 +344,7 @@ export async function runWearableStorageMigrationPass({
     shouldTombstoneCanonicalArtifacts
     && remainingFiles > 0
     && remainingBytes > 0
-    && !deadlineExceeded(startedAtMs, deadlineMs)
+    && shouldContinue()
   ) {
     attemptedCanonicalTombstones = true;
     const canonicalResult = await tombstoneRawArtifactClass({
@@ -349,6 +356,7 @@ export async function runWearableStorageMigrationPass({
       predicate: isCanonicalRecordArtifact,
       reason: "derived_duplicate_not_canonical_evidence",
       schemaVersion: "wearable.legacy_canonical_records_pruned.v1",
+      shouldYield,
       startedAtMs,
       vaultRoot,
     });
@@ -368,7 +376,7 @@ export async function runWearableStorageMigrationPass({
     shouldTombstoneDenseRaw
     && remainingFiles > 0
     && remainingBytes > 0
-    && !deadlineExceeded(startedAtMs, deadlineMs)
+    && shouldContinue()
   ) {
     attemptedDenseRawTombstones = true;
     const denseRawResult = await tombstoneRawArtifactClass({
@@ -383,6 +391,7 @@ export async function runWearableStorageMigrationPass({
       predicate: isDenseRawTimeseriesArtifact,
       reason: "dense_provider_debug_timeseries_pruned_after_product_facts",
       schemaVersion: "wearable.dense_provider_timeseries_pruned.v1",
+      shouldYield,
       startedAtMs,
       vaultRoot,
     });
@@ -403,36 +412,38 @@ export async function runWearableStorageMigrationPass({
     || (shouldTombstoneCanonicalArtifacts && !attemptedCanonicalTombstones)
     || (shouldTombstoneDenseRaw && !attemptedDenseRawTombstones);
 
-  if (
-    !hasMore
-    && hasUnattemptedEnabledRepair
-    && !deadlineExceeded(startedAtMs, deadlineMs)
-  ) {
-    const detection = await detectWearableStorageMigrationCandidates({
-      includeRecentDenseRaw,
-      now,
-      vaultRoot,
-    });
-    if (
-      shouldCompactReceipts
-      && !attemptedReceiptCompaction
-      && detection.legacyReceiptPayloadCount > 0
-    ) {
+  // An interrupted pass has not proved there is no remaining work. Do not
+  // clear its durable continuation or start an unbounded detection scan.
+  if (!hasMore && hasUnattemptedEnabledRepair) {
+    if (!shouldContinue()) {
       hasMore = true;
-    }
-    if (
-      shouldTombstoneCanonicalArtifacts
-      && !attemptedCanonicalTombstones
-      && detection.legacyCanonicalArtifactCount > 0
-    ) {
-      hasMore = true;
-    }
-    if (
-      shouldTombstoneDenseRaw
-      && !attemptedDenseRawTombstones
-      && detection.retentionEligibleDenseProviderRawTimeseriesCount > 0
-    ) {
-      hasMore = true;
+    } else {
+      const detection = await detectWearableStorageMigrationCandidates({
+        includeRecentDenseRaw,
+        now,
+        vaultRoot,
+      });
+      if (
+        shouldCompactReceipts
+        && !attemptedReceiptCompaction
+        && detection.legacyReceiptPayloadCount > 0
+      ) {
+        hasMore = true;
+      }
+      if (
+        shouldTombstoneCanonicalArtifacts
+        && !attemptedCanonicalTombstones
+        && detection.legacyCanonicalArtifactCount > 0
+      ) {
+        hasMore = true;
+      }
+      if (
+        shouldTombstoneDenseRaw
+        && !attemptedDenseRawTombstones
+        && detection.retentionEligibleDenseProviderRawTimeseriesCount > 0
+      ) {
+        hasMore = true;
+      }
     }
   }
 
@@ -471,6 +482,7 @@ export async function pruneWearableDenseRawTimeseries({
   maxFiles,
   maxBytes,
   deadlineMs,
+  shouldYield,
   now,
   validateAfter,
 }: PruneWearableDenseRawTimeseriesInput): Promise<WearableStorageMigrationResult> {
@@ -482,6 +494,7 @@ export async function pruneWearableDenseRawTimeseries({
     now,
     pruneDenseRaw: true,
     repairClasses: ["dense_raw_timeseries"],
+    shouldYield,
     validateAfter,
     vaultRoot,
   });
@@ -493,6 +506,7 @@ async function tombstoneRawArtifactClass(input: {
     includeRecent: boolean;
   };
   deadlineMs?: number;
+  shouldYield?: () => boolean;
   maxBytes: number;
   maxFiles: number;
   now: Date;
@@ -503,7 +517,29 @@ async function tombstoneRawArtifactClass(input: {
   vaultRoot: string;
 }): Promise<RawTombstoneRunResult> {
   return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
-    const lock = await acquireCanonicalWriteLock(input.vaultRoot);
+    const opportunistic = input.deadlineMs !== undefined || input.shouldYield !== undefined;
+    let lock: CanonicalWriteLockHandle;
+    try {
+      // Cleanup must not queue behind an outstanding canonical write. This
+      // existing scope skips the process queue; the directory lock still
+      // excludes every other writer. Unbounded offline repair may still wait.
+      lock = await acquireCanonicalWriteLock(
+        input.vaultRoot,
+        opportunistic ? { timeoutMs: 0 } : {},
+      );
+    } catch (error) {
+      if (!opportunistic || !(error instanceof VaultError) || error.code !== "CANONICAL_WRITE_LOCKED") {
+        throw error;
+      }
+      return {
+        bytesAfter: 0,
+        bytesBefore: 0,
+        hasMore: true,
+        skippedCount: 0,
+        tombstonedCount: 0,
+        touchedPaths: [],
+      };
+    }
 
     try {
       return await tombstoneRawArtifactClassLocked(input);
@@ -519,6 +555,7 @@ async function tombstoneRawArtifactClassLocked(input: {
     includeRecent: boolean;
   };
   deadlineMs?: number;
+  shouldYield?: () => boolean;
   maxBytes: number;
   maxFiles: number;
   now: Date;
@@ -528,7 +565,8 @@ async function tombstoneRawArtifactClassLocked(input: {
   startedAtMs: number;
   vaultRoot: string;
 }): Promise<RawTombstoneRunResult> {
-  const shouldContinue = () => !deadlineExceeded(input.startedAtMs, input.deadlineMs);
+  const shouldContinue = () => !deadlineExceeded(input.startedAtMs, input.deadlineMs)
+    && input.shouldYield?.() !== true;
   const manifestReadResult = await readRawManifestReadResult(input.vaultRoot, {
     shouldContinue,
   });
@@ -572,7 +610,7 @@ async function tombstoneRawArtifactClassLocked(input: {
   let hasMore = false;
 
   for (const references of groups) {
-    if (deadlineExceeded(input.startedAtMs, input.deadlineMs)) {
+    if (!shouldContinue()) {
       hasMore = true;
       break;
     }
@@ -609,7 +647,7 @@ async function tombstoneRawArtifactClassLocked(input: {
       skippedCount += 1;
       continue;
     }
-    if (deadlineExceeded(input.startedAtMs, input.deadlineMs)) {
+    if (!shouldContinue()) {
       hasMore = true;
       break;
     }
@@ -622,11 +660,14 @@ async function tombstoneRawArtifactClassLocked(input: {
     }
   }
 
-  if (prepared.length === 0) {
+  // Nothing is durable yet. Yield without starting a cleanup commit when
+  // foreground arrives; a commit already in progress must finish atomically.
+  const yieldedBeforeCommit = input.shouldYield?.() === true;
+  if (prepared.length === 0 || yieldedBeforeCommit) {
     return {
       bytesAfter: 0,
       bytesBefore: 0,
-      hasMore,
+      hasMore: hasMore || yieldedBeforeCommit,
       skippedCount,
       tombstonedCount: 0,
       touchedPaths: [],

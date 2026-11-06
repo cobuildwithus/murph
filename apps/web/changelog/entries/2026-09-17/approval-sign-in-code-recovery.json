@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "approval-sign-in-code-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Sign in again to continue an approval",
+    "summary": "Requesting a phone or email verification code during approval sign-in no longer fails with an internal error.",
+    "details": "Use a sign-in method already linked to your account, then continue the passkey steps to confirm your request.",
+    "relevanceTags": ["account", "approvals", "reliability"],
+    "sourcePullRequests": []
+  }
+}

@@ -157,9 +157,12 @@ export function parseHostedInitialOnboardingCompletionRequest(
     throw invalidCompletionRequest("Choose a valid Murph persona, tone, and voice.");
   }
   rejectUnknownFields(body.preferences, COMPLETION_PREFERENCE_FIELDS);
+  const persona = body.preferences.persona;
+  if (!isAssistantPersonaId(persona)) {
+    throw invalidCompletionRequest("Refresh Murph before completing setup.");
+  }
   if (
-    !isAssistantPersonaId(body.preferences.persona)
-    || !isAssistantTonePreference(body.preferences.tone)
+    !isAssistantTonePreference(body.preferences.tone)
     || !isAssistantVoiceOptionId(body.preferences.voice)
   ) {
     throw invalidCompletionRequest("Choose a valid Murph persona, tone, and voice.");
@@ -168,7 +171,7 @@ export function parseHostedInitialOnboardingCompletionRequest(
   return {
     action: "save",
     preferences: {
-      persona: body.preferences.persona,
+      persona,
       tone: body.preferences.tone,
       voice: body.preferences.voice,
     },

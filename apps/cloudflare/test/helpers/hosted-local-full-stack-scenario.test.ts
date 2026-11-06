@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedRunnerContainerEnv } from "../../src/hosted-env-policy.js";
+import { HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../../src/runner-injected-credential.js";
+
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import { resolveHostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/config";
+
+import { waitForHostedJunctionReplayCompletion } from "./hosted-local-junction-replay-completion.js";
+import type { HostedLocalAssistantProviderStubRequest } from "./hosted-local-e2e-support.js";
 
 const mocks = vi.hoisted(() => ({
   issueHostedAppSessionForTest: vi.fn(async (input: { secureCookieMode: boolean }) => ({
@@ -10,7 +17,7 @@ const mocks = vi.hoisted(() => ({
     sessionId: "session-id",
   })),
   ensureHostedRuntimeLogDatabaseForTest: vi.fn(async () => {}),
-  listHostedRuntimeLogsForTest: vi.fn(async () => [{
+  listHostedRuntimeLogsForTest: vi.fn<typeof import("#hosted-web-testing")["listHostedRuntimeLogsForTest"]>(async () => [{
     at: "2026-08-07T12:00:00.000Z",
     attemptId: "attempt_test",
     component: "runner",
@@ -22,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   reserveLocalTcpPort: vi.fn(async () => 4300),
   reserveLocalTemporalTcpPort: vi.fn(async () => 7233),
   startHostedLocalDevHarness: vi.fn(),
+  startHostedLocalDevStack: vi.fn<typeof import("@murphai/hosted-local-harness/dev-hosted-local/stack")["startHostedLocalDevStack"]>(),
   startHostedLocalOidcFixture: vi.fn(async () => ({
     jwksUrl: "http://127.0.0.1:4100/.well-known/jwks.json",
     stop: vi.fn(async () => {}),
@@ -71,6 +79,10 @@ vi.mock("./hosted-local-dev-harness.js", () => ({
   startHostedLocalDevHarness: mocks.startHostedLocalDevHarness,
 }));
 
+vi.mock("@murphai/hosted-local-harness/dev-hosted-local/stack", () => ({
+  startHostedLocalDevStack: mocks.startHostedLocalDevStack,
+}));
+
 vi.mock("./hosted-local-wake.js", () => ({
   appendHostedWake: vi.fn(),
   appendHostedWakeAndWakeWorker: vi.fn(),
@@ -79,18 +91,22 @@ vi.mock("./hosted-local-wake.js", () => ({
 import {
   assertHostedRunNoProviderEgressAuthFailures,
   buildHostedLocalRuntimeLogDatabaseNameForTest,
-  buildHostedLocalFullStackWebProcessEnvOverrides,
+  buildHostedLocalFullStackHostProcessEnvOverrides,
   cleanupActiveHostedLocalFullStackScenarioSetups,
+  rethrowHostedLocalProviderCountFailure,
   shouldReuseExplicitHostedLocalScenarioDatabaseUrl,
 } from "./hosted-local-full-stack-scenario.js";
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
-describe("hosted local full-stack web process environment", () => {
-  it("gives the host web process loopback access to the shared Linq stub", () => {
-    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+describe("hosted local full-stack host process environment", () => {
+  it("gives host processes loopback access to the shared Linq stub", () => {
+    expect(buildHostedLocalFullStackHostProcessEnvOverrides({
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/api/partner/v3",
     })).toEqual({
       LINQ_API_BASE_URL: "http://127.0.0.1:4011/api/partner/v3",
@@ -98,13 +114,13 @@ describe("hosted local full-stack web process environment", () => {
   });
 
   it("does not replace a non-stub Linq origin", () => {
-    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+    expect(buildHostedLocalFullStackHostProcessEnvOverrides({
       LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
     })).toEqual({});
   });
 
   it("passes the dedicated runtime-log database to the web process", () => {
-    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+    expect(buildHostedLocalFullStackHostProcessEnvOverrides({
       HOSTED_RUNTIME_LOG_DATABASE_URL:
         "postgresql://127.0.0.1:5432/murph_e2e_runtime_logs",
     })).toEqual({
@@ -179,6 +195,34 @@ it("derives and authoritatively injects a stable runtime-log database for explic
   }
 });
 
+it.each([
+  ["http://host.docker.internal:4011/api/partner/v3", "http://127.0.0.1:4011/api/partner/v3"],
+  ["https://api.linqapp.com/api/partner/v3", "https://api.linqapp.com/api/partner/v3"],
+])("projects the host Linq upstream independently of container authority (%s)", async (sourceUrl, hostUrl) => {
+  mocks.startHostedLocalDevHarness.mockResolvedValue(createScenarioHarness());
+  const scenario = await startScenario({
+    additionalEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      LINQ_API_BASE_URL: sourceUrl,
+      LINQ_API_TOKEN: "synthetic-worker-linq-token",
+    },
+    requiredRunnerEnvProfile: "linq",
+    webProcessEnvOverrides: { LINQ_API_BASE_URL: "http://127.0.0.1:4012" },
+  });
+  try {
+    const input = mocks.startHostedLocalDevHarness.mock.calls.at(-1)?.[0];
+    expect(input.env.LINQ_API_BASE_URL).toBe(hostUrl);
+    expect(input.env.LINQ_API_TOKEN).toBe("synthetic-worker-linq-token");
+    expect(input.webProcessEnvOverrides.LINQ_API_BASE_URL).toBe("http://127.0.0.1:4012");
+    expect(buildHostedRunnerContainerEnv(input.env)).toMatchObject({
+      LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
+      LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+    });
+  } finally {
+    await scenario.stop();
+  }
+});
+
 it.each([false, true])(
   "mints an app-session cookie for the selected Web process mode (%s)",
   async (webUsesProductionArtifact) => {
@@ -189,13 +233,12 @@ it.each([false, true])(
     try {
       await scenario.issueHostedAppSession({
         memberId: "member_cookie_mode",
-        privyUserId: "did:privy:cookie_mode",
       });
 
       expect(mocks.issueHostedAppSessionForTest).toHaveBeenCalledWith(
         expect.objectContaining({
           memberId: "member_cookie_mode",
-          privyUserId: "did:privy:cookie_mode",
+          environment: expect.objectContaining({ NODE_ENV: "test" }),
           secureCookieMode: webUsesProductionArtifact,
         }),
       );
@@ -234,6 +277,105 @@ it("requires progress from the prior completed status before a later completion"
       },
     );
   } finally {
+    await scenario.stop();
+  }
+});
+
+it.each([false, true])(
+  "observes Junction completion through the real scenario and passive harness (retained retry: %s)",
+  async (retainedRetry) => {
+    const scenario = await startScenarioWithRealHarness();
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const baseline = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
+    const admitted = createCompletedStatus("2", "2026-07-10T12:00:01.000Z");
+    const drained = createCompletedStatus("3", "2026-07-10T12:00:31.000Z");
+    let activated = false;
+    const fetchStatus = vi.fn(async (_request: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json(!activated ? baseline : retainedRetry && Date.now() < startedAt + 30_000
+        ? admitted : drained)
+    );
+    vi.stubGlobal("fetch", fetchStatus);
+    const progress = vi.spyOn(scenario.harness, "waitForHostedProgress");
+    vi.spyOn(scenario, "readJunctionDeviceSyncReplayDrainStatus").mockImplementation(async () => ({
+      hasPendingDirtyConnection: retainedRetry && Date.now() < startedAt + 30_000,
+      hasPendingDirtyConnectionForUser: retainedRetry && Date.now() < startedAt + 30_000,
+      historicalBackfillEmptyAttempts: null,
+      historicalBackfillEvidence: null,
+      historicalBackfillLastEmptyAt: null,
+      historicalBackfillStatus: null,
+      pendingDirtyResourceCount: retainedRetry && Date.now() < startedAt + 30_000 ? 48 : 0,
+    }));
+
+    try {
+      await scenario.waitForHostedCompletion(baseline.userId);
+      activated = true;
+      const completion = expect(waitForHostedJunctionReplayCompletion({
+        assertNoJobFailures: async () => {},
+        connectionId: "junction_replay_fixture",
+        deadlineAtMs: startedAt + 31_000,
+        memberId: baseline.userId,
+        scenario,
+      })).resolves.toMatchObject({ workspace: { version: "3" } });
+      await Promise.all([completion, vi.advanceTimersByTimeAsync(31_000)]);
+      expect(progress).toHaveBeenCalledOnce();
+      expect(progress).toHaveBeenCalledWith(baseline.userId, expect.objectContaining({
+        afterStatus: baseline,
+      }));
+      expect(fetchStatus.mock.calls.every(([, init]) => init?.method === undefined)).toBe(true);
+      expect(scenario.harness.interventionCount).toBe(0);
+
+      // A later turn still needs progress beyond the final observed replay state.
+      const laterCompletion = expect(scenario.waitForHostedCompletion(baseline.userId, {
+        pollIntervalMs: 10,
+        timeoutMs: 50,
+      })).rejects.toThrow("Timed out waiting for hosted production-path progress");
+      await Promise.all([laterCompletion, vi.advanceTimersByTimeAsync(50)]);
+      expect(progress).toHaveBeenLastCalledWith(baseline.userId, expect.objectContaining({
+        afterStatus: expect.objectContaining({ workspace: expect.objectContaining({ version: "3" }) }),
+      }));
+    } finally {
+      vi.useRealTimers();
+      await scenario.stop();
+    }
+  },
+);
+
+it("rejects provider auth failure appearing during a retained Junction continuation", async () => {
+  const scenario = await startScenarioWithRealHarness();
+  vi.useFakeTimers();
+  const startedAt = Date.now();
+  const status = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json(status)));
+  vi.spyOn(scenario, "readJunctionDeviceSyncReplayDrainStatus").mockImplementation(async () => ({
+    hasPendingDirtyConnection: Date.now() < startedAt + 30_000,
+    hasPendingDirtyConnectionForUser: Date.now() < startedAt + 30_000,
+    historicalBackfillEmptyAttempts: null,
+    historicalBackfillEvidence: null,
+    historicalBackfillLastEmptyAt: null,
+    historicalBackfillStatus: null,
+    pendingDirtyResourceCount: Date.now() < startedAt + 30_000 ? 48 : 0,
+  }));
+  const healthyLogs = await mocks.listHostedRuntimeLogsForTest({ environment: {}, userId: status.userId });
+  mocks.listHostedRuntimeLogsForTest.mockImplementation(async () => Date.now() < startedAt + 30_000
+    ? healthyLogs
+    : [{
+      ...healthyLogs[0]!,
+      eventCode: "runner.provider_egress_diagnostic",
+      redactedJson: { providerKind: "openai", responseStatus: 401 },
+    }]);
+  try {
+    const failure = expect(waitForHostedJunctionReplayCompletion({
+      assertNoJobFailures: async () => {},
+      connectionId: "junction_replay_fixture",
+      deadlineAtMs: startedAt + 31_000,
+      memberId: status.userId,
+      scenario,
+    })).rejects.toThrow("recorded provider-egress/auth failures");
+    await Promise.all([failure, vi.advanceTimersByTimeAsync(31_000)]);
+  } finally {
+    mocks.listHostedRuntimeLogsForTest.mockResolvedValue(healthyLogs);
+    vi.useRealTimers();
     await scenario.stop();
   }
 });
@@ -312,10 +454,14 @@ it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () 
   }
 });
 
-it("retries startup with fresh port reservations after an address-in-use race", async () => {
+it.each([
+  "Address already in use (0.0.0.0:4300).",
+  "cloudflare dev process exited before the hosted local stack became healthy. "
+    + "Address already in use was reported by the exited process.",
+])("retries startup with fresh port reservations after an address-in-use race (%s)", async (message) => {
   const harness = createScenarioHarness();
   mocks.startHostedLocalDevHarness
-    .mockRejectedValueOnce(new Error("Address already in use (0.0.0.0:4300)."))
+    .mockRejectedValueOnce(new Error(message))
     .mockResolvedValueOnce(harness);
 
   const scenario = await startScenario();
@@ -326,6 +472,23 @@ it("retries startup with fresh port reservations after an address-in-use race", 
     expect(mocks.startHostedLocalOidcFixture).toHaveBeenCalledTimes(2);
   } finally {
     await scenario.stop();
+  }
+});
+
+it("stops after three attempts when the child keeps reporting a port collision", async () => {
+  const error = new Error(
+    "cloudflare dev process exited before the hosted local stack became healthy. "
+    + "Address already in use was reported by the exited process.",
+  );
+  mocks.startHostedLocalDevHarness.mockRejectedValue(error);
+
+  await expect(startScenario()).rejects.toBe(error);
+  expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledTimes(3);
+  expect(mocks.reserveLocalTcpPort).toHaveBeenCalledTimes(6);
+  expect(mocks.reserveLocalTemporalTcpPort).toHaveBeenCalledTimes(3);
+  for (const result of mocks.startHostedLocalOidcFixture.mock.results) {
+    const fixture = await result.value;
+    expect(fixture.stop).toHaveBeenCalledOnce();
   }
 });
 
@@ -398,14 +561,14 @@ it("forwards explicitly supplied provider credentials to the worker harness", as
 
   const scenario = await startScenario({
     additionalEnv: {
-      VENICE_API_KEY: "synthetic-local-venice-key",
+      OPENAI_API_KEY: "synthetic-local-openai-key",
     },
   });
   try {
     expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
       expect.objectContaining({
         env: expect.objectContaining({
-          VENICE_API_KEY: "synthetic-local-venice-key",
+          OPENAI_API_KEY: "synthetic-local-openai-key",
         }),
       }),
     );
@@ -413,6 +576,274 @@ it("forwards explicitly supplied provider credentials to the worker harness", as
     await scenario.stop();
   }
 });
+
+it("includes provider outcome metadata in failures without request text or identifiers", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+  const scenario = await startScenario();
+  const body = JSON.stringify({
+    client_metadata: {
+      session_id: "synthetic-private-session-sentinel",
+      turn_id: "synthetic-private-turn-sentinel",
+    },
+    input: [{ content: "synthetic-private-prompt-sentinel", role: "user" }],
+  });
+  scenario.assistantProviderRequests.push({
+    body,
+    fixtureMatch: "none",
+    method: "POST",
+    queuedResponseCount: 0,
+    requestKind: "turn",
+    responseStatus: 500,
+    url: "/v1/responses",
+  });
+
+  try {
+    const failure = await scenario.buildFailureMessage("member_diagnostic_fixture", [
+      "Synthetic request-count failure.",
+    ]);
+    const requestLogLine = failure.split("\n").find((line) =>
+      line.startsWith("assistant provider requests: ")
+    );
+    expect(requestLogLine).toBeDefined();
+    expect(JSON.parse(requestLogLine!.slice("assistant provider requests: ".length))).toEqual([
+      {
+        bodyBytes: Buffer.byteLength(body, "utf8"),
+        bodyFingerprint: expect.any(String),
+        fixtureMatch: "none",
+        method: "POST",
+        queuedResponseCount: 0,
+        requestKind: "turn",
+        responseStatus: 500,
+        url: "/v1/responses",
+      },
+    ]);
+    expect(failure).not.toContain("synthetic-private-");
+    expect(failure).not.toContain("client_metadata");
+  } finally {
+    await scenario.stop();
+  }
+});
+
+describe("Linq recovery strict provider-count failure diagnostics", () => {
+  const promptMarker = "Give me the recovery link";
+
+  function providerRequest(
+    body = promptMarker,
+    requestKind: HostedLocalAssistantProviderStubRequest["requestKind"] = "turn",
+    fixtureMatch: HostedLocalAssistantProviderStubRequest["fixtureMatch"] = "scoped",
+  ): HostedLocalAssistantProviderStubRequest {
+    return { body, fixtureMatch, method: "POST", requestKind, url: "/v1/responses" };
+  }
+
+  async function assertOriginalGlobalCount(
+    scenario: Awaited<ReturnType<typeof startScenario>>,
+    providerBaseline: number,
+    observeFailure: (error: unknown) => void = () => {},
+  ): Promise<void> {
+    try {
+      expect(scenario.assistantProviderRequests.filter((request) =>
+        request.url === "/v1/responses"
+      ).length).toBe(providerBaseline + 1);
+    } catch (error) {
+      observeFailure(error);
+      await rethrowHostedLocalProviderCountFailure(error, {
+        promptMarker, providerBaseline, scenario, userId: "synthetic-private-member-sentinel",
+      });
+    }
+  }
+
+  it.each([
+    ["target replay", promptMarker, "turn", "none", true],
+    ["memory carrying the target marker", promptMarker, "memory", "not_applicable", true],
+    ["unrelated memory", "synthetic-private-memory-sentinel", "memory", "not_applicable", false],
+    ["unrelated prewarm", "synthetic-private-prewarm-sentinel", "prewarm", "not_applicable", false],
+    ["previous fixture turn", "synthetic-private-previous-sentinel", "turn", "unscoped", false],
+  ] as const)("retains the exact mismatch and distinguishes %s", async (_label, body, kind, match, markerPresent) => {
+    mocks.startHostedLocalDevHarness.mockResolvedValue(createScenarioHarness());
+    const scenario = await startScenario();
+    scenario.assistantProviderRequests.push(providerRequest());
+    const providerBaseline = scenario.assistantProviderRequests.length;
+    scenario.assistantProviderRequests.push(providerRequest(), providerRequest(body, kind, match));
+    const diagnostics = vi.spyOn(scenario, "buildFailureMessage");
+    let original: unknown;
+    let originalMessage = "";
+    try {
+      const failure: unknown = await assertOriginalGlobalCount(scenario, providerBaseline, (error) => {
+        original = error;
+        if (error instanceof Error) originalMessage = error.message;
+      }).catch((error: unknown) => error);
+      expect(originalMessage).not.toContain("assistant provider request counts:");
+      expect(failure).toBe(original);
+      expect(failure).toMatchObject({ actual: 3, expected: 2, name: "AssertionError" });
+      if (!(failure instanceof Error)) throw new Error("Expected the original assertion error.");
+      expect(failure.message).toContain(originalMessage);
+      expect(diagnostics).toHaveBeenCalledExactlyOnceWith(
+        "synthetic-private-member-sentinel", [], { promptMarker, providerBaseline },
+      );
+      const summaryLine = failure.message.split("\n").find((line) =>
+        line.startsWith("assistant provider request counts: ")
+      );
+      expect(JSON.parse(summaryLine!.slice("assistant provider request counts: ".length))).toEqual({
+        categories: [
+          { count: 1, fixtureMatch: "scoped", promptMarkerPresent: true, requestKind: "turn" },
+          { count: 1, fixtureMatch: match, promptMarkerPresent: markerPresent, requestKind: kind },
+        ],
+        observedGlobalCount: 3,
+        promptMarkerMatchesBeforeBaseline: 1,
+        promptMarkerMatchesSinceBaseline: markerPresent ? 2 : 1,
+        providerBaseline: 1,
+        requestsSinceBaseline: 2,
+      });
+      expect(failure.message).not.toContain("synthetic-private-");
+      expect(failure.message).not.toContain(promptMarker);
+    } finally {
+      await scenario.stop();
+    }
+  });
+
+  it("does no diagnostic work or output when the unchanged global assertion passes", async () => {
+    const harness = createScenarioHarness();
+    mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+    const scenario = await startScenario();
+    scenario.assistantProviderRequests.push(providerRequest(), providerRequest());
+    const diagnostics = vi.spyOn(scenario, "buildFailureMessage");
+    const outputs = ["debug", "error", "info", "log", "warn"] as const;
+    const outputSpies = outputs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+    try {
+      await expect(assertOriginalGlobalCount(scenario, 1)).resolves.toBeUndefined();
+      expect(diagnostics).not.toHaveBeenCalled();
+      expect(harness.readUserStatus).not.toHaveBeenCalled();
+      for (const output of outputSpies) expect(output).not.toHaveBeenCalled();
+      expect(harness.stdoutTail).not.toHaveBeenCalled();
+      expect(harness.stderrTail).not.toHaveBeenCalled();
+    } finally {
+      await scenario.stop();
+    }
+  });
+
+  it("snapshots exact Responses counts before status awaits and exposes only bounded categories and status", async () => {
+    const harness = createScenarioHarness();
+    mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+    const scenario = await startScenario();
+    const unclassified = providerRequest("synthetic-private-body-sentinel");
+    Object.defineProperties(unclassified, {
+      fixtureMatch: { value: "synthetic-private-fixture-sentinel" },
+      headers: { value: { authorization: "synthetic-private-header-sentinel" } },
+      requestKind: { value: "synthetic-private-kind-sentinel" },
+    });
+    scenario.assistantProviderRequests.push(providerRequest(), providerRequest(), unclassified);
+    for (const url of ["/v1/responses?synthetic-private-query", "/synthetic-private-url"]) {
+      scenario.assistantProviderRequests.push({ ...providerRequest(), url });
+    }
+    harness.readUserStatus.mockImplementationOnce(async () => {
+      scenario.assistantProviderRequests.push(providerRequest());
+      const status = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
+      status.mailboxLag[0]!.lag = "1";
+      return Object.assign(status, {
+        lastErrorCode: "synthetic-private-error-sentinel",
+        userId: "synthetic-private-user-sentinel",
+      });
+    });
+    harness.stdoutTail.mockReturnValue("synthetic-private-stdout-sentinel");
+    harness.stderrTail.mockReturnValue("synthetic-private-stderr-sentinel");
+    try {
+      const failure = await scenario.buildFailureMessage("synthetic-private-member-sentinel", [], {
+        promptMarker, providerBaseline: 1,
+      });
+      const lines = failure.split("\n");
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0]!.slice("assistant provider request counts: ".length))).toEqual({
+        categories: [
+          { count: 1, fixtureMatch: "scoped", promptMarkerPresent: true, requestKind: "turn" },
+          { count: 1, fixtureMatch: "not_applicable", promptMarkerPresent: false, requestKind: "unknown" },
+        ],
+        observedGlobalCount: 3,
+        promptMarkerMatchesBeforeBaseline: 1,
+        promptMarkerMatchesSinceBaseline: 1,
+        providerBaseline: 1,
+        requestsSinceBaseline: 2,
+      });
+      expect(lines[1]).toBe('hosted count-check status: {"available":true,"lastErrorPresent":true,"mailboxLaggingLaneCount":1}');
+      expect(scenario.assistantProviderRequests.filter((request) => request.url === "/v1/responses")).toHaveLength(4);
+      for (const excluded of ["synthetic-private-", promptMarker, "bodyFingerprint", "bodyBytes"]) {
+        expect(failure).not.toContain(excluded);
+      }
+      expect(harness.stdoutTail).not.toHaveBeenCalled();
+      expect(harness.stderrTail).not.toHaveBeenCalled();
+    } finally {
+      await scenario.stop();
+    }
+  });
+
+  it.each(["status", "capture", "builder"] as const)(
+    "preserves the original count assertion when the %s diagnostic read fails",
+    async (fault) => {
+      const harness = createScenarioHarness();
+      mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+      const scenario = await startScenario();
+      scenario.assistantProviderRequests.push(providerRequest(), providerRequest());
+      const secondary = new Error("synthetic-private-secondary-sentinel");
+      if (fault === "status") harness.readUserStatus.mockRejectedValueOnce(secondary);
+      if (fault === "capture") Object.defineProperty(scenario.assistantProviderRequests[0], "body", {
+        get: () => { throw secondary; },
+      });
+      if (fault === "builder") vi.spyOn(scenario, "buildFailureMessage").mockRejectedValueOnce(secondary);
+      let original: unknown;
+      let originalMessage = "";
+      try {
+        const failure: unknown = await assertOriginalGlobalCount(scenario, 0, (error) => {
+          original = error;
+          if (error instanceof Error) originalMessage = error.message;
+        }).catch((error: unknown) => error);
+        expect(failure).toBe(original);
+        expect(failure).toMatchObject({ actual: 2, expected: 1, name: "AssertionError" });
+        if (!(failure instanceof Error)) throw new Error("Expected the original assertion error.");
+        expect(failure.message).not.toContain("synthetic-private-");
+        if (fault === "status") {
+          expect(failure.message).toContain(originalMessage);
+          expect(failure.message).toContain("assistant provider request counts: ");
+          expect(failure.message).toContain('hosted count-check status: {"available":false,"lastErrorPresent":null,"mailboxLaggingLaneCount":null}');
+        } else {
+          expect(failure.message).toBe(`${originalMessage}\nassistant provider count diagnostics: unavailable`);
+        }
+      } finally {
+        await scenario.stop();
+      }
+    },
+  );
+});
+
+async function startScenarioWithRealHarness() {
+  const actualHarness = await vi.importActual<typeof import("./hosted-local-dev-harness.js")>(
+    "./hosted-local-dev-harness.js",
+  );
+  mocks.startHostedLocalDevHarness.mockImplementationOnce(actualHarness.startHostedLocalDevHarness);
+  mocks.startHostedLocalDevStack.mockImplementationOnce(async ({ env }) => ({
+    config: resolveHostedLocalDevConfig(env),
+    hostedAppSessionHmacKey: "synthetic-session-key",
+    hostedBetterAuthSecret: "synthetic-better-auth-secret",
+    hostedAuthStorageKey: "11".repeat(32),
+    kill: vi.fn(),
+    linqWebhookTargetUrl: null,
+    oidcIdentity: { environment: "development", projectName: "murph", teamSlug: "local" },
+    oidcToken: "local-oidc-token",
+    processes: {
+      cloudflare: null, healthCommons: null, linqTunnel: null, minio: null,
+      stripe: null, temporalServer: null, temporalWorker: null, web: null,
+    },
+    ready: Promise.resolve(),
+    runtimeEnv: env,
+    stderrTail: () => "",
+    stdoutTail: () => "",
+    stop: vi.fn(async () => {}),
+    waitForExit: vi.fn(),
+    webBaseUrl: "http://127.0.0.1:4300",
+    workerBaseUrl: "http://127.0.0.1:4300",
+    workerRuntimeEnv: null,
+  }));
+  return await startScenario();
+}
 
 function createScenarioHarness(input: {
   assertNoInterventions?: () => void;
@@ -443,6 +874,7 @@ function createScenarioHarness(input: {
 async function startScenario(input: {
   additionalEnv?: NodeJS.ProcessEnv;
   faultInjection?: boolean;
+  requiredRunnerEnvProfile?: string;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
 } = {}) {
   const { startHostedLocalFullStackScenario } = await import(
@@ -455,7 +887,7 @@ async function startScenario(input: {
     faultInjection: input.faultInjection,
     localDatabaseUrl: "postgresql://127.0.0.1:5432/murph_test",
     persistDirPrefix: "murph-hosted-local-oracle-test-",
-    requiredRunnerEnvProfile: "default",
+    requiredRunnerEnvProfile: input.requiredRunnerEnvProfile ?? "default",
     reuseLocalDatabase: true,
     scenarioLabel: "Hosted local passive oracle helper test",
     webProcessEnvOverrides: input.webProcessEnvOverrides,

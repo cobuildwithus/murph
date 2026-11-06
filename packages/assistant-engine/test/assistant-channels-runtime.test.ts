@@ -1,3 +1,5 @@
+import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
@@ -23,7 +25,7 @@ const runtimeMocks = vi.hoisted(() => ({
   uploadLinqAttachment: vi.fn(),
 }))
 
-const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
+const mp3Bytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
 
 const NUTRITION_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
@@ -229,6 +231,7 @@ describe('assistant channels runtime seam', () => {
       'telegram',
       'linq',
       'email',
+      'voice',
     ])
     expect(listAssistantChannelAdapters().map((adapter) => adapter.channel)).toEqual(
       listAssistantChannelNames(),
@@ -2429,6 +2432,7 @@ describe('assistant channels runtime seam', () => {
     runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
     runtimeMocks.sendLinqIMessageAppCard.mockResolvedValue({
       message: { id: 'native-card-message-1' },
+      providerMessageEffects: [{ message: null, providerMessageId: 'native-card-message-1' }],
     })
 
     await expect(sendLinqMessage({
@@ -2462,6 +2466,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
       card: NUTRITION_CARD,
       chatId: 'private-thread-1',
+      companionMessage: NUTRITION_CARD_TEXT,
       idempotencyKey: 'card-delivery-1',
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
@@ -2707,6 +2712,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
       card: CHALLENGE_CARD,
       chatId: 'scheduled-group-thread',
+      companionMessage: CHALLENGE_CARD_TEXT,
       idempotencyKey: 'scheduled-group-card',
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
@@ -2969,12 +2975,10 @@ describe('assistant channels runtime seam', () => {
       chatId: 'chat_private_image',
       idempotencyKey: null,
       media: [{ attachmentId: 'attachment_private_image' }],
-      message: `Your progress card.\n\n${fallbackDescription}`,
+      message: 'Your progress card.',
       replyToMessageId: null,
     })
-    expect(request?.message.match(
-      /Direction context unavailable · mover sentiment is neutral\./gu,
-    )).toHaveLength(1)
+    expect(request?.message).not.toContain(fallbackDescription)
   })
 
   it.each([
@@ -3052,7 +3056,7 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendLinqMessage({
       media: [{
-        alt: 'x'.repeat(9_997),
+        alt: 'A private chart description that is not part of the message.',
         contentType: 'image/png',
         filename: 'exact-limit.png',
         kind: 'vault_image',
@@ -3061,7 +3065,7 @@ describe('assistant channels runtime seam', () => {
         sizeBytes: bytes.byteLength,
         source: 'gpt-image-2',
       }],
-      message: 'm',
+      message: 'm'.repeat(10_000),
       target: 'chat_exact_text_limit',
       targetKind: 'thread',
     }, {
@@ -3077,7 +3081,33 @@ describe('assistant channels runtime seam', () => {
       .toHaveLength(10_000)
   })
 
-  it('keeps an image description exactly once when the message already contains it', async () => {
+  it.each(['Here is the diagram.', ''])('sends public images without appending alt text to %j', async (message) => {
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'message_public_image' },
+    })
+
+    await sendLinqMessage({
+      media: [{
+        alt: 'A labeled diagram with three connected boxes.',
+        kind: 'image',
+        source: 'test',
+        url: 'https://cdn.example.test/diagram.png',
+      }],
+      message,
+      target: 'chat_public_image',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })
+
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.sendLinqChatMessage.mock.calls[0]?.[0]).toMatchObject({
+      chatId: 'chat_public_image',
+      media: [{ url: 'https://cdn.example.test/diagram.png' }],
+      message,
+    })
+  })
+
+  it('preserves image descriptions explicitly included in the authored message', async () => {
     const alternative = 'Direction context unavailable · mover sentiment is neutral.'
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({
       message: { id: 'message_accessible_image' },
@@ -3629,6 +3659,7 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
+    expect(handle.isActive?.()).toBe(true)
     await vi.advanceTimersByTimeAsync(2 * 60_000)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
     await vi.advanceTimersByTimeAsync(3 * 60_000 - 1)
@@ -3637,6 +3668,7 @@ describe('assistant channels runtime seam', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
 
+    expect(handle.isActive?.()).toBe(false)
     await handle.stop()
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
@@ -4403,3 +4435,40 @@ function readJsonBody(body: string | Blob | FormData | undefined): Record<string
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
+
+
+describe('sleep note native delivery guard', () => {
+  const note = 'This synthetic night follows the recent pattern.'
+  const input = {
+    card: SYNTHETIC_SLEEP_CARD, directRecipientPhoneNumber: 'synthetic@example.test',
+    idempotencyKey: 'synthetic-sleep-pair', message: renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note),
+    target: 'synthetic-sleep-chat', targetKind: 'thread' as const, threadIsDirect: true,
+  }
+  it('forwards the provider ordered identities and effects without reconstruction', async () => {
+    runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
+    const providerMessageEffects = [{ message: null, providerMessageId: 'synthetic-card' }, { message: note, providerMessageId: 'synthetic-note' }]
+    runtimeMocks.sendLinqIMessageAppCard.mockResolvedValue({ message: { id: 'synthetic-note' }, providerMessageIds: ['synthetic-card', 'synthetic-note'], providerMessageEffects })
+    await expect(sendLinqMessage(input, { env: { LINQ_API_TOKEN: 'synthetic-token' } })).resolves.toMatchObject({
+      providerMessageId: 'synthetic-note', providerMessageIds: ['synthetic-card', 'synthetic-note'], providerMessageEffects,
+    })
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+  it.each([true, false])('rethrows capability errors only for a nonempty note (%s)', async (hasNote) => {
+    const error = new VaultCliError('LINQ_API_REQUEST_FAILED', 'Synthetic invalid capability.', { retryable: true })
+    runtimeMocks.checkLinqIMessageCapability.mockRejectedValue(error)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({ message: { id: 'synthetic-text' } })
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    const delivery = sendLinqMessage({ ...input, message: hasNote ? input.message : renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD) }, {
+      env: { LINQ_API_TOKEN: 'synthetic-token' }, persistAppCardTextFallback,
+    })
+    if (hasNote) {
+      await expect(delivery).rejects.toBe(error)
+      expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+      expect(persistAppCardTextFallback).not.toHaveBeenCalled()
+    } else {
+      await expect(delivery).resolves.toMatchObject({ providerMessageId: 'synthetic-text' })
+      expect(persistAppCardTextFallback).toHaveBeenCalledOnce()
+    }
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+  })
+})

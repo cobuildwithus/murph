@@ -33,6 +33,7 @@ import type {
   HostedGcpKmsClient,
 } from "@/src/lib/hosted-crypto/gcp-kms";
 import {
+  HOSTED_INGRESS_ROOT_CACHE_TTL_MS,
   runWithHostedDomainRootProviderCallsDisabled,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
@@ -85,6 +86,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.advanceTimersByTime(HOSTED_INGRESS_ROOT_CACHE_TTL_MS);
+  vi.useRealTimers();
   state.kmsClient = null;
   setHostedSecureBoxStringTestCodecForTests(null);
   vi.unstubAllEnvs();
@@ -92,7 +95,8 @@ afterEach(() => {
 });
 
 describe("group context handoff crypto composition", () => {
-  it("prepares both member roots before fresh append and exact replay transactions", async () => {
+  it("prepares both member roots and reuses ingress keys on exact replay", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const harness = await createCompositionHarness();
 
     const fresh = await runWithPreparedHostedMailboxItemAppendCrypto({
@@ -124,6 +128,7 @@ describe("group context handoff crypto composition", () => {
       inserted: true,
       item: { id: HANDOFF_EVENT_ID, userId: TARGET_MEMBER_ID },
     });
+    expect(harness.state.kmsTransactionStates).toEqual([false, false]);
 
     const replay = await runWithPreparedHostedMailboxItemAppendCrypto({
       append: () => harness.prisma.$transaction((tx) =>
@@ -157,14 +162,11 @@ describe("group context handoff crypto composition", () => {
       originEventId: harness.originWake.eventId,
     });
     expect(harness.state.mailboxInsertCount).toBe(1);
-    expect(harness.state.kmsTransactionStates).toEqual([
-      false,
-      false,
-      false,
-      false,
-    ]);
-    expect(harness.state.kmsCallsAtTransactionBegin).toEqual([2, 4]);
-    expect(harness.state.kmsCallsAtTransactionEnd).toEqual([2, 4]);
+    // A new request still prepares both roots, but reuses their verified key
+    // bytes. No provider work runs in either transaction or on the warm replay.
+    expect(harness.state.kmsTransactionStates).toEqual([false, false]);
+    expect(harness.state.kmsCallsAtTransactionBegin).toEqual([2, 2]);
+    expect(harness.state.kmsCallsAtTransactionEnd).toEqual([2, 2]);
     expect(harness.state.transactionDepth).toBe(0);
   });
 });
@@ -393,7 +395,8 @@ function createPrismaStub(input: {
       }),
     },
     hostedWorkspace: {
-      upsert: vi.fn(async () => ({ userId: TARGET_MEMBER_ID })),
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
     },
   };
 

@@ -439,6 +439,9 @@ describe("MemberUsageClient", () => {
     expect(rendered.container.textContent).toContain(
       "The active search filter will be ignored.",
     );
+    expect(rendered.container.textContent).toContain(
+      "restore their Starter allowance to $4.50, including partly used allowances.",
+    );
     expect(getButton(rendered.container, "Reset").disabled).toBe(true);
     const confirmButton = getButtonByAriaLabel(
       rendered.container,

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "environment-reports-finish-updating",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Environment reports finish updating",
+    "summary": "Environment reports update more reliably after an interview.",
+    "details": "Fixes cases where your answers were saved but the report update could stop or wait unnecessarily after Murph finished other work.",
+    "relevanceTags": ["environment", "reliability"],
+    "sourcePullRequests": [3251, 3269, 3272, 3277, 3284]
+  }
+}

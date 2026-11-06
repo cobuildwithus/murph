@@ -1,0 +1,180 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const edges = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
+  authenticate: vi.fn(), complete: vi.fn(), retire: vi.fn(), release: vi.fn(),
+  authorize: vi.fn(), claim: vi.fn(), notify: vi.fn(), loaded: vi.fn(),
+}));
+vi.mock("next/server", async (original) => ({
+  ...await original<typeof import("next/server")>(), after: edges.after,
+}));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackJsonRequest: edges.authenticate,
+}));
+vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
+  completeHostedRuntime: edges.complete,
+  retireHostedRuntime: edges.retire,
+  releaseHostedRuntimeAfterCompletion: edges.release,
+  releaseHostedRuntimeAfterRetirement: edges.release,
+  authorizeHostedRuntimeProvider: edges.authorize,
+  claimHostedRuntime: edges.claim,
+}));
+vi.mock("@/src/lib/hosted-orchestration/runtime-owner-release", () => {
+  edges.loaded("completion");
+  return { notifyHostedRuntimeOwnerCompletion: edges.notify };
+});
+vi.mock("@/src/lib/hosted-execution/runtime-upload-recovery", () => {
+  edges.loaded("uploads");
+  return {};
+});
+
+const command = {
+  operation: "complete", attemptId: "synthetic-attempt", generation: "7",
+  settledRunnerContainerName: "synthetic-slot", immediateRecheckRequested: true,
+};
+const identity = { userId: "synthetic-member", attemptId: command.attemptId, generation: command.generation };
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function post() {
+  const { POST } = await import("../app/api/internal/hosted-runtime/owner/route");
+  return POST(new Request("https://example.test/api/internal/hosted-runtime/owner", { method: "POST" }));
+}
+
+beforeEach(() => {
+  vi.resetModules();
+  vi.resetAllMocks();
+  edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: command });
+  edges.complete.mockResolvedValue(true);
+  edges.retire.mockResolvedValue(true);
+  edges.release.mockResolvedValue(true);
+  edges.authorize.mockResolvedValue({ cutover: "postgres", owner: null });
+});
+afterEach(() => { vi.restoreAllMocks(); });
+
+describe("runtime ownership response", () => {
+  it("waits for committed release, then responds before loading or waiting for the advisory hint", async () => {
+    const release = createDeferred<boolean>();
+    const releasing = createDeferred<void>();
+    // Completion and its final release now commit in one owner transaction.
+    edges.complete.mockImplementationOnce(() => { releasing.resolve(); return release.promise; });
+    const response = post();
+    await releasing.promise;
+    expect(edges.complete).toHaveBeenCalledExactlyOnceWith({ prisma: {}, identity, settledRunnerContainerName: command.settledRunnerContainerName });
+    expect(edges.after).not.toHaveBeenCalled();
+    expect(edges.loaded).not.toHaveBeenCalled();
+
+    release.resolve(true);
+    await expect((await response).json()).resolves.toEqual({ cutover: "postgres", status: "updated", owner: null });
+    expect(edges.after).toHaveBeenCalledOnce();
+    expect(edges.loaded).not.toHaveBeenCalled();
+    expect(edges.notify).not.toHaveBeenCalled();
+
+    const notification = createDeferred<void>();
+    edges.notify.mockReturnValueOnce(notification.promise);
+    const deferred = edges.after.mock.calls[0]![0]();
+    await vi.waitFor(() => expect(edges.notify).toHaveBeenCalledExactlyOnceWith({
+      userId: identity.userId, runtimeAttemptId: command.attemptId,
+    }));
+    notification.resolve();
+    await deferred;
+  });
+
+  it("notifies only the final release across early completion and a repeated completion", async () => {
+    edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
+      ...command, settledRunnerContainerName: null, immediateRecheckRequested: true,
+    } });
+    expect((await post()).status).toBe(200);
+    expect(edges.complete).toHaveBeenCalledExactlyOnceWith({ prisma: {}, identity, settledRunnerContainerName: null });
+    expect(edges.release).not.toHaveBeenCalled();
+    expect(edges.after).not.toHaveBeenCalled();
+    expect(edges.loaded).not.toHaveBeenCalled();
+    // The settled callback does not need an immediate-work flag.
+    edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: {
+      ...command, immediateRecheckRequested: false,
+    } });
+    await expect((await post()).json()).resolves.toMatchObject({ status: "updated" });
+    edges.complete.mockResolvedValueOnce(false);
+    await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
+    expect(edges.after).toHaveBeenCalledOnce();
+    await edges.after.mock.calls[0]![0]();
+    expect(edges.notify).toHaveBeenCalledExactlyOnceWith({
+      userId: identity.userId, runtimeAttemptId: command.attemptId,
+    });
+  });
+
+  it.each(["release", "release_completed"])("notifies the successful %s transition once", async (operation) => {
+    edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: {
+      operation, attemptId: command.attemptId, generation: command.generation,
+      runnerContainerName: "synthetic-slot",
+    } });
+    await expect((await post()).json()).resolves.toMatchObject({ status: "updated" });
+    edges.release.mockResolvedValueOnce(false);
+    await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
+    expect(edges.after).toHaveBeenCalledOnce();
+    await edges.after.mock.calls[0]![0]();
+    expect(edges.notify).toHaveBeenCalledExactlyOnceWith({
+      userId: identity.userId, runtimeAttemptId: command.attemptId,
+    });
+  });
+
+  it.each(["complete", "retire", "release"] as const)("never schedules a hint for stale %s", async (stage) => {
+    if (stage !== "complete") edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
+      operation: stage, attemptId: command.attemptId, generation: command.generation,
+      ...(stage === "retire" ? { completed: false } : { runnerContainerName: "synthetic-slot" }),
+    } });
+    edges[stage].mockResolvedValueOnce(false);
+    await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
+    expect(edges.after).not.toHaveBeenCalled();
+    expect(edges.loaded).not.toHaveBeenCalled();
+    if (stage === "retire") expect(edges.release).not.toHaveBeenCalled();
+  });
+
+  it.each(["authenticate", "complete", "retire", "release"] as const)("never schedules a hint when %s fails", async (stage) => {
+    if (stage === "retire" || stage === "release") edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
+      operation: stage, attemptId: command.attemptId, generation: command.generation,
+      ...(stage === "retire" ? { completed: false } : { runnerContainerName: "synthetic-slot" }),
+    } });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    edges[stage].mockRejectedValueOnce(new Error("synthetic failure"));
+    expect((await post()).status).toBe(500);
+    expect(edges.after).not.toHaveBeenCalled();
+    expect(edges.loaded).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed completion before mutating ownership", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: { ...command, generation: "invalid" } });
+    expect((await post()).ok).toBe(false);
+    expect(edges.retire).not.toHaveBeenCalled();
+    expect(edges.complete).not.toHaveBeenCalled();
+    expect(edges.after).not.toHaveBeenCalled();
+  });
+
+  it("authorizes providers without loading completion or upload recovery", async () => {
+    const payload = { operation: "authorize_provider", runnerContainerName: "synthetic-slot",
+      providerEgressTokenHash: null, providerKind: "linq" };
+    edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload });
+    await expect((await post()).json()).resolves.toEqual({ cutover: "postgres", status: "blocked", owner: null });
+    expect(edges.authorize).toHaveBeenCalledExactlyOnceWith({ ...payload, prisma: {}, userId: identity.userId });
+    expect(edges.after).not.toHaveBeenCalled();
+    expect(edges.loaded).not.toHaveBeenCalled();
+  });
+
+  it.each(["admission"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
+    edges.authenticate.mockResolvedValueOnce({ userId: identity.userId,
+      payload: { operation: "claim", processingMode: "system_mailbox" } });
+    const cutover = "postgres";
+    edges.claim.mockResolvedValueOnce({ cutover, status: "blocked", reason });
+    await expect((await post()).json()).resolves.toEqual({
+      cutover, status: "blocked", owner: null, blockedReason: reason,
+    });
+    expect(edges.claim).toHaveBeenCalledExactlyOnceWith({ prisma: {}, userId: identity.userId, processingMode: "system_mailbox" });
+  });
+
+});

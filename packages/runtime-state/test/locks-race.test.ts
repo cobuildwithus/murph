@@ -80,7 +80,7 @@ function createDeferred<T>(): {
 }
 
 afterEach(() => {
-  vi.doUnmock("../src/atomic-write.ts");
+  vi.doUnmock("node:fs/promises");
   vi.restoreAllMocks();
   vi.resetModules();
 
@@ -92,26 +92,25 @@ afterEach(() => {
 it("does not let a failed metadata write clean up a contender that already acquired the lock", async () => {
   const tempRoot = createTempRoot();
   const options = createLockOptions(tempRoot);
-  const actualAtomicWrite = await vi.importActual<typeof import("../src/atomic-write.ts")>(
-    "../src/atomic-write.ts"
+  const actualFs = await vi.importActual<typeof import("node:fs/promises")>(
+    "node:fs/promises"
   );
   const failingWriteReady = createDeferred<void>();
   const releaseFailingWrite = createDeferred<void>();
 
-  vi.doMock("../src/atomic-write.ts", () => ({
-    ...actualAtomicWrite,
-    writeJsonFileAtomic: vi.fn(
-      async (...args: Parameters<typeof actualAtomicWrite.writeJsonFileAtomic>) => {
+  vi.doMock("node:fs/promises", () => ({
+    ...actualFs,
+    writeFile: vi.fn(
+      async (...args: Parameters<typeof actualFs.writeFile>) => {
         const [, value] = args;
-        const owner =
-          value && typeof value === "object" && "owner" in value ? value.owner : undefined;
+        const { owner } = JSON.parse(String(value)) as TestLockMetadata;
         if (owner === "failing-owner") {
           failingWriteReady.resolve();
           await releaseFailingWrite.promise;
           throw new Error("simulated metadata write failure");
         }
 
-        return actualAtomicWrite.writeJsonFileAtomic(...args);
+        return actualFs.writeFile(...args);
       },
     ),
   }));

@@ -1,14 +1,22 @@
+import {
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+} from './managed-automations.js'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from './managed-automation-ids.js'
 import type {
   AssistantSession,
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantUsageCredentialSource,
-  AssistantUsageStripeMeterSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   createAssistantUsageReportingUserId as createHostedAssistantUsageReportingUserId,
-  normalizeAssistantUsageStripeMeterSource,
 } from '@murphai/hosted-execution/assistant-usage'
 
 import type { AssistantMessageInput } from './service-contracts.js'
@@ -22,7 +30,6 @@ export interface AssistantUsageAttribution {
   gatewayTags: readonly string[]
   reportingUserId: string | null
   surface: string
-  stripeMeterSource: AssistantUsageStripeMeterSource
   triggerKind: string
 }
 
@@ -33,7 +40,6 @@ export function createAssistantUsageAttribution(input: {
   memberId: string
   reportingSecret?: string | null
   surface: string
-  stripeMeterSource?: AssistantUsageStripeMeterSource | null
   triggerKind: string
 }): AssistantUsageAttribution {
   const environment = normalizeUsageAttributionPart(input.environment) ?? 'development'
@@ -60,7 +66,6 @@ export function createAssistantUsageAttribution(input: {
     gatewayTags,
     reportingUserId,
     surface,
-    stripeMeterSource: normalizeAssistantUsageStripeMeterSource(input.stripeMeterSource),
     triggerKind,
   }
 }
@@ -72,17 +77,35 @@ export function createAssistantUsageReportingUserId(input: {
   return createHostedAssistantUsageReportingUserId(input)
 }
 
+const MANAGED_USAGE_FEATURES = new Map<string, string>([
+  [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, 'assistant_cron_journal_context'],
+  [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, 'assistant_cron_weekly_digest'],
+  [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, 'assistant_cron_weekly_insight'],
+  [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'assistant_cron_monthly_review'],
+  [MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID, 'assistant_cron_memory_maintenance'],
+  [MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID, 'assistant_cron_room_maintenance'],
+  [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID, 'assistant_cron_meal_closeout'],
+  [MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID, 'assistant_cron_usage_optimizer'],
+])
+
 export function resolveAssistantUsageFeatureKey(input: {
+  scheduledInvocationAuthority?: AssistantMessageInput['scheduledInvocationAuthority']
+  scheduledOccurrenceAt?: AssistantMessageInput['scheduledOccurrenceAt']
   deliverResponse?: boolean | null
   promptProfile:
     | 'assistant-ask-continuation'
     | 'conversation'
-    | 'creative-notification'
     | 'maintenance'
     | 'operator-message'
     | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {
+  const authority = input.scheduledInvocationAuthority
+  if (input.turnTrigger === 'automation-cron' && authority
+    && authority.occurrenceAt === input.scheduledOccurrenceAt) {
+    const managedFeature = MANAGED_USAGE_FEATURES.get(authority.automationId)
+    if (managedFeature) return managedFeature
+  }
   if (input.deliverResponse === false) {
     return 'assistant_internal_reply'
   }

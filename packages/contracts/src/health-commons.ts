@@ -2235,7 +2235,7 @@ export const healthCommonsSourceIndexEntrySchema = z
     identityKeys: z.array(nonEmptyStringSchema.max(1_000)),
     artifactIds: z.array(healthCommonsStableIdSchema),
     findingIds: z.array(healthCommonsKeySchema),
-    metadataFetchedAt: z.string().datetime().nullable(),
+    metadataFetchedAt: z.isoDateTime().nullable(),
     extractionStatus: z.enum(HEALTH_COMMONS_SOURCE_EXTRACTION_STATUSES),
     sourceRevisionId: z.string().startsWith("sha256:"),
   })

@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
     deliveryContextOrdinal: number | null
-    generateSongTurnState?: unknown
     kind: string
     voiceMemoRuntime: unknown
   }>,
@@ -41,8 +40,6 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
           deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
           ...(input.request.kind === 'generate-song'
             ? {
-                generateSongTurnState:
-                  input.generateSongTurnState ?? null,
               }
             : {}),
           kind: input.request.kind,
@@ -336,7 +333,7 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 
-  it('passes voice memo, generated-song policy, and exact-turn style capabilities only to their tools', async () => {
+  it('passes voice memo and exact-turn style capabilities only to their tools', async () => {
     const workingDirectory = await createTempDir('assistant-codex-dynamic-runtime-work-')
     const codexHome = await createTempDir('assistant-codex-dynamic-runtime-home-')
     const voiceMemoRuntime: VoiceMemoToolRuntime = {
@@ -367,10 +364,6 @@ describe('Codex dynamic tool runtime routing', () => {
         env: {
           CODEX_HOME: codexHome,
           PATH: '/usr/bin',
-        },
-        generateSongPolicy: {
-          maxAttempts: 1,
-          requiredDurationSeconds: 15,
         },
         prompt: 'Use four tools.',
         sandbox: 'workspace-write',
@@ -411,13 +404,6 @@ describe('Codex dynamic tool runtime routing', () => {
       },
       {
         deliveryContextOrdinal: 0,
-        generateSongTurnState: {
-          attemptCount: 0,
-          policy: {
-            maxAttempts: 1,
-            requiredDurationSeconds: 15,
-          },
-        },
         kind: 'generate-song',
         voiceMemoRuntime,
       },

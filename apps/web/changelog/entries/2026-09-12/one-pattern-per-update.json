@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "one-pattern-per-update",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "One pattern at a time",
+    "summary": "Personal Patterns updates share one useful observation in a short message.",
+    "details": "Each update focuses on one finding, without a link or a prompt to browse more results.",
+    "relevanceTags": [
+      "patterns"
+    ],
+    "sourcePullRequests": [3413]
+  }
+}

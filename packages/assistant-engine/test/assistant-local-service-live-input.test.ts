@@ -58,8 +58,9 @@ import {
   waitForRpcMethod,
 } from './assistant-codex-runtime.harness.ts'
 import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
+import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from '../src/assistant/group-reply-reconsideration.ts'
 
-test('sendAssistantMessageLocal live-steers same-conversation input without provider replay', async () => {
+test.each([false, true])('live-steered input keeps provider-start typing telemetry (direct: %s)', async (direct) => {
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'linq-progress-message',
@@ -85,11 +86,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       },
       identityId: 'identity-1',
       threadId: 'thread-1',
-      threadIsDirect: false,
+      threadIsDirect: direct,
     },
   })
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = direct
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
       ...sharedPlan,
@@ -97,6 +99,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     },
     session,
   })
+  const adapters = await vi.importActual<typeof import('../src/assistant/channel-adapters.ts')>(
+    '../src/assistant/channel-adapters.ts',
+  )
+  mocks.getAssistantChannelAdapter.mockImplementation(adapters.getAssistantChannelAdapter)
+  const startTelegramTyping = vi.fn(async () => ({ stop: async () => undefined }))
+  const onTypingAccepted = vi.fn()
   const providerStarted = createDeferred<void>()
   const providerProgressRequested = createDeferred<void>()
   const providerProgressDelivered = createDeferred<void>()
@@ -114,6 +122,8 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     },
   )
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    expect(startTelegramTyping).not.toHaveBeenCalled()
+    await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
       codexThreadId: 'provider-thread-active-turn',
@@ -177,6 +187,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        channelTypingDependencies: { startTelegramTyping, onTypingAccepted },
         userEnvKeys: [],
       },
     },
@@ -191,7 +202,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
-      directness: 'group',
+      directness: direct ? 'direct' : 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -201,6 +212,13 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
   expect(providerBoundInputIds).toEqual([['manual-1']])
+  expect(startTelegramTyping).toHaveBeenCalledTimes(direct ? 1 : 0)
+  if (direct) {
+    expect(onTypingAccepted).toHaveBeenCalledWith(expect.objectContaining({ acceptedInputIds: ['initial'] }))
+    expect(onTypingAccepted).toHaveBeenCalledWith(expect.objectContaining({ acceptedInputIds: ['manual-1'] }))
+  } else {
+    expect(onTypingAccepted).not.toHaveBeenCalled()
+  }
   expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
   providerProgressRequested.resolve()
   await providerProgressDelivered.promise
@@ -3867,18 +3885,19 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     ).toMatchObject({
       prompt: 'Initial group message\n\nActually, plans changed.',
       turnContext: expect.stringContaining(
-        'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
+        ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
       ),
     })
-    expect(
-      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
-    ).toContain(
-      'If the latest accepted message gives another human the floor, finish without a reply.',
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
+      'stays owed unless a later accepted message withdraws or replaces it',
     )
-    expect(
-      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
-    ).toContain(
-      'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result.',
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).not.toContain(
+      'the latest accepted message decides',
+    )
+    // Request 1 starts with empty reply staging, so draft media must be
+    // re-attached rather than treated as a completed effect.
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
+      'Images, cards, and other reply staging from the draft were discarded with it; attach again whatever the final result needs.',
     )
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
@@ -5034,7 +5053,7 @@ test.each([
         'Count the push-ups in the first video\n\n'
         + 'Please also check the second video for a rabbit',
       turnContext: expect.stringContaining(
-        'The unsent draft neither answers a request nor keeps Murph\'s floor',
+        ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
       ),
     })
     expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
@@ -5080,7 +5099,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
   const requestOneLive = createDeferred<void>()
   const providerConfig = normalizeAssistantProviderConfig({
     approvalPolicy: 'never',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     provider: 'codex-cli',
     sandbox: 'workspace-write',
@@ -5132,7 +5151,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
           expect(requestOneInput).toContain('First group request')
           expect(requestOneInput).toContain('Second group request')
           expect(requestOneInput).toContain(
-            'The unsent draft neither answers a request',
+            ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
           )
         }
         const providerTurnId = `provider-turn-group-composed-${providerRequestOrdinal}`

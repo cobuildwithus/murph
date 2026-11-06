@@ -21,13 +21,11 @@ describe('proactive onboarding support', () => {
       channel: 'linq',
       cliAccess: {
         rawCommand: 'vault-cli',
-        setupCommand: 'murph',
       },
       currentLocalDate: '2026-07-17',
       currentTimeZone: 'America/New_York',
       hostedRuntime: true,
       onboardingGuidance: true,
-      modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
     })
 

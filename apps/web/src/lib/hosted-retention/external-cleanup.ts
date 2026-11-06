@@ -9,10 +9,14 @@ import {
   drainHostedAccountDeletionCleanupBatch,
   type HostedAccountDeletionCleanupBatchResult,
 } from "../hosted-privacy/account-deletion-cleanup";
+import { runHostedRuntimeResourceCleanup } from "../hosted-execution/runtime-resource-cleanup";
+import { redriveHostedHealthDataConsentStops } from "../hosted-privacy/health-data-consent-withdrawal";
 import { normalizeHostedRetentionDate } from "./cleanup";
 
 export interface HostedExternalRetentionCleanupResult {
+  healthDataConsentStopRedrive: Awaited<ReturnType<typeof redriveHostedHealthDataConsentStops>>;
   accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
+  runtimeResourceCleanup: Awaited<ReturnType<typeof runHostedRuntimeResourceCleanup>>;
   expiredComputerRunsCleanedUp: number;
 }
 
@@ -21,6 +25,7 @@ export async function runHostedExternalRetentionCleanup(input: {
   prisma?: PrismaClient;
 } = {}): Promise<HostedExternalRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
+  const healthDataConsentStopRedrive = await redriveHostedHealthDataConsentStops({ prisma });
   const now = normalizeHostedRetentionDate(input.now ?? new Date());
   const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
     now,
@@ -31,7 +36,11 @@ export async function runHostedExternalRetentionCleanup(input: {
     store: new PrismaComputerUseStore(prisma),
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
 
+  const runtimeResourceCleanup = await runHostedRuntimeResourceCleanup({ now, prisma });
+
   return {
+    healthDataConsentStopRedrive,
+    runtimeResourceCleanup,
     accountDeletionCleanup,
     expiredComputerRunsCleanedUp,
   };

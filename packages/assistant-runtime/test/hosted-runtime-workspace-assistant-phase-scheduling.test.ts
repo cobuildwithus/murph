@@ -18,6 +18,7 @@ import {
 import type {
   RuntimeAssistantConfigurationToolPort,
   RuntimeLabsToolPort,
+  RuntimeUsageDiagnosticsPort,
   RuntimeSubscriptionToolPort,
   RuntimeUsageRecordPort,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
@@ -32,6 +33,7 @@ import {
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
@@ -110,7 +112,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       adapter: "codex-cli" as const,
       approvalPolicy: "never" as const,
       codexCommand: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       modelProvider: "openai",
       oss: false,
       profile: null,
@@ -355,13 +357,35 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       };
     });
 
+    const logRequests: HostedRuntimeLogRequest[] = [];
     try {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        logRequests,
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
       expect(sequence).toEqual(["assistant_lane", "read_shared", "read_shared"]);
       expect(request).toHaveBeenCalledTimes(2);
+      const readTimings = logRequests
+        .flatMap((logRequest) => parseHostedRuntimeLogRequest(logRequest).entries)
+        .filter((entry) => entry.redactedJson?.type === "hosted_group_shared_read_timing");
+      expect(readTimings).toHaveLength(2);
+      expect(readTimings[0]).toMatchObject({
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: "info",
+        redactedJson: {
+          groupSharedReadCallbackCount: 1,
+          groupSharedReadDecision: "no_freshness",
+          groupSharedReadFreshnessRequested: false,
+          groupSharedReadLane: "scheduled",
+          groupSharedReadOutcome: "ok",
+          groupSharedReadPollCount: 0,
+          groupSharedReadWaitBudgetMs: 300_000,
+          schema: "murph.hosted-group-shared-read-timing.v1",
+        },
+      });
+      expect(JSON.stringify(readTimings)).not.toMatch(/steps-days|member_shared|participant_shared|Ada|chat_current/u);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -755,6 +779,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes the hosted usage diagnostics port into assistant execution", async () => {
+    const usageDiagnosticsPort: RuntimeUsageDiagnosticsPort = { read: vi.fn() };
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeUsageDiagnosticsPort: usageDiagnosticsPort,
+    }));
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      { hosted: expect.objectContaining({ usageDiagnostics: usageDiagnosticsPort }) },
+      expect.any(Object),
+    );
+  });
+
+  it("omits hosted usage diagnostics when unavailable", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      { hosted: expect.not.objectContaining({ usageDiagnostics: expect.anything() }) },
+      expect.any(Object),
+    );
+  });
+
   it("passes the hosted labs port into assistant execution when available", async () => {
     const labsToolPort: RuntimeLabsToolPort = {
       request: vi.fn(),
@@ -790,7 +833,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       LINQ_API_BASE_URL: "https://linq.example.test",
     };
@@ -1196,12 +1239,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     events.push("checkpoint");
     await result.afterCheckpoint?.();
 
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
-      shouldYield: null,
-      signal: null,
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
 
     expect(events).toEqual([
       "assistant",
@@ -1355,8 +1393,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
   });
 
-  it("does not turn migration-only foreground progress into managed automation work", async () => {
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+  it("leaves route migration to a background pass when foreground work makes no progress", async () => {
+    mocks.runHostedAssistantAutomationLane.mockResolvedValue({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: false,
       nextWakeAt: null,
@@ -1367,15 +1405,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       trusted: true,
     });
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const foreground = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
     }));
 
-    expect(result).toEqual(expect.objectContaining({
+    expect(foreground.progressed).toBe(false);
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+
+    const background = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    expect(background).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
-    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
   });
 
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {
@@ -1432,7 +1475,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("keeps browser-vault refresh control work behind fresh conversation input", async () => {
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null).mockResolvedValueOnce({
       item: createBrowserVaultRefreshSystemMailboxItem(),
       itemId: "system_mailbox_item_browser_vault_refresh",
       metrics: {
@@ -1447,7 +1490,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(result).not.toHaveProperty("browserVaultReplicaRefreshRequested");
     expectAssistantLaneCallWithoutDeviceSyncOptions({
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
@@ -1473,12 +1521,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -2039,12 +2082,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const outboxWakeAt = "2026-04-27T00:00:05.000Z";
     const deviceSyncContinuationAt = "2026-04-27T00:00:30.000Z";
     const resolvedDeviceSync = {
-      providerConfigs: {
-        whoop: {
-          clientId: "synthetic-whoop-client",
-          clientSecret: "synthetic-whoop-secret",
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "synthetic-device-sync-secret",
     } as const;
@@ -2252,12 +2290,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -2313,12 +2346,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -2376,12 +2404,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
