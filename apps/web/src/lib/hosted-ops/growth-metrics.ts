@@ -88,6 +88,10 @@ export type {
   HostedGrowthReferralLinkUsage,
 } from "@/src/lib/hosted-ops/growth-referral-link-usage";
 
+// A purchase's own return URL names its target, so a one-time gift stays a group
+// gift after its payer or the group's owner is deleted.
+const GROUP_FUNDING_CHECKOUT_RETURN_PATTERN =
+  /^https:\/\/[^/]+\/groups\/fund\//u;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
 const WEEKLY_ROWS = 8;
@@ -1651,10 +1655,8 @@ export async function readHostedGrowthDashboard(
     prisma.hostedUsageCreditPurchase.findMany({
       select: {
         cashAmountMinor: true,
+        checkoutSuccessUrl: true,
         groupSponsorshipAuthorizationId: true,
-        beneficiary: {
-          select: { threadContainer: { select: { memberId: true } } },
-        },
         paidAt: true,
       },
       where: {
@@ -1866,7 +1868,9 @@ export async function readHostedGrowthDashboard(
           cashAmountMinor: purchase.cashAmountMinor,
           isGroupSponsorship:
             purchase.groupSponsorshipAuthorizationId !== null
-            || purchase.beneficiary.threadContainer !== null,
+            || GROUP_FUNDING_CHECKOUT_RETURN_PATTERN.test(
+              purchase.checkoutSuccessUrl,
+            ),
           paidAt: purchase.paidAt,
         }]
       ),

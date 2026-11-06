@@ -350,9 +350,8 @@ End the grid with **Monthly revenue**: restrained sage bars where each bar
 estimates one UTC month from the month's latest snapshot MRR plus fulfilled
 live-mode top-up and group-sponsorship cash. The card copy must say it is an
 estimate rather than invoices, that refunds are not subtracted, and that
-account deletion can remove past purchase cash or leave an old one-time group
-gift counted as a regular top-up, and it must name hover, tap, and focus as the
-breakdown affordances. The bar carries only the total; the keyboard-reachable
+account deletion can remove past purchase cash, and it must name hover, tap,
+and focus as the breakdown affordances. The bar carries only the total; the keyboard-reachable
 tooltip lists personal subscriptions, family subscriptions, group sponsorship,
 and usage top-ups with a summed total row, and labels the window-end month
 "month to date". Months whose snapshots predate the subscription split columns

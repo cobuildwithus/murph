@@ -2805,31 +2805,31 @@ describe("hosted ops growth metrics", () => {
       {
         cashAmountMinor: 1_500,
         groupSponsorshipAuthorizationId: null,
-        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
         paidAt: new Date("2026-07-27T09:00:00.000Z"),
       },
       {
         cashAmountMinor: 7_500,
         groupSponsorshipAuthorizationId: null,
-        beneficiary: { threadContainer: null },
+        checkoutSuccessUrl: "https://www.withmurph.ai/settings?usageCheckout=success&usagePurchase=hucp_example#subscription",
         paidAt: new Date("2026-07-04T10:00:00.000Z"),
       },
       {
         cashAmountMinor: 2_000,
         groupSponsorshipAuthorizationId: "auth_recurring",
-        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
         paidAt: new Date("2026-08-01T00:00:00.000Z"),
       },
       {
         cashAmountMinor: 3_000,
         groupSponsorshipAuthorizationId: null,
-        beneficiary: { threadContainer: null },
+        checkoutSuccessUrl: "https://www.withmurph.ai/settings?usageCheckout=success&usagePurchase=hucp_example#subscription",
         paidAt: new Date("2026-08-05T15:00:00.000Z"),
       },
       {
         cashAmountMinor: 9_900,
         groupSponsorshipAuthorizationId: null,
-        beneficiary: { threadContainer: null },
+        checkoutSuccessUrl: "https://www.withmurph.ai/settings?usageCheckout=success&usagePurchase=hucp_example#subscription",
         paidAt: null,
       },
     ]);
@@ -2865,9 +2865,7 @@ describe("hosted ops growth metrics", () => {
       select: {
         cashAmountMinor: true,
         groupSponsorshipAuthorizationId: true,
-        beneficiary: {
-          select: { threadContainer: { select: { memberId: true } } },
-        },
+        checkoutSuccessUrl: true,
         paidAt: true,
       },
       where: {
@@ -2908,7 +2906,7 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         ...giftRow,
-        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
       },
     ]);
     mocks.hostedMemberBillingRef.count
@@ -2926,7 +2924,7 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         ...giftRow,
-        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
         payerMemberId: null,
       },
     ]);
