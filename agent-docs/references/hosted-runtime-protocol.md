@@ -1026,8 +1026,8 @@ gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
 in the maintenance lane rather than extending reply ownership.
 
 After a bounded background automation pass, the live post-pass cron status is
-the assistant cron owner's authoritative continuation. A fast pre-checkpoint
-delivery or a deferred post-checkpoint delivery/provider-cleanup drain may
+the assistant cron owner's authoritative continuation. Inline delivery or a
+deferred provider-cleanup drain may
 consume the workspace wake that admitted the pass, but each path must carry the
 independently recomputed cron candidate through the existing post-delivery
 reconciliation wake. The later `idle_shutdown` snapshot therefore persists
@@ -3831,7 +3831,7 @@ same-room successor up to the existing cumulative cap. All candidates still
 pass the existing replyability, same-conversation, route, capacity, and
 exact-successor checks without broad pending-index discovery or mutation.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
-must resume before post-checkpoint delivery or background drains continue. A
+must resume before delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
@@ -4002,7 +4002,7 @@ drained through hosted provider-cleanup after the next successful runtime-owned
 idle-floor workspace checkpoint. The first deferred cleanup wake is
 scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
 the warm idle window; actual cleanup failures use the provider-cleanup retry
-delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
+delay. Delivery and provider-cleanup drains recompute cleanup
 wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
 On an established default invocation, container preparation overlaps the ordinary

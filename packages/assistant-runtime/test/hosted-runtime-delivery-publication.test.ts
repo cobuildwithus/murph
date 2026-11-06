@@ -3,6 +3,12 @@ import {
   loadHostedSystemMailboxRealImplementation, mocks,
   runHostedWorkspaceAssistantPhase, runHostedWorkspaceDurableCheckpointEffects,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
+import * as assistantEngine from "@murphai/assistant-engine";
+import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+import { runHostedWorkspaceUntilIdleOrBudget } from "../src/hosted-runtime/workspace-runner.ts";
+import { createHostedWorkspaceCheckpointRequestBuilder } from "../src/hosted-runtime.ts";
+import { enqueueHostedPendingAssistantInputId } from "../src/hosted-runtime/pending-input-index.ts";
 import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -70,6 +76,7 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
     ...options,
   };
   const intent = await createAssistantOutboxIntent(base);
+  const logRequests: HostedRuntimeLogRequest[] = [];
   const wireKeys: string[] = [];
   const visibleReplies = new Set<string>();
   const consumed = new Set<string>();
@@ -127,14 +134,16 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
     providerFetch.mockImplementation(originalFetch);
     providerFetch.mockClear(); sendEmail.mockClear();
   };
-  const phase = async (entry: Entry = "general", preferredIntentIds: string[] = [], shouldYield?: () => boolean) => {
+  const phase = async (entry: Entry = "general", preferredIntentIds: string[] = [], shouldYield?: () => boolean, selectedInputWakeAt: string | null = null) => {
     mocks.runHostedAssistantAutomationLane.mockResolvedValue({
       assistantAutomationCurrentTurnDeliveryIntentIds: entry === "foreground" ? preferredIntentIds : [],
       assistantAutomationProgressed: preferredIntentIds.length > 0,
+      assistantAutomationSelectedInputWakeAt: selectedInputWakeAt,
       nextWakeAt: null, redactedLogEntries: [],
     });
     const input = createPhaseInput({
       importedCount: entry === "foreground" ? 1 : 0,
+      logRequests,
       now: () => new Date().toISOString(), operatorHomeRoot: path.join(root, "home"), vaultRoot,
       runtimeActionApprovalPort: actionApprovalPort, runtimeForwardedEnv: env, linqDeliveryContext,
       shouldYieldBackgroundMaintenance: shouldYield,
@@ -146,11 +155,14 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
     input.platform.effectsPort = effectsPort;
     const result = await runHostedWorkspaceAssistantPhase(input);
     const callsBeforeLocalCheckpoint = providerFetch.mock.calls.length + sendEmail.mock.calls.length;
-    const post = await result.afterCheckpoint?.();
+    const completion = await result.afterCheckpoint?.();
+    const afterDurableCheckpoint = [result.afterDurableCheckpoint, completion?.afterDurableCheckpoint]
+      .flatMap((effects) => typeof effects === "function" ? [effects] : effects ?? []);
+    const post = { ...result, ...completion, afterDurableCheckpoint: afterDurableCheckpoint.length ? afterDurableCheckpoint : undefined };
     return { result, post, callsBeforeLocalCheckpoint };
   };
   return {
-    root, vaultRoot, snapshot, intent, base, collect, drain, read, retry, phase, providerFetch, sendEmail,
+    root, vaultRoot, snapshot, intent, base, collect, drain, read, retry, phase, providerFetch, sendEmail, logRequests,
     recordLinqDeliveryOutcome, wireKeys, visibleReplies, consumed,
     setApproval: (port: HostedRuntimeActionApprovalPort) => { actionApprovalPort = port; },
     setSignal: (value?: AbortSignal) => { signal = value; },
@@ -264,6 +276,84 @@ describe("post-foreground maintenance publication", () => {
   });
 });
 
+describe("post-send failure recovery", () => {
+  it("keeps an accepted receipt and recovery wake when mixed-batch terminal staging fails", async () => {
+    const f = await fixture("telegram");
+    const terminal = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "terminal-second", sessionId: "session_terminal", turnId: "turn_terminal" });
+    f.providerFetch.mockResolvedValueOnce(Response.json({ ok: true, result: { message_id: 7, chat: { id: 123 } } }))
+      .mockResolvedValueOnce(Response.json({ ok: false, error_code: 400, description: "Synthetic terminal rejection" }, { status: 400 }));
+    mocks.recordHostedProviderCleanupAfterDelivery.mockImplementationOnce(async () => {
+      mocks.readAssistantOutboxIntent.mockRejectedValueOnce(new Error("Synthetic terminal staging unavailable"));
+      return { nextWakeAt: null };
+    });
+
+    const { result } = await f.phase("foreground", [f.intent.intentId, terminal.intentId]);
+    expect(f.sends()).toBe(2);
+    expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    expect(await f.read(terminal.intentId)).toMatchObject({ status: "failed" });
+    expect(result).toMatchObject({
+      progressed: true, checkpointReason: "outbox_receipt",
+      nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
+      redactedStatus: { hostedOutboxDeliveryAttempted: 2, hostedOutboxDeliverySent: 1 },
+    });
+    expect(result.nextWakeReason ?? "assistant").toBe("assistant");
+    expect(f.logRequests.flatMap((request) => request.entries)
+      .filter((entry) => entry.errorCode === "assistant_after_checkpoint_failed")).toHaveLength(1);
+  });
+
+  it("keeps an accepted receipt and recovery wake when the yielded branch cannot read cleanup state", async () => {
+    const f = await fixture("telegram");
+    const remaining = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "yield-second", sessionId: "session_yield", turnId: "turn_yield",
+      bindingDelivery: { kind: "thread", target: "456" }, threadId: "456" });
+    const effects = await f.collect([f.intent.intentId, remaining.intentId]);
+    expect(effects).toHaveLength(2);
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce(effects);
+    let yieldNow = false;
+    f.providerFetch.mockImplementationOnce(async () => {
+      yieldNow = true;
+      return Response.json({ ok: true, result: { message_id: 7, chat: { id: 123 } } });
+    });
+    mocks.recordHostedProviderCleanupAfterDelivery.mockImplementationOnce(async ({ outcomes }) => {
+      expect(outcomes).toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+      await readFile(path.join(f.root, "missing-cleanup-state.json"));
+      return { nextWakeAt: null };
+    });
+    const { result } = await f.phase("general", [f.intent.intentId, remaining.intentId], () => yieldNow);
+    expect(f.sends()).toBe(1);
+    expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    expect(await f.read(remaining.intentId)).toMatchObject({ status: "pending" });
+    expect(result).toMatchObject({
+      progressed: true, checkpointReason: "outbox_receipt",
+      nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
+      redactedStatus: { hostedOutboxDeliverySent: 1, hostedOutboxPendingDeliveryEffects: 1 },
+    });
+    expect(result.nextWakeReason ?? "assistant").toBe("assistant");
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledOnce();
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).not.toHaveBeenCalled();
+    expect(f.logRequests.flatMap((request) => request.entries)
+      .filter((entry) => entry.errorCode === "assistant_after_checkpoint_failed")).toHaveLength(1);
+  });
+
+  it("drops an expired base wake when post-send projection fails", async () => {
+    const f = await fixture("telegram");
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [f.intent.intentId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: new Date(Date.now() + 5_000).toISOString(), redactedLogEntries: [],
+    });
+    f.providerFetch.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date(Date.now() + 8_000));
+      return Response.json({ ok: true, result: { message_id: 7, chat: { id: 123 } } });
+    });
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockRejectedValueOnce(new Error("Synthetic projection unavailable"));
+    const { result } = await f.phase("foreground", [f.intent.intentId]);
+    expect(f.sends()).toBe(1);
+    expect((await f.read()).status).toBe("sent");
+    expect(result).toMatchObject({ progressed: true, nextWakeAt: "2026-09-04T12:00:38.000Z" });
+    expect(result.nextWakeReason ?? "assistant").toBe("assistant");
+  });
+});
+
 describe.each(["telegram", "email"] as const)("%s publication", (channel) => {
   it.each(["retryable", "durable pending"] as const)("publishes the exact %s claim before sending and never resends after restore", async (state) => {
     const f = await fixture(channel);
@@ -292,10 +382,96 @@ describe.each(["telegram", "email"] as const)("%s publication", (channel) => {
     const f = await fixture(channel);
     expect(await f.collect([f.intent.intentId])).toEqual([expect.not.objectContaining({ publishBeforeDispatch: true })]);
     const { result, post } = await f.phase(entry, [f.intent.intentId]);
-    expect(result.afterCheckpoint).toBeTypeOf("function"); // Existing local dirty-state hook only.
+    if (entry === "general") expect(result.afterCheckpoint).toBeUndefined();
+    expect(result.afterDurableCheckpoint).toBeUndefined();
     expect(post?.afterDurableCheckpoint).toBeUndefined();
     expect(f.sends()).toBe(1);
     expect((await f.read()).status).toBe("sent");
+  });
+
+  it.each(["foreground", "general"] as const)("keeps an accepted %s reply and continuation when cleanup fails", async (entry) => {
+    const f = await fixture(channel);
+    const continuationWakeAt = new Date(Date.now() + 60_000).toISOString();
+    mocks.recordHostedProviderCleanupAfterDelivery.mockRejectedValueOnce(new Error("Synthetic cleanup unavailable"));
+    const { result } = await f.phase(entry, [f.intent.intentId], undefined, continuationWakeAt);
+    expect(result).toMatchObject({ progressed: true, checkpointReason: "outbox_receipt", nextWakeAt: new Date(Date.now() + 30_000).toISOString() });
+    expect(result.redactedStatus).toMatchObject({ hostedOutboxDeliverySent: 1 });
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(f.logRequests.flatMap((request) => request.entries)).toContainEqual(expect.objectContaining({
+      errorCode: "assistant_after_checkpoint_failed",
+      redactedJson: expect.objectContaining({
+        checkpointed: false,
+        failureNames: ["Error"],
+        failureSummaries: ["Synthetic cleanup unavailable"],
+        failureCodeDetails: [],
+        nestedErrorCode: "runtime_error",
+      }),
+    }));
+    expect(f.sends()).toBe(1);
+    expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    await f.publish();
+    await f.restore();
+    await f.phase();
+    expect(f.sends()).toBe(1);
+    expect((await f.read()).status).toBe("sent");
+  });
+
+  it("propagates liveness loss during cleanup without losing the accepted receipt", async () => {
+    const f = await fixture(channel);
+    const controller = new AbortController();
+    f.setSignal(controller.signal);
+    mocks.recordHostedProviderCleanupAfterDelivery.mockImplementationOnce(async () => {
+      controller.abort(new Error("Synthetic invocation cancelled"));
+      controller.signal.throwIfAborted();
+      return { nextWakeAt: null };
+    });
+    await expect(f.phase("foreground", [f.intent.intentId])).rejects.toThrow("Synthetic invocation cancelled");
+    expect(f.sends()).toBe(1);
+    expect((await f.read()).status).toBe("sent");
+  });
+
+  it.each(["foreground", "general"] as const)("leaves a prompt assistant wake when %s post-delivery projection fails", async (entry) => {
+    const f = await fixture(channel);
+    mocks.resolveHostedAssistantOutboxNextWakeAt
+      .mockRejectedValueOnce(new Error("Synthetic projection unavailable"));
+    const { result } = await f.phase(entry, [f.intent.intentId]);
+    expect(result).toMatchObject({
+      progressed: true, checkpointReason: "outbox_receipt",
+      nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    expect(result.nextWakeReason ?? "assistant").toBe("assistant");
+    expect(f.sends()).toBe(1);
+    expect((await f.read()).status).toBe("sent");
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(f.logRequests.flatMap((request) => request.entries)).toContainEqual(expect.objectContaining({
+      errorCode: "assistant_after_checkpoint_failed",
+      redactedJson: expect.objectContaining({
+        checkpointed: false, failureNames: ["Error"],
+        failureSummaries: ["Synthetic projection unavailable"],
+        failureCodeDetails: [], nestedErrorCode: "runtime_error",
+      }),
+    }));
+  });
+
+  it("does not list the outbox or read cleanup wakes before the first reply send", async () => {
+    const f = await fixture(channel);
+    const listing = vi.spyOn(assistantEngine, "listAssistantOutboxIntents");
+    const assertNoReads = () => {
+      expect(listing).not.toHaveBeenCalled();
+      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).not.toHaveBeenCalled();
+      expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).not.toHaveBeenCalled();
+    };
+    const fetch = f.providerFetch.getMockImplementation()!;
+    const sendEmail = f.sendEmail.getMockImplementation()!;
+    f.providerFetch.mockImplementation(async (...args) => { assertNoReads(); return fetch(...args); });
+    f.sendEmail.mockImplementation(async (...args) => { assertNoReads(); return sendEmail(...args); });
+    try {
+      await f.phase("foreground", [f.intent.intentId]);
+      expect(f.sends()).toBe(1);
+      expect(listing).toHaveBeenCalled();
+    } finally {
+      listing.mockRestore();
+    }
   });
 
   it("settles a confirmation-only retry without a fence or another provider call", async () => {
@@ -311,6 +487,69 @@ describe.each(["telegram", "email"] as const)("%s publication", (channel) => {
     expect((await f.read()).status).toBe("sent");
     expect(await listAutomations(f.vaultRoot)).toHaveLength(1);
   });
+});
+
+it("repairs a selected-input prefix after a general-path non-idempotent send", async () => {
+  const f = await fixture("telegram");
+  const engine = await vi.importActual<typeof import("@murphai/assistant-engine")>("@murphai/assistant-engine");
+  mocks.readAssistantInputEvent.mockImplementation(engine.readAssistantInputEvent);
+  mocks.readAssistantAutomationState.mockImplementation(engine.readAssistantAutomationState);
+  const automation = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>("@murphai/assistant-engine/assistant-automation");
+  mocks.hasCompleteAssistantAutoReplyTerminalEvidence.mockImplementation(automation.hasCompleteAssistantAutoReplyTerminalEvidence);
+  const events: Awaited<ReturnType<typeof engine.upsertAssistantInputEvent>>[] = [];
+  for (const laneSeq of ["1", "2"]) {
+    const event = await engine.upsertAssistantInputEvent({
+      vault: f.vaultRoot,
+      event: {
+        content: { text: "Synthetic selected input", transcriptText: null, userMessageContent: [] },
+        conversation: { accountId: "account_synthetic", actorId: "actor_synthetic", actorIsSelf: false, source: "telegram", threadId: "123", threadIsDirect: true },
+        occurredAt: NOW, receivedAt: NOW,
+        replyTarget: { channel: "telegram", messageId: `message_${laneSeq}`, threadId: "123" },
+        sourceRef: { dedupeKey: `input_${laneSeq}`, eventId: `input_${laneSeq}`, itemId: `item_${laneSeq}`, causalSeq: laneSeq, kind: "hosted-mailbox", lane: "conversation", laneSeq, payloadSchema: "murph.hosted-mailbox-payload.v1", payloadSource: "inline", source: "hosted-mailbox", wakeSchema: "murph.hosted-execution-wake.v1" },
+      },
+    });
+    events.push(event);
+    await enqueueHostedPendingAssistantInputId({ inputId: event.inputId, vaultRoot: f.vaultRoot });
+  }
+  await engine.saveAssistantAutomationState(f.vaultRoot, {
+    autoReply: [{ channel: "telegram", eligibleAfter: null, enabledAt: NOW }], updatedAt: NOW, version: 1,
+  });
+  const input = createPhaseInput({ vaultRoot: f.vaultRoot, importedCount: 0, now: () => NOW });
+  const result = await runHostedWorkspaceUntilIdleOrBudget({
+    checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_selected_delivery", expectedWorkspaceVersion: "0", leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+    }),
+    expectedUserId: "member_synthetic_phase", requestId: "request_selected_delivery",
+    initialMailboxImport: input.initialMailboxImport,
+    initialAssistantInputBatch: { assistantInputIds: events.map((event) => event.inputId), emailDeliveryContexts: [], linqDeliveryContexts: [] },
+    async importItem() { throw new Error("No new mailbox input expected"); },
+    limitPerLane: 10, now: () => NOW, vaultRoot: f.vaultRoot, workspace: input.workspace,
+    platform: {
+      ...input.platform,
+      mailboxPort: {
+        async fetch() { return { fetchedAt: NOW, items: [], maxSeqByLane: [], userId: "member_synthetic_phase" }; },
+        async fetchPayload() { throw new Error("No mailbox payload expected"); },
+      },
+      workspacePort: { async checkpoint() { throw new Error("No publication expected"); } },
+    },
+    async runAssistantPhase(selected) {
+      expect(selected.initialAssistantInputBatch?.assistantInputIds).toEqual(events.map((event) => event.inputId));
+      // A general pass has no foreground reply result. Its inline delivery must
+      // not prevent the runner from repairing a handled prefix of its selection.
+      await automation.writeAssistantAutoReplyReplyTerminalEvidence({
+        captureIds: [], inputIds: [events[0]!.inputId], deliveryIntentId: f.intent.intentId,
+        outcome: "result", recordedAt: NOW, sessionId: "session_publication", vault: f.vaultRoot,
+      });
+      const { result: delivered } = await f.phase("general", [f.intent.intentId]);
+      expect(delivered.foregroundReplyFailed).toBeUndefined();
+      expect(delivered.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+      expect(delivered.nextWakeAt).toBeNull();
+      return delivered;
+    },
+  });
+  expect(f.sends()).toBe(1);
+  expect((await f.read()).status).toBe("sent");
+  expect(result.latestAssistantInputBatch?.assistantInputIds).toEqual([events[1]!.inputId]);
 });
 
 it("does not dispatch a marked effect without its prepared token", async () => {

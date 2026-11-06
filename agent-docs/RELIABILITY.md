@@ -3336,6 +3336,11 @@ Current product admission, delivery and native runtime safety rules remain.
   barrier. Generic non-idempotent transport work remains excluded from the hot
   pass, and generic notifications or unrelated pending outbox work cannot
   hitchhike. Fresh conversation input retains priority.
+  A finished reply has one route: its effects drain inline before the phase
+  returns, and only `publishBeforeDispatch` effects wait for publication. Once a
+  provider has accepted a send, one boundary keeps the accepted outcome: a later
+  cleanup, staging or wake-projection failure logs
+  `assistant_after_checkpoint_failed` and leaves a prompt recovery wake.
   A Linq reply boundary carrying a parked file-approval cycle or post-acceptance
   settlement obligation publishes its prepared claims and obligations before
   any reply bubble can consume the input. A crash after publication but before

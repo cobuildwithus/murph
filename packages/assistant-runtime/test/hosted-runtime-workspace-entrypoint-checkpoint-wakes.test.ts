@@ -113,9 +113,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase() {
             if (++pass > 1) return { progressed: false };
             started.resolve();
-            return { progressed: true, checkpointReason: "outbox_sending", afterCheckpoint: async () => ({
-              checkpointReason: "outbox_sending", afterDurableCheckpoint: durableEffect,
-            }) };
+            return { progressed: true, checkpointReason: "outbox_sending", afterDurableCheckpoint: durableEffect };
           },
         }), 15_000, () => events.join(","));
       await started.promise;

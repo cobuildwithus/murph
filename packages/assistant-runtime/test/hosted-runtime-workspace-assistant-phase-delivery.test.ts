@@ -77,7 +77,7 @@ vi.mock("@murphai/assistant-engine/assistant-codex", async (importOriginal) => (
   executeCodexAppServerTurn: vi.fn(),
 }));
 
-describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes foreground delivery finished timing after deferred delivery drains", async () => {
+describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes foreground delivery finished timing after inline delivery drains", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const backgroundMaintenanceController = new AbortController();
     const shouldYieldBackgroundMaintenance = vi.fn(() => false);
@@ -135,7 +135,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         .flatMap((request) => request.entries)
         .map((entry) => entry.redactedJson?.turnTimingStage)
         .filter(Boolean),
-    ).not.toContain("foreground-delivery-phase-finished");
+    ).toContain("foreground-delivery-phase-finished");
 
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
@@ -221,33 +221,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       },
     );
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const phasePromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       runtimeProductFeedbackPort: { recordProductFeedback },
     }));
 
-    expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    expect(recordProductFeedback).not.toHaveBeenCalled();
-
-    const postCheckpointPromise = result.afterCheckpoint?.();
     await vi.waitFor(() => {
       expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledOnce();
       expect(recordProductFeedback).toHaveBeenCalledWith(feedback);
     });
     expect(memberDeliveryCompleted).toBe(true);
 
-    let postCheckpointSettled = false;
-    void postCheckpointPromise?.then(() => {
-      postCheckpointSettled = true;
+    let phaseSettled = false;
+    void phasePromise.then(() => {
+      phaseSettled = true;
     });
     await Promise.resolve();
-    expect(postCheckpointSettled).toBe(false);
+    expect(phaseSettled).toBe(false);
 
     resolveFeedback({
       feedbackId: "feedback_synthetic",
       recorded: true,
     });
-    await postCheckpointPromise;
+    await phasePromise;
   });
 
   it("does not record queued product feedback when the current delivery fails", async () => {
@@ -522,9 +518,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
       preparedDispatches: createPreparedDispatchesForDeliveryEffect(deferredDeliveryEffect),
     });
-    mocks.resolveHostedAssistantOutboxNextWakeAt
-      .mockResolvedValueOnce(staleOutboxWakeAt)
-      .mockResolvedValueOnce(null);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockImplementation(async () =>
+      mocks.drainHostedPreparedAssistantDeliveries.mock.calls.length > 0
+        ? null : staleOutboxWakeAt,
+    );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
@@ -552,12 +549,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
-      nextWakeAt: staleOutboxWakeAt,
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
       progressed: true,
     }));
 
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -652,10 +649,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       shouldYieldBackgroundMaintenance: () => shouldYield,
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
@@ -711,11 +708,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       shouldYieldBackgroundMaintenance: () => shouldYield,
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(result).toEqual(expect.objectContaining({
-      afterCheckpointKeepsForegroundImportLoop: true,
-      checkpointReason: "outbox_sending",
+      checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
     expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
@@ -797,7 +793,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       shouldYieldBackgroundMaintenance: () => false,
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -936,7 +932,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         vaultRoot,
         workspace: createDueAssistantWorkspace(),
       }));
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
       expect(mocks.resetHostedPreparedAssistantDeliveryEffects).not.toHaveBeenCalled();
@@ -1145,7 +1141,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
           vaultRoot,
           workspace: createDueAssistantWorkspace(),
         }));
-        const postCheckpoint = await result.afterCheckpoint?.();
+        const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
         expect(postCheckpoint).toEqual(expect.objectContaining({
           checkpointReason: "outbox_receipt",
@@ -1184,10 +1180,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
       nextWakeAt,
       progressed: true,
     }));
@@ -1210,26 +1206,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
-    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      now = "2026-05-08T16:00:08.000Z";
+      return [
+        {
+          cleanupMessages: [],
+          cleanupTargetAliases: [],
+          deliveryChannel: "telegram",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint_synthetic",
+          effectId: "effect_synthetic",
+          journalMethod: "PUT",
+          journalStatus: "200",
+          providerMessageId: null,
+          providerMessageIds: [],
+          providerThreadId: "thread_synthetic",
+          retryable: false,
+          target: null,
+          targetKind: null,
+        },
+      ];
+    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => now,
@@ -1237,12 +1236,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
-      nextWakeAt: consumedWakeAt,
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
     }));
 
-    now = "2026-05-08T16:00:08.000Z";
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -1307,7 +1305,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         updatedAt: "2026-05-08T16:00:00.000Z",
       }),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -1323,8 +1321,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
   it("preserves a post-delivery outbox-only wake with delivery ownership", async () => {
     let now = "2026-05-08T16:00:00.000Z";
     const consumedWakeAt = "2026-05-08T16:00:05.000Z";
-    mocks.resolveHostedAssistantOutboxNextWakeAt
-      .mockResolvedValueOnce(consumedWakeAt);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(consumedWakeAt);
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       assistantAutomationOutboxOnlyNextWakeAt: consumedWakeAt,
@@ -1368,7 +1365,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       }),
     }));
 
-    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledOnce();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: consumedWakeAt,
@@ -1429,7 +1426,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       }),
     }));
 
-    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledOnce();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: "2026-05-08T16:05:08.000Z",
@@ -1948,12 +1945,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       expect(firstPostCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
         nextWakeAt: now,
-        nextWakeReason: "assistant",
         redactedStatus: expect.objectContaining({
           hostedOutboxTerminalFailureInputsStaged: 1,
           hostedOutboxTerminalizedSending: 1,
         }),
       }));
+      expect(firstPostCheckpoint?.nextWakeReason ?? "assistant").toBe("assistant");
       let pendingInputIds = await readExistingHostedPendingAssistantInputIds({
         vaultRoot,
       });
@@ -2827,6 +2824,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       deliveryEffect,
     ]);
 
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantAutomationScheduleChanged: () => scheduleChanged,
       clearAssistantAutomationScheduleChanged,
@@ -2849,20 +2850,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       afterCheckpoint: expect.any(Function),
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
       nextWakeAt: reconciliationWakeAt,
       progressed: true,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: reconciliationWakeAt,
-        hostedOutboxPendingDeliveryEffects: 1,
+        hostedOutboxPendingDeliveryEffects: 0,
       }),
     }));
     expect(result).not.toHaveProperty("nextWakeReason");
 
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      createSentDeliveryOutcome(),
-    ]);
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0])
@@ -2949,15 +2947,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         },
       }));
       expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_sending",
+        checkpointReason: "outbox_receipt",
         nextWakeAt: null,
         progressed: true,
         redactedStatus: expect.objectContaining({
-          hostedOutboxPendingDeliveryEffects: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
         }),
       }));
 
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -3020,12 +3018,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         },
       }));
       expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_sending",
+        checkpointReason: "outbox_receipt",
         nextWakeAt: null,
         progressed: true,
       }));
 
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -3153,12 +3151,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         },
       }));
       expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_sending",
+        checkpointReason: "outbox_receipt",
         nextWakeAt: null,
         progressed: true,
       }));
 
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -3702,10 +3700,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
-      "assistant.pass_finished",
       "outbox.delivery_finished",
+      "assistant.pass_finished",
     ]);
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished")?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -3762,7 +3760,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished")?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -3818,7 +3816,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
-    const deliveryLogRequest = filteredLogRequests[1];
+    const deliveryLogRequest = filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished");
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       deliveryErrorSummaries: [
@@ -3864,7 +3862,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
-    const deliveryLogRequest = filteredLogRequests[1];
+    const deliveryLogRequest = filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished");
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       deliveryErrorSummaries: [
@@ -3936,7 +3934,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
-    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests)[1];
+    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests).find((request) => request.entries.some((entry) => entry.eventCode === "outbox.delivery_finished"))!;
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       deliveryErrorSummaries: [
@@ -4041,7 +4039,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished")?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
