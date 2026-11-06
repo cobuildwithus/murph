@@ -5,7 +5,7 @@ import { handleGameChatTool } from "../src/lib/game/chat-tool";
 import { gameRecapMessage } from "../src/lib/game/recap-message";
 import { getPrisma } from "../src/lib/prisma";
 import { sealGameText } from "../src/lib/game/crypto";
-import { readGame, readHistory, readHome, readGameRecapMaterial, sealGameRecap } from "../src/lib/game/service";
+import { readGame, readHistory, readHome, readGameRecapMaterial, runGameCommand, sealGameRecap } from "../src/lib/game/service";
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "../src/lib/prisma-operation-timing";
 import { recordGameRecapWitnessTx } from "../src/lib/game/recap-witness";
 import { deliverGameChatLifecycle } from "../src/lib/game/chat-lifecycle";
@@ -219,6 +219,65 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
       expect(await unchangedSettlement(f)).toEqual(settlement);
     });
 
+    it("ends published pair work after a real block, including after unblock", async () => {
+      const f = await published(), queued = await receipt(f), settlement = await unchangedSettlement(f);
+      expect(await runGameCommand({ actorMemberId: f.players[0]!, command: { type: "block", memberId: f.players[1]! } })).toMatchObject({ ok: true });
+      const blocked = await receipt(f), before = await rows(f);
+      expect(blocked.skippedAt).toBeInstanceOf(Date);
+      expect(blocked).toEqual({ ...queued, status: "skipped", skipReason: "game_blocked", skippedAt: blocked.skippedAt,
+        retryAfterAt: null, updatedAt: blocked.updatedAt });
+      expect((await story(f)).chatContainerMemberId).toBeNull();
+      expect(await unchangedSettlement(f)).toEqual(settlement);
+      for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action)).toEqual(terminal(action));
+      const regeneration = { gameId: f.gameId, regenerationId: "blocked_successor", execute: true, operatorMemberId: "system" };
+      expect((await requestGameRecapRegeneration(regeneration)).outcome).toBe("chat_unavailable");
+      expect(await rows(f)).toEqual(before);
+      expect(await runGameCommand({ actorMemberId: f.players[0]!, command: { type: "unblock", memberId: f.players[1]! } })).toMatchObject({ ok: true });
+      for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action)).toEqual(terminal(action));
+      expect((await requestGameRecapRegeneration(regeneration)).outcome).toBe("chat_unavailable");
+      expect(await rows(f)).toEqual(before);
+    });
+
+    it("returns terminal when a real pair block wins between material and the final seal", async () => {
+      const f = await published();
+      publication.runtime.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockImplementationOnce(async () => {
+        expect(await runGameCommand({ actorMemberId: f.players[0]!, command: { type: "block", memberId: f.players[1]! } })).toMatchObject({ ok: true });
+      });
+      expect(await tool(f, "write_recap")).toEqual(terminal("write_recap"));
+      expect(await receipt(f)).toMatchObject({ status: "skipped", skipReason: "game_blocked" });
+      expect((await story(f)).recapEncrypted).toBeNull();
+    });
+
+    it("keeps a temporary block row uncertain and resumes the unskipped generation", async () => {
+      const f = await published(), queued = JSON.stringify(await receipt(f));
+      const block = { blockerMemberId: f.players[0]!, blockedMemberId: f.players[1]! };
+      await f.db.gameBlock.create({ data: block });
+      for (const action of ["read_game", "write_recap"] as const) {
+        expect(await tool(f, action)).toEqual(unavailable(action));
+        expect(JSON.stringify(await receipt(f))).toBe(queued);
+      }
+      await f.db.gameBlock.delete({ where: { blockerMemberId_blockedMemberId: block } });
+      expect(await tool(f, "read_game")).toEqual({ action: "read_game", result: { status: "ok", recapGame: (await material(f))!.game } });
+      expect(await tool(f, "write_recap")).toEqual(savedResponse(f, recap));
+      expect((await story(f)).recapEncrypted).not.toBeNull();
+      expect(JSON.stringify(await receipt(f))).toBe(queued);
+    });
+
+    it("keeps published group work uncertain after a real block and unblock", async () => {
+      const f = await published();
+      await f.db.game.update({ where: { id: f.gameId }, data: { maxPlayers: 10 } });
+      publication.audience.mockResolvedValue({ memberIds: f.players });
+      expect(await runGameCommand({ actorMemberId: f.players[0]!, multiplayer: true, command: { type: "block", memberId: f.players[1]! } })).toMatchObject({ ok: true });
+      expect(await receipt(f)).toMatchObject({ status: "skipped", skipReason: "game_blocked" });
+      const before = await rows(f);
+      for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action, recap, true)).toEqual(unavailable(action));
+      expect(await rows(f)).toEqual(before);
+      expect(await runGameCommand({ actorMemberId: f.players[0]!, multiplayer: true, command: { type: "unblock", memberId: f.players[1]! } })).toMatchObject({ ok: true });
+      // Retained, not recovered: the block unbound this game and nothing rebinds a settled group.
+      for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action, recap, true)).toEqual(unavailable(action));
+      expect(await rows(f)).toEqual(before);
+    });
+
     it("returns terminal when a report wins between material and the final seal", async () => {
       const f = await published(), queued = await receipt(f);
       publication.runtime.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockImplementationOnce(async () => { await report(f); });
@@ -281,16 +340,16 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
       expect(await unchangedSettlement(f)).toEqual(settlement);
     });
 
-    it.each(["outside witness", "awaiting_generation", "clean legacy", "game_blocked"])("does not retire %s", async cause => {
+    it.each(["outside witness", "awaiting_generation", "clean legacy", "game_lifecycle_superseded"])("does not retire %s", async cause => {
       const f = await fixture(false, cause !== "awaiting_generation");
       if (cause === "outside witness") {
         await f.db.gameEntry.update({ where: { id: f.entries[0]!.id }, data: { withdrawnAt: new Date(), withdrawnReason: "replaced" } });
         await f.db.$transaction(tx => recordGameRecapWitnessTx(tx, f.gameId, f.eventId));
       }
-      if (cause === "game_blocked") await f.db.hostedLinqDelivery.update({ where: { id: (await receipt(f)).id }, data: { status: "skipped", skipReason: "game_blocked", skippedAt: new Date() } });
+      if (cause === "game_lifecycle_superseded") await f.db.hostedLinqDelivery.update({ where: { id: (await receipt(f)).id }, data: { status: "skipped", skipReason: "game_lifecycle_superseded", skippedAt: new Date() } });
       const before = JSON.stringify(await receipt(f));
       if (cause === "outside witness" || cause === "awaiting_generation") await remove(f);
-      if (cause === "game_blocked") await report(f);
+      if (cause === "game_lifecycle_superseded") await report(f);
       if (cause === "outside witness" || cause === "clean legacy") {
         expect(await tool(f, "read_game")).toEqual({ action: "read_game", result: { status: "ok", recapGame: (await material(f))!.game } });
         expect(await tool(f, "write_recap", cleanRecap)).toEqual(savedResponse(f, cleanRecap));

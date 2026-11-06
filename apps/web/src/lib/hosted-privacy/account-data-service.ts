@@ -87,6 +87,7 @@ import {
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_STRIPE_CANCEL_FAILED_MESSAGE,
   HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH,
   type HostedAccountExitReasonCode,
   isHostedAccountExitReasonCode,
@@ -2399,7 +2400,7 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
       httpStatus: 502,
-      message: "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing.",
+      message: HOSTED_ACCOUNT_DELETION_STRIPE_CANCEL_FAILED_MESSAGE,
       retryable: true,
     });
   }

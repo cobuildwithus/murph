@@ -299,6 +299,24 @@ export async function runHostedAssistantAutomationLane(input: {
   };
 }
 
+const PROVIDER_START_CRITICAL_PATH_TIMING_KEYS = [
+  "automationGroupAndOperationScopeMs", "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs", "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
+] as const;
+
+function readProviderStartCriticalPathTiming(
+  path: Partial<Record<(typeof PROVIDER_START_CRITICAL_PATH_TIMING_KEYS)[number], unknown>>
+    | null | undefined,
+): Record<string, number> | null {
+  const details: Record<string, number> = {};
+  for (const key of PROVIDER_START_CRITICAL_PATH_TIMING_KEYS) {
+    const value = path?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) details[key] = value;
+  }
+  return Object.keys(details).length > 0 ? details : null;
+}
+
 export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
@@ -554,6 +572,11 @@ export async function runHostedAssistantAutomation(
       },
       onProviderRequestStarted: (event) => {
         options?.onProviderRequestStarted?.();
+        const criticalPathTiming = readProviderStartCriticalPathTiming(event.providerStartCriticalPath);
+        if (criticalPathTiming) redactedLogEntries.push(emitHostedRuntimeRedactedLog({
+          component: "runtime", details: criticalPathTiming, wake, phase: "wake.running",
+          message: "Hosted assistant provider-start critical path timing.",
+        }));
         const source = readHostedIngressLatencySource(event.source);
         const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
         activeProviderMilestoneTraceContext = source && runtimeAttemptId

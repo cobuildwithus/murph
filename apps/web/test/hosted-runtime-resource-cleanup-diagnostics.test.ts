@@ -1,6 +1,7 @@
 import { createHash, Hash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { Prisma } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
   control: vi.fn(), reconcile: vi.fn(),
@@ -114,7 +115,7 @@ function requeue(row: OrphanRow) {
 function acknowledge(row: OrphanRow) {
   const { userId, kind, resourceId, revision } = row;
   return { where: { userId, kind, resourceId, revision, retiredAt: { not: null }, purgedAt: null },
-    data: { purgedAt: NOW } };
+    data: kind === "snapshot" ? { purgedAt: NOW, snapshotRef: Prisma.DbNull } : { purgedAt: NOW } };
 }
 function fingerprint(row: OrphanRow): string {
   return createHash("sha256").update(JSON.stringify([

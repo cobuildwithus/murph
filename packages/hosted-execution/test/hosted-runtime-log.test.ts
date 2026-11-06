@@ -13,6 +13,21 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime log contracts", () => {
+  it("accepts only fixed thread rotation labels and numeric automation preparation timings", () => {
+    for (const reason of [null, "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled"]) {
+      expect(parseHostedRuntimeRedactedJson({ threadRotationReason: reason }, "log")).toEqual({ threadRotationReason: reason });
+    }
+    for (const value of ["private-unrecognized-reason", 7, {}, true]) {
+      expect(() => parseHostedRuntimeRedactedJson({ threadRotationReason: value }, "log")).toThrow();
+    }
+    for (const key of ["automationGroupAndOperationScopeMs", "automationTerminalEvidenceMs", "automationSessionPreflightMs", "automationCrossSessionContextMs", "automationPromptPreparationMs"]) {
+      expect(parseHostedRuntimeRedactedJson({ [key]: 12 }, "log")).toEqual({ [key]: 12 });
+      for (const value of ["private timing text", -1, Infinity, true]) {
+        expect(() => parseHostedRuntimeRedactedJson({ [key]: value }, "log")).toThrow();
+      }
+    }
+  });
+
   it("exports the structural redacted JSON parser with privacy guards intact", () => {
     expect(parseHostedRuntimeRedactedJson(
       { importedCount: 2 },

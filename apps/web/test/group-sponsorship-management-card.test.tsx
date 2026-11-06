@@ -388,7 +388,16 @@ test.each([
       await vi.advanceTimersByTimeAsync(1_000);
     });
 
-    expect(recoveryStatus.textContent).toContain("Payment confirmed");
+    const heading = rendered.container.querySelector("h1");
+    expect(heading?.textContent).toBe("This group has more Murph.");
+    expect(rendered.container.textContent).toContain("Automatic refills are on.");
+    expect(rendered.container.textContent).toContain("For Sunday sleep crew");
+    expect(rendered.container.textContent).not.toContain("Payment confirmed");
+    expect(rendered.container.textContent).not.toContain("Pause refills");
+    expect(rendered.container.textContent).not.toContain("Cancel sponsorship");
+    expect(
+      rendered.container.querySelector('a[href="sms:"]')?.textContent,
+    ).toContain("Open Messages");
     expect(rendered.replaceState).toHaveBeenCalledWith(
       {},
       "",
@@ -713,6 +722,108 @@ test.each([
   }
 });
 
+test("holds the finished page until a returned checkout is confirmed", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      management: { ...baseManagement, status: "recovery_required" },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  vi.useFakeTimers();
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      checkoutReturned: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  try {
+    expect(rendered.container.textContent).toContain("Payment is processing");
+    expect(rendered.container.querySelector('a[href="sms:"]')).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_000);
+    });
+
+    expect(rendered.container.textContent).toContain("Check your payment");
+    expect(rendered.container.textContent).not.toContain("has more Murph");
+    expect(rendered.container.querySelector('a[href="sms:"]')).toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps an open cancel drawer when a returned checkout confirms behind it", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({ management: baseManagement }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  vi.useFakeTimers();
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      checkoutReturned: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  try {
+    await clickLabel(rendered.container, "Cancel sponsorship");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rendered.container.textContent).toContain("Cancel your sponsorship?");
+    expect(rendered.container.textContent).not.toContain("has more Murph");
+
+    await clickLabel(rendered.container, "Keep it");
+
+    expect(rendered.container.querySelector("h1")?.textContent)
+      .toBe("This group has more Murph.");
+    expect(rendered.container.textContent).not.toContain("Cancel your sponsorship?");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps a cancel-only sponsor on cancellation after a returned checkout", async () => {
+  vi.stubGlobal("fetch", vi.fn());
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      cancelOnly: true,
+      checkoutReturned: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
+      management: baseManagement,
+    },
+  ));
+  try {
+    expect(rendered.container.textContent).toContain("Cancel sponsorship");
+    expect(rendered.container.textContent).not.toContain("has more Murph");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("says when a lower limit starts, even right after a confirmed payment", async () => {
   const fetchMock = vi.fn(async () => ({
     json: async () => ({
@@ -744,7 +855,10 @@ test("says when a lower limit starts, even right after a confirmed payment", asy
   });
   const focused = recordFocus(rendered);
   try {
-    expect(rendered.container.textContent).toContain("Payment confirmed");
+    await clickLabel(rendered.container, "Manage sponsorship");
+    expect(focused.at(-1)).toBe("You sponsor Sunday sleep crew.");
+    expect(rendered.container.textContent).toContain("Pause refills");
+    expect(rendered.container.textContent).toContain("Cancel sponsorship");
     await clickLabel(rendered.container, "$5 a month");
     await clickLabel(rendered.container, "Lower limit to $5");
 

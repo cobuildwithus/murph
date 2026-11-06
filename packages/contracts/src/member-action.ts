@@ -1,6 +1,6 @@
 import * as z from "./zod-runtime.ts";
 import { companionMealIdSchema } from "./companion-meals.ts";
-import { memoryDemographicsPatchSchema } from "./memory.ts";
+import { memoryDisplayNameSchema, memoryDemographicsPatchSchema } from "./memory.ts";
 import {
   workoutSessionPresentationV1Schema,
   workoutSessionCardV1Bounds,
@@ -492,8 +492,15 @@ export const demographicsSetMemberActionV1Schema = z.object({
   patch: memoryDemographicsPatchSchema,
 }).strict();
 
+export const displayNameSetMemberActionV1Schema = z.object({
+  kind: z.literal("display-name.set"),
+  version: z.literal(1),
+  displayName: memoryDisplayNameSchema,
+}).strict();
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
   demographicsSetMemberActionV1Schema,
+  displayNameSetMemberActionV1Schema,
   // Decode queued/restored legacy requests only; the runner consumes this as a
   // no-op. Keep until old producers and retained snapshots have drained.
   z.object({ kind: z.literal("meal.names.repair"), version: z.literal(1), batch: z.number().int().min(0).max(100000) }).strict(),

@@ -345,12 +345,15 @@ it has been explicitly elevated to a cross-cutting invariant.
   only after terminal or durable pending evidence. Accepted delivery
   needing confirmation settles through its existing delivery retry deadline;
   optional accounting may update its own marker but never moves that deadline.
+  A hosted Telegram send checks liveness before provider entry. Once a sender
+  returns an accepted response, losing liveness cannot discard it: the outbox
+  persists the receipt before any post-dispatch liveness check.
   A retry under a provider idempotency key sends the bytes accepted for that
   key, so freeze those inputs on the accepted receipt and never rebuild them
   from current source state.
 - Failure to observe an outcome does not prove rejection. Once a native game
-  write has read its request, a server failure is reported as retryable, never
-  as a final refusal of that request.
+  write or an account deletion has read its request, a server failure is
+  reported as retryable, never as a final refusal of that request.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
@@ -377,9 +380,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
-- A native game command or Messages member action admitted before request
-  reading or preparation rechecks its exact session inside the transaction that
-  commits its effect. A failed recheck writes nothing.
+- A native game command, board sharing save or Messages member action admitted
+  before request reading or preparation rechecks its exact session inside the
+  transaction that commits its effect. A failed recheck writes nothing.
 - Participant-target phone egress is denied unless its exact send kind has a
   narrow durable authority binding the idempotency key, participant identity,
   and source line. Adding one allowed first-contact kind must not widen another

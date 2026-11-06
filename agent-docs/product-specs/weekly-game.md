@@ -476,10 +476,10 @@ resulting avatar. No private photo is shared with the subject or other players.
   and the retake stay as they are. The field names no day, so capture-age
   placement is unchanged. A client that omits it keeps the older rule: a new
   entry ID replaces the live post.
-- **Write outcomes.** Every native game command rechecks its exact session
-  inside the transaction that commits it. A session revoked after admission
-  returns 401 `UNAUTHENTICATED` and writes nothing. Once a command or upload has
-  read its request, a server failure is not a refusal: it returns
+- **Write outcomes.** Every native game command and board sharing save rechecks
+  its exact session inside the transaction that commits it. A session revoked
+  after admission returns 401 `UNAUTHENTICATED` and writes nothing. Once a
+  command or upload has read its request, a server failure is not a refusal: it returns
   `retryable: true`, as `INTERNAL_ERROR` (500) or `GAME_MEDIA_UNAVAILABLE` (503),
   and the app keeps its unsent shot or reply. Same-ID replay makes that retry
   safe after a commit whose response failed. Malformed input, a foreign or
@@ -631,6 +631,11 @@ resulting avatar. No private photo is shared with the subject or other players.
   Web answers `GAME_RECAP_GENERATION_RETIRED` before roster work, allowing the
   runner to consume the pending item without sending. Temporary roster, access,
   audience or storage failures and claimed provider work keep their uncertainty.
+  A pair receipt skipped as `game_blocked` also permanently ends the generation,
+  even after unblock: its room cannot be restored. A block row alone leaves an
+  unskipped generation temporary. Group generations skipped for a block stay
+  non-terminal because a group block does not end the game. Nothing yet restores
+  a settled group's room, so such a generation retries without being able to send.
   A dry run can answer `would_regenerate` for stale work without changing rows;
   execution retires it before reserving a clean generation, even without a stored
   story. Unpublished work gets its first clean witness at publication.

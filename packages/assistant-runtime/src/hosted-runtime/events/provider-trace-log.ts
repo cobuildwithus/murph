@@ -56,6 +56,9 @@ const HOSTED_ASSISTANT_REASONING_EFFORT_VALUES = new Set([
   "high",
   "xhigh",
 ]);
+const HOSTED_ASSISTANT_THREAD_ROTATION_REASON_VALUES = new Set([
+  "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled",
+]);
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",
   "assistant_context_snapshot",
@@ -612,6 +615,11 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
         ?? readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
     workingDirectoryKind,
   };
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details, "threadRotationReason",
+    readHostedAssistantProviderDiagnosticAllowedString(record, "threadRotationReason", HOSTED_ASSISTANT_THREAD_ROTATION_REASON_VALUES),
+  );
 
   for (const key of [
     "dynamicToolCount",

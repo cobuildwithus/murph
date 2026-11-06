@@ -11,6 +11,7 @@ import { HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS } from "@murphai/ho
 import { createPrismaClient } from "@/src/lib/prisma";
 import { claimHostedRuntime, requireHostedRuntimeOwnerTx, releaseHostedRuntimeAfterRetirement,
   prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted } from "@/src/lib/hosted-execution/runtime-owner";
+import { acknowledgeHostedRuntimeOrphanPurge, claimHostedRuntimeResourceCleanup } from "@/src/lib/hosted-execution/runtime-resource-cleanup";
 import { recoverHostedWorkspaceCheckpoint } from "@/src/lib/hosted-workspace/checkpoint-recovery";
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 
@@ -143,6 +144,27 @@ describe.skipIf(!enabled)("protected checkpoint recovery PostgreSQL publication"
     await db.hostedWorkspace.update({ where: { userId: other.userId }, data: { version: { increment: 1 } } });
     await expect(other.run("publish")).rejects.toMatchObject({ code: "HOSTED_CHECKPOINT_RECOVERY_CONFLICT" });
     expect((await db.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: other.userId } })).phase).toBe("starting");
+  });
+
+  it("rejects a purged candidate whose ref was cleared and fails closed on any ref-less staged row", async () => {
+    const f = await fixture();
+    await f.run("stage");
+    const where = { userId_kind_resourceId: { userId: f.userId, kind: "snapshot", resourceId: f.replacement.snapshotId } };
+    // Stand in for the grace period, and sort first in this bounded shared sweep.
+    await db.hostedRuntimeOrphan.update({ where, data: { cleanupAt: new Date(0) } });
+    const now = new Date();
+    const orphan = (await claimHostedRuntimeResourceCleanup({ prisma: db, now })).orphans.find(row => row.userId === f.userId);
+    if (!orphan) throw new Error("Expected the staged candidate to be claimed.");
+    expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan, now })).toBe(true);
+    expect(await db.hostedRuntimeOrphan.findUniqueOrThrow({ where })).toMatchObject({ snapshotRef: null, purgedAt: now });
+    // A purge needs retirement, so the publication fence answers before the staged read.
+    await expect(f.run("stage")).rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+    await expect(f.run("publish")).rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+    // Past the fence, a null ref must reach the same conflict rather than a parse error.
+    await db.hostedRuntimeOrphan.update({ where, data: { retiredAt: null } });
+    await expect(f.run("stage")).rejects.toMatchObject({ code: "HOSTED_CHECKPOINT_RECOVERY_CONFLICT" });
+    await expect(f.run("publish")).rejects.toMatchObject({ code: "HOSTED_CHECKPOINT_RECOVERY_CONFLICT" });
+    expect(await db.hostedWorkspace.findUniqueOrThrow({ where: { userId: f.userId } })).toMatchObject({ version: 7n });
   });
 
   it("serializes competing publication and acknowledges the same replacement exactly once", async () => {

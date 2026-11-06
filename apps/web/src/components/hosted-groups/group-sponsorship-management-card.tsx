@@ -12,11 +12,13 @@ import {
 } from "@/src/lib/hosted-groups/group-sponsorship-contract";
 
 import { GroupFundingDial } from "./group-funding-dial";
+import { GroupFundingOpenMessages } from "./group-funding-open-messages";
 import {
   LinkPageError,
   LinkPageLink,
   LinkPagePill,
   LinkPageScreen,
+  LinkPageTicket,
 } from "@/src/components/link-page/link-page-shell";
 
 const MONTHLY_CAP_DIAL_OPTIONS = HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map(
@@ -119,9 +121,19 @@ export function GroupSponsorshipManagementCard({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const appliedMonthlyCapMinor =
     management.pendingMonthlyCapMinor ?? management.monthlyCapMinor;
+  // Only a payer back from Checkout came here to pay, so only they are finished.
+  // A payment recovered on this page stays with the controls it started from, and
+  // a drawer opened while the payment settled stays until it is closed.
+  const checkoutFinished =
+    Boolean(checkoutReturned) &&
+    !cancelOnly &&
+    confirmation === null &&
+    recoveryProgress === "fulfilled";
   const outcome = canceled
     ? "canceled"
-    : `${management.status}:${appliedMonthlyCapMinor}`;
+    : checkoutFinished
+      ? "checkout_finished"
+      : `${management.status}:${appliedMonthlyCapMinor}`;
   const focusedOutcomeRef = useRef(outcome);
 
   useEffect(() => {
@@ -390,6 +402,30 @@ export function GroupSponsorshipManagementCard({
       Cancel sponsorship
     </LinkPageLink>
   );
+
+  if (checkoutFinished) {
+    return (
+      <section
+        className="flex flex-1 flex-col"
+        data-component="group-sponsorship-management"
+      >
+        <LinkPageScreen
+          actions={
+            <>
+              <GroupFundingOpenMessages />
+              <LinkPageLink onClick={() => setRecoveryProgress(null)}>
+                Manage sponsorship
+              </LinkPageLink>
+            </>
+          }
+          below={<LinkPageTicket kicker={`For ${groupName}`} title="More Murph" />}
+          detail="Automatic refills are on."
+          headingRef={headingRef}
+          title="This group has more Murph."
+        />
+      </section>
+    );
+  }
 
   return (
     <section

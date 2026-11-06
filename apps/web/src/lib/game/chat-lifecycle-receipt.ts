@@ -7,6 +7,8 @@ import { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
+export const GAME_CHAT_BLOCKED = "game_blocked";
+
 export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "change_resolved" | "cancelled" | "recap" | "missed" | "challenge" | "talk";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, regenerationId?: string): string {
@@ -152,7 +154,7 @@ export async function markGameChatGenerationQueuedTx(eventId: string, tx: Pick<P
 export async function skipGameChatLifecycleTx(tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">, gameIds: readonly string[], now: Date): Promise<void> {
   if (gameIds.length === 0) return;
   await tx.hostedLinqDelivery.updateMany({
-    data: { retryAfterAt: null, skipReason: "game_blocked", skippedAt: now, status: "skipped" },
+    data: { retryAfterAt: null, skipReason: GAME_CHAT_BLOCKED, skippedAt: now, status: "skipped" },
     where: { source: "game_lifecycle", skippedAt: null, status: { in: ["awaiting_generation", "generation_queued"] },
       OR: [{ sourceRef: { in: [...gameIds] } }, ...gameIds.map((gameId) => ({ sourceRef: { startsWith: `${gameId}:` } }))] },
   });

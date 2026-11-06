@@ -32,6 +32,50 @@ beforeEach(() => {
 });
 
 describe("hosted browser-vault replica refresh preparation", () => {
+  it("projects the resolved name and refreshes an old digest without a generation bump", async () => {
+    const { createHash } = await import("node:crypto");
+    const { setMemoryDisplayName, readMemoryDemographics } = await import("@murphai/core");
+    const { hashCanonicalQuerySources } = await import("@murphai/query/browser-replica-server");
+    const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources, refreshHostedBrowserVaultReplicaFromRuntime } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const root = await mkdtemp(path.join(os.tmpdir(), "display-name-replica-"));
+    try {
+      await setMemoryDisplayName(root, { displayName: "Avery" });
+      const oldHash = createHash("sha256").update("murph.hosted-browser-vault-source.v1\0")
+        .update((await hashCanonicalQuerySources(root)).hash).update("\0demographics\0")
+        .update(JSON.stringify(await readMemoryDemographics(root))).update("\0").digest("hex");
+      const hash = await hashHostedBrowserVaultReplicaSources(root);
+      expect(hash.hash).not.toBe(oldHash);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: hash.hash });
+      expect(replica.displayName).toBe("Avery");
+      expect(replica.generation).toBe(18);
+      const publishRef = vi.fn().mockResolvedValue({ published: true });
+      const write = vi.fn(async ({ replica }: { replica: unknown }) => createReplicaRefFromReplica(replica));
+      const workspace = createWorkspaceState();
+      workspace.browserVaultReplicaRef = { ...createReplicaRefFromReplica(replica), sourceBundleHash: oldHash };
+      const refreshed = await refreshHostedBrowserVaultReplicaFromRuntime({ vaultRoot: root, workspace,
+        platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+      });
+      expect(refreshed.status).toBe("published");
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(publishRef).toHaveBeenCalledTimes(1);
+      await setMemoryDisplayName(root, { displayName: "Robin" });
+      expect((await hashHostedBrowserVaultReplicaSources(root)).hash).not.toBe(hash.hash);
+    } finally { await rm(root, { force: true, recursive: true }); }
+  });
+
+  it("still constructs and hashes a replica when the name resolver throws", async () => {
+    const projection = await import("../src/hosted-runtime/vault-share-projection.ts");
+    const readName = vi.spyOn(projection, "readProjectableProfileName").mockRejectedValue(new Error("Synthetic read failure"));
+    const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const root = await mkdtemp(path.join(os.tmpdir(), "display-name-unreadable-"));
+    try {
+      const hash = await hashHostedBrowserVaultReplicaSources(root);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: hash.hash });
+      expect(replica.displayName).toBeUndefined();
+      expect(readName).toHaveBeenCalledTimes(2);
+    } finally { readName.mockRestore(); await rm(root, { force: true, recursive: true }); }
+  });
+
   it("projects only resolved demographics and hashes only the recognized memory input", async () => {
     const { setMemoryDemographics, upsertMemory, readMemoryDemographics } = await import("@murphai/core");
     const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources } = await import("../src/hosted-runtime/browser-vault-replica.ts");

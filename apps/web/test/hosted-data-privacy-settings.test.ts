@@ -837,6 +837,18 @@ describe("HostedDataPrivacySettings", () => {
       code: "ACCOUNT_DELETION_GAME_STATE_CHANGED",
       message: "A game changed while your account was being deleted. Retry account deletion.",
     },
+    {
+      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
+      message: "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing.",
+    },
+    {
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      message: "Billing is not configured, so your subscription could not be canceled. Contact support to delete your account.",
+    },
+    {
+      code: "UNRECOGNIZED_DELETION_FAILURE",
+      message: "Something went wrong while deleting your account. Retry account deletion, or contact support if it keeps failing.",
+    },
   ])("keeps $code guidance and confirmation in the open dialog", async ({
     code,
     message,
@@ -846,7 +858,7 @@ describe("HostedDataPrivacySettings", () => {
       "@/src/components/hosted-onboarding/client-api"
     );
     mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
-      new HostedOnboardingApiError({ code, message }),
+      new HostedOnboardingApiError({ code, message, retryable: true }),
     );
 
     const { document, window } = loadLinkedom().parseHTML(
