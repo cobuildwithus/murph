@@ -460,16 +460,23 @@ async function writeEvents(tx: Tx, gameId: string, actor: string, events: readon
   }
 }
 
+/** Every member write opens here, so its authority check runs first, ahead of game and pair locks. */
+function commandTransaction<T>(context: Pick<CommandContext, "beforeMutationTx">, work: (tx: Tx) => Promise<T>): Promise<T> {
+  return getPrisma().$transaction(async (tx) => {
+    // Match account deletion's owner-before-game lock order. The callback's
+    // runtime/owner locks remain held through the following game mutation.
+    await context.beforeMutationTx?.(tx);
+    return work(tx);
+  });
+}
+
 /** Locks the game, runs one step, and records what it changed. A step that changes nothing returns no events. */
 async function runLocked(
   gameId: string,
   context: CommandContext,
   step: (locked: LockedStep) => Promise<GameEventDraft[]>,
 ): Promise<void> {
-  await getPrisma().$transaction(async (tx) => {
-    // Match account deletion's owner-before-game lock order. The callback's
-    // runtime/owner locks remain held through the following game mutation.
-    await context.beforeMutationTx?.(tx);
+  await commandTransaction(context, async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
     const [loaded] = await loadGames(tx, [gameId]);
@@ -517,8 +524,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
   };
   // Partial updates never read then rewrite unrelated fields. RETURNING also
   // makes the response describe this write, not a later concurrent update.
-  const profile = await getPrisma().$transaction(async tx => {
-    await context.beforeMutationTx?.(tx);
+  const profile = await commandTransaction(context, async tx => {
     return firstNameEncrypted !== undefined && command.timeZone !== undefined
       ? tx.gameProfile.upsert({
         create: { ...data, firstNameEncrypted, memberId: actor, timeZone: command.timeZone },
@@ -572,8 +578,7 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   if (chatOther) await maintainPair(actor, chatOther);
   const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone);
   try {
-    const answer = await prisma.$transaction(async (tx) => {
-      await context.beforeMutationTx?.(tx);
+    const answer = await commandTransaction(context, async (tx) => {
       const now = context.now ?? await databaseNow(tx);
       if (chatOther) {
         await lockGamePair(tx, actor, chatOther);
@@ -669,8 +674,7 @@ async function createGroupGame(context: CommandContext, command: Extract<GameCom
   const termsWordsEncrypted = await seal(gameTarget(target, "terms_words"), JSON.stringify(prepared.words));
   const inviteTokenEncrypted = await seal(gameTarget(target, "invite_token"), token);
   try {
-    await prisma.$transaction(async tx => {
-      await context.beforeMutationTx?.(tx);
+    await commandTransaction(context, async tx => {
       await lockGameAudience(tx, prepared.keys.candidates);
       if (await isGameCreationReplay(tx, actor, command.gameId)) return;
       await prepared.revalidate(tx);
@@ -1013,8 +1017,7 @@ async function cancelInvite(context: CommandContext, gameId: string): Promise<st
  */
 async function watchRecap(context: CommandContext, gameId: string): Promise<string> {
   const { actor } = context;
-  await getPrisma().$transaction(async tx => {
-    await context.beforeMutationTx?.(tx);
+  await commandTransaction(context, async tx => {
     // Account deletion scrubs event actors under this lock: a receipt lands
     // before it (and is scrubbed) or finds the seat already gone.
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
@@ -1447,8 +1450,7 @@ async function setPlayerPhoto(context: CommandContext, command: Extract<GameComm
   const { actor } = context;
   const { memberId, photoKey } = command;
   if (memberId === actor) reject("INVALID_REQUEST", "Use your profile to change your own photo.");
-  await getPrisma().$transaction(async (tx) => {
-    await context.beforeMutationTx?.(tx);
+  await commandTransaction(context, async (tx) => {
     await lockGamePair(tx, actor, memberId);
     if (!await tx.game.findFirst({ select: { id: true }, where: gamesBetween(actor, memberId) })
       || await areGamePlayersBlocked(tx, actor, memberId)) {
@@ -1519,8 +1521,7 @@ async function block(context: CommandContext, command: { memberId?: string; toke
   if (command.token === undefined && !await prisma.game.findFirst({ select: { id: true }, where: gamesBetween(actor, memberId) })) {
     reject("NOT_A_PLAYER", "You can only block someone you play with.");
   }
-  await prisma.$transaction(async (tx) => {
-    await context.beforeMutationTx?.(tx);
+  await commandTransaction(context, async (tx) => {
     await lockGamePair(tx, actor, memberId);
     const existing = await tx.gameBlock.findUnique({ select: { createdAt: true },
       where: { blockerMemberId_blockedMemberId: { blockedMemberId: memberId, blockerMemberId: actor } } });
@@ -1553,8 +1554,7 @@ async function block(context: CommandContext, command: { memberId?: string; toke
 
 /** Changes no game: what a block called off stays called off. */
 async function unblock(context: CommandContext, memberId: string): Promise<null> {
-  await getPrisma().$transaction(async tx => {
-    await context.beforeMutationTx?.(tx);
+  await commandTransaction(context, async tx => {
     await tx.gameBlock.deleteMany({ where: { blockedMemberId: memberId, blockerMemberId: context.actor } });
   });
   return null;
