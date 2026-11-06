@@ -449,7 +449,9 @@ function GroupUsageFundingStudy() {
             message={HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE}
             title="More credit can’t be added right now"
             tone="attention"
-          />
+          >
+            <Button className="w-full" size="xl">Try again</Button>
+          </GroupFundingStatusView>
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Active sponsor" state="monthly-active">

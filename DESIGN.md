@@ -540,8 +540,8 @@ A canceled or failed checkout returns to the normal page with one line, such as
 `Checkout canceled. Nothing was charged.`, and the dial ready to use. Never treat
 the cancel return as proof: follow the authoritative purchase status, which can
 still confirm a payment. When an attempt may have reached payment, lock the
-amount and offer only `Check payment`, which reuses the same request and cannot
-start a second payment. Status views use one Fraunces headline, one sentence, and
+amount and the mode and offer only `Check payment`, which reuses the same request
+and cannot start a second payment. Every state keeps a way forward. Status views use one Fraunces headline, one sentence, and
 at most one primary action plus one quiet action. Move focus to the new headline
 or note when an outcome replaces the control the person just used.
 

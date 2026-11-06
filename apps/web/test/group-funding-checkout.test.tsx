@@ -367,6 +367,7 @@ test("locks an uncertain attempt to its amount and request key", async () => {
       /We couldn’t confirm your payment/u,
     );
     assert.equal(hasButton(rendered.container, "Change amount"), false);
+    assert.equal(hasButton(rendered.container, "One time"), false);
     assert.equal(
       sliderOf(rendered.container).getAttribute("aria-disabled"),
       "true",
@@ -583,6 +584,11 @@ test("explains a full group without a dead-end form", async () => {
       /More credit can’t be added right now/u,
     );
     assert.equal(rendered.container.querySelector('[role="slider"]'), null);
+
+    await clickButton(rendered, "Try again");
+
+    assert.ok(buttonByText(rendered.container, "Sponsor up to $5 a month"));
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }

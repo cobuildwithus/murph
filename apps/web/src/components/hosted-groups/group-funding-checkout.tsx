@@ -186,7 +186,19 @@ function GroupFundingCheckout({
         message={HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE}
         title="More credit can’t be added right now"
         tone="attention"
-      />
+      >
+        <Button
+          className="w-full"
+          onClick={() => {
+            controller.changeAmount();
+            refresh();
+          }}
+          size="xl"
+          type="button"
+        >
+          Try again
+        </Button>
+      </GroupFundingStatusView>
     );
   }
 
@@ -266,7 +278,11 @@ function GroupFundingSelectionScreen({
       note,
     noteRef,
     onChangeAmount: controller.changeAmount,
-    onModeChange: monthly && oneTimeOffers.length > 0 ? onModeChange : null,
+    // An unresolved attempt owns its terms, so its recovery must resend them.
+    onModeChange:
+      monthly && oneTimeOffers.length > 0 && attempt.kind === "idle"
+        ? onModeChange
+        : null,
     onSubmit: () =>
       void controller.startCheckout(failedAttempt?.offerCode ?? offerCode),
   };
