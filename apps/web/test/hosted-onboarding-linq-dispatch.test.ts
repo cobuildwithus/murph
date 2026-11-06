@@ -14035,7 +14035,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findFirst: vi.fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValue({ inviteCode: "first_contact_invite_code" }),
-        update: vi.fn(),
       },
       hostedLinqProviderEvent: {
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -14044,7 +14043,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedMember: {
         // The activation evidence query carries an OR; this member has none.
-        findUnique: vi.fn(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : fixture.member),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : fixture.member),
       },
       hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
     });
