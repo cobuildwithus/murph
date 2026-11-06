@@ -2,6 +2,7 @@ import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
 import {
   collectEventRawReferencePaths,
@@ -470,7 +471,10 @@ async function collectHostedMediaEventInventory(
   const latestEvents = new Map<string, EventRecord>();
   for (const relativePath of await listEventLedgerShardPaths(vaultRoot)) {
     assertHostedMediaReferenceLive(signal);
+    // Validate all JSON before inspecting event values, preserving malformed-row errors.
+    let count = 0;
     for (const rawRecord of await readJsonlRecords({ vaultRoot, relativePath })) {
+      if (++count % 256 === 0) await yieldToEventLoop();
       for (const rawRef of collectEventRawReferencePaths(rawRecord)) {
         const storedPath = normalizeHostedMediaVaultPath(rawRef, RAW_INBOX_PREFIX);
         if (storedPath) {
