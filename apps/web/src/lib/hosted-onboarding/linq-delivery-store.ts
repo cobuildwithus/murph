@@ -24,7 +24,6 @@ import {
 } from "./linq-observability-identifiers";
 import {
   buildHostedLinqInviteSignupEffectId,
-  type HostedLinqInviteSignupGroupJoinReplyContext,
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
@@ -49,6 +48,7 @@ import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
 import { lockHostedMemberRow } from "./shared";
+import { markHostedLinqOnboardingLinkNoticeSent, releaseHostedLinqOnboardingLinkNoticeClaim } from "./linq-daily-state";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
@@ -57,6 +57,12 @@ export const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 export const HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE =
   "instant_first_turn_v1";
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA =
+  "murph.hosted-linq-delivery-payload.instant-first-turn.v1";
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE =
+  "HOSTED_LINQ_INSTANT_FIRST_TURN_FIRST_DISPATCH_REJECTED";
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE =
+  "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED";
 
 type HostedLinqInstantFirstTurnCanaryResetRow = {
   acceptedAt: Date | null;
@@ -299,11 +305,9 @@ type HostedLinqDeliveryReceiptData = {
   service: string | null;
 };
 
-type HostedLinqReopenOnboardingLink = {
-  groupJoinReplyContext?: HostedLinqInviteSignupGroupJoinReplyContext;
+type HostedLinqSignupSuppressionIdentity = {
   memberId: string;
   occurredAt: string;
-  releaseDailySuppression?: true;
 };
 
 type HostedLinqAcceptedMilestoneStatus =
@@ -312,7 +316,7 @@ type HostedLinqAcceptedMilestoneStatus =
   | "failed"
   | null;
 
-type HostedLinqDeliveredOnboardingLink = HostedLinqReopenOnboardingLink & {
+type HostedLinqDeliveredOnboardingLink = HostedLinqSignupSuppressionIdentity & {
   linqChatId: string | null;
   service: string | null;
 };
@@ -393,8 +397,8 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 }
 
 type HostedLinqDeliveryProviderDispatchClaimInput = {
-  advancePreProviderAttempt?: boolean;
   attemptedAt?: Date;
+  expectedAttemptedAt?: Date;
   groupJoinOutreachId?: string | null;
   groupJoinReplyOccurredAt?: Date | null;
   idempotencyKey?: string | null;
@@ -411,6 +415,7 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
 };
 
 export type HostedLinqDeliveryProviderDispatchClaim = {
+  attemptedAt?: Date;
   claimed: boolean;
   failureCode?: string | null;
   id: string | null;
@@ -752,7 +757,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   });
   if (existing) {
     return claimExistingHostedLinqDeliveryProviderDispatchTx({
-      advancePreProviderAttempt: input.advancePreProviderAttempt,
+      expectedAttemptedAt: input.expectedAttemptedAt,
       attemptedAt,
       data,
       delivery: existing,
@@ -763,6 +768,10 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     });
   }
 
+  if (input.expectedAttemptedAt !== undefined) {
+    return { claimed: false, id: null };
+  }
+
   const created = await input.prisma.hostedLinqDelivery.createMany({
     data: [createData],
     skipDuplicates: true,
@@ -771,6 +780,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     return {
       claimed: true,
       id: createData.id,
+      ...(template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE ? { attemptedAt } : {}),
     };
   }
 
@@ -782,7 +792,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     throw new Error("Hosted Linq delivery claim conflict did not preserve a row.");
   }
   return claimExistingHostedLinqDeliveryProviderDispatchTx({
-    advancePreProviderAttempt: input.advancePreProviderAttempt,
+    expectedAttemptedAt: input.expectedAttemptedAt,
     attemptedAt,
     data,
     delivery: concurrent,
@@ -821,46 +831,58 @@ export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
   | "available"
   | "defer";
 
-export function isHostedLinqInstantFirstTurnFallbackTerminal(input: {
-  failedAt: Date | null;
-  payloadCiphertext: string | null;
-  payloadSchema: string | null;
-  skippedAt: Date | null;
-  status: string;
-}): boolean {
-  return input.skippedAt !== null
-    || input.status === "skipped"
-    || (
-      (input.failedAt !== null || input.status === "failed")
-      && input.payloadCiphertext === null
-      && input.payloadSchema === null
-    );
-}
-
-type HostedLinqInstantFirstTurnDeliveryDisposition =
-  | "answered"
-  | "fallback"
-  | "unresolved";
-
+/**
+ * The legal states of one first-turn row. Empty means all three payload fields
+ * are null; sealed means all three hold this exact obligation. Correlation is
+ * read first because a late positive may settle a row after any reclaim.
+ *
+ * | Row                                   | Disposition | Who may change it                         | Runtime egress   |
+ * | ------------------------------------- | ----------- | ----------------------------------------- | ---------------- |
+ * | provider-correlated                   | answered    | receipts and finalization                 | already_answered |
+ * | skipped + empty                       | fallback    | nobody                                    | available        |
+ * | failed + empty + certified rejection  | fallback    | nobody                                    | available        |
+ * | attempted + empty                     | reserved    | exact claim seals or skips; stale reclaim | defer            |
+ * | attempted, started or failed + sealed | sealed      | exact claim dispatches or fails; a failed | defer            |
+ * | (except rejected retries)             |             | or stale row reclaims                     |                  |
+ * | anything else                         | held        | positive evidence only                    | defer            |
+ *
+ * Held covers rejected retries, legacy skipped + sealed and uncertified failed +
+ * empty rows. They never resume because a later reply could follow an ordinary
+ * answer to the same input.
+ */
 function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   acceptedAt: Date | null;
   deliveredAt: Date | null;
   failedAt: Date | null;
-  failureCode?: string | null;
+  failureCode: string | null;
   lastReceiptAt: Date | null;
   messageLookupKey: string | null;
   payloadCiphertext: string | null;
+  payloadOwnerMemberId: string | null;
   payloadSchema: string | null;
   skippedAt: Date | null;
   status: string;
-}): HostedLinqInstantFirstTurnDeliveryDisposition {
-  if (isHostedLinqDeliveryProviderCorrelated(input)) {
-    return "answered";
+}): "answered" | "fallback" | "reserved" | "sealed" | "held" {
+  if (isHostedLinqDeliveryProviderCorrelated(input)) return "answered";
+  const empty = input.payloadCiphertext === null
+    && input.payloadOwnerMemberId === null && input.payloadSchema === null;
+  const sealed = input.payloadCiphertext !== null
+    && input.payloadOwnerMemberId !== null
+    && input.payloadSchema === HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA;
+  if (input.skippedAt !== null || input.status === "skipped") {
+    return empty ? "fallback" : "held";
   }
-  if (isHostedLinqInstantFirstTurnFallbackTerminal(input)) {
-    return "fallback";
+  if (input.failedAt !== null || input.status === "failed") {
+    if (input.failureCode === HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE) return "held";
+    return sealed ? "sealed"
+      : empty && input.failureCode === HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE
+        ? "fallback" : "held";
   }
-  return "unresolved";
+  if (input.status === "attempted") return empty ? "reserved" : sealed ? "sealed" : "held";
+  if (input.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS) {
+    return sealed ? "sealed" : "held";
+  }
+  return "held";
 }
 
 export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx(
@@ -879,18 +901,7 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
   }
 
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
-    select: {
-      acceptedAt: true,
-      deliveredAt: true,
-      failedAt: true,
-      failureCode: true,
-      lastReceiptAt: true,
-      messageLookupKey: true,
-      payloadCiphertext: true,
-      payloadSchema: true,
-      skippedAt: true,
-      status: true,
-    },
+    select: hostedLinqDeliveryLifecycleSelect,
     where: {
       linqChatLookupKey: { in: linqChatLookupKeys },
       sourceRef,
@@ -909,6 +920,25 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
       ? "available"
       : "defer";
 }
+
+// Rejected retries and legacy held rows hold only their exact input. Nothing can
+// resolve them here, and blocking the chat before mailbox append would lose later
+// inbound messages. Callers exclude skipped rows themselves.
+const hostedLinqInstantFirstTurnUnresolvedWhere = {
+  template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+  OR: [
+    { failedAt: null, status: "attempted" },
+    { payloadCiphertext: { not: null }, status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS },
+    {
+      payloadCiphertext: { not: null },
+      status: "failed",
+      OR: [
+        { failureCode: null },
+        { failureCode: { not: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE } },
+      ],
+    },
+  ],
+} satisfies Prisma.HostedLinqDeliveryWhereInput;
 
 export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
   linqChatId: string;
@@ -937,21 +967,7 @@ export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
           failedAt: null,
           status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
         },
-        {
-          template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
-          OR: [
-            { failedAt: null, status: "attempted" },
-            {
-              payloadCiphertext: { not: null },
-              status: {
-                in: [
-                  HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-                  "failed",
-                ],
-              },
-            },
-          ],
-        },
+        hostedLinqInstantFirstTurnUnresolvedWhere,
       ],
     },
   });
@@ -982,19 +998,7 @@ export async function hasConflictingHostedLinqInstantFirstTurnForChatTx(input: {
       messageLookupKey: null,
       skippedAt: null,
       sourceRef: { not: sourceRef },
-      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
-      OR: [
-        { failedAt: null, status: "attempted" },
-        {
-          payloadCiphertext: { not: null },
-          status: {
-            in: [
-              HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-              "failed",
-            ],
-          },
-        },
-      ],
+      ...hostedLinqInstantFirstTurnUnresolvedWhere,
     },
   });
 
@@ -1158,12 +1162,10 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   replayingRichLinkPartial?: boolean;
 }): Promise<{
   deliveryStatus: HostedLinqAcceptedMilestoneStatus;
-  reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
   restoreOnboardingLink: HostedLinqDeliveredOnboardingLink | null;
 }> {
   const none = {
     deliveryStatus: null,
-    reopenOnboardingLink: null,
     restoreOnboardingLink: null,
   };
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
@@ -1239,19 +1241,18 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
         where: { idempotencyKey },
         select: { status: true },
       });
-      return {
-        ...none,
-        deliveryStatus: readHostedLinqAcceptedMilestoneStatus(
-          current?.status ?? null,
-        ),
-      };
+      const deliveryStatus = readHostedLinqAcceptedMilestoneStatus(current?.status ?? null);
+      if (signupAttempt && (deliveryStatus === "accepted" || deliveryStatus === "delivered")) {
+        await applyHostedLinqSignupSuppressionMilestoneTx({
+          memberId: signupAttempt.memberId, occurredAt: signupAttempt.dayUtc, milestone: "sent", prisma,
+        });
+      }
+      return { ...none, deliveryStatus };
     }
 
     const delivery = await prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: {
-        groupJoinOutreachId: true,
-        groupJoinReplyOccurredAt: true,
         id: true,
         sourceRef: true,
         template: true,
@@ -1275,51 +1276,28 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       messageIds: providerMessageIds.length > 1 ? providerMessageIds : undefined,
       prisma,
     });
-    if (!replay.advanced || !replay.receipt) {
-      return {
-        ...none,
-        deliveryStatus: "accepted",
-      };
-    }
-
-    // A receipt buffered before this milestone wrote the message lookup key
-    // just resolved the delivery terminally; surface the same reopen/restore
-    // signal the live receipt-ingestion path emits so the orchestration layer
-    // projects the same complete member/day delivery truth.
+    const deliveryStatus = replay.advanced && replay.receipt
+      ? replay.receipt.deliveryStatus : "accepted";
     const deliveryIdentity = {
-      groupJoinOutreachId: delivery?.groupJoinOutreachId ?? null,
-      groupJoinReplyOccurredAt: delivery?.groupJoinReplyOccurredAt ?? null,
       idempotencyKey: input.idempotencyKey,
       sourceRef: delivery?.sourceRef ?? null,
       template: delivery?.template ?? null,
     };
-    const onboardingLink = replay.receipt.deliveryStatus === "failed"
-      ? await resolveHostedLinqFailedDeliveryReopenTx({
-          ...deliveryIdentity,
-          prisma,
-        })
-      : resolveHostedLinqReopenOnboardingLink(deliveryIdentity);
-    if (!onboardingLink) {
-      return {
-        ...none,
-        deliveryStatus: replay.receipt.deliveryStatus,
-      };
+    if (deliveryStatus === "failed") {
+      await releaseHostedLinqFailedDeliverySignupSuppressionTx({ ...deliveryIdentity, prisma });
+    } else if (signupAttempt) {
+      await applyHostedLinqSignupSuppressionMilestoneTx({
+        memberId: signupAttempt.memberId, occurredAt: signupAttempt.dayUtc, milestone: "sent", prisma,
+      });
     }
-    return replay.receipt.deliveryStatus === "failed"
-      ? {
-          deliveryStatus: "failed",
-          reopenOnboardingLink: onboardingLink,
-          restoreOnboardingLink: null,
-        }
-      : {
-          deliveryStatus: "delivered",
-          reopenOnboardingLink: null,
-          restoreOnboardingLink: {
-            ...onboardingLink,
-            linqChatId: input.linqChatId ?? null,
-            service: replay.receipt.service,
-          },
-        };
+    const onboardingLink = deliveryStatus === "delivered"
+      ? readHostedLinqSignupSuppressionIdentity(deliveryIdentity) : null;
+    return {
+      deliveryStatus,
+      restoreOnboardingLink: onboardingLink
+        ? { ...onboardingLink, linqChatId: input.linqChatId ?? null, service: replay.receipt?.service ?? null }
+        : null,
+    };
   });
 }
 
@@ -1879,6 +1857,69 @@ export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
   return delivery.count === 1;
 }
 
+export async function abandonHostedLinqInstantFirstTurnDeliveryTx(input: {
+  expectedAttemptedAt: Date | null;
+  idempotencyKey: string;
+  now?: Date;
+  prisma: HostedLinqDeliveryClient;
+  reason: string;
+}): Promise<boolean> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
+  if (!idempotencyKey) return false;
+  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
+    where: { idempotencyKey }, select: hostedLinqDeliveryLifecycleSelect,
+  });
+  if (!delivery) return true;
+  if (delivery.template !== HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE) return false;
+  const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(delivery);
+  if (disposition === "fallback") return true;
+  const skippedAt = input.now ?? new Date();
+  if (disposition !== "reserved"
+    || (input.expectedAttemptedAt?.getTime() !== delivery.attemptedAt.getTime()
+      && delivery.attemptedAt.getTime() > skippedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS)) return false;
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      id: delivery.id, attemptedAt: delivery.attemptedAt, status: "attempted",
+      failedAt: null, skippedAt: null, acceptedAt: null, deliveredAt: null,
+      lastReceiptAt: null, messageLookupKey: null,
+      payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
+    },
+    data: {
+      status: "skipped", skippedAt, skipReason: input.reason.slice(0, 160), attemptedAt: skippedAt,
+      failedAt: null, retryAfterAt: null, failureCode: "HOSTED_LINQ_DELIVERY_SKIPPED",
+      failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
+        "Linq/iMessage send skipped before provider dispatch.",
+      ),
+    },
+  });
+  return updated.count === 1;
+}
+
+export async function recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx(input: {
+  expectedAttemptedAt: Date;
+  idempotencyKey: string;
+  failedAt?: Date;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
+  if (!idempotencyKey) return false;
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      idempotencyKey, template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      attemptedAt: input.expectedAttemptedAt, status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+      acceptedAt: null, deliveredAt: null, failedAt: null, lastReceiptAt: null,
+      messageLookupKey: null, skippedAt: null, payloadCiphertext: { not: null },
+    },
+    data: {
+      status: "failed", failedAt: input.failedAt ?? new Date(),
+      failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE,
+      failureReason: null, retryAfterAt: null,
+      payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
+    },
+  });
+  return updated.count === 1;
+}
+
 export async function markHostedLinqDeliverySkippedTx(input: {
   failureCode?: string | null;
   failureReason?: string | null;
@@ -1990,7 +2031,6 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   advanced: boolean;
   deliveryId: string | null;
   phoneNumberLookupKey: string | null;
-  reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
   restoreOnboardingLink: HostedLinqDeliveredOnboardingLink | null;
 }> {
   if (!input.event.messageLookupKey || !input.event.deliveryStatus) {
@@ -1998,7 +2038,6 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       advanced: true,
       deliveryId: null,
       phoneNumberLookupKey: null,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     };
   }
@@ -2016,8 +2055,6 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     },
     select: {
       failureCode: true,
-      groupJoinOutreachId: true,
-      groupJoinReplyOccurredAt: true,
       id: true,
       idempotencyKey: true,
       phoneNumberLookupKey: true,
@@ -2032,7 +2069,6 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       advanced: true,
       deliveryId: null,
       phoneNumberLookupKey: null,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     };
   }
@@ -2045,11 +2081,10 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       advanced: false,
       deliveryId: delivery.id,
       phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     };
   }
-  const deliveryOnboardingLink = resolveHostedLinqReopenOnboardingLink(
+  const deliveryOnboardingLink = readHostedLinqSignupSuppressionIdentity(
     delivery,
   );
   if (deliveryOnboardingLink) {
@@ -2086,28 +2121,20 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     data: buildReceiptUpdate(input.event),
   });
   const advanced = updated.count === 1;
-  const onboardingLink = !advanced
-    || (input.event.deliveryStatus === "delivered" && previousStatus === "delivered")
-    ? null
-    : input.event.deliveryStatus === "failed"
-      ? await resolveHostedLinqFailedDeliveryReopenTx({
-          groupJoinOutreachId: delivery.groupJoinOutreachId,
-          groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
-          idempotencyKey: delivery.idempotencyKey,
-          prisma: input.prisma,
-          sourceRef: delivery.sourceRef,
-          template: delivery.template,
-        })
-      : deliveryOnboardingLink;
+  const onboardingLink = advanced
+    && !(input.event.deliveryStatus === "delivered" && previousStatus === "delivered")
+    ? deliveryOnboardingLink : null;
+  if (onboardingLink) {
+    if (input.event.deliveryStatus === "failed") {
+      await releaseHostedLinqFailedDeliverySignupSuppressionTx({ ...delivery, prisma: input.prisma });
+    } else if (input.event.deliveryStatus === "delivered") {
+      await applyHostedLinqSignupSuppressionMilestoneTx({ ...onboardingLink, milestone: "sent", prisma: input.prisma });
+    }
+  }
   return {
     advanced,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-    reopenOnboardingLink: input.event.deliveryStatus === "failed"
-      ? onboardingLink
-      : null,
-    // The symmetric signal: a delivered receipt that wins ordering after a
-    // reopen re-marks the member/day because that delivery remains live truth.
     restoreOnboardingLink:
       input.event.deliveryStatus === "delivered"
       && onboardingLink
@@ -2127,7 +2154,6 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
   advanced: boolean;
   deliveryId: string;
   phoneNumberLookupKey: string | null;
-  reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
   restoreOnboardingLink: HostedLinqDeliveredOnboardingLink | null;
 } | null> {
   const messageClient = input.prisma.hostedLinqDeliveryMessage;
@@ -2153,8 +2179,6 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
     select: {
       delivery: {
         select: {
-          groupJoinOutreachId: true,
-          groupJoinReplyOccurredAt: true,
           id: true,
           idempotencyKey: true,
           phoneNumberLookupKey: true,
@@ -2181,11 +2205,10 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
       advanced: false,
       deliveryId: delivery.id,
       phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     };
   }
-  const deliveryOnboardingLink = resolveHostedLinqReopenOnboardingLink(delivery);
+  const deliveryOnboardingLink = readHostedLinqSignupSuppressionIdentity(delivery);
   if (deliveryOnboardingLink) {
     await lockHostedMemberRow(input.prisma, deliveryOnboardingLink.memberId);
   }
@@ -2217,7 +2240,6 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
       advanced: false,
       deliveryId: delivery.id,
       phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     };
   }
@@ -2226,23 +2248,18 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
     prisma: input.prisma,
   });
   const terminalOnboardingLink = updated.count === 1 && aggregate.terminalStatusChanged
-    ? aggregate.status === "failed"
-      ? await resolveHostedLinqFailedDeliveryReopenTx({
-          groupJoinOutreachId: delivery.groupJoinOutreachId,
-          groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
-          idempotencyKey: delivery.idempotencyKey,
-          prisma: input.prisma,
-          sourceRef: delivery.sourceRef,
-          template: delivery.template,
-        })
-      : resolveHostedLinqReopenOnboardingLink(delivery)
-    : null;
+    ? deliveryOnboardingLink : null;
+  if (terminalOnboardingLink) {
+    if (aggregate.status === "failed") {
+      await releaseHostedLinqFailedDeliverySignupSuppressionTx({ ...delivery, prisma: input.prisma });
+    } else if (aggregate.status === "delivered") {
+      await applyHostedLinqSignupSuppressionMilestoneTx({ ...terminalOnboardingLink, milestone: "sent", prisma: input.prisma });
+    }
+  }
   return {
     advanced: updated.count === 1,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-    reopenOnboardingLink:
-      aggregate.status === "failed" ? terminalOnboardingLink : null,
     restoreOnboardingLink:
       aggregate.status === "delivered" && terminalOnboardingLink
         ? {
@@ -3066,6 +3083,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   messageLookupKey: true,
   phoneNumberLookupKey: true,
   payloadCiphertext: true,
+  payloadOwnerMemberId: true,
   payloadSchema: true,
   retryAfterAt: true,
   skippedAt: true,
@@ -3203,6 +3221,11 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(
     return { claimed: false, id: input.delivery.id, outcome: "incompatible" };
   }
 
+  if (input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE) {
+    return claimHostedLinqInstantFirstTurnDeliveryTx(input);
+  }
+
   // Accepted game lifecycle work reserves this exact delivery identity before
   // generation. Its source-current and audience guards run before dispatch;
   // this CAS advances the same untouched reservation, never a second send.
@@ -3229,8 +3252,36 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(
   return claimAttemptedHostedLinqDeliveryProviderDispatchTx(input);
 }
 
+async function claimHostedLinqInstantFirstTurnDeliveryTx(
+  input: Parameters<typeof claimAttemptedHostedLinqDeliveryProviderDispatchTx>[0],
+): Promise<HostedLinqDeliveryProviderDispatchClaim> {
+  const { delivery } = input;
+  const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(delivery);
+  if (disposition === "answered") return { claimed: false, id: delivery.id, outcome: "completed" };
+  if (disposition === "fallback") return { claimed: false, id: delivery.id, outcome: "terminal" };
+  if (disposition === "held") return { claimed: false, id: delivery.id };
+  if (input.data.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS) {
+    if (input.expectedAttemptedAt?.getTime() !== delivery.attemptedAt.getTime()
+      || delivery.status !== "attempted") return { claimed: false, id: delivery.id };
+  } else if (delivery.status !== "failed"
+    && delivery.attemptedAt.getTime() > input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS) {
+    return { claimed: false, id: delivery.id };
+  }
+  const attemptedAt = new Date(Math.max(input.attemptedAt.getTime(), delivery.attemptedAt.getTime() + 1));
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      id: delivery.id, attemptedAt: delivery.attemptedAt, status: delivery.status,
+      acceptedAt: null, deliveredAt: null, lastReceiptAt: null, messageLookupKey: null, skippedAt: null,
+    },
+    data: { ...input.data, attemptedAt },
+  });
+  return updated.count === 1
+    ? { attemptedAt, claimed: true, id: delivery.id }
+    : { claimed: false, id: delivery.id };
+}
+
 async function claimAttemptedHostedLinqDeliveryProviderDispatchTx(input: {
-  advancePreProviderAttempt?: boolean;
+  expectedAttemptedAt?: Date;
   attemptedAt: Date;
   data: HostedLinqDeliveryProviderDispatchData;
   delivery: {
@@ -3247,6 +3298,7 @@ async function claimAttemptedHostedLinqDeliveryProviderDispatchTx(input: {
     messageLookupKey: string | null;
     phoneNumberLookupKey: string | null;
     payloadCiphertext: string | null;
+    payloadOwnerMemberId: string | null;
     payloadSchema: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
@@ -3336,55 +3388,6 @@ async function claimAttemptedHostedLinqDeliveryProviderDispatchTx(input: {
     };
   }
 
-
-  if (
-    input.advancePreProviderAttempt === true
-    && input.data.status
-      === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
-    && input.delivery.status === "attempted"
-    && isHostedLinqDeliveryPreProvider(input.delivery)
-  ) {
-    const updated = await input.prisma.hostedLinqDelivery.updateMany({
-      where: {
-        acceptedAt: null,
-        attemptedAt: input.delivery.attemptedAt,
-        deliveredAt: null,
-        failedAt: null,
-        id: input.delivery.id,
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        skippedAt: null,
-        source: input.delivery.source,
-        sourceRef: input.delivery.sourceRef,
-        status: "attempted",
-        targetKind: input.delivery.targetKind,
-        template: input.delivery.template,
-        updatedAt: input.delivery.updatedAt,
-      },
-      data: input.data,
-    });
-    return {
-      claimed: updated.count === 1,
-      id: input.delivery.id,
-      ...(updated.count === 0 ? { retryAt: input.attemptedAt } : {}),
-    };
-  }
-
-  if (
-    input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
-    && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
-  ) {
-    const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(
-      input.delivery,
-    );
-    if (disposition !== "unresolved") {
-      return {
-        claimed: false,
-        id: input.delivery.id,
-        outcome: disposition === "answered" ? "completed" : "terminal",
-      };
-    }
-  }
 
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
@@ -3510,15 +3513,6 @@ async function claimAttemptedHostedLinqDeliveryProviderDispatchTx(input: {
               source: HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE,
               status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
               template: "ai_usage_quota",
-            }]
-          : []),
-        ...(input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
-          ? [{
-              attemptedAt: {
-                lte: staleAttemptBefore,
-              },
-              status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-              template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
             }]
           : []),
       ]
@@ -3657,85 +3651,59 @@ async function runHostedLinqDeliveryStoreTransaction<T>(
   return operation(prisma);
 }
 
-function resolveHostedLinqReopenOnboardingLink(input: {
-  groupJoinOutreachId: string | null;
-  groupJoinReplyOccurredAt: Date | null;
+export async function applyHostedLinqSignupSuppressionMilestoneTx(input: {
+  memberId: string;
+  milestone: "sent" | "send_failed";
+  occurredAt: Date | string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<void> {
+  if (input.milestone === "sent") {
+    await markHostedLinqOnboardingLinkNoticeSent({ memberId: input.memberId, occurredAt: input.occurredAt, prisma: input.prisma });
+  } else {
+    await releaseHostedLinqOnboardingLinkNoticeClaim({ memberId: input.memberId, occurredAt: input.occurredAt, prisma: input.prisma });
+  }
+}
+
+function readHostedLinqSignupSuppressionIdentity(input: {
   idempotencyKey: string | null;
   sourceRef: string | null;
   template: string | null;
-}): HostedLinqReopenOnboardingLink | null {
-  if (!isHostedLinqInviteSignupDeliveryTemplate(input.template)) {
-    return null;
-  }
-
+}): HostedLinqSignupSuppressionIdentity | null {
+  if (!isHostedLinqInviteSignupDeliveryTemplate(input.template)) return null;
   const parsed = parseHostedLinqInviteSignupEffectId(input.sourceRef)
     ?? parseHostedLinqInviteSignupEffectId(input.idempotencyKey);
-  if (!parsed) {
-    return null;
-  }
-  const groupJoinReplyContext =
-    input.groupJoinOutreachId && input.groupJoinReplyOccurredAt
-      ? {
-          outreachId: input.groupJoinOutreachId,
-          repliedAt: input.groupJoinReplyOccurredAt.toISOString(),
-        }
-      : null;
-  return {
-    ...(groupJoinReplyContext ? { groupJoinReplyContext } : {}),
-    memberId: parsed.memberId,
-    occurredAt: parsed.dayUtc,
-  };
+  return parsed ? { memberId: parsed.memberId, occurredAt: parsed.dayUtc } : null;
 }
 
-async function resolveHostedLinqFailedDeliveryReopenTx(input: {
-  groupJoinOutreachId: string | null;
-  groupJoinReplyOccurredAt: Date | null;
+async function releaseHostedLinqFailedDeliverySignupSuppressionTx(input: {
   idempotencyKey: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef: string | null;
   template: string | null;
-}): Promise<HostedLinqReopenOnboardingLink | null> {
-  const link = resolveHostedLinqReopenOnboardingLink(input);
-  if (!link) {
-    return null;
-  }
+}): Promise<void> {
+  if (!isHostedLinqInviteSignupDeliveryTemplate(input.template)) return;
   const failedAttempt = parseHostedLinqInviteSignupEffectId(input.sourceRef)
     ?? parseHostedLinqInviteSignupEffectId(input.idempotencyKey);
-  if (!failedAttempt) {
-    return link;
-  }
-
-  // The daily marker is one projection of all generic and group-aware signup
-  // deliveries for the member/day. Recompute only the two bounded facts the
-  // caller needs after any failed identity. The caller holds the member row
-  // lock, so the result is independent of terminal receipt order, including
-  // concurrent failures.
-  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx({
-    dayUtc: failedAttempt.dayUtc,
-    memberId: failedAttempt.memberId,
+  if (!failedAttempt) return;
+  // The caller holds the member lock: only the last live signup identity can
+  // release the shared member/day projection, including concurrent failures.
+  const live = await hasHostedLinqInviteSignupLiveDeliveryTx({
+    dayUtc: failedAttempt.dayUtc, memberId: failedAttempt.memberId,
     prisma: input.prisma,
-    sourceEventDigest: failedAttempt.sourceEventDigest,
   });
-  if (liveAttemptFacts.sameIdentityStillLive) {
-    return null;
+  if (!live) {
+    await applyHostedLinqSignupSuppressionMilestoneTx({
+      memberId: failedAttempt.memberId, occurredAt: failedAttempt.dayUtc,
+      milestone: "send_failed", prisma: input.prisma,
+    });
   }
-  if (liveAttemptFacts.anyIdentityLive) {
-    return link.groupJoinReplyContext ? link : null;
-  }
-  return link.groupJoinReplyContext
-    ? { ...link, releaseDailySuppression: true }
-    : link;
 }
 
-export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
+export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
   dayUtc: string;
   memberId: string;
   prisma: HostedLinqDeliveryClient;
-  sourceEventDigest?: string | null;
-}): Promise<{
-  anyIdentityLive: boolean;
-  sameIdentityStillLive: boolean;
-}> {
+}): Promise<boolean> {
   const sourceRefPrefix = buildHostedLinqInviteSignupEffectId({
     memberId: input.memberId,
     occurredAt: input.dayUtc,
@@ -3743,17 +3711,6 @@ export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
   const sourceRefLikePattern = `${escapeHostedLinqSourceRefLikePrefix(
     sourceRefPrefix,
   )}%`;
-  const exactIdentitySourceRefs = input.sourceEventDigest === undefined
-    ? null
-    : Array.from(
-      { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY },
-      (_, index) => buildHostedLinqInviteSignupEffectId({
-        attempt: index + 1,
-        memberId: input.memberId,
-        occurredAt: input.dayUtc,
-        sourceEventDigest: input.sourceEventDigest,
-      }),
-    );
   const liveInviteSignupDeliveryPredicateSql = Prisma.sql`
     "delivery"."source_ref" IS NOT NULL
       AND "delivery"."template" IN (
@@ -3767,25 +3724,10 @@ export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
         'delivered'
       )
   `;
-  const sameIdentityStillLiveSql = exactIdentitySourceRefs
-    ? Prisma.sql`
-        EXISTS (
-          SELECT 1
-          FROM "hosted_linq_delivery" AS "delivery"
-          WHERE ${liveInviteSignupDeliveryPredicateSql}
-            AND "delivery"."source_ref" IN (
-              ${Prisma.join(exactIdentitySourceRefs)}
-            )
-          LIMIT 1
-        )
-      `
-    : Prisma.sql`FALSE`;
   const rows = await input.prisma.$queryRaw<Array<{
     anyIdentityLive: boolean;
-    sameIdentityStillLive: boolean;
   }>>(Prisma.sql`
     SELECT
-      ${sameIdentityStillLiveSql} AS "sameIdentityStillLive",
       EXISTS (
         SELECT 1
         FROM "hosted_linq_delivery" AS "delivery"
@@ -3798,23 +3740,86 @@ export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
         LIMIT 1
       ) AS "anyIdentityLive"
   `);
-  return {
-    anyIdentityLive: rows[0]?.anyIdentityLive === true,
-    sameIdentityStillLive: rows[0]?.sameIdentityStillLive === true,
-  };
+  return rows[0]?.anyIdentityLive === true;
 }
 
 function escapeHostedLinqSourceRefLikePrefix(value: string): string {
   return value.replace(/[!%_]/gu, (character) => `!${character}`);
 }
 
-export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
+type HostedLinqSignupProjectionIdentity = {
   dayUtc: string;
   memberId: string;
+};
+
+function readHostedLinqSignupProjectionIdentities(
+  deliveries: readonly { sourceRef: string | null }[],
+): HostedLinqSignupProjectionIdentity[] {
+  const identities = new Map<string, HostedLinqSignupProjectionIdentity>();
+  for (const delivery of deliveries) {
+    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
+    if (!attempt) {
+      continue;
+    }
+    const identity = {
+      dayUtc: attempt.dayUtc,
+      memberId: attempt.memberId,
+    };
+    identities.set(`${identity.memberId}\0${identity.dayUtc}`, identity);
+  }
+  return [...identities.values()];
+}
+
+export async function releaseHostedLinqSignupSuppressionAfterDeletionTx(input: {
+  deliveries: readonly { sourceRef: string | null }[];
   prisma: HostedLinqDeliveryClient;
-}): Promise<boolean> {
-  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
-  return liveAttemptFacts.anyIdentityLive;
+}): Promise<void> {
+  const { prisma } = input;
+  const projectionIdentities = readHostedLinqSignupProjectionIdentities(input.deliveries);
+  if (projectionIdentities.length === 0) {
+    return;
+  }
+  const liveDeliveries = await prisma.hostedLinqDelivery.findMany({
+    select: { sourceRef: true },
+    where: {
+      OR: projectionIdentities.map((identity) => ({
+        sourceRef: {
+          startsWith: buildHostedLinqInviteSignupEffectId({
+            memberId: identity.memberId,
+            occurredAt: identity.dayUtc,
+          }),
+        },
+      })),
+      status: {
+        in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
+      },
+      template: {
+        in: ["invite_signup", "invite_signup_fallback"],
+      },
+    },
+  });
+  const liveIdentityKeys = new Set(
+    readHostedLinqSignupProjectionIdentities(liveDeliveries).map(
+      (identity) => `${identity.memberId}\0${identity.dayUtc}`,
+    ),
+  );
+  const identityWhere = projectionIdentities
+    .filter((identity) => !liveIdentityKeys.has(`${identity.memberId}\0${identity.dayUtc}`))
+    .map((identity) => ({
+      dayUtc: new Date(identity.dayUtc),
+      memberId: identity.memberId,
+    }));
+  if (identityWhere.length === 0) {
+    return;
+  }
+  await prisma.hostedLinqDailyState.updateMany({
+    // Preserve the independent daily reminder allowance when reopening signup.
+    data: { onboardingLinkSentAt: null },
+    where: {
+      ...(identityWhere.length === 1 ? identityWhere[0] : { OR: identityWhere }),
+      onboardingLinkSentAt: { not: null },
+    },
+  });
 }
 
 function readHostedLinqAcceptedMilestoneStatus(

@@ -19,7 +19,6 @@ import {
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import { HostedDomainRootPreparationMismatchError } from "../hosted-crypto/domain-root-store";
 import { getPrisma } from "../prisma";
-import { isHostedMemberActivationPending } from "./activation-progress";
 import {
   getHostedDefaultBillingPlanCode,
   listHostedBillingPlanPresentations,
@@ -127,18 +126,10 @@ export async function getHostedInviteStatus(input: {
   const memberMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const sessionMatchesInvite = memberMatchesInvite;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-  const activationPending = sessionMatchesInvite
-    ? await isHostedMemberActivationPending({
-        billingStatus: invite.member.billingStatus,
-        memberId: invite.memberId,
-        prisma,
-      })
-    : false;
   const inviteRouting = invite.member.routing
     ? await projectHostedMemberRoutingState(invite.member.routing, prisma)
     : null;
   const stage = deriveHostedOnboardingStage({
-    activationPending,
     billingStatus: invite.member.billingStatus,
     expiresAt: invite.expiresAt,
     now,

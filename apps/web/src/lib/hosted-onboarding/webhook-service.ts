@@ -458,6 +458,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
+    let instantFirstTurnReservation: Date | null = null;
     let instantFirstTurnOwnsFinalPlan = false;
     let instantOpeningContinuation = false;
     let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
@@ -467,6 +468,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
       const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
       await abandonHostedLinqInstantFirstTurn({
+        expectedAttemptedAt: instantFirstTurnReservation,
         eventId: event.event_id,
         linqChatId: context.summary.chatId,
         prisma,
@@ -523,6 +525,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
+        if (claim.kind === "generate") instantFirstTurnReservation = claim.attemptedAt;
         instantOpeningContinuation = claim.opening !== undefined;
         const generationTiming = startHostedOnboardingTiming(
           "hosted-onboarding.webhook.linq.first-turn-generation",
@@ -875,8 +878,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const activeWakeHandoff = plan.wakeHandoffs?.[0];
       if (
         activeWakeHandoff
-        && firstContactAdmissionDecision?.kind === "allow"
-        && firstContactAdmissionDecision.source === "model"
+        && isModelAllowedFirstContactAdmission(firstContactAdmissionDecision)
       ) {
         // Exact-event webhook recovery can arrive after enrollment already
         // committed, so it no longer sees the enrollment plan above. Reclaim
@@ -894,9 +896,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ? await planHostedLinqPermanentHomeRouteRecovery({ event, prisma })
           : null;
       if (!recoveredPlan) {
-        // A pre-provider failure has no persisted reply to resume. The skip
-        // writer ignores ambiguous and completed deliveries.
-        await abandonInstantFirstTurn("planner-failed-before-provider-dispatch");
+        // Only this request's winning generation reservation can be abandoned.
+        if (instantFirstTurnReservation) {
+          await abandonInstantFirstTurn("planner-failed-before-provider-dispatch");
+        }
         finishHostedOnboardingTiming(planTiming, "failed", {
           directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
           errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -915,8 +918,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     );
     if (!instantFirstTurnOwnsFinalPlan) {
       // Exact replay may recover a durable claim without recreating the
-      // request-local generation promise. Settle the existing event row before
-      // another path becomes visible; absence remains a no-op.
+      // request-local generation promise. Only a stale empty reservation can
+      // settle without its version; unresolved obligations keep retrying.
       await abandonInstantFirstTurn("planner-selected-non-instant-path");
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {

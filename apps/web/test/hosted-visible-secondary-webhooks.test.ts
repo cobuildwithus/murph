@@ -1,4 +1,4 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberEmailAuthorizationLookup } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -351,7 +351,7 @@ describe("visible secondary webhook outcomes", () => {
     }));
   });
 
-  it("keeps a failed Telegram Stripe-pending reply retryable", async () => {
+  it("terminalizes an ambiguous Telegram Stripe-pending reply", async () => {
     const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
       message: {
         chat: { id: 42, type: "private" },
@@ -371,6 +371,7 @@ describe("visible secondary webhook outcomes", () => {
     }));
 
     await expect(withHostedVisibleSecondaryTelegramOutcomes(handler, {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -378,7 +379,7 @@ describe("visible secondary webhook outcomes", () => {
     })({
       rawBody: JSON.stringify(update),
       secretToken: "secret",
-    })).rejects.toBe(sendError);
+    })).resolves.toMatchObject({ ignored: false, reason: "visible-secondary-reply:stripe-effect-pending" });
     expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Billing is already changing. Try again shortly.",
@@ -498,6 +499,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "unlinked-telegram",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -558,6 +560,7 @@ describe("visible secondary webhook outcomes", () => {
     const response = await withHostedVisibleSecondaryTelegramOutcomes(
       handler,
       {
+        getPrisma: createTelegramDeliveryPrisma,
         parseHostedTelegramWebhookUpdate: vi.fn(() => update),
         requireHostedOnboardingPublicBaseUrl,
         sendHostedTelegramTextMessage,
@@ -611,6 +614,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "family-invite-draft-recovery-required",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -669,6 +673,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "family-invite-draft-recovery-required",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -709,6 +714,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "family-invite-draft-recovery-required",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -755,6 +761,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "usage-referral-evidence-only",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: createTelegramDeliveryPrisma,
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
       sendHostedTelegramTextMessage,
@@ -903,4 +910,14 @@ function buildOperationalLinqEvent(input: {
     event_type: "message.received",
     webhook_version: "2026-02-03",
   });
+}
+
+function createTelegramDeliveryPrisma(): PrismaClient {
+  const tx = { hostedLinqDelivery: {
+    findUnique: vi.fn(async () => null), createMany: vi.fn(async () => ({ count: 1 })),
+    updateMany: vi.fn(async () => ({ count: 1 })),
+  } };
+  // Only delivery persistence is needed; incoming targets have no member authority.
+  // @ts-expect-error -- deliberately narrow Prisma fixture for the delivery boundary.
+  return { ...tx, $transaction: async (run: (transaction: typeof tx) => unknown) => run(tx) };
 }

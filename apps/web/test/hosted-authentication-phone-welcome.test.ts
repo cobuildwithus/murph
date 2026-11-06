@@ -11,7 +11,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/channel-welcome", () => ({ ensureHostedMemberChannelWelcome: mocks.emailWelcome }));
 vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({ ensureHostedMemberPhoneWelcome: mocks.welcome }));
-vi.mock("@/src/lib/hosted-onboarding/activation-progress", () => ({ isHostedMemberActivationPending: vi.fn(async () => false) }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   issueHostedInvite: mocks.invite,
   buildHostedInviteUrl: () => "https://www.withmurph.ai/join/synthetic",

@@ -338,8 +338,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   Fresh Telegram and email first sends stay outside this rule.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
-  proof that the effect did not begin. Acknowledge, clean up, or advance
-  progress only after terminal or durable pending evidence. Accepted delivery
+  proof that the effect did not begin. A definite provider rejection proves
+  only the attempt that received it: only the winning first dispatch may
+  release an obligation, atomically and naming its exact attempt. A rejected
+  retry keeps earlier ambiguity. Acknowledge, clean up, or advance progress
+  only after terminal or durable pending evidence. Accepted delivery
   needing confirmation settles through its existing delivery retry deadline;
   optional accounting may update its own marker but never moves that deadline.
   A retry under a provider idempotency key sends the bytes accepted for that

@@ -18,7 +18,7 @@ import {
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { buildHostedLinqInviteSignupEffectId } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
-import { completeHostedLinqInstantFirstTurn } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
+import { claimHostedLinqInstantFirstTurn, completeHostedLinqInstantFirstTurn } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
 import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { readHostedMailboxWakeByItemId } from "@/src/lib/hosted-mailbox/store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
@@ -307,9 +307,16 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
         },
       };
       const message = "Hey! What would you like help with?";
+      const reservation = await claimHostedLinqInstantFirstTurn({
+        linqChatId: f.chatId, prisma: f.prisma, request: {
+          eventId: input.wakeHandoff.eventId, participantContactKind: "phone", partTypes: ["text"],
+          service: "imessage", text: "Hello", textWasTruncated: false,
+        },
+      });
+      if (reservation.kind !== "generate") throw new Error("Synthetic first turn must reserve generation.");
       const completion = completeHostedLinqInstantFirstTurn({
         ...input,
-        generation: { kind: "reply", message, usage: {
+        generation: { attemptedAt: reservation.attemptedAt, kind: "reply", message, usage: {
           requestedModel: "gpt-5.6-luna",
           // Same narrow accounting fixture as the first-turn unit tests.
           response: { id: "resp_first_turn", model: "gpt-5.6-luna", service_tier: "default", usage: {
@@ -375,7 +382,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
           replyToMessageId: input.inboundMessageId, parts: [{ type: "text", value: message }],
         } },
       });
-      await expect(completeHostedLinqInstantFirstTurn({ ...input, generation: { kind: "resume" } })).resolves.toEqual(result);
+      await expect(completeHostedLinqInstantFirstTurn({ ...input, generation: { kind: "resume", attemptedAt: parent.attemptedAt } })).resolves.toEqual(result);
       if (event) expect(await f.ingest(event)).toMatchObject({ duplicate: true });
       expect(await readParent()).toEqual(parent);
       expect(await f.prisma.hostedMailboxItem.findMany({ where: { userId: f.memberId } })).toEqual(items);
