@@ -1331,6 +1331,41 @@ test("sign-in on a device connect link returns to the same URL, fragment include
   await rendered.cleanup();
 });
 
+test("sign-in on a records link returns to the same URL with extra parameters", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  mocks.pathname = "/records/connect";
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false }),
+    {
+      location: {
+        hash: "#portal",
+        href: "https://join.example.test/records/connect?launch=clinical-records&utm_source=chat#portal",
+        origin: "https://join.example.test",
+        pathname: "/records/connect",
+        search: "?launch=clinical-records&utm_source=chat",
+      },
+      requireButton: false,
+    },
+  );
+
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
 test("AuthProvider keeps the default home redirect for ordinary sign-in completion", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

@@ -6,6 +6,7 @@ import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
 import { DevelopmentPersonaSwitcher } from "@/src/components/dashboard/development-persona-switcher";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
+import { LinkPageTakeoverHold } from "@/src/components/link-page/link-page-takeover";
 import { LinkPageVeil } from "@/src/components/link-page/link-page-veil";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import {
@@ -66,7 +67,9 @@ export default async function DashboardLayout({
     >
       <LinkPageVeil />
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
-        {children}
+        <LinkPageTakeoverHold held={Boolean(consentStatus && !consentStatus.launchGranted)}>
+          {children}
+        </LinkPageTakeoverHold>
         {process.env.NODE_ENV === "development" ? (
           <DevelopmentPersonaSwitcher activePersona={developmentPersona} />
         ) : null}

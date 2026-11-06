@@ -1,6 +1,12 @@
 "use client";
 
-import { useLayoutEffect, type ComponentProps, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
 import {
   LinkPageNightGround,
@@ -12,6 +18,19 @@ import { Dialog, DialogContent } from "@/src/components/ui/dialog";
 function LinkPageVeilRelease() {
   useLayoutEffect(releaseLinkPageVeil, []);
   return null;
+}
+
+const LinkPageTakeoverHeld = createContext(false);
+
+/** Holds every link page back while something that must come first is showing. */
+export function LinkPageTakeoverHold({
+  children,
+  held,
+}: {
+  children: ReactNode;
+  held: boolean;
+}) {
+  return <LinkPageTakeoverHeld.Provider value={held}>{children}</LinkPageTakeoverHeld.Provider>;
 }
 
 /**
@@ -31,6 +50,12 @@ export function LinkPageTakeover({
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
 }) {
+  // Two open modals hide each other from screen readers, so consent goes alone.
+  // Accepting reloads the page, which brings this back.
+  if (useContext(LinkPageTakeoverHeld)) {
+    return <LinkPageVeilRelease />;
+  }
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent

@@ -91,3 +91,17 @@ test.each(["outlook", "junction", "", null])(
     expect(resolveConnectLogoSrc(id)).toBeNull();
   },
 );
+
+test("a link page steps aside while consent is showing", async () => {
+  const { LinkPageTakeover, LinkPageTakeoverHold } = await import(
+    "@/src/components/link-page/link-page-takeover"
+  );
+
+  const markup = renderToStaticMarkup(
+    <LinkPageTakeoverHold held>
+      <LinkPageTakeover label="Connect Oura">Link page</LinkPageTakeover>
+    </LinkPageTakeoverHold>,
+  );
+
+  expect(markup).toBe("");
+});
