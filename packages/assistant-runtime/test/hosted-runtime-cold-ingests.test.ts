@@ -24,6 +24,114 @@ import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifact
 
 const closedPath = "ledger/integration-ingests/2020/2020-01.jsonl.br";
 
+test.each([
+  ["2030-12", "2031-01"],
+  ["2031-02", "2031-03"],
+  ["2032-02", "2032-03"],
+])("closed %s stays inline for ten days into %s, including reads and export", async (month, nextMonth) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(`${nextMonth}-06T00:00:00.000Z`));
+  const root = await mkdtemp(path.join(tmpdir(), "inline-closed-ingest-"));
+  const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "export");
+  const archivePath = `ledger/integration-ingests/${month.slice(0, 4)}/${month}.jsonl.br`;
+  const mediaStore: HostedRuntimeMediaStore = { put: vi.fn(async () => {}), get: vi.fn(async () => null) };
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const record = buildIntegrationIngestRecord({
+      id: "xfm_synthetic", provider: "synthetic", source: "device", importedAt: `${month}-28T00:00:00.000Z`,
+      parts: [buildIntegrationEvidencePart({ role: "payload", fileName: "payload.json", mediaType: "application/json", content: '{"value":42}' })],
+      eventOutputs: [{ id: "evt_synthetic", roles: ["payload"] }], eventIdsComplete: true,
+      sampleIds: [], sampleIdsComplete: true, eventCount: 1, sampleCount: 0,
+    });
+    const bytes = brotliCompressSync(Buffer.from(`${JSON.stringify(record)}\n`));
+    await mkdir(path.dirname(path.join(vaultRoot, archivePath)), { recursive: true });
+    await writeFile(path.join(vaultRoot, archivePath), bytes);
+    const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    expect(publication).toMatchObject({ excludedVaultPaths: [], referenceCount: 0, uploadedMediaCount: 0 });
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+    expect((await listIntegrationIngestsForEvent(vaultRoot, "evt_synthetic"))[0]?.record).toEqual(record);
+    const plan = await collectHostedWorkspaceSnapshotArchivePlan({ vaultRoot, durableRoot: vaultRoot,
+      excludedVaultPaths: publication.excludedVaultPaths });
+    expect(plan.entries).toContainEqual(expect.objectContaining({ relativePath: archivePath, size: bytes.length }));
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore });
+    expect(await materializeVaultMedia({ args: { all: true }, vaultRoot, materialize }))
+      .toEqual({ requested: 0, available: 0, removed: 0, unavailable: [] });
+    const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    expect(snapshot).toBeTruthy();
+    await restoreHostedBundleRoots({ bytes: snapshot!, expectedKind: "vault", roots: { vault: restoredRoot } });
+    expect(await readFile(path.join(restoredRoot, archivePath))).toEqual(bytes);
+    expect((await readIntegrationIngestEntries(restoredRoot)).map(entry => entry.record)).toEqual([record]);
+    vi.setSystemTime(new Date(`${nextMonth}-10T23:59:59.999Z`));
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([]);
+    expect(mediaStore.put).not.toHaveBeenCalled();
+    expect(mediaStore.get).not.toHaveBeenCalled();
+    for (const day of ["11", "12"]) {
+      vi.setSystemTime(new Date(`${nextMonth}-${day}T00:00:00.000Z`));
+      expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
+    }
+    expect(mediaStore.put).toHaveBeenCalledTimes(1);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([
+      expect.objectContaining({ relativePath: archivePath, sha256: createHash("sha256").update(bytes).digest("hex") }),
+    ]);
+  } finally { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("an older runner's cold month stays cold inside the delay, but a thaw waits before publishing its new hash", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2031-01-06T00:00:00.000Z"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-ingest-delay-thaw-"));
+  const archivePath = "ledger/integration-ingests/2030/2030-12.jsonl.br";
+  const objects = new Map<string, Uint8Array>();
+  const mediaStore: HostedRuntimeMediaStore = {
+    put: vi.fn(async entry => { objects.set(entry.mediaId, entry.bytes); }),
+    get: vi.fn(async entry => objects.get(entry.mediaId) ?? null),
+    delete: vi.fn(async () => {}),
+  };
+  const batch = { vaultRoot, provider: "synthetic", importedAt: "2030-12-28T00:00:00.000Z", events: [], samples: [],
+    evidenceParts: [{ role: "payload", fileName: "payload.json", content: { value: 1 } }] };
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const first = await importDeviceBatch(batch);
+    await archiveClosedIntegrationIngestShards({ vaultRoot });
+    const bytes = await readFile(path.join(vaultRoot, archivePath));
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    // Same persisted shape as a runner that externalizes immediately at rollover.
+    const cold = { relativePath: archivePath, mediaId: sha256, sha256, byteSize: bytes.length,
+      mediaKind: "integration-ingest" as const, expiresAt: null, mimeType: "application/octet-stream", recordedAt: "2030-12-01T00:00:00.000Z" };
+    objects.set(cold.mediaId, bytes);
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [cold] } });
+    await rm(path.join(vaultRoot, archivePath));
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([cold]);
+    expect(mediaStore.put).not.toHaveBeenCalled();
+    expect(mediaStore.get).not.toHaveBeenCalled();
+    // The rollback guard uses the true current month, not the delayed cutoff.
+    vi.setSystemTime(new Date("2030-12-31T23:59:59.999Z"));
+    await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Cold ingest month is not closed");
+    vi.setSystemTime(new Date("2031-01-06T00:00:00.000Z"));
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore });
+    const backfill = await withIntegrationIngestMaterializer(vaultRoot, materialize, () => importDeviceBatch({
+      ...batch, evidenceParts: [{ role: "payload", fileName: "payload.json", content: { value: 2 } }],
+    }));
+    expect(backfill.applied).toBe(true);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+    const amended = await readFile(path.join(vaultRoot, archivePath));
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })))
+      .toMatchObject({ excludedVaultPaths: [], referenceCount: 0, uploadedMediaCount: 0 });
+    expect(mediaStore.put).not.toHaveBeenCalled();
+    expect((await readIntegrationIngestEntries(vaultRoot)).map(entry => entry.record.id)).toEqual([first.ingestId, backfill.ingestId]);
+    vi.setSystemTime(new Date("2031-01-12T00:00:00.000Z"));
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
+    const [next] = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+    expect(next?.sha256).toBe(createHash("sha256").update(amended).digest("hex"));
+    expect(next?.sha256).not.toBe(cold.sha256);
+    expect(next?.mediaId).not.toBe(cold.mediaId);
+    expect(mediaStore.put).toHaveBeenCalledTimes(1);
+    expect(mediaStore.delete).not.toHaveBeenCalled();
+    expect(Buffer.from(objects.get(cold.mediaId)!)).toEqual(bytes);
+  } finally { vi.useRealTimers(); await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
 test.each([false, true])("bulk restoration preserves a committed later-month backfill and checkpoint, replaced=%s", async republish => {
   const root = await mkdtemp(path.join(tmpdir(), "cold-ingest-bulk-race-"));
   const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "restored");
@@ -163,7 +271,7 @@ test("snapshot excludes closed ingest months, retains current month and sparse r
   }
 });
 
-test("idle-compressed current month stays inline and appendable, then externalizes after rollover", async () => {
+test("idle-compressed current month stays inline and appendable, then externalizes after the delay", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2030-11-15T12:00:00.000Z"));
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "active-cold-ingest-"));
@@ -207,7 +315,7 @@ test("idle-compressed current month stays inline and appendable, then externaliz
     expect(mediaStore.put).not.toHaveBeenCalled();
     expect(mediaStore.get).not.toHaveBeenCalled();
 
-    vi.setSystemTime(new Date("2030-12-01T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2030-12-11T00:00:00.000Z"));
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
     const [cold] = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
     expect(cold).toBeDefined();

@@ -239,15 +239,20 @@ landing; record the chosen posture here so the decision is reviewable.
   state, so no rotation or compaction seam is planned.
 
 - `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` is canonical monthly-sharded
-  provider/import evidence and is included in hosted snapshots. On a true idle
-  shutdown, each valid closed raw month is replaced by one `.jsonl.gz` file;
-  the current and future UTC months remain appendable JSONL. The transition
-  does not add a sidecar, manifest, queue, or compaction-state file, so steady
-  state remains exactly one physical file per elapsed month while reducing the
-  bytes walked, archived, uploaded, restored, and stored. Exact raw-plus-gzip
-  crash residue is reconciled before foreground work; a non-identical pair is
-  retained and fails closed rather than increasing the accepted steady-state
-  file count.
+  provider/import evidence. True idle-shutdown maintenance converts valid closed
+  plain/gzip shards to `.jsonl.br`; current-month plain shards are also eligible
+  at 4 MiB and remain appendable through the verified amendment writer. Smaller
+  current shards and future months remain untouched. New hosted cold references
+  wait 10 full days after month end, exceeding the routine 7-day lookback. Until
+  then, closed shards stay inline in checkpoints and full exports. Eligible
+  unambiguous Brotli months use the existing media-reference catalogue and may be
+  absent locally after restore; already-cold months remain cold. A thawed month
+  observes the same delay before returning with its new hash. No new sidecar,
+  queue, or state owner is introduced: each local month has one representation.
+  Readers and amendment planning repair encountered identical duplicates under
+  the canonical lock; conflicting pairs fail closed and startup does not sweep
+  archives. See [vault layout](01-vault-layout.md) for the complete representation
+  and export contract.
 
 - `derived/captures/generated-image-lookups.json`
   (`murph.capture-lookup.v1`) is a compact derived index for generated-image
