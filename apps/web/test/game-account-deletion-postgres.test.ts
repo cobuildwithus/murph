@@ -100,6 +100,20 @@ async function deleteAccount(memberId: string) {
 }
 
 describe.skipIf(!runPostgresProof)("weekly game when a player deletes their account", () => {
+  it("uses the actor and type index for the paged note selector", async () => {
+    const rollback = new Error("Roll back the query plan proof");
+    let plan: unknown;
+    await expect(getPrisma().$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      plan = await tx.$queryRaw`EXPLAIN (FORMAT JSON)
+        SELECT e.id, e.game_id, e.actor, e.command_key, e.payload FROM game_event e
+        WHERE e.actor IN (${randomUUID()}, ${randomUUID()}) AND e.type = 'talk_requested'
+          AND EXISTS (SELECT 1 FROM game g WHERE g.id = e.game_id AND g.max_players = 10)
+        ORDER BY e.id ASC LIMIT 100`;
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect(JSON.stringify(plan)).toContain('"Index Name":"game_event_actor_type_idx"');
+  });
   afterAll(async () => {
     await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });

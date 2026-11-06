@@ -1553,10 +1553,11 @@ existing session. This exception grants only deletion; ordinary session reads,
 runtime access, and transaction-time session guards still reject suspension.
 Revoked or expired sessions never qualify.
 Game history beyond one page commits in separate transactions under the suspension
-fence; a request stops after 20 partial pages with a retryable error, and the
-delete dialog stays open for that retry because a suspended account cannot reload
-Settings. Keys remain until the final transaction applies the last page and proves
-no dependency remains.
+fence; a request stops after 20 partial pages with a retryable error. The endpoint
+reports every server failure as retryable, and the delete dialog stays open for any
+retryable answer because a suspended account cannot reload Settings. A refusal, a
+lost session or an unknown outcome still reloads. Keys remain until the final
+transaction applies the last page and proves no dependency remains.
 
 Account deletion first locks and suspends the owner plus every owned thread
 container, and every relationship writer that can add a runtime, Stripe, or Family

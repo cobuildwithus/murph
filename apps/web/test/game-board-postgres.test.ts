@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedVaultShareProjectionKindToScope, buildHostedVaultShareProjectionScopeKey, resolveHostedVaultShareDataSource, type HostedVaultShareFixedProjectionKind } from "@murphai/hosted-execution/vault-share";
 
-const mocks = vi.hoisted(() => ({ audience: vi.fn(), route: vi.fn(), wake: vi.fn(), afterDecrypt: vi.fn(), decrypt: vi.fn(), auth: vi.fn() }));
+const mocks = vi.hoisted(() => ({ audience: vi.fn(), route: vi.fn(), wake: vi.fn(), afterDecrypt: vi.fn(), decrypt: vi.fn() }));
 vi.mock("@/src/lib/game/chat-membership", async original => ({
   ...await original<typeof import("@/src/lib/game/chat-membership")>(), readGameChatAudience: mocks.audience,
 }));
@@ -11,9 +11,6 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", async original => ({
 }));
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({ hasHostedRuntimeActiveAccess: vi.fn().mockResolvedValue(true) }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: mocks.wake }));
-vi.mock("@/src/lib/hosted-mailbox/store", () => ({ appendHostedMailboxEnvelopeTx: vi.fn(async (input: { envelope: { userId: string } }) => ({ item: {
-  id: "synthetic-maintenance", lane: "maintenance", laneSeq: "1", userId: input.envelope.userId,
-} })) }));
 vi.mock("@/src/lib/hosted-vault-share/projection-snapshot", async original => {
   const actual = await original<typeof import("@/src/lib/hosted-vault-share/projection-snapshot")>();
   return { ...actual, decryptHostedVaultShareProjectionSnapshots: async (input: Parameters<typeof actual.decryptHostedVaultShareProjectionSnapshots>[0]) => {
@@ -23,11 +20,11 @@ vi.mock("@/src/lib/hosted-vault-share/projection-snapshot", async original => {
     return result;
   } };
 });
-vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMember: mocks.auth }));
 
 import { getPrisma } from "@/src/lib/prisma";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readPairBoard, savePairBoardSharing } from "@/src/lib/game/board";
+import { hostedAuthAdapter } from "@/src/lib/better-auth/adapter";
+import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
+import { readPairBoard, savePairBoardSharing as saveSharing } from "@/src/lib/game/board";
 import { readHostedGroupBoardData, leaveHostedGroupMemberTx } from "@/src/lib/hosted-groups/group-store";
 import { recordHostedConsentGrant, buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -43,6 +40,8 @@ if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murp
 const db = getPrisma();
 const members: string[] = [], games: string[] = [], groups: string[] = [];
 const today = () => new Date().toISOString().slice(0, 10);
+const savePairBoardSharing = (viewerId: string, otherId: string, input: Omit<Parameters<typeof saveSharing>[2], "beforeMutationTx">) =>
+  saveSharing(viewerId, otherId, { ...input, beforeMutationTx: async () => {} });
 async function fixture(joined = false) {
   const a = randomUUID(), b = randomUUID(), room = randomUUID(), groupId = randomUUID(), gameId = randomUUID();
   members.push(a, b, room); groups.push(groupId); games.push(gameId);
@@ -59,7 +58,23 @@ async function fixture(joined = false) {
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 10 }, stakes: [] }] }, termsWordsEncrypted: "synthetic",
     chatContainerMemberId: room, startedAt: new Date(),
     players: { create: [a, b].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date(`${addDays(today(), -20)}T00:00:00Z`), joinedAt: new Date() })) } } });
-  mocks.auth.mockResolvedValue(a);
+  const token = randomUUID().replaceAll("-", "");
+  const adapter = hostedAuthAdapter(db)({});
+  const dates = { createdAt: new Date(), updatedAt: new Date() };
+  await adapter.create({ model: "user", forceAllowId: true,
+    data: { id: a, email: `${a}@example.test`, emailVerified: true, name: "", ...dates } });
+  await adapter.create({ model: "session", forceAllowId: true,
+    data: { id: `session-${a}`, userId: a, token, expiresAt: new Date(Date.now() + 3_600_000), ...dates } });
+  const revoke = () => adapter.delete({ model: "session", where: [{ field: "id", value: `session-${a}` }] });
+  const request = (body?: unknown, afterAdmission?: () => Promise<unknown>) => new Request("https://example.test/board/sharing", {
+    method: body === undefined ? "GET" : "PUT",
+    headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}` },
+    ...(body === undefined ? {} : { duplex: "half", body: new ReadableStream({ async pull(controller) {
+      await afterAdmission?.();
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+      controller.close();
+    } }, { highWaterMark: 0 }) }),
+  });
   mocks.audience.mockResolvedValue({ memberIds: [a, b], contacts: [a, b].map(id => createHostedLinqParticipantContact({ kind: "email", value: `${id}@example.test` })!), keys: { candidates: [], current: "synthetic" }, threadId: "synthetic-thread" });
   mocks.route.mockResolvedValue({ containerMemberId: room });
   const read = () => readPairBoard(a, b);
@@ -81,14 +96,17 @@ async function fixture(joined = false) {
     }
     return grant.id;
   };
-  return { a, b, room, groupId, gameId, read, raw, share };
+  return { a, b, room, groupId, gameId, read, raw, share, request, revoke };
 }
 
 beforeEach(() => {
+  vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
+  vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
+  vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://example.test");
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
   vi.clearAllMocks(); mocks.afterDecrypt.mockResolvedValue(undefined); mocks.wake.mockResolvedValue(undefined); process.env.MURPH_GAME_ENABLED = "true"; delete process.env.MURPH_GAME_BOARD_ENABLED; delete process.env.MURPH_GAME_MEMBER_ALLOWLIST;
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 afterAll(async () => {
   if (!enabled) return;
   await db.game.deleteMany({ where: { id: { in: games } } });
@@ -98,11 +116,74 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
+  async function sharingSnapshot(f: Awaited<ReturnType<typeof fixture>>) {
+    return {
+      members: await db.hostedGroupMember.findMany({ where: { groupId: f.groupId }, orderBy: { id: "asc" } }),
+      shares: await db.hostedVaultShare.findMany({ where: { destinationMemberId: f.room }, orderBy: { id: "asc" } }),
+      mailbox: await db.hostedMailboxItem.findMany({ where: { userId: { in: [f.a, f.room] } }, orderBy: { id: "asc" } }),
+      counters: await db.hostedMailboxLaneCounter.findMany({ where: { userId: { in: [f.a, f.room] } }, orderBy: [{ userId: "asc" }, { lane: "asc" }] }),
+    };
+  }
+  it("rejects board sharing revoked after admission without writing", async () => {
+    const f = await fixture();
+    const before = await sharingSnapshot(f);
+    const response = await PUT(f.request({ expectedMembershipId: null, numbers: ["steps"] }, f.revoke),
+      { params: Promise.resolve({ memberId: f.b }) });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED", retryable: false } });
+    expect(await sharingSnapshot(f)).toEqual(before);
+  });
+  it("waits for member suspension and refuses board sharing without writing", async () => {
+    const f = await fixture();
+    const before = await sharingSnapshot(f);
+    let markHeld!: () => void, release!: () => void, holderPid = 0;
+    const held = new Promise<void>(resolve => { markHeld = resolve; });
+    const released = new Promise<void>(resolve => { release = resolve; });
+    let holding: Promise<void> | undefined;
+    const response = PUT(f.request({ expectedMembershipId: null, numbers: ["steps"] }, async () => {
+      holding = db.$transaction(async tx => {
+        [{ pid: holderPid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        await tx.hostedMember.update({ where: { id: f.a }, data: { suspendedAt: new Date() } });
+        markHeld();
+        await released;
+      });
+      await Promise.race([held, holding]);
+    }), { params: Promise.resolve({ memberId: f.b }) });
+    try {
+      await held;
+      await vi.waitFor(async () => {
+        const [state] = await db.$queryRaw<{ waiting: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+            WHERE datname = current_database() AND ${holderPid} = ANY(pg_blocking_pids(pid))) AS waiting`;
+        expect(state.waiting).toBe(true);
+      });
+    } finally {
+      release();
+      await holding;
+    }
+    const result = await response;
+    expect(result.status).toBe(403);
+    expect(await result.json()).toMatchObject({ error: { code: "HOSTED_MEMBER_SUSPENDED", retryable: false } });
+    expect(await sharingSnapshot(f)).toEqual(before);
+  });
+  it("makes unexpected board write failures retryable and membership refusals final", async () => {
+    const f = await fixture();
+    const context = { params: Promise.resolve({ memberId: f.b }) };
+    const spy = vi.spyOn(db, "$transaction").mockRejectedValueOnce(new Error("Synthetic write failure"));
+    try {
+      const response = await PUT(f.request({ expectedMembershipId: null, numbers: [] }), context);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR", retryable: true } });
+    } finally { spy.mockRestore(); }
+    const refusal = await PUT(f.request({ expectedMembershipId: "stale-membership", numbers: [] }), context);
+    expect(refusal.status).toBe(409);
+    expect(await refusal.json()).toMatchObject({ error: { code: "MEMBERSHIP_CHANGED", retryable: false } });
+  });
   it("distinguishes a readable empty VO2 snapshot from an unpublished grant on the wire", async () => {
     const f = await fixture(true);
     await f.share(f.a, "vo2-max-days.v0", true, false, 0);
     await f.share(f.b, "vo2-max-days.v0");
-    const response = await GET(new Request("https://example.test/board"), { params: Promise.resolve({ memberId: f.b }) });
+    const response = await GET(f.request(), { params: Promise.resolve({ memberId: f.b }) });
     expect(response.status).toBe(200);
     const { board } = await response.json();
     expect(board.people[0].numbers.vo2Max).toEqual({ state: "pending", reason: "no_readings" });
@@ -167,7 +248,7 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: membershipId, numbers: [] })).rejects.toMatchObject({ httpStatus: 409 });
     await db.hostedConsentGrant.delete({ where: { memberId_scope: { memberId: f.a, scope: "launch.health-data" } } });
     const context = { params: Promise.resolve({ memberId: f.b }) };
-    const response = await PUT(new Request("https://example.test/board/sharing", { method: "PUT", body: JSON.stringify({ expectedMembershipId: joined!.membershipId, numbers: [] }) }), context);
+    const response = await PUT(f.request({ expectedMembershipId: joined!.membershipId, numbers: [] }), context);
     expect(response.status).toBe(403);
     expect((await response.json()).error.code).toBe("HOSTED_CONSENT_REQUIRED");
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: joined!.membershipId, numbers: [] })).rejects.toMatchObject({ httpStatus: 403, code: "HOSTED_CONSENT_REQUIRED" });
@@ -254,7 +335,7 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
   it("uses no-store routes, enforces kill switch and rejects malformed saves", async () => {
     const f = await fixture();
     const context = { params: Promise.resolve({ memberId: f.b }) };
-    const request = (body?: unknown) => new Request("https://example.test/api/game/v1/people/other/board", { method: body ? "PUT" : "GET", ...(body ? { body: JSON.stringify(body) } : {}) });
+    const request = f.request;
     const get = await GET(request(), context);
     expect(get.status).toBe(200); expect(get.headers.get("cache-control")).toContain("no-store");
     expect((await get.json()).board.membershipId).toBeNull();
@@ -265,7 +346,7 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     expect((await PUT(request({ expectedMembershipId: null, numbers: [] }), context)).status).toBe(404);
     process.env.MURPH_GAME_BOARD_ENABLED = "FALSE";
     expect((await (await GET(request(), context)).json()).board).not.toBeNull();
-    mocks.auth.mockRejectedValueOnce(hostedOnboardingError({ code: "UNAUTHENTICATED", httpStatus: 401, message: "Sign in to continue." }));
+    await f.revoke();
     const denied = await GET(request(), context);
     expect(denied.status).toBe(401);
     expect(denied.headers.get("cache-control")).toContain("no-store");

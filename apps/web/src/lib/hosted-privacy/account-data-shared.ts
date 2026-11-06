@@ -1,4 +1,8 @@
 export const HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE = "DELETE MY ACCOUNT";
+export const HOSTED_ACCOUNT_DELETION_UNEXPECTED_FAILURE_MESSAGE =
+  "Something went wrong while deleting your account. Retry account deletion, or contact support if it keeps failing.";
+export const HOSTED_ACCOUNT_DELETION_STRIPE_CANCEL_FAILED_MESSAGE =
+  "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing.";
 export const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE =
   "Connected-app setup is still finishing. Try account deletion again after it finishes or times out.";
 export const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE =
