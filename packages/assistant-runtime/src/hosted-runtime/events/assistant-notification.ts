@@ -81,7 +81,7 @@ type HostedAssistantNotificationSystemMailboxPreparation =
   | {
       kind: "terminal_no_send";
       outcome: HostedMailboxOutcome;
-      reason: "external_route_authority_stale" | "notification_profile_retired";
+      reason: "external_route_authority_stale";
     };
 
 export type HostedLegacyUsageReferralAuthorityClassification =
@@ -108,17 +108,6 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
     wake: HostedExecutionAssistantNotificationRequestedWake;
   },
 ): Promise<HostedAssistantNotificationSystemMailboxPreparation> {
-  if (isHostedRetiredAssistantNotificationProfile(input.wake.notification.notificationPromptProfile)) {
-    return {
-      kind: "terminal_no_send",
-      reason: "notification_profile_retired",
-      outcome: createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "assistant-notification",
-        redactedLogEntries: [],
-      }),
-    };
-  }
   if (
     input.mailboxDedupeKey.startsWith(
       HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,

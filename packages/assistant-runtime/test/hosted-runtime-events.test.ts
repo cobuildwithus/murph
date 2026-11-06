@@ -1,4 +1,3 @@
-import { prepareHostedAssistantNotificationSystemMailboxWake } from "../src/hosted-runtime/events/assistant-notification.ts";
 import assert from "node:assert/strict";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -3781,53 +3780,6 @@ describe("executeHostedMailboxEvent", () => {
       mailboxLane: "assistant-notification",
     });
   });
-
-  it.each([
-    "creative-response",
-    "creative-response-text",
-  ] as const)(
-    "skips a retired %s notification without model work or delivery",
-    async (notificationPromptProfile) => {
-      const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-        eventId: `evt_notification_${notificationPromptProfile}_failure`,
-        memberId: "member_group_runtime",
-        notification: {
-          instructions: "Create one brief sponsorship thank-you.",
-          notificationPromptProfile,
-          responsePolicy: {
-            kind: "require_send",
-          },
-          route: {
-            actorId: null,
-            channel: "linq",
-            delivery: {
-              kind: "thread",
-              target: "thread_group_sponsorship",
-            },
-            identityId: "hbidx:phone:v1:test",
-            threadId: "thread_group_sponsorship",
-            threadIsDirect: false,
-          },
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      });
-
-      const assertAuthority = vi.fn();
-      await expect(prepareHostedAssistantNotificationSystemMailboxWake({
-        assertExternalThreadRouteAuthority: assertAuthority,
-        executionContext,
-        mailboxDedupeKey: wake.eventId,
-        signal: null,
-        wake,
-      })).resolves.toMatchObject({
-        kind: "terminal_no_send",
-        reason: "notification_profile_retired",
-        outcome: { conversationMetrics: null, mailboxLane: "assistant-notification" },
-      });
-      expect(assertAuthority).not.toHaveBeenCalled();
-      expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
-    },
-  );
 
   it("still fails closed for non-first-contact required notifications", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
