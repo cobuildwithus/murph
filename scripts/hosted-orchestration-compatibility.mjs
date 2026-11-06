@@ -15,12 +15,11 @@ export const HOSTED_RELEASE_ADMISSION_MODE = "release_admission";
 export const HOSTED_RELEASE_SCOPE_NONE = "none";
 export const HOSTED_RELEASE_SCOPE_FOREGROUND = "foreground_priority";
 export const HOSTED_RELEASE_SCOPE_PRODUCTION_CORE = "production_core";
+// Web sits on the inbound path, so these two gate every production Web candidate.
+// Reminder, foreground, and cache-prefix journeys run nightly in Murph Cloud.
 const PRODUCTION_CORE_LANES = [
   "linq-delivery",
-  "linq-scheduled-reminder",
   "hosted-web-browser-smoke",
-  "foreground-reply-priority",
-  "foreground-checkpoint-ordering",
 ];
 
 const GITHUB_API_VERSION = "2026-03-10";
