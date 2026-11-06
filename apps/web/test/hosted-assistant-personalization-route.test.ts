@@ -49,7 +49,7 @@ describe("hosted assistant personalization internal route", () => {
       action: "read",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         solAvailable: false,
         supportingPersona: null,
         tone: "formal",

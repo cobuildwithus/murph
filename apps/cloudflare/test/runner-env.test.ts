@@ -65,6 +65,31 @@ const DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN = {
 } as const;
 
 describe("buildHostedRunnerContainerEnv", () => {
+  it("keeps the sleep allowlist and ambient enable flag out of container and job env", () => {
+    const list = "hbm_testAllowlisted0001,hbm_testOther0002";
+    const source = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
+      MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: list,
+      MURPH_NATIVE_SLEEP_CARD_ENABLED: "1",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:
+        "MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS,MURPH_NATIVE_SLEEP_CARD_ENABLED",
+    };
+    const forwardedEnv = buildHostedRunnerContainerEnv(source);
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource: source,
+      forwardedEnv,
+      runnerSecrets: {
+        MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: list,
+        MURPH_NATIVE_SLEEP_CARD_ENABLED: "1",
+      },
+    });
+    for (const value of [forwardedEnv, runtime]) {
+      expect(JSON.stringify(value)).not.toContain("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+      expect(JSON.stringify(value)).not.toContain("MURPH_NATIVE_SLEEP_CARD_ENABLED");
+      expect(JSON.stringify(value)).not.toContain(list);
+    }
+  });
+
   it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
@@ -97,7 +122,6 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("forwards opt-in runner env profiles when configured", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: "exa-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
@@ -105,32 +129,17 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox,hosted-email,exa",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox,hosted-email",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SEND_READY: "true",
       MAPBOX_ACCESS_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      NODE_ENV: "production",
-    });
-  });
-
-  it("maps Worker-owned Exa credentials to a hosted runtime sentinel", () => {
-    expect(buildHostedRunnerContainerEnv({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: "exa-token",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa",
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
     });
   });
@@ -205,7 +214,7 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects deprecated local Codex app-server bridge config", () => {
     expect(() =>
       buildHostedRunnerContainerEnv({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
@@ -220,7 +229,7 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects the removed local-codex hosted assistant provider", () => {
     expect(() =>
       buildHostedRunnerContainerEnv({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "local-codex",
         NODE_ENV: "development",
         OPENAI_API_KEY: "openai-key",
@@ -232,34 +241,17 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards OpenAI assistant config into runner containers", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       NODE_ENV: "development",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     })).toEqual({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "development",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-    });
-  });
-
-  it("forwards the managed Venice credential for per-member provider overrides", () => {
-    expect(buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      OPENAI_API_KEY: "openai-worker-secret",
-      VENICE_API_KEY: "venice-worker-secret",
-    })).toEqual({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      VENICE_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
   });
 
@@ -448,7 +440,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://evil.example.test:1234",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
-      EXA_API_KEY: "exa-user",
       GEMINI_API_KEY: "gemini-user",
       HF_TOKEN: "hf-user",
       LINQ_API_TOKEN: "linq-user",
@@ -457,7 +448,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
-      VENICE_API_KEY: "venice-user",
       WHATSAPP_API_BASE_URL: "https://removed-whatsapp.example.test",
       WHATSAPP_ACCESS_TOKEN: "removed-whatsapp-user",
       WHATSAPP_APP_SECRET: "removed-whatsapp-app-secret",
@@ -471,7 +461,6 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects intercept-injected provider credentials from runner secrets even when explicitly allowlisted", () => {
     expect(filterHostedRunnerSecrets(
       {
-        EXA_API_KEY: "exa-user",
         LINQ_API_TOKEN: "linq-user",
         MAPBOX_ACCESS_TOKEN: "mapbox-user",
         MURPH_DATA_API_KEY: "data-api-user",
@@ -487,7 +476,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       },
       {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
-          "EXA_API_KEY",
           "LINQ_API_TOKEN",
           "MAPBOX_ACCESS_TOKEN",
           "MURPH_DATA_API_KEY",
@@ -724,7 +712,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "fixture-user-key",
-        VENICE_API_KEY: "venice-user",
       },
     })).toMatchObject({
       commitTimeoutMs: 45_000,
@@ -1005,12 +992,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.resolvedConfig).toBeDefined();
     expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
     expect(runtime.resolvedConfig?.deviceSync).toEqual({
-      providerConfigs: {
-        oura: {
-          clientId: "oura-client",
-          clientSecret: "oura-secret",
-        },
-      },
+      providerConfigs: {},
       publicBaseUrl: "https://murph.example/api/device-sync",
       secret: "runtime-codec-secret",
     });
@@ -1118,19 +1100,14 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         telegramBotConfigured: false,
       },
       deviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "whoop-client",
-            clientSecret: "whoop-secret",
-          },
-        },
+        providerConfigs: {},
         publicBaseUrl: "https://device-sync.example.test",
         secret: "secret_123",
       },
     });
   });
 
-  it("reuses the shared device-sync runtime config helper and strips provider-only fields", () => {
+  it("ignores credentials for retired direct providers", () => {
     const resolved = buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
@@ -1145,17 +1122,12 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         telegramBotConfigured: false,
       },
       deviceSync: {
-        providerConfigs: {
-          oura: {
-            clientId: "oura-client",
-            clientSecret: "oura-secret",
-          },
-        },
+        providerConfigs: {},
         publicBaseUrl: "https://device-sync.example.test",
         secret: "secret_123",
       },
     });
-    expect(resolved.deviceSync?.providerConfigs.oura).not.toHaveProperty("webhookVerificationToken");
+    expect(resolved.deviceSync?.providerConfigs).toEqual({});
   });
 });
 
@@ -1169,7 +1141,7 @@ describe("hosted deploy automation device-sync surface", () => {
     });
 
     expect(deployEnv.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "exa,hosted-email,linq,mapbox,telegram",
+      "hosted-email,linq,mapbox,telegram",
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
@@ -1184,7 +1156,6 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
         "LINQ_API_TOKEN",
-        "EXA_API_KEY",
         "GEMINI_API_KEY",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",
@@ -1205,19 +1176,9 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
         "MURPH_ANDROID_APP_ENABLED",
-        "WHOOP_SCOPES",
+        "JUNCTION_PROVIDER_FILTER",
       ]),
     );
-    for (const retiredVeniceModelVar of [
-      "HOSTED_VENICE_LUNA_MODEL",
-      "HOSTED_VENICE_SOL_MODEL",
-      "HOSTED_VENICE_TERRA_MODEL",
-    ]) {
-      expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
-        retiredVeniceModelVar,
-      );
-    }
-    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toContain("VENICE_API_KEY");
     for (const retiredWhatsAppVar of [
       "WHATSAPP_API_BASE_URL",
       "WHATSAPP_GRAPH_VERSION",

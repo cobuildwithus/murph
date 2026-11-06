@@ -9,7 +9,8 @@ import {
   initializeVault,
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
-  readStoredWriteOperation,
+  listAuditShardPaths,
+  readAuditShardRows,
   upsertMemory,
 } from '@murphai/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -19,6 +20,15 @@ import { addMeasurementRecord } from '@murphai/vault-usecases/measurements'
 import { addWorkoutRecord } from '@murphai/vault-usecases/workouts'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
+
+async function readWorkoutFormatAudits(vaultRoot: string) {
+  const rows = (await Promise.all(
+    (await listAuditShardPaths(vaultRoot)).map(relativePath =>
+      readAuditShardRows({ vaultRoot, relativePath }),
+    ),
+  )).flat()
+  return rows.map(row => row.value).filter(record => record.action === 'workout_format_save')
+}
 
 const WORKOUT_FORMAT_CANONICAL_EVENT_PATH_TIMEOUT_MS = 90_000
 const WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS = 300_000
@@ -326,42 +336,13 @@ test(
       )
       assert.equal(requireData(saveFormat).created, true)
 
-      const workoutFormatOperation = (
-        await Promise.all(
-          (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-            readStoredWriteOperation(vaultRoot, relativePath),
-          ),
-        )
-      ).find((operation) => operation.operationType === 'workout_format_save')
-      assert.ok(workoutFormatOperation)
-      assert.equal(workoutFormatOperation.status, 'committed')
-      const firstAction = workoutFormatOperation.actions[0]
-      assert.ok(firstAction)
-      assert.deepEqual(
-        workoutFormatOperation.actions.map((action) => ({
-          kind: action.kind,
-          targetRelativePath: action.targetRelativePath,
-        })),
-        [
-          {
-            kind: 'text_write',
-            targetRelativePath: 'bank/workout-formats/push-day-a.md',
-          },
-          {
-            kind: 'jsonl_append',
-            targetRelativePath: workoutFormatOperation.actions[1]?.targetRelativePath ?? '',
-          },
-        ],
-      )
-      assert.match(
-        workoutFormatOperation.actions[1]?.targetRelativePath ?? '',
-        /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u,
-      )
-      if (firstAction.kind !== 'text_write') {
-        throw new Error('Expected workout_format_save to stage a text_write action.')
-      }
-      assert.equal(typeof firstAction.committedPayloadReceipt?.sha256, 'string')
-      assert.equal(typeof firstAction.committedPayloadReceipt?.byteLength, 'number')
+      const audits = await readWorkoutFormatAudits(vaultRoot)
+      assert.equal(audits.length, 1)
+      assert.equal(audits[0]?.commandName, 'core.upsertWorkoutFormat')
+      assert.deepEqual(audits[0]?.changes, [
+        { path: 'bank/workout-formats/push-day-a.md', op: 'create' },
+      ])
+      assert.deepEqual(await listWriteOperationMetadataPaths(vaultRoot), [])
 
       const savedMarkdownPath = path.join(vaultRoot, requireData(saveFormat).path)
       const savedMarkdown = await readFile(savedMarkdownPath, 'utf8')
@@ -706,29 +687,14 @@ test(
       assert.match(savedMarkdown, /25 min strength training/u)
       assert.doesNotMatch(savedMarkdown, /20 min strength training/u)
 
-      const operations = await Promise.all(
-        (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-          readStoredWriteOperation(vaultRoot, relativePath),
-        ),
-      )
-      const workoutFormatOperations = operations.filter(
-        (operation) => operation.operationType === 'workout_format_save',
-      )
-      assert.equal(workoutFormatOperations.length, 2)
-      assert.equal(
-        workoutFormatOperations.every(
-          (operation) =>
-            operation.status === 'committed' &&
-            operation.actions.length === 2 &&
-            operation.actions[0]?.kind === 'text_write' &&
-            operation.actions[0]?.targetRelativePath === 'bank/workout-formats/push-day-a.md' &&
-            operation.actions[1]?.kind === 'jsonl_append' &&
-            /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u.test(
-              operation.actions[1]?.targetRelativePath ?? '',
-            ),
-        ),
-        true,
-      )
+      const audits = await readWorkoutFormatAudits(vaultRoot)
+      assert.equal(audits.length, 2)
+      assert.ok(audits.every(record => record.commandName === 'core.upsertWorkoutFormat'))
+      assert.deepEqual(audits.map(record => record.changes), [
+        [{ path: 'bank/workout-formats/push-day-a.md', op: 'create' }],
+        [{ path: 'bank/workout-formats/push-day-a.md', op: 'update' }],
+      ])
+      assert.deepEqual(await listWriteOperationMetadataPaths(vaultRoot), [])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

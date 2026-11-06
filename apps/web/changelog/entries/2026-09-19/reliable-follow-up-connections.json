@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-19",
+  "order": 100,
+  "item": {
+    "id": "reliable-follow-up-connections",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable follow-up replies",
+    "summary": "Follow-up messages can reuse a healthy reply connection after a pause in the conversation.",
+    "details": "Connection recovery preserves the conversation when a provider connection closes.",
+    "relevanceTags": [
+      "replies",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3590
+    ]
+  }
+}

@@ -243,16 +243,19 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       connectTargets: [{
         connectSourceId: "oura",
         connectTarget: "oura",
-        provider: "oura",
-        sourceProviderSlug: null,
+        provider: "junction",
+      sourceProviderSlug: "oura",
       }],
+      connectionSources: [{ connectionId: "dspc_example", firstSeenAt: "2026-04-01T08:00:00.000Z", lastSeenAt: "2026-04-01T08:00:00.000Z", lastDataAt: null, resourceCount: 0, sourceProviderSlug: "oura", status: "connected" }],
       connections: [buildConnection({
+        provider: "junction",
+        metadata: { sourceProviderSlug: "oura" },
         lastSyncCompletedAt: "2026-04-02T07:00:00.000Z",
         lastSyncErrorAt: "2026-04-03T08:00:00.000Z",
         status: "reauthorization_required",
       })],
       now: new Date("2026-04-03T12:00:00.000Z"),
-      providers: [OURA_PROVIDER],
+      providers: [JUNCTION_PROVIDER],
     });
 
     expect(source).toMatchObject({
@@ -272,8 +275,8 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       connectTargets: [{
         connectSourceId: "oura",
         connectTarget: "oura",
-        provider: "oura",
-        sourceProviderSlug: null,
+        provider: "junction",
+      sourceProviderSlug: "oura",
       }],
       connections: [buildConnection({
         lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
@@ -300,8 +303,8 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       connectTargets: [{
         connectSourceId: "oura",
         connectTarget: "oura",
-        provider: "oura",
-        sourceProviderSlug: null,
+        provider: "junction",
+      sourceProviderSlug: "oura",
       }],
       connections: [buildConnection({
         lastErrorCode: "PROVIDER_REVOKE_FAILED",
@@ -384,8 +387,8 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         {
           connectSourceId: "whoop",
           connectTarget: "whoop",
-          provider: "whoop",
-          sourceProviderSlug: null,
+          provider: "junction",
+      sourceProviderSlug: "whoop_v2",
         },
         {
           connectSourceId: "whoop",
@@ -751,7 +754,10 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
 
   it("offers reconnect for active sources whose latest sync failed when a connect target is available", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{ connectionId: "dspc_example", firstSeenAt: "2026-04-01T08:00:00.000Z", lastSeenAt: "2026-04-01T08:00:00.000Z", lastDataAt: null, resourceCount: 0, sourceProviderSlug: "oura", status: "connected" }],
       connections: [buildConnection({
+        provider: "junction",
+        metadata: { sourceProviderSlug: "oura" },
         lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
         lastErrorMessage: "WHOOP token request failed.",
         lastSyncCompletedAt: "2026-03-28T07:00:00.000Z",
@@ -761,10 +767,11 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       connectTargets: [{
         connectSourceId: "oura",
         connectTarget: "oura",
-        provider: "oura",
+        provider: "junction",
+      sourceProviderSlug: "oura",
       }],
       now: new Date("2026-04-03T12:00:00.000Z"),
-      providers: [OURA_PROVIDER],
+      providers: [JUNCTION_PROVIDER],
     });
 
     expect(source).toMatchObject({

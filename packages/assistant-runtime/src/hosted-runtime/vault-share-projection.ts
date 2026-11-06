@@ -7,6 +7,7 @@ import {
   deviceDataOriginSchema,
   formatTimeZoneDateTimeParts,
   hasMemoryDisplayNameEvidence,
+  isShortOrTentativeSleepSession,
   isStrictIsoDate,
   isStrictIsoDateTime,
   memoryDisplayNameSchema,
@@ -19,6 +20,13 @@ import {
 } from "@murphai/contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
+  isHostedVaultShareRecentDateProjectionKind,
+  parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareSleepClassification,
+  serializeHostedVaultShareProjectionContentDigestInput,
+  getHostedVaultShareProjectionMaxRecords,
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
   getHostedVaultShareActivityDistanceProjectionSpec,
   getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareActivitySessionCountProjectionSpec,
@@ -26,7 +34,6 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
-  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
@@ -76,6 +83,14 @@ import {
 } from "@murphai/query";
 
 import type { HostedRuntimeVaultSharePort } from "./platform.ts";
+import {
+  emptyHostedVaultShareProjectionPublicationState,
+  readHostedVaultShareProjectionPublicationState,
+  type HostedVaultShareProjectionPublication,
+  type HostedVaultShareProjectionPublicationState,
+  upsertHostedVaultShareProjectionPublication,
+  writeHostedVaultShareProjectionPublicationState,
+} from "./vault-share-publication-state.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MAX_MINUTES = 24 * 60;
@@ -88,22 +103,31 @@ const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   (_, zone) => `heart-rate-zone-${zone}-minutes`,
 );
 
-export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 7;
+// All dated metric grants publish the same member-local retention window.
+// Short reporting windows are selected by the shared-read owner, not here.
+export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 6;
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 7;
+export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 6;
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1;
 
-// Workouts read one preceding source date so a positive-offset event zone can
-// still populate the oldest projected date. Admit the complete source-tagged
-// workout shape for that eight-date read, then probe one row beyond it so every
-// activity projection still fails closed rather than consuming a partial read.
+export function buildHostedVaultShareProjectionContentDigest(input: {
+  memberTimeZone?: string;
+  projectionScope: HostedVaultShareProjectionScope;
+  records: readonly HostedVaultShareDeliveryRecord[];
+}): string {
+  return createHash("sha256")
+    .update(serializeHostedVaultShareProjectionContentDigestInput(input))
+    .digest("base64url");
+}
+
+// Canonical source dates can straddle either side of an event-local date.
+// At 90 dates plus two boundary dates, the complete 104-workout/day shape and
+// one overflow probe total 9,569 rows, below the query owner's 10,000-row cap.
 const ACTIVITY_SESSION_SOURCE_ROW_LIMIT =
-  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
-  * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1);
-const ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT = ACTIVITY_SESSION_SOURCE_ROW_LIMIT + 1;
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY * (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS + 2);
 
 const HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE = "Etc/GMT+12";
 
@@ -192,6 +216,10 @@ type ProjectableMemoryProfileNameRead =
   | { status: "absent" | "no-evidence" | "unresolved" };
 
 export interface HostedVaultShareProjectionOfferResult {
+  failureReason?:
+    | "serialized_projection_too_large"
+    | "delivery_exception"
+    | "scope_failed";
   outcome:
     | "continued"
     | "deferred"
@@ -208,6 +236,7 @@ export type HostedVaultShareProjectionScopeResolution =
     generationTokensByProjectionScopeKey: Record<string, string>;
     hasDeferredProjectionWork: boolean;
     outcome: "active-scopes";
+    publishedSourceWorkspaceVersionByProjectionScopeKey: Record<string, string>;
     projectionMode?: HostedVaultShareProjectionMode;
     projectionScopes: HostedVaultShareProjectionScope[];
   }
@@ -217,14 +246,20 @@ export type HostedVaultShareProjectionScopeResolution =
 
 export interface HostedVaultShareProjectionCapture {
   hasDeferredProjectionWork: boolean;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Record<string, string>;
   projectionMode?: HostedVaultShareProjectionMode;
   sourceWorkspaceVersion: string;
   snapshots: Array<{
+    contentDigest?: string;
+    memberTimeZone?: string;
     generationToken: string;
     projectionScope: HostedVaultShareProjectionScope;
     records: HostedVaultShareDeliveryRecord[];
   }>;
 }
+
+type HostedVaultShareProjectionCaptureSnapshot =
+  HostedVaultShareProjectionCapture["snapshots"][number];
 
 export type HostedVaultShareProjectionCaptureResult =
   | {
@@ -241,10 +276,12 @@ export type HostedVaultShareProjectionCaptureResult =
 export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
   projectionMode?: HostedVaultShareProjectionMode;
   signal?: AbortSignal | null;
+  sourceWorkspaceVersion: string;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionScopeResolution> {
   try {
     const activeProjections = await input.vaultSharePort.listActiveProjectionScopes({
+      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
       ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
@@ -265,6 +302,7 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
       };
     }
     const generationTokensByProjectionScopeKey: Record<string, string> = {};
+    const publishedSourceWorkspaceVersionByProjectionScopeKey: Record<string, string> = {};
     for (const projectionScope of projectionScopes) {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
         projectionScope,
@@ -277,12 +315,21 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
         return { outcome: "error" };
       }
       generationTokensByProjectionScopeKey[projectionScopeKey] = generationToken;
+      const publishedSourceWorkspaceVersion =
+        activeProjections.publishedSourceWorkspaceVersionByProjectionScopeKey?.[
+          projectionScopeKey
+        ];
+      if (publishedSourceWorkspaceVersion !== undefined) {
+        publishedSourceWorkspaceVersionByProjectionScopeKey[projectionScopeKey] =
+          publishedSourceWorkspaceVersion;
+      }
     }
     return {
       generationTokensByProjectionScopeKey,
       hasDeferredProjectionWork:
         activeProjections.hasDeferredProjectionWork === true,
       outcome: "active-scopes",
+      publishedSourceWorkspaceVersionByProjectionScopeKey,
       ...(activeProjections.projectionMode
         ? { projectionMode: activeProjections.projectionMode }
         : {}),
@@ -304,6 +351,7 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
 export async function captureHostedVaultShareProjectionBestEffort(input: {
   generationTokensByProjectionScopeKey: Readonly<Record<string, string>>;
   hasDeferredProjectionWork: boolean;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Readonly<Record<string, string>>;
   projectionMode?: HostedVaultShareProjectionMode;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
   sourceWorkspaceVersion: string;
@@ -311,6 +359,7 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
 }): Promise<HostedVaultShareProjectionCaptureResult> {
   const snapshots: HostedVaultShareProjectionCapture["snapshots"] = [];
   const context: HostedVaultShareProjectionReadContext = {};
+  const memberTimeZone = await readProjectableVaultTimeZone(input.vaultRoot);
 
   for (const projectionScope of input.projectionScopes) {
     const readRecords = resolveProjectableRecordReader(projectionScope);
@@ -324,13 +373,29 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
       if (!generationToken) {
         return { outcome: "error" };
       }
+      const dated = isHostedVaultShareRecentDateProjectionKind(projectionScope.projectionKind);
+      if (dated && !memberTimeZone) return { outcome: "error" };
+      const records = await readRecords({ context, vaultRoot: input.vaultRoot });
+      assertCompleteProjectionRecords(records, getHostedVaultShareProjectionMaxRecords(projectionScope));
+      const projectionRequest = parseHostedVaultShareDeliverRequest({
+        projectionScope, projectionKind: projectionScope.projectionKind, records,
+        expectedGenerationToken: generationToken, sourceWorkspaceVersion: input.sourceWorkspaceVersion,
+        ...(dated && memberTimeZone ? { memberTimeZone } : {}),
+      });
       snapshots.push({
-        generationToken,
-        projectionScope,
-        records: await readRecords({
-          context,
-          vaultRoot: input.vaultRoot,
+        contentDigest: buildHostedVaultShareProjectionContentDigest({
+          ...(projectionRequest.memberTimeZone
+            ? { memberTimeZone: projectionRequest.memberTimeZone }
+            : {}),
+          projectionScope: projectionRequest.projectionScope,
+          records: projectionRequest.records,
         }),
+        ...(projectionRequest.memberTimeZone
+          ? { memberTimeZone: projectionRequest.memberTimeZone }
+          : {}),
+        generationToken,
+        projectionScope: projectionRequest.projectionScope,
+        records: projectionRequest.records,
       });
     } catch {
       return { outcome: "error" };
@@ -342,6 +407,8 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
     : {
       capture: {
         hasDeferredProjectionWork: input.hasDeferredProjectionWork,
+        publishedSourceWorkspaceVersionByProjectionScopeKey:
+          { ...(input.publishedSourceWorkspaceVersionByProjectionScopeKey ?? {}) },
         ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
         snapshots,
         sourceWorkspaceVersion: input.sourceWorkspaceVersion,
@@ -376,16 +443,42 @@ type ProjectableRecordReader = (input: {
  */
 export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   capture: HostedVaultShareProjectionCapture;
+  publicationStateVaultRoot?: string;
   shouldStop?: () => boolean;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionOfferResult> {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
+  let publicationState = emptyHostedVaultShareProjectionPublicationState();
+  if (input.publicationStateVaultRoot) {
+    try {
+      publicationState = await readHostedVaultShareProjectionPublicationState(
+        input.publicationStateVaultRoot,
+      );
+    } catch {
+      publicationState = emptyHostedVaultShareProjectionPublicationState();
+    }
+  }
   for (const snapshot of input.capture.snapshots) {
     if (input.shouldStop?.()) {
       return { outcome: "preempted" };
     }
     try {
+      const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+        snapshot.projectionScope,
+      );
+      const recordedPublication =
+        publicationState.publicationsByProjectionScopeKey[projectionScopeKey];
+      if (canSkipHostedVaultShareProjectionDelivery({
+        capture: input.capture,
+        projectionScopeKey,
+        recordedPublication,
+        snapshot,
+      })) {
+        outcomes.push("delivered");
+        continue;
+      }
       const request = {
+        ...(snapshot.memberTimeZone ? { memberTimeZone: snapshot.memberTimeZone } : {}),
         expectedGenerationToken: snapshot.generationToken,
         ...(input.capture.projectionMode
           ? { projectionMode: input.capture.projectionMode }
@@ -395,16 +488,30 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
         records: snapshot.records,
         sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
       };
+      if (new TextEncoder().encode(JSON.stringify(request)).byteLength > HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES - 1024) {
+        // Reserve the existing destination-continuation envelope. An oversized
+        // complete result is an error, never an empty replacement or truncation.
+        return { failureReason: "serialized_projection_too_large", outcome: "error" };
+      }
       const response = await input.vaultSharePort.deliver(request);
       if (response.status === "scope-failed") {
         outcomes.push("error");
         continue;
       }
+      if (response.status === "delivered") {
+        publicationState = await recordHostedVaultShareProjectionPublicationBestEffort({
+          capture: input.capture,
+          projectionScopeKey,
+          publicationState,
+          snapshot,
+          vaultRoot: input.publicationStateVaultRoot,
+        });
+      }
       outcomes.push(
         response.status === "delivered" ? "delivered" : "no-active-share",
       );
     } catch {
-      return { outcome: "error" };
+      return { failureReason: "delivery_exception", outcome: "error" };
     }
   }
   const outcome = combineHostedVaultShareOfferOutcomes(outcomes);
@@ -416,7 +523,60 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
           : "deferred",
     };
   }
-  return { outcome };
+  return outcome === "error"
+    ? { failureReason: "scope_failed", outcome }
+    : { outcome };
+}
+
+function canSkipHostedVaultShareProjectionDelivery(input: {
+  capture: HostedVaultShareProjectionCapture;
+  projectionScopeKey: string;
+  recordedPublication: HostedVaultShareProjectionPublication | undefined;
+  snapshot: HostedVaultShareProjectionCaptureSnapshot;
+}): boolean {
+  const publishedSourceWorkspaceVersion =
+    input.capture.publishedSourceWorkspaceVersionByProjectionScopeKey?.[
+      input.projectionScopeKey
+    ];
+  return (
+    !input.capture.projectionMode
+    && publishedSourceWorkspaceVersion !== undefined
+    && input.snapshot.contentDigest !== undefined
+    && input.recordedPublication?.generationToken === input.snapshot.generationToken
+    && input.recordedPublication.contentDigest === input.snapshot.contentDigest
+    && input.recordedPublication.sourceWorkspaceVersion
+      === publishedSourceWorkspaceVersion
+  );
+}
+
+async function recordHostedVaultShareProjectionPublicationBestEffort(input: {
+  capture: HostedVaultShareProjectionCapture;
+  projectionScopeKey: string;
+  publicationState: HostedVaultShareProjectionPublicationState;
+  snapshot: HostedVaultShareProjectionCaptureSnapshot;
+  vaultRoot?: string;
+}): Promise<HostedVaultShareProjectionPublicationState> {
+  if (
+    !input.vaultRoot
+    || input.capture.projectionMode
+    || input.snapshot.contentDigest === undefined
+  ) {
+    return input.publicationState;
+  }
+  const next = upsertHostedVaultShareProjectionPublication(
+    input.publicationState,
+    {
+      contentDigest: input.snapshot.contentDigest,
+      generationToken: input.snapshot.generationToken,
+      projectionScopeKey: input.projectionScopeKey,
+      sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
+    },
+  );
+  await writeHostedVaultShareProjectionPublicationState({
+    state: next,
+    vaultRoot: input.vaultRoot,
+  }).catch(() => undefined);
+  return next;
 }
 
 function resolveProjectableRecordReader(
@@ -654,18 +814,18 @@ export async function readProjectableSleepNights(
   if (!dateContext) {
     return [];
   }
+  const cutoffDate = projectionCutoffDate(dateContext.currentDate, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1);
+  if (!cutoffDate) return [];
   const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
-    from: projectionCutoffDate(
-      dateContext.currentDate,
-      HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
-    ) ?? undefined,
+    from: cutoffDate,
+    to: dateContext.currentDate,
   });
   const providers = [...new Set(sourceHealth
     .filter((source) => source.sleepNights > 0)
     .map((source) => source.provider))]
     .sort();
   if (providers.length > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
-    return [];
+    throw new TypeError("Vault share sleep sources exceed the complete projection bound.");
   }
   const records: HostedVaultShareDeliveryRecord[] = [];
   for (const provider of providers) {
@@ -674,7 +834,8 @@ export async function readProjectableSleepNights(
       return [];
     }
     const summaries = await summarizeWearableSleepRuntime(vaultRoot, {
-      limit: HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW,
+      from: cutoffDate,
+      to: dateContext.currentDate,
       providers: [provider],
     });
     records.push(...selectProjectableSleepNights(
@@ -683,9 +844,8 @@ export async function readProjectableSleepNights(
       source,
     ));
   }
-  return records.length <= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS
-    ? records.sort(compareHostedVaultShareDeliveryRecords)
-    : [];
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  return records.sort(compareHostedVaultShareDeliveryRecords);
 }
 
 export async function readProjectableDailyMetricDays(
@@ -699,18 +859,23 @@ export async function readProjectableDailyMetricDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
   }
-  const points = await readMetricPointsByPublicSource({
+  const sourcePoints = await readMetricPointsByPublicSource({
     cutoffDate,
+    throughDate: dateContext.currentDate,
     metricKeys: [spec.metricKey],
     vaultRoot,
   });
   const acceptsManualSleepStage = spec.metricKey === "deep-sleep-minutes"
     || spec.metricKey === "rem-sleep-minutes";
+  // A nap does not establish a reported night; retain other metrics from naps.
+  const points = spec.metricKey === "total-sleep-minutes" || acceptsManualSleepStage
+    ? sourcePoints.filter((point) => point.context.sleepType !== "nap")
+    : sourcePoints;
   const dayGrainPoints = acceptsManualSleepStage
     ? points.map((point) =>
         isManualSleepStageCorrection(point)
@@ -776,7 +941,7 @@ function selectPublicSourceMetricSeries(input: {
     pointsBySource.set(source.source, group);
   }
   if (pointsBySource.size > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
-    return null;
+    throw new TypeError("Vault share metric sources exceed the complete projection bound.");
   }
   const preservesRecordedAt = input.metricKey === "deep-sleep-minutes"
     || input.metricKey === "rem-sleep-minutes";
@@ -820,23 +985,26 @@ function uniqueMetricPointsByPublicSource(
 
 async function readMetricPointsByPublicSource(input: {
   cutoffDate: string;
+  throughDate: string;
   metricKeys: readonly string[];
   vaultRoot: string;
 }): Promise<MetricPoint[]> {
   const sourceHealth = await summarizeWearableSourceHealthRuntime(
     input.vaultRoot,
-    { from: input.cutoffDate },
+    { from: input.cutoffDate, to: input.throughDate },
   );
   const providers = [...new Set(sourceHealth.map((source) => source.provider))]
     .sort();
   const [sourceGroups, fallbackPoints] = await Promise.all([
     listMetricPointsByPublicSource(input.vaultRoot, {
       from: input.cutoffDate,
+      to: input.throughDate,
       metricKeys: input.metricKeys,
       providers,
     }),
     listMetricPointsBatch(input.vaultRoot, input.metricKeys.map((metricKey) => ({
       from: input.cutoffDate,
+      to: input.throughDate,
       limit: null,
       metricKey,
     }))),
@@ -938,13 +1106,14 @@ export async function readProjectableWorkoutDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
   }
   const points = await readMetricPointsByPublicSource({
     cutoffDate,
+    throughDate: dateContext.currentDate,
     metricKeys: ["workout-count", "workout-minutes"],
     vaultRoot,
   });
@@ -973,29 +1142,20 @@ export async function readProjectableWorkoutsDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const calendarCurrentDate = readTimeZoneDate(
-    nowMs,
-    HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE,
-  );
-  if (!calendarCurrentDate) {
-    return [];
-  }
-  // The oldest emitted UTC-12 date can begin on the preceding UTC date in a
-  // positive-offset event zone. Read that one preceding date, then let the
-  // event-zone conversion and fixed eight-date producer window filter it.
-  const sourceReadFromDate = shiftIsoDate(
-    calendarCurrentDate,
-    -HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
-  );
+  const vaultTimeZone = await readProjectableVaultTimeZone(vaultRoot);
+  const currentDate = readTimeZoneDate(nowMs, vaultTimeZone ?? "");
+  if (!currentDate) return [];
+  const sourceReadFromDate = shiftIsoDate(currentDate, -HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
   if (!sourceReadFromDate) {
     return [];
   }
-  const [activityRead, vaultTimeZone] = await Promise.all([
-    readProjectableActivitySessionRows(vaultRoot, sourceReadFromDate, context),
-    readProjectableVaultTimeZone(vaultRoot),
-  ]);
+  const sourceReadThroughDate = shiftIsoDate(currentDate, 1);
+  if (!sourceReadThroughDate) return [];
+  const activityRead = await readProjectableActivitySessionRows(
+    vaultRoot, sourceReadFromDate, sourceReadThroughDate, context,
+  );
   if (!activityRead.complete) {
-    return [];
+    throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteWorkoutItemSources(selectProjectableWorkoutsDays({
     nowMs,
@@ -1046,7 +1206,7 @@ export async function readProjectableActivityMinutesDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1054,10 +1214,11 @@ export async function readProjectableActivityMinutesDays(
   const activityRead = await readProjectableActivitySessionRows(
     vaultRoot,
     cutoffDate,
+    dateContext.currentDate,
     context,
   );
   if (!activityRead.complete) {
-    return [];
+    throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteRecordSources(selectProjectableActivityMinutesDays({
     currentDate: dateContext.currentDate,
@@ -1078,7 +1239,7 @@ export async function readProjectableActivityDistanceDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1086,10 +1247,11 @@ export async function readProjectableActivityDistanceDays(
   const activityRead = await readProjectableActivitySessionRows(
     vaultRoot,
     cutoffDate,
+    dateContext.currentDate,
     context,
   );
   if (!activityRead.complete) {
-    return [];
+    throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteRecordSources(selectProjectableActivityDistanceDays({
     currentDate: dateContext.currentDate,
@@ -1110,7 +1272,7 @@ export async function readProjectableActivitySessionCountDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1118,10 +1280,11 @@ export async function readProjectableActivitySessionCountDays(
   const activityRead = await readProjectableActivitySessionRows(
     vaultRoot,
     cutoffDate,
+    dateContext.currentDate,
     context,
   );
   if (!activityRead.complete) {
-    return [];
+    throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteRecordSources(selectProjectableActivitySessionCountDays({
     currentDate: dateContext.currentDate,
@@ -1140,13 +1303,14 @@ export async function readProjectableHeartRateZoneDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
   }
   const points = await readMetricPointsByPublicSource({
     cutoffDate,
+    throughDate: dateContext.currentDate,
     metricKeys: HEART_RATE_ZONE_MINUTES_METRIC_KEYS,
     vaultRoot,
   });
@@ -1177,21 +1341,29 @@ export async function readProjectableHeartRateZoneDays(
  * sleep timestamps stay inside the encrypted payload.
  */
 export function selectProjectableSleepNights(
-  summaries: readonly Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">[],
+  summaries: readonly (
+    Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">
+    & Partial<Pick<ProjectedWearableSleepSummary, "sleepType" | "sleepState">>
+  )[],
   currentDate: string,
   source?: HostedVaultShareDataSource,
 ): HostedVaultShareDeliveryRecord[] {
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const summary of summaries) {
-    if (typeof summary.sleepStartAt !== "string" || typeof summary.sleepEndAt !== "string") {
+    if (
+      summary.sleepType === "nap"
+      || isShortOrTentativeSleepSession(summary)
+      || typeof summary.sleepStartAt !== "string"
+      || typeof summary.sleepEndAt !== "string"
+    ) {
       continue;
     }
 
     if (!isDateInProjectionWindow(
       summary.date,
       currentDate,
-      HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -1207,11 +1379,9 @@ export function selectProjectableSleepNights(
       ...(source ? { source } : {}),
     });
 
-    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW) {
-      break;
-    }
   }
 
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
   return records;
 }
 
@@ -1230,7 +1400,7 @@ export function selectProjectableDailyMetricDays(
     if (!isDateInProjectionWindow(
       point.date,
       currentDate,
-      HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -1264,10 +1434,8 @@ export function selectProjectableDailyMetricDays(
       continue;
     }
     const projectedAt = new Date(nowMs).toISOString();
-    const sourceTaggedSleepStage = source !== undefined && (
-      spec.metricKey === "deep-sleep-minutes"
-      || spec.metricKey === "rem-sleep-minutes"
-    );
+    const sourceTaggedSleepStage = source !== undefined
+      && ["deep-sleep-minutes", "rem-sleep-minutes"].includes(spec.metricKey);
 
     records.push({
       data: {
@@ -1286,6 +1454,7 @@ export function selectProjectableDailyMetricDays(
               sourcesDisagree: sleepMetricSourcesDisagree(sources),
             }
           : {}),
+        ...parseHostedVaultShareSleepClassification(point.context, spec.metricKey),
         ...(point.provisional ? { provisional: true } : {}),
         ...(sourceTaggedSleepStage
           ? { recordedAt: point.recordedAt ?? null }
@@ -1303,15 +1472,9 @@ export function selectProjectableDailyMetricDays(
       ),
     });
 
-    if (
-      records.length
-      >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW
-        * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
-    ) {
-      break;
-    }
   }
 
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -1375,12 +1538,12 @@ export async function readProjectableMealNutritionDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
   }
-  const summary = await readProjectableMealNutritionTotals(vaultRoot, cutoffDate, context);
+  const summary = await readProjectableMealNutritionTotals(vaultRoot, cutoffDate, dateContext.currentDate, context);
   return selectProjectableMealNutritionDays(
     summary.days,
     spec,
@@ -1391,21 +1554,22 @@ export async function readProjectableMealNutritionDays(
 async function readProjectableMealNutritionTotals(
   vaultRoot: string,
   cutoffDate: string,
+  throughDate: string,
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<MealNutritionTotalsResult> {
   if (context) {
-    const cacheKey = `${vaultRoot}\u0000${cutoffDate}`;
+    const cacheKey = `${vaultRoot}\u0000${cutoffDate}\u0000${throughDate}`;
     context.mealNutritionTotalsByVaultAndCutoff ??= new Map();
     const cached = context.mealNutritionTotalsByVaultAndCutoff.get(cacheKey);
     if (cached) {
       return cached;
     }
-    const read = readProjectableMealNutritionTotals(vaultRoot, cutoffDate);
+    const read = readProjectableMealNutritionTotals(vaultRoot, cutoffDate, throughDate);
     context.mealNutritionTotalsByVaultAndCutoff.set(cacheKey, read);
     return read;
   }
 
-  return readMealNutritionTotals(vaultRoot, { from: cutoffDate });
+  return readMealNutritionTotals(vaultRoot, { from: cutoffDate, to: throughDate });
 }
 
 /**
@@ -1438,7 +1602,7 @@ export function selectProjectableMealNutritionDays(
     if (!isDateInProjectionWindow(
       day.date,
       currentDate,
-      HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -1465,11 +1629,9 @@ export function selectProjectableMealNutritionDays(
       source,
     });
 
-    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
-      break;
-    }
   }
 
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
   return records;
 }
 
@@ -1495,7 +1657,7 @@ export function selectProjectableWorkoutDays(
     if (!isDateInProjectionWindow(
       countRow.date,
       input.currentDate,
-      HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+      (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) - 1,
     )) {
       continue;
     }
@@ -1546,11 +1708,9 @@ export function selectProjectableWorkoutDays(
       ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision([countRow, minuteRow])),
     });
 
-    if (records.length >= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
-      break;
-    }
   }
 
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -1571,9 +1731,10 @@ function requireCompleteRecordSources(
     }
     sources.add(record.source.source);
   }
-  return sources.size <= HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
-    ? records
-    : [];
+  if (sources.size > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
+    throw new TypeError("Vault share sources exceed the complete projection bound.");
+  }
+  return records;
 }
 
 function requireCompleteWorkoutItemSources(
@@ -1591,9 +1752,10 @@ function requireCompleteWorkoutItemSources(
       sources.add(workout.source.source);
     }
   }
-  return sources.size <= HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
-    ? records
-    : [];
+  if (sources.size > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
+    throw new TypeError("Vault share sources exceed the complete projection bound.");
+  }
+  return records;
 }
 
 export function selectProjectableWorkoutsDays(
@@ -1618,7 +1780,7 @@ export function selectProjectableWorkoutsDays(
       continue;
     }
     const startedAtMs = Date.parse(startedAt);
-    if (!Number.isFinite(startedAtMs)) {
+    if (!Number.isFinite(startedAtMs) || startedAtMs > input.nowMs) {
       continue;
     }
     const timeZone = normalizeIanaTimeZone(row.timeZone) ?? vaultTimeZone;
@@ -1677,27 +1839,9 @@ export function selectProjectableWorkoutsDays(
     }
   }
 
-  // A date is complete only after it has ended in UTC-12, the last civil
-  // timezone to leave it. This boundary is global and monotonic: changing a
-  // member's declared timezone cannot reopen a result that was already final.
-  const calendarCurrentDate = readTimeZoneDate(
-    input.nowMs,
-    HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE,
-  );
-  if (!calendarCurrentDate) {
-    return [];
-  }
-  const calendarClosedThroughDate = shiftIsoDate(calendarCurrentDate, -1);
-  if (!calendarClosedThroughDate) {
-    return [];
-  }
-  const windowDates = readRecentIsoDates(
-    calendarCurrentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
-  );
-  if (windowDates.length !== HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
-    return [];
-  }
+  const window = readProjectableWorkoutWindow(input.nowMs, vaultTimeZone);
+  if (!window) return [];
+  const { calendarClosedThroughDate, windowDates } = window;
   const windowDateSet = new Set(windowDates);
 
   const groups = new Map<string, ProjectableWorkoutCandidate[]>();
@@ -1714,7 +1858,7 @@ export function selectProjectableWorkoutsDays(
     if (!hostedVaultShareWorkoutsFitDailyCapacity(
       candidates.map((candidate) => candidate.workout),
     )) {
-      return [];
+      throw new TypeError("Vault share workouts exceed a complete source/date bound.");
     }
   }
 
@@ -1743,6 +1887,30 @@ export function selectProjectableWorkoutsDays(
       ),
     };
   });
+}
+
+function readProjectableWorkoutWindow(nowMs: number, vaultTimeZone: string | null) {
+  // A date is complete only after it has ended in UTC-12, the last civil
+  // timezone to leave it. This boundary is global and monotonic: changing a
+  // member's declared timezone cannot reopen a result that was already final.
+  const calendarCurrentDate = readTimeZoneDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE,
+  );
+  if (!calendarCurrentDate) {
+    return null;
+  }
+  const calendarClosedThroughDate = shiftIsoDate(calendarCurrentDate, -1);
+  if (!calendarClosedThroughDate) {
+    return null;
+  }
+  const currentDate = vaultTimeZone ? readTimeZoneDate(nowMs, vaultTimeZone) : null;
+  if (!currentDate) return null;
+  const windowDates = readRecentIsoDates(currentDate, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
+  if (windowDates.length !== HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) {
+    return null;
+  }
+  return { calendarClosedThroughDate, windowDates };
 }
 
 function readTimeZoneDate(
@@ -1864,12 +2032,10 @@ export function selectProjectableActivityMinutesDays(
 
   const records: HostedVaultShareDeliveryRecord[] = [];
   for (const group of [...groups.values()].sort((left, right) => right.date.localeCompare(left.date))) {
-    if (
-      group.sessionCount <= 0
-      || group.sessionCount > 100
-      || group.sessionMinutes <= 0
-      || group.sessionMinutes > DAY_MAX_MINUTES
-    ) {
+    if (group.sessionCount > DAY_MAX_SESSIONS || group.sessionMinutes > DAY_MAX_MINUTES) {
+      throw new TypeError("Vault share activity totals exceed a complete source/date bound.");
+    }
+    if (group.sessionCount <= 0 || group.sessionMinutes <= 0) {
       continue;
     }
 
@@ -1889,6 +2055,7 @@ export function selectProjectableActivityMinutesDays(
     });
   }
 
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -1936,13 +2103,10 @@ export function selectProjectableActivityDistanceDays(
 
   const records: HostedVaultShareDeliveryRecord[] = [];
   for (const group of [...groups.values()].sort((left, right) => right.date.localeCompare(left.date))) {
-    if (
-      group.sessionCount <= 0
-      || group.sessionCount > DAY_MAX_SESSIONS
-      || group.hasIncompleteDistance
-      || group.sessionDistanceMeters <= 0
-      || group.sessionDistanceMeters > DAY_MAX_DISTANCE_METERS
-    ) {
+    if (group.sessionCount > DAY_MAX_SESSIONS || group.sessionDistanceMeters > DAY_MAX_DISTANCE_METERS) {
+      throw new TypeError("Vault share activity totals exceed a complete source/date bound.");
+    }
+    if (group.sessionCount <= 0 || group.hasIncompleteDistance || group.sessionDistanceMeters <= 0) {
       continue;
     }
 
@@ -1962,6 +2126,7 @@ export function selectProjectableActivityDistanceDays(
     });
   }
 
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -1997,9 +2162,10 @@ export function selectProjectableActivitySessionCountDays(
 
   const records: HostedVaultShareDeliveryRecord[] = [];
   for (const group of [...groups.values()].sort((left, right) => right.date.localeCompare(left.date))) {
-    if (group.sessionCount <= 0 || group.sessionCount > DAY_MAX_SESSIONS) {
-      continue;
+    if (group.sessionCount > DAY_MAX_SESSIONS) {
+      throw new TypeError("Vault share activity totals exceed a complete source/date bound.");
     }
+    if (group.sessionCount <= 0) continue;
 
     records.push({
       data: {
@@ -2016,6 +2182,7 @@ export function selectProjectableActivitySessionCountDays(
     });
   }
 
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -2090,7 +2257,7 @@ export function selectProjectableHeartRateZoneDays(
     if (!isDateInProjectionWindow(
       date,
       currentDate,
-      HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -2099,10 +2266,9 @@ export function selectProjectableHeartRateZoneDays(
       .sort((left, right) => left.zone - right.zone || (left.label ?? "").localeCompare(right.label ?? ""));
 
     if (
-      zones.length === 0
-      || zones.length > HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY
+      zones.length > HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY
     ) {
-      return [];
+      throw new TypeError("Vault share heart-rate zones exceed a complete date bound.");
     }
 
     records.push({
@@ -2117,34 +2283,38 @@ export function selectProjectableHeartRateZoneDays(
     });
   }
 
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
 async function readProjectableActivitySessionRows(
   vaultRoot: string,
   cutoffDate: string,
+  throughDate: string,
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<ActivitySessionProjectionReadResult> {
   if (context) {
-    const cacheKey = `${vaultRoot}\u0000${cutoffDate}`;
+    const cacheKey = `${vaultRoot}\u0000${cutoffDate}\u0000${throughDate}`;
     context.activityRowsByVaultAndCutoff ??= new Map();
     const cached = context.activityRowsByVaultAndCutoff.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate);
+    const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate, throughDate);
     context.activityRowsByVaultAndCutoff.set(cacheKey, read);
     return read;
   }
 
+  const rowLimit = ACTIVITY_SESSION_SOURCE_ROW_LIMIT;
   const entities = await listCanonicalEntities(vaultRoot, {
     family: "event",
     from: cutoffDate,
+    to: throughDate,
     kinds: ["activity_session", "intervention_session"],
-    limit: ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT,
+    limit: rowLimit + 1,
   });
-  if (entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT) {
+  if (entities.length > rowLimit) {
     return { complete: false, rows: [] };
   }
 
@@ -2367,7 +2537,7 @@ function isProjectableActivitySessionRow(
   return isDateInProjectionWindow(
     row.date,
     currentDate,
-    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   )
     && activityTextMatchesKind(row.activityKind, activityKind);
 }
@@ -2789,4 +2959,13 @@ function readContextString(context: MetricSeriesPoint["context"] | undefined, ke
   }
   const value = context[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function assertCompleteProjectionRecords(
+  records: readonly HostedVaultShareDeliveryRecord[],
+  maxRecords: number,
+): void {
+  if (records.length > maxRecords || new Set(records.map((record) => record.recordKey)).size !== records.length) {
+    throw new TypeError("Vault share projection exceeds its complete source/date bound.");
+  }
 }

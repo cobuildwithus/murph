@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
-  assistantStatusAutomationSchema,
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -13,15 +12,15 @@ import {
 test('assistant session options expose only Codex app-server execution and resume values', () => {
   const options = serializeAssistantProviderSessionOptions({
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
   })
   assert.equal(options.executionDriver, 'codex-app-server')
   assert.equal(options.resumeKind, 'codex-thread')
-  assert.equal(options.modelProvider, 'vercel-ai-gateway')
+  assert.equal(options.modelProvider, 'openai')
   assert.equal(options.provider, 'codex-cli')
 
   assert.throws(
@@ -39,8 +38,8 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     provider: 'codex-cli',
     approvalPolicy: 'never',
     codexHome: '/tmp/codex-home',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     oss: false,
     profile: 'default',
     reasoningEffort: 'medium',
@@ -70,8 +69,8 @@ test('assistant session parsing resolves Codex modelProvider and status automati
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       oss: false,
       profile: 'default',
       reasoningEffort: 'medium',
@@ -88,47 +87,8 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     sessionOptions.continuityFingerprint,
   )
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
-  assert.equal(parsedSession.providerOptions.modelProvider, 'vercel-ai-gateway')
+  assert.equal(parsedSession.providerOptions.modelProvider, 'openai')
   assert.equal(parsedSession.providerOptions.resumeKind, 'codex-thread')
-
-  const statusAutomation = assistantStatusAutomationSchema.parse({
-    autoReply: [
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-08T12:00:00.000Z',
-        eligibleAfter: null,
-      },
-      {
-        channel: 'email',
-        enabledAt: '2026-04-08T12:01:00.000Z',
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'input-2',
-          occurredAt: '2026-04-08T12:06:00.000Z',
-          sourceKind: 'inbox-capture',
-        },
-      },
-    ],
-    updatedAt: '2026-04-08T12:10:00.000Z',
-  })
-
-  assert.equal(statusAutomation.autoReply[0]?.eligibleAfter, null)
-  assert.equal(statusAutomation.autoReply[1]?.eligibleAfter?.inputId, 'input-2')
-
-  assert.throws(() =>
-    assistantStatusAutomationSchema.parse({
-      autoReply: [
-        {
-          channel: 'telegram',
-          cursor: {
-            captureId: 'capture-legacy',
-            occurredAt: '2026-04-08T12:05:00.000Z',
-          },
-        },
-      ],
-      updatedAt: '2026-04-08T12:10:00.000Z',
-    }),
-  )
 })
 
 test('assistant session parsing fails closed for unsupported persisted sessions', () => {

@@ -6,9 +6,11 @@ import {
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
-import type {
-  AssistantHostedToolContext,
-  AssistantHostedUserActionScope,
+import {
+  createAssistantHostedDeviceActivityRequestKey,
+  createAssistantHostedScheduledRequestKey,
+  type AssistantHostedToolContext,
+  type AssistantHostedUserActionScope,
 } from '../src/assistant/hosted-tool-context.js'
 
 const CONNECT_URL =
@@ -93,6 +95,87 @@ describe('assistant Clinical Records connect-link tool', () => {
         'current user input in a private conversation',
       )
     }
+    expect(createConnectLink).not.toHaveBeenCalled()
+  })
+
+  it('pins the canonical scheduled link key byte for byte', () => {
+    expect(createAssistantHostedScheduledRequestKey({
+      operation: 'clinical-records-connect-link',
+      origin: {
+        automationId: 'automation_scheduled_tools',
+        kind: 'automation_occurrence',
+        occurrenceAt: '2026-08-06T14:30:00.000Z',
+      },
+    })).toBe(
+      'scheduled_e47fb06c6715bc52a2903c50a82cf4b59f34f5bde5657173c8c3231430c4497e',
+    )
+  })
+
+  it('keys a private device-activity link on its wearable event', async () => {
+    const createConnectLink = vi.fn(async () => ({
+      connectUrl: CONNECT_URL,
+      expiresAt: '2026-07-16T12:15:00.000Z',
+      ok: true as const,
+    }))
+    const request = readConnectLinkRequest({})
+    if (!request) {
+      throw new Error('Expected a Clinical Records connect-link request.')
+    }
+    const occurrence = {
+      occurrenceKey: 'a'.repeat(40),
+      parentAutomationId: 'automation_sync_listener',
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        ...createHostedToolContext({ createConnectLink, userActionScope: null }),
+        currentConversationScope: () => 'direct',
+        currentDeviceActivityOccurrence: () => occurrence,
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(result.rpcResult.success).toBe(true)
+    const requestKey = createAssistantHostedDeviceActivityRequestKey({
+      occurrence,
+      operation: 'clinical-records-connect-link',
+    })
+    expect(requestKey).toMatch(/^scheduled_[a-f0-9]{64}$/u)
+    expect(createConnectLink).toHaveBeenCalledWith({ requestKey, signal: null })
+    expect(createAssistantHostedDeviceActivityRequestKey({
+      occurrence: { ...occurrence, occurrenceKey: 'b'.repeat(40) },
+      operation: 'clinical-records-connect-link',
+    })).not.toBe(requestKey)
+  })
+
+  it('rejects a device-activity occurrence without a private audience', async () => {
+    const createConnectLink = vi.fn()
+    const request = readConnectLinkRequest({})
+    if (!request) {
+      throw new Error('Expected a Clinical Records connect-link request.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        ...createHostedToolContext({ createConnectLink, userActionScope: null }),
+        currentConversationScope: () => 'group',
+        currentDeviceActivityOccurrence: () => ({
+          occurrenceKey: 'a'.repeat(40),
+          parentAutomationId: 'automation_sync_listener',
+        }),
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(result.rpcResult.success).toBe(false)
     expect(createConnectLink).not.toHaveBeenCalled()
   })
 

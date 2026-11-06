@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "retire-public-product-search",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Public product search retired",
+    "summary": "The standalone product search and branded-food comparison pages have been removed.",
+    "details": "Murph still looks up food and supplement labels in conversation and uses nutrition information for food logging.",
+    "relevanceTags": [
+      "nutrition"
+    ],
+    "sourcePullRequests": []
+  }
+}

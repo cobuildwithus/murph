@@ -1,33 +1,35 @@
 # @murphai/device-syncd
 
-Workspace-private local device sync runtime for Murph.
+Workspace-private hosted device ingestion and reconciliation runtime for Murph.
+
+Junction `blood_oxygen` resource jobs that fail complete-day normalization and
+`electrocardiogram_voltage` jobs that fail recording binding stay queued for a
+30-minute recheck even after their initial attempt allowance. Existing data and
+the failed resource/window remain intact; corrected provider responses use the
+same import owner. This does not revive already terminal jobs, weaken source
+binding, or bypass disconnect and lease fences. Other failure classes retain
+their existing retry behavior. See `agent-docs/RELIABILITY.md` for the finite
+normalization categories, ECG collection counts, and hosted progress diagnostics.
 
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 
-Murph's CLI can install, start, reuse, and stop this daemon for the selected vault through `murph device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
+Web owns authenticated device control and connection authority. The runner consumes
+shared hosted-runtime contracts and finite scheduler/worker passes. Local daemon
+entrypoints, listeners, launchers, and wearable fixture capture are retired.
 
-The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
+`@murphai/device-syncd/public-ingress` owns OAuth state, callbacks and webhook
+preflight/dispatch. Configured provider assembly remains on
+`@murphai/device-syncd/config`. Shared source/account types, including source
+resource availability, remain available on `@murphai/device-syncd/client`.
 
-The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook preflight/dispatch. Hosted or alternate HTTP surfaces should import that seam from `@murphai/device-syncd/public-ingress`; the package root stays daemon-oriented. That shared ingress is the seam used by the current hosted Vercel control plane while keeping the local/tunneled callback flow alive.
-Daemon config readers and HTTP response helpers stay on `@murphai/device-syncd/config`
-and `@murphai/device-syncd/http` instead of leaking back through the shared ingress seam.
-Hosted surfaces should also reuse the configured-provider assembly helpers on
-`@murphai/device-syncd/config` instead of maintaining app-local provider config objects
-or registration lists.
-For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers inside this workspace or bundled public tarballs.
+Provider snapshots flow through importers/core. Jobs serialize per account and
+retain bounded provider batching, retry, lease and disconnect fences. Hosted
+snapshots exclude the SQLite execution cache; Web remains connection authority.
 
-What it does:
-- serves a provider-agnostic local control plane for CLI and web auth flows
-- owns OAuth connection state
-- stores encrypted provider tokens in SQLite under `.runtime/operations/device-sync/state.sqlite`
-- keeps `.runtime/operations/device-sync/**` local-only; those secrets, cursors, launcher artifacts, and logs are excluded from hosted workspace snapshots because the hosted lane uses a web-owned hosted device-sync control plane plus narrow signed runtime callbacks instead of the local daemon store
-- treats the managed control bearer and managed OAuth encryption secret as separate local files, so bearer rotation does not invalidate encrypted provider tokens
-- accepts provider webhooks when a provider supports them
-- runs background backfill and reconcile jobs
-- serializes active jobs per account so rotating refresh-token flows do not race
-- may execute compatible already-durable jobs as bounded provider-owned batches while keeping job rows granular for retry, ack, and idempotency
-- treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
-- imports provider snapshots through `@murphai/importers`
+Hosted source hydration preserves control-plane source keys even when a cold
+restore creates a new local account id. Local-only accounts retain deterministic
+source-key creation; established local source identities and lifecycle fences
+remain stable during warm hydration.
 
 Canonical imports keep member-authored event revisions live while advancing
 the connected-source baseline beneath them. Unrelated facts in the same
@@ -37,7 +39,7 @@ spine owner; device jobs, wakes, and hosted transports carry no parallel
 conflict state or overwrite preference.
 
 Current providers:
-- Direct runtime providers: Oura, Strava, and WHOOP.
+- Junction is the only hosted runtime provider. WHOOP, Oura, Strava, Garmin, and other source labels retain their importers and read filters.
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
@@ -109,12 +111,38 @@ Current providers:
   attributed workouts per one-day window, then reads Junction's dedicated
   per-workout stream endpoint serially and caps each stream at 100,000 points.
   The exact production assembly has
-  48 production timeseries resources: 6 wide and 42 one-day resources, including
-  41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
+  48 production timeseries resources: 7 wide and 41 one-day resources, including
+  40 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
-  pages with one attempt and an eight-second timeout per page, limiting provider
-  wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
-  hour; daily aggregates remain day-atomic. Workout streams use the same bounded
+  pages with one attempt and a 12-second timeout per page (36 seconds of request
+  budgets, excluding processing). Ordinary full-job summaries use the same limits;
+  coupled sleep/sleep-cycle summaries use 7.5 seconds per request and provider
+  inventory uses one page at 12 seconds. These per-request caps do not establish
+  an outer job budget or guarantee completion within one pass. The five-second
+  batching interval, generic 15-second request default, page/attempt limits,
+  job retries, and foreground cancellation are unchanged.
+  An hourly/session feature exceeding either the page or record cap retries as one complete
+  hour; daily aggregates remain day-atomic. Resource-only hourly-feature jobs use
+  the same reduction policy when a complete day exceeds the collection cap.
+  Their existing scalar window coordinate retains one complete hour per durable
+  suffix, preserving committed days, source admission and foreground yielding.
+  An oversized individual hour still fails without partial import; this does
+  not replay or reset earlier terminal jobs. Historical and webhook resource jobs
+  for uncapped dense daily-aggregate and hourly/session resources begin with one
+  closed UTC day per request. The compatible resource reader accepts and retains
+  `timeseriesWindowHours: 1` on each hourly suffix. Deploy that reader and verify
+  serving and warm-invocation convergence before enabling the overflow producer;
+  retain that reader floor while hourly continuations can remain durable.
+  Daily aggregates stay day-atomic.
+  A job's first nonempty day commits alone, as the
+  one-day owner did; later consecutive closed days share one canonical import
+  (up to eight days, 4,000 records, or whatever has accumulated after five
+  seconds) after one fresh source-authority read. Because a yielded or aborted
+  job's writes are rejected, these bounds keep every pass that completes a day
+  from losing it to a later slow read or pass deadline. A yield, abort, or
+  retryable failure resumes at the first uncommitted day, and already-read days
+  commit before a retryable failure. Calendar-day, capped, workout-stream, and
+  ECG resources keep one canonical day per write. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
   serial stream reads. Each reduced unit is imported before the scalar resource
   and window coordinate advance. A deployed v1 resource envelope is accepted
@@ -150,6 +178,16 @@ Current providers:
   the committed `queued`/`dead` transition and remaining bounded attempt budget,
   while a typed origin distinguishes them from canonical-apply and checkpoint-side
   diagnostics.
+- Hosted dirty admission coalesces overlapping plain Garmin notification fetches
+  for steps, distance, active calories, and respiratory rate within one bounded
+  dirty page. Only matching resource and event types share a range, capped at
+  366 days. Inline data, backfill/cursor payloads, and unknown fields stay separate.
+  Every original payload retains its acknowledgement owner; group identities
+  include all original payload IDs so fresh notifications cannot join older
+  fetched work. Existing original jobs prevent coalescing their group, and
+  retained shared continuations keep their narrowed window on cold restore.
+  Changing a page's membership can conservatively repeat a fetch; it never
+  treats overlap alone as proof that new notifications were imported.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
@@ -161,13 +199,26 @@ Current providers:
   `temporal-*` facet set through existing authoritative event sets, so a
   successful empty or insufficient replacement retracts stale derived facts;
   failed or yielded work grants no authority.
-- The temporal horizon is clamped to 1–14 authoritative vault-local days. The
-  newest eligible day imports inline, while older resource/day coordinates use
-  the existing durable queue in newest-first order. Queued or running work
-  deduplicates across restarts, while succeeded rows remain history rather than
-  suppressing a later scheduled pull whose source roster or provider data may
-  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
-  reconcile follow-up remain serialized by the existing per-account fence.
+- The temporal horizon is clamped to 1–14 authoritative vault-local days. All
+  complete-day work uses the existing durable resource/day queue, newest first.
+  A hashed `junctionTemporalSweepV1` metadata marker records the scheduled scope:
+  newest eligible day, timezone, resources, horizon, and stable source roster and
+  capabilities. Matching scheduled reconciles skip the broad sweep; a new day or
+  changed scope schedules it again. The marker and children commit atomically in
+  local SQLite. Hosted recovery checkpoints the marker with exact retained jobs
+  before publishing it to Web; SQLite itself is excluded from hosted snapshots.
+  The marker never proves an import completed. Ordinary reconciliation keeps its cadence.
+- Oxygen/stress data-event jobs also queue intersecting local days within that
+  rolling horizon, plus days still awaiting closure and the 24-hour arrival lag.
+  Future children become available only after the lag. Bursts share the existing
+  day key; the account fence ensures an event arriving during a fetch executes
+  afterward and can recreate its completed day job. Daily repair covers missing
+  events and late corrections. No source-authority check is cached or removed.
+- Queued/running children retain existing retries across restarts. Succeeded or
+  dead rows can be recreated; a daily sweep has at most 28 temporal children plus
+  one ordinary continuation. Targeted events add at most the configured horizon
+  plus three not-yet-eligible local days for one resource. All jobs stay serialized
+  by the existing account fence, with unchanged complete-source-day validation.
 - Temporal children never advance generic account completion. That watermark is
   account activity state rather than complete floor coverage, so every scheduled
   reconcile still refetches configured ordinary resources. Collection remains
@@ -197,7 +248,7 @@ the provider parser exposes it as `providerSentAt`. This is distinct from the
 provider event's `occurredAt` and the shared ingress receipt time. Generic
 ingress carries only those typed timestamps and the stripped webhook summary;
 it never forwards signature headers or raw provider payloads as observability
-metadata. Junction, Oura, WHOOP, and Strava currently expose verified send
+metadata. Junction exposes verified send
 times. Provider adapters likewise omit top-level `occurredAt` when the signed
 payload does not identify the event time, even if an import window needs a
 receipt-time fallback internally. A missing timestamp means the provider did
@@ -215,7 +266,7 @@ and every supported redrive path are proven free of its schema version.
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
 It also does **not** own provider-specific webhook-admin secrets. If a provider
 needs verification or subscription credentials, keep them on that provider's
-config and factory path instead of widening the generic ingress or daemon
+config and factory path instead of widening the generic ingress or runtime
 HTTP/env shapes.
 
 ## Provider model
@@ -244,22 +295,60 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
-One worker drain reuses a single in-memory canonical import session. Core may
-reuse its event-identity index only when the event-ledger metadata fingerprint
-is unchanged and every event id, external reference, Junction profile scope,
-and authoritative facet scope changed earlier in the drain is disjoint from
-the next import. Overlap, an external ledger write, or an import failure forces
-a full rescan. The session is neither persisted nor shared across drains, and
-the worker still checks the foreground-yield fence before each job.
+Junction summary continuations call the canonical importer only when the prepared
+summary map contains a resource. A completed summary phase does not manufacture
+an empty provider snapshot or receipt. Explicit fetched empty collections retain
+their existing import path; complete-source-day timeseries imports and their
+authoritative corrections are unchanged. Source checks, continuation checkpoints,
+content proof, and reconciliation cadence keep their existing owners.
+
+Core retains one bounded event-identity index in process memory across worker
+drains. Under the canonical write lock, it checks the vault and shard metadata
+fingerprint before reuse and advances the index from committed append rows using
+the cold builder's reducer. Unknown writes, shard or vault replacement, import
+failure, and histories above 100,000 rows discard the cache. Nothing is persisted;
+a fresh process rebuilds from the ledger. The worker still checks the foreground
+yield fence before each job.
 
 The job's abort signal also reaches snapshot normalization and canonical import
-preparation. Large identity scans yield to the event loop at bounded row
-intervals so foreground polling can interrupt them. Cancellation before
-publication releases the canonical lock, discards the session cache, and
-requeues the existing job without consuming its retry budget. Once canonical
-publication starts it finishes atomically and reports committed progress, even
+preparation. Hosted conversation admission additionally supplies an import-only
+predicate: preparation waits or aborts before publication, then retries the same
+snapshot in place without re-downloading or releasing the job. Hosted admission
+re-arms its 30-second window at provider return, protecting transcript/session
+finalization and reply dispatch even after a long provider phase. The existing
+accepted-input release callback owns re-arming; provider start and phase cleanup
+close the window. The existing 100-ms service poll aborts preparation; identity
+visitation and reduction check that signal and yield every 256 rows.
+
+Fairness is per retained snapshot: 30 seconds after its first deferral, preparation
+runs through even if newer foreground windows remain open. New messages and
+preparation retries cannot renew this deadline. Ordinary job cancellation still
+applies; this bounds foreground deferral, not total import execution time.
+Large identity scans yield to the event loop at bounded row intervals.
+Cancellation before publication releases the canonical lock and discards the identity cache.
+Ordinary job-level cancellation still requeues work without consuming retry
+budget. Once canonical publication starts it finishes atomically and reports committed progress, even
 if the signal aborts during the write. This does not make synchronous
 normalization, archive validation, or every preparation segment interruptible.
+
+Timeout failures retain five metadata-only fields in the existing
+`JUNCTION_API_REQUEST_TIMEOUT` details and `device-sync.job_failed` projection:
+`providerRequestTimeoutMs`, `providerRequestElapsedMs` (monotonic time from the
+start of this attempt to failure handling), `providerRequestAttempt` (HTTP
+attempt, not job retry), `providerRequestStage`, and
+`providerResponseHeadersPresent`. Stages are `request_setup`, `awaiting_headers`,
+`response_body` (body handling before observed EOF, including discard), and
+`post_body` (observed EOF, no body, or completed discard). They describe observed
+boundaries, not network/decode root causes; synchronous processing cannot be
+preempted by a timer. Timeout remains terminal within the request; only the
+existing job owner decides later retries. A late caller abort does not relabel a
+request timeout. The same validator at normalization, hosted boundary parsing,
+and log projection admits only this error code, closed stages, booleans, integer
+milliseconds up to 300,000 (timeout positive; elapsed nonnegative), and HTTP
+ordinals 1–100. Out-of-range values are omitted, not turned into execution caps.
+The fields precede optional log metadata to survive the existing sanitizer key
+limit. No success event, payload, URL, header value, identifier, new log owner,
+or retention policy is added.
 
 Privacy-safe job timing separates Junction inventory requests, Junction
 resource requests, normalization, event-identity indexing, canonical writes,
@@ -270,6 +359,11 @@ Historical resource jobs also report their last upstream readiness classificatio
 provider execution reports the proposed follow-up count and earliest delay from
 the attempt's start; these fields do not imply imported data or committed jobs.
 The durable-progress and canonical-progress fields retain that distinction.
+Provider-proven forward continuation coverage is separately credited only after
+its owned job completion and successor commit. Junction's strict suffix of an
+unchanged finite resource window qualifies even when provider dates are empty;
+unchanged retries and generic queue completion do not. Hosted runtime uses this
+in-process evidence for its existing checkpointed system-progress generation.
 The diagnostic stream never includes account or job ids, cursors, provider records, health values,
 credentials, or filesystem paths.
 
@@ -284,7 +378,11 @@ and `weight`—always starts with an explicit 180-day window independent of both
 the generic timeseries window and `summaryBackfillDays`. The existing
 source-scoped sparse-history jobs fetch policy-sized one-day chunks, serialize
 per account, and record terminal coverage in compact
-connection metadata; they do not add another queue or lifecycle. Blood pressure
+connection metadata; they do not add another queue or lifecycle. Confirmed-empty
+date-query history windows share a job up to the existing sixteen-unit budget.
+Every provider day is still fetched, and foreground yield is checked before each
+fetch. The first populated date retains its original import window and ends that
+job's segment; a continuation resumes after the completed prefix. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
 source-by-resource matrix in an existing blood-pressure or note metadata slot.
@@ -342,11 +440,6 @@ creation and is returned only if that epoch is still current. Obsolete Link
 completion that overlaps provider cleanup advances the same exact-source
 operation and performs another idempotent target-only deregistration before the
 initiating operation can converge on success.
-
-WHOOP uses OAuth plus webhooks.
-Strava uses OAuth, polling, and optional app-global webhooks.
-
-Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
 The companion WHOOP 5/MG overnight-PRV lane is not another provider scheduler.
 After one explicit mobile enrollment, iOS continuously subscribes and owns the
@@ -409,76 +502,13 @@ provider-generic, and its route layer should keep using the shared
 
 Provider-readiness checkpoint:
 - a normal provider addition should stop at the descriptor, transport module, importer adapter, boot-safe serialization schema, and provider-manifest registration
-- generic hosted or local ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
+- generic hosted ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
 - if a provider seems to need edits outside those seams, treat it as an architecture review instead of routine provider wiring
 
 ## Environment
 
-Required:
-- `DEVICE_SYNC_VAULT_ROOT`
-- `DEVICE_SYNC_PUBLIC_BASE_URL`
-- `DEVICE_SYNC_SECRET` for the daemon's local bootstrap/service secret
-- `DEVICE_SYNC_CONTROL_TOKEN` for the control-plane bearer token
-
-Those two secrets are part of the local daemon contract. The hosted execution path uses signed internal web routes and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
-
-At least one provider must be configured.
-
-Common optional settings:
-- `DEVICE_SYNC_PORT`
-- `DEVICE_SYNC_HOST` (defaults to `127.0.0.1`)
-- `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
-- `DEVICE_SYNC_STATE_DB_PATH`
-- `DEVICE_SYNC_WORKER_POLL_MS`
-- `DEVICE_SYNC_WORKER_BATCH_SIZE`
-- `DEVICE_SYNC_SCHEDULER_POLL_MS`
-- `DEVICE_SYNC_SESSION_TTL_MS`
-- `DEVICE_SYNC_WORKER_LEASE_MS`
-- `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
-
-WHOOP settings:
-- `WHOOP_CLIENT_ID`
-- `WHOOP_CLIENT_SECRET`
-- `WHOOP_BASE_URL`
-- `WHOOP_SCOPES`
-- `WHOOP_BACKFILL_DAYS`
-- `WHOOP_RECONCILE_DAYS`
-- `WHOOP_RECONCILE_INTERVAL_MS`
-- `WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `WHOOP_REQUEST_TIMEOUT_MS`
-
-Oura settings:
-- `OURA_CLIENT_ID`
-- `OURA_CLIENT_SECRET`
-- `OURA_AUTH_BASE_URL`
-- `OURA_API_BASE_URL`
-- `OURA_SCOPES`
-- `OURA_BACKFILL_DAYS`
-- `OURA_RECONCILE_DAYS`
-- `OURA_RECONCILE_INTERVAL_MS`
-- `OURA_REQUEST_TIMEOUT_MS`
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider config to answer webhook preflight challenges and run connect-time Oura webhook subscription upkeep
-
-Strava settings:
-- `STRAVA_CLIENT_ID`
-- `STRAVA_CLIENT_SECRET`
-- `STRAVA_AUTH_BASE_URL`
-- `STRAVA_API_BASE_URL`
-- `STRAVA_SCOPES`
-- `STRAVA_BACKFILL_DAYS`
-- `STRAVA_RECONCILE_DAYS`
-- `STRAVA_RECONCILE_INTERVAL_MS`
-- `STRAVA_REQUEST_TIMEOUT_MS`
-- `STRAVA_WEBHOOK_SIGNING_SECRET` when direct Strava webhook POST delivery is enabled; Strava POST events fail closed without a valid `X-Strava-Signature`
-- `STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `STRAVA_WEBHOOK_VERIFY_TOKEN` when you want the Strava provider config to answer webhook preflight challenges and maintain the single app-global Strava webhook subscription
-
-## Run
-
-```bash
-# from the repo root
-node packages/device-syncd/dist/bin.js
-```
+Hosted runtime configuration retains `DEVICE_SYNC_PUBLIC_BASE_URL` and
+`DEVICE_SYNC_SECRET`; signed Web routes own control-plane authentication.
 
 ### Provider execution scope
 
@@ -494,3 +524,46 @@ discard that reuse. Historical attempts and calendar repair load their own
 inventory. Every canonical import retains its live connection-source admission
 check. The scope contains provider inventory only, never cached authorization
 or durable state.
+
+Queued daily resource notifications for steps, distance, active calories, and
+heart rate may share one provider scan when their source and complete closed
+UTC-day range match. The existing provider batch owner claims at most 16 jobs,
+counts each row against the drain budget, and retains per-job retries. Inline
+payloads, historical proof, calendar/temporal work, and extended payload fields
+remain separate. Updates arriving after the claim receive a new scan. A yield
+retains the unfinished range in the existing durable continuation; every populated
+day still checks live authority before import. This is queue batching, with no
+cached provider data or permanent suppression of later corrections.
+
+Within one full-job timeseries continuation, reuse successful inventory across
+its existing bounded daily units. Empty units share one final source-lifecycle
+fence check before returning progress; populated units still check live authority
+before each canonical import. Return, yield, or failure discards this local scope.
+Daily coverage, retry windows, and foreground yield points remain unchanged.
+
+Schedule-time extended history, including weight, keeps one active identity per
+source lifecycle and coverage generation across day boundaries. Source-first
+exact history retains its window identity. Empty weight retry roots at their
+full-history boundary converge to the schedule-time key during queue admission,
+including cold restores. A valid version-one empty unresolved-identity set is
+empty evidence; nonempty, malformed, or unknown encoded evidence cannot converge.
+Queued roots retain the union of accepted windows;
+running or partial scans, unresolved evidence, and older generations retain their
+existing owners. Weight reads use bounded 30-day chunks, preserving pagination
+and source lifecycle checks. A pending upstream
+weight pull still permits bounded reads and canonical import of available exact
+records; it prevents coverage certification and retains a daily continuation.
+A scan that began while the pull was pending carries that observation through
+its continuations and never certifies coverage; its daily continuation restarts
+from the history start and re-reads readiness there.
+Daily aggregate history continues to wait for provider readiness before its
+scan. Hosted future history can share the checkpoint-fenced reconcile proof's
+bounded deferral; content changes, dirty work, and proof expiry still admit the
+ordinary runtime path.
+
+Hosted passes with admitted dirty work, including retained reconciliation owners
+that absorb webhook hints, can pull a Junction full reconcile
+forward by up to thirty minutes while already awake. The ordinary account-scoped
+scheduler queues the same durable full jobs; partial imports never substitute for
+a complete content proof. Empty hints, other providers, foreground yields, and
+more distant cadences do not trigger this optimization.

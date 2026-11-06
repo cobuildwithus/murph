@@ -150,7 +150,8 @@ function normalizeAssistantPreferencesForWrite(
   const nextPreferences: AssistantPreferencesUpdate = {};
 
   if (preferences.persona !== undefined) {
-    nextPreferences.persona = assistantPersonaIdSchema.parse(preferences.persona);
+    assistantPersonaIdSchema.parse(preferences.persona);
+    nextPreferences.persona = "classic";
   }
   if (preferences.tone !== undefined) {
     nextPreferences.tone = assistantTonePreferenceSchema.parse(preferences.tone);

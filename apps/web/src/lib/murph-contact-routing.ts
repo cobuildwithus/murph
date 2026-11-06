@@ -1,18 +1,10 @@
 import { HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS } from "@murphai/hosted-execution/hosted-email";
 
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
-import {
-  extractHostedPrivyPhoneAccount,
-  extractHostedPrivyTelegramAccount,
-  extractHostedPrivyVerifiedEmailAccount,
-  resolveHostedPrivyLinkedAccounts,
-  type HostedPrivyLinkedAccountContainer,
-  type PrivyLinkedAccountLike,
-} from "@/src/lib/hosted-onboarding/privy-shared";
+
 
 export const MURPH_CONTACT_EMAIL = HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS;
 export const DEFAULT_MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
-export const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
 export const MURPH_TELEGRAM_BOT_USERNAME = resolveMurphTelegramBotUsername();
 export const MURPH_TELEGRAM_URL = buildMurphTelegramUrl(MURPH_TELEGRAM_BOT_USERNAME);
 
@@ -103,8 +95,12 @@ export function withMurphContactOptionBody(
     };
   }
 
+  if (option.kind === "telegram") {
+    return { ...option, href: withMurphTelegramText(option.href, body) };
+  }
+
   const href = new URL(option.href);
-  href.searchParams.set(option.kind === "telegram" ? "text" : "body", body);
+  href.searchParams.set("body", body);
 
   return {
     ...option,
@@ -138,24 +134,6 @@ function orderMurphContactKinds(
   ];
 }
 
-export function resolveMurphContactChannels(input: {
-  accountContainer?: HostedPrivyLinkedAccountContainer | null;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
-}): MurphContactChannels {
-  const linkedAccounts = input.linkedAccounts
-    ? [...input.linkedAccounts]
-    : resolveHostedPrivyLinkedAccounts(input.accountContainer ?? { linkedAccounts: [] });
-  const telegram = extractHostedPrivyTelegramAccount({
-    linkedAccounts,
-    telegram: input.accountContainer?.telegram,
-  });
-
-  return {
-    email: extractHostedPrivyVerifiedEmailAccount(linkedAccounts) !== null,
-    telegram: telegram !== null,
-    text: extractHostedPrivyPhoneAccount(linkedAccounts) !== null,
-  };
-}
 
 export function buildMurphSmsHref(input: {
   body?: string | null;
@@ -236,7 +214,7 @@ export function buildMurphTelegramTextHref(input: {
     return telegramUrl;
   }
 
-  return `${telegramUrl}?${buildMurphTelegramTextQuery(body)}`;
+  return withMurphTelegramText(telegramUrl, body);
 }
 
 export function resolveMurphWebmailShortcut(input: {
@@ -335,9 +313,15 @@ function buildMurphTelegramContactOption(input: {
   };
 }
 
-function buildMurphTelegramTextQuery(body: string): string {
-  const query = new URLSearchParams({ text: body });
-  return query.toString();
+/**
+ * Sets a t.me link's prefilled message. Telegram shows a form-style "+" as a
+ * literal plus sign, so the text is percent-encoded; other parameters stay.
+ */
+export function withMurphTelegramText(href: string, text: string): string {
+  const url = new URL(href);
+  url.searchParams.delete("text");
+  const query = url.searchParams.toString();
+  return `${url.origin}${url.pathname}?${query ? `${query}&` : ""}text=${encodeURIComponent(text)}`;
 }
 
 function buildMurphEmailContactOption(input: {

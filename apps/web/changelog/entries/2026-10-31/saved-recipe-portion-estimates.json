@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-31",
+  "order": 110,
+  "item": {
+    "id": "saved-recipe-portion-estimates",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Logging part of a saved recipe just works",
+    "summary": "Say how much of a saved recipe you had, like a cup and a half of your usual smoothie, and Murph estimates your portion and sends your nutrition card.",
+    "details": "Murph works out the batch size from the recipe's ingredients instead of asking you for it, and marks the result as an estimate.",
+    "relevanceTags": [
+      "nutrition",
+      "meal-logging"
+    ],
+    "sourcePullRequests": [
+      4407
+    ]
+  }
+}

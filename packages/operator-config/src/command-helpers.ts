@@ -100,31 +100,6 @@ export const httpBaseUrlSchema = z
     message: httpBaseUrlInvalidMessage,
   })
 
-export function resolveEffectiveTopLevelToken(
-  args: readonly string[],
-): string | null {
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]
-    if (!token) {
-      continue
-    }
-
-    if (token === '--') {
-      return (args[index + 1] as string | undefined) ?? null
-    }
-
-    if (!token.startsWith('-')) {
-      return token
-    }
-
-    if (resolveRootOptionTokenWithValue(token) !== null && !token.includes('=')) {
-      index += 1
-    }
-  }
-
-  return null
-}
-
 export function resolveVaultCliCommandPath(
   args: readonly string[],
 ): string[] {

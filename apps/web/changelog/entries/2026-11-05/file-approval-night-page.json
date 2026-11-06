@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "file-approval-night-page",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A clearer page for approving a file",
+    "summary": "When Murph needs your OK to send a file, the link now shows the file itself, and your answer is stamped right on it.",
+    "details": "If you're signed out, the page still says what the link is for, and you sign in right there. The file name stays hidden until you do.",
+    "relevanceTags": ["vault", "security"],
+    "sourcePullRequests": [4626]
+  }
+}

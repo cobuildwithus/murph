@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-29",
+  "order": 100,
+  "item": {
+    "id": "clinical-structured-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More detail from imported medical records",
+    "summary": "Murph can recover supported measurements, lab results and other structured findings from records previously saved only as source notes.",
+    "details": "Your original evidence stays in the vault. Unclear details remain unresolved, and recovered facts track corrections or withdrawals of their source records. Advanced intake imports can also retain assessment categories and links to source records. This does not guarantee a complete medical chart.",
+    "relevanceTags": [
+      "clinical-records",
+      "vault"
+    ],
+    "sourcePullRequests": [
+      3765,
+      3810
+    ]
+  }
+}

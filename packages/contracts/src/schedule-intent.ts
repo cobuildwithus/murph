@@ -106,7 +106,7 @@ export function isValidExecutableCronExpression(expression: string): boolean {
 
 export const executableScheduleIntentAtSchema = z.object({
   kind: z.literal("at"),
-  at: z.string().datetime({ offset: true }),
+  at: z.isoDateTime({ offset: true }),
 }).strict();
 
 export const executableScheduleIntentEverySchema = scheduleIntentEverySchema.extend({

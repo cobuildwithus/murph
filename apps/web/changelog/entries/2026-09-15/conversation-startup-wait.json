@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "conversation-startup-wait",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when a conversation resumes",
+    "summary": "Murph can get to your next message sooner when a conversation starts back up.",
+    "details": "This reduces startup waiting in private conversations and groups. The time needed to think through a reply still varies.",
+    "relevanceTags": [
+      "conversations",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3496
+    ]
+  }
+}

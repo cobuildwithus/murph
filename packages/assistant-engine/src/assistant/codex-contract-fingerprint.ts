@@ -7,14 +7,19 @@ import { MURPH_CODEX_BASE_INSTRUCTIONS } from './codex-base-instructions.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildAssistantCodexContractFingerprint(input: {
-  developerInstructions: string | null
+  developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   routeFingerprint: string
 }): string {
   return createHash('sha256')
     .update(stableJsonStringify({
-      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-      developerInstructions: normalizeNullableString(input.developerInstructions),
+      // Thread-level launches and legacy hosted bindings include instructions.
+      ...(input.developerInstructions !== undefined
+        ? {
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            developerInstructions: normalizeNullableString(input.developerInstructions),
+          }
+        : {}),
       // thread/resume cannot replace tools. Hash exactly the declarations sent at
       // thread/start so an old unsupplemented thread bootstraps once, then resumes.
       dynamicTools: input.dynamicTools.map(withCodexToolInputContract),

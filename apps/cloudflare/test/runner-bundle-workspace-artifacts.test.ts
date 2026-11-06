@@ -17,9 +17,6 @@ import {
 } from "../scripts/runner-bundle-contract.js";
 import {
   buildHostedRunnerWorkspaceArtifacts,
-  buildHostedRunnerWorkspaceArtifactPlan,
-  buildHostedRunnerWorkspaceBuildArgs,
-  buildWorkspacePackagePackPreflightArgs,
   mapWithConcurrency,
   packWorkspacePackageArtifacts,
   stageHostedRunnerRuntimeArtifact,
@@ -28,14 +25,10 @@ import {
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const temporaryDirectories: string[] = [];
-const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const healthCommonsRuntimeArtifactNames = [
   "biomarker-desired-directions.json",
   "web/browse/goals.json",
   "knowledge.sqlite",
-  "protocol-index.json",
-  "protocol-run-specs.json",
-  "protocol-family-graph.json",
 ] as const;
 
 afterEach(async () => {
@@ -48,98 +41,54 @@ afterEach(async () => {
 });
 
 describe("runner bundle runtime artifact staging", () => {
-  it("honors explicit runner bundle workspace build concurrency", () => {
-    expect(
-      buildHostedRunnerWorkspaceBuildArgs(
-        ["@murphai/contracts", "@murphai/runtime-state"],
-        { MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "6" },
-      ),
-    ).toEqual([
-      "--workspace-concurrency=6",
-      "--filter",
-      "@murphai/contracts",
-      "--filter",
-      "@murphai/runtime-state",
-      "run",
-      "build",
-    ]);
-  });
-
-  it("defaults runner bundle workspace builds to serial package execution", () => {
-    expect(
-      buildHostedRunnerWorkspaceBuildArgs(
-        ["@murphai/contracts", "@murphai/runtime-state"],
-        {},
-      ),
-    ).toEqual([
-      "--workspace-concurrency=1",
-      "--filter",
-      "@murphai/contracts",
-      "--filter",
-      "@murphai/runtime-state",
-      "run",
-      "build",
-    ]);
-  });
-
-  it("rejects invalid runner bundle build concurrency", () => {
-    expect(() =>
-      buildHostedRunnerWorkspaceBuildArgs(["@murphai/contracts"], {
-        MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "0",
-      }),
-    ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
-  });
-
-  it("assembles the assistant CLI surface after the built workspace CLI exists", () => {
-    const plan = buildHostedRunnerWorkspaceArtifactPlan(
-      ["@murphai/assistant-engine", "@murphai/murph"],
-      {
-        env: { MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4" },
-        repoRoot,
-      },
-    );
-
-    expect(plan.buildArgs).toEqual([
-      "--workspace-concurrency=4",
-      "--filter",
-      "@murphai/assistant-engine",
-      "--filter",
-      "@murphai/murph",
-      "run",
-      "build",
-    ]);
-    expect(plan.assistantCliSurfaceAssemblyArgs).toEqual([
-      path.join(
-        repoRoot,
-        "scripts",
-        "assemble-assistant-cli-surface.mjs",
-      ),
-    ]);
-  });
-
-  it("keeps unrelated workspace builds single-phase", () => {
-    const plan = buildHostedRunnerWorkspaceArtifactPlan(
-      ["@murphai/health-commons"],
-      { env: {}, repoRoot },
-    );
-
-    expect(plan.assistantCliSurfaceAssemblyArgs).toBeNull();
-  });
-
-  it("prepares runtime artifacts before scriptless runner package packing", () => {
-    expect(buildWorkspacePackagePackPreflightArgs("@murphai/contracts")).toEqual([
-      "--filter",
-      "@murphai/contracts",
-      "run",
-      "build",
-    ]);
-    expect(buildWorkspacePackagePackPreflightArgs("@murphai/health-commons")).toEqual([
-      "--filter",
-      "@murphai/health-commons",
-      "run",
-      "build",
-    ]);
-    expect(buildWorkspacePackagePackPreflightArgs("@murphai/runtime-state")).toBeNull();
+  it("builds dependencies before CLI assembly and suppresses assembly after a failed build", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-runner-build-flow-"));
+    temporaryDirectories.push(root);
+    for (const directory of ["apps", "bin", "scripts", "packages/murph", "packages/assistant-engine", "packages/contracts"]) {
+      await mkdir(path.join(root, directory), { recursive: true });
+    }
+    for (const name of ["murph", "assistant-engine", "contracts"]) {
+      await writeFile(path.join(root, "packages", name, "package.json"), JSON.stringify({
+        name: `@murphai/${name}`, version: "1.0.0",
+        dependencies: name === "assistant-engine" ? { "@murphai/murph": "workspace:*" } : {},
+      }));
+    }
+    const pnpm = path.join(root, "bin", "pnpm");
+    await writeFile(pnpm, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "if (fs.existsSync('fail-build')) process.exit(17);",
+      "fs.writeFileSync('build.json', JSON.stringify(process.argv.slice(2)));",
+    ].join("\n"));
+    await chmod(pnpm, 0o755);
+    await writeFile(path.join(root, "scripts", "assemble-assistant-cli-surface.mjs"), [
+      "import { readFileSync, writeFileSync } from 'node:fs';",
+      "const args = JSON.parse(readFileSync('build.json', 'utf8'));",
+      "if (!args.includes('@murphai/murph')) throw new Error('CLI was not built');",
+      "writeFileSync('assembled', 'ready');",
+    ].join("\n"));
+    vi.stubEnv("PATH", `${path.dirname(pnpm)}${path.delimiter}${process.env.PATH ?? ""}`);
+    vi.stubEnv("PNPM_STORE_DIR", path.join(root, "store"));
+    for (const concurrency of [undefined, "4"]) {
+      vi.stubEnv("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY", concurrency);
+      await buildHostedRunnerWorkspaceArtifacts(["@murphai/assistant-engine", "@murphai/murph"], { repoRoot: root });
+      expect(JSON.parse(await readFile(path.join(root, "build.json"), "utf8"))).toEqual([
+        `--workspace-concurrency=${concurrency ?? "1"}`, "--filter", "@murphai/murph",
+        "--filter", "@murphai/assistant-engine", "run", "build",
+      ]);
+      await expect(readFile(path.join(root, "assembled"), "utf8")).resolves.toBe("ready");
+      await rm(path.join(root, "assembled"));
+    }
+    await buildHostedRunnerWorkspaceArtifacts(["@murphai/contracts"], { repoRoot: root });
+    await expect(readFile(path.join(root, "assembled"))).rejects.toMatchObject({ code: "ENOENT" });
+    vi.stubEnv("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY", "0");
+    await expect(buildHostedRunnerWorkspaceArtifacts(["@murphai/contracts"], { repoRoot: root }))
+      .rejects.toThrow("must be a positive integer");
+    vi.stubEnv("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY", "1");
+    await writeFile(path.join(root, "fail-build"), "fail");
+    await expect(buildHostedRunnerWorkspaceArtifacts(["@murphai/assistant-engine", "@murphai/murph"], { repoRoot: root }))
+      .rejects.toThrow("exited with code 17");
+    await expect(readFile(path.join(root, "assembled"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("waits for active bounded-concurrency work before rethrowing the first failure", async () => {
@@ -190,7 +139,7 @@ describe("runner bundle runtime artifact staging", () => {
             jose: "^6.2.2",
           },
           engines: {
-            node: ">=24.14.1",
+            node: ">=24.22.1",
           },
           exports: {
             ".": {
@@ -224,14 +173,16 @@ describe("runner bundle runtime artifact staging", () => {
     };
 
     expect(stagedPackageJson.dependencies).toEqual({
-      "@murphai/assistant-cli": "workspace:*",
       "@murphai/assistant-engine": "workspace:*",
       "@murphai/clinical-records": "workspace:*",
+      "@murphai/contracts": "workspace:*",
       "@murphai/core": "workspace:*",
       "@murphai/device-syncd": "workspace:*",
       "@murphai/exercise-library": "workspace:*",
+      "@murphai/gateway-core": "workspace:*",
       "@murphai/health-commons": "workspace:*",
       "@murphai/health-metrics": "workspace:*",
+      "@murphai/hosted-execution": "workspace:*",
       "@murphai/importers": "workspace:*",
       "@murphai/inbox-services": "workspace:*",
       "@murphai/inboxd": "workspace:*",
@@ -241,7 +192,6 @@ describe("runner bundle runtime artifact staging", () => {
       "@murphai/parsers": "workspace:*",
       "@murphai/query": "workspace:*",
       "@murphai/runtime-state": "workspace:*",
-      "@murphai/setup-cli": "workspace:*",
       "@murphai/vault-usecases": "workspace:*",
       jose: "^6.2.2",
     });
@@ -460,7 +410,14 @@ describe("runner bundle runtime artifact staging", () => {
     for (const artifactName of healthCommonsRuntimeArtifactNames) {
       expect(entries).toContain(`package/generated/${artifactName}`);
     }
-    expect(entries).not.toContain("package/generated/catalog.json");
+    for (const retiredArtifactName of [
+      "catalog.json",
+      "protocol-index.json",
+      "protocol-run-specs.json",
+      "protocol-family-graph.json",
+    ]) {
+      expect(entries).not.toContain(`package/generated/${retiredArtifactName}`);
+    }
     expect(entries).toContain("package/package.json");
     expect(
       entries.filter((entry) =>
@@ -537,24 +494,9 @@ describe("runner bundle runtime artifact staging", () => {
       healthCommonsTarball,
       "-C",
       extractDir,
-      "package/generated/protocol-index.json",
-      "package/generated/protocol-run-specs.json",
-      "package/generated/protocol-family-graph.json",
       "package/generated/biomarker-desired-directions.json",
       "package/generated/web/browse/goals.json",
     ]);
-    const protocolIndexRaw = await readFile(
-      path.join(extractDir, "package", "generated", "protocol-index.json"),
-      "utf8",
-    );
-    const protocolRunSpecsRaw = await readFile(
-      path.join(extractDir, "package", "generated", "protocol-run-specs.json"),
-      "utf8",
-    );
-    const protocolFamilyGraphRaw = await readFile(
-      path.join(extractDir, "package", "generated", "protocol-family-graph.json"),
-      "utf8",
-    );
     const biomarkerDesiredDirectionsRaw = await readFile(
       path.join(
         extractDir,
@@ -575,9 +517,6 @@ describe("runner bundle runtime artifact staging", () => {
       ),
       "utf8",
     );
-    const protocolIndex: unknown = JSON.parse(protocolIndexRaw);
-    const protocolRunSpecs: unknown = JSON.parse(protocolRunSpecsRaw);
-    const protocolFamilyGraph: unknown = JSON.parse(protocolFamilyGraphRaw);
     const biomarkerDesiredDirections: unknown = JSON.parse(
       biomarkerDesiredDirectionsRaw,
     );
@@ -599,26 +538,6 @@ describe("runner bundle runtime artifact staging", () => {
         startPrompt: "Hey Murph, help me improve my deep sleep.",
       });
 
-    expect(findProtocolArtifactEntry(protocolIndex, finnishDrySaunaProtocolKey)).toMatchObject({
-      entityType: "protocol_variant",
-      key: finnishDrySaunaProtocolKey,
-      slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
-      title: "Finnish Dry Sauna",
-    });
-    expect(findProtocolArtifactEntry(protocolRunSpecs, finnishDrySaunaProtocolKey)).toMatchObject({
-      protocol: expect.objectContaining({
-        doseSignature: expect.any(String),
-      }),
-      testPlans: expect.arrayContaining([
-        expect.objectContaining({
-          planId: expect.any(String),
-        }),
-      ]),
-    });
-    expect(findProtocolFamilyGraphEdge(protocolFamilyGraph, finnishDrySaunaProtocolKey)).toMatchObject({
-      targetKey: "experiment_family:dry-sauna",
-      type: "parent_family",
-    });
     expect(
       findBiomarkerDesiredDirectionEntry(
         biomarkerDesiredDirections,
@@ -630,12 +549,19 @@ describe("runner bundle runtime artifact staging", () => {
     });
   });
 
-  it("packs the runner CLI without its public bundled dependency payload", async () => {
+  it("packs the private runner CLI assets with sibling workspace tarball dependencies", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-pack-"));
     const packageDir = path.join(rootDir, "packages", "cli");
     const assistantEngineDir = path.join(rootDir, "packages", "assistant-engine");
     const healthCommonsDir = path.join(rootDir, "packages", "health-commons");
     const tarballsDir = path.join(rootDir, "tarballs");
+    const cliManifest = JSON.parse(
+      await readFile(path.join(repoRoot, "packages", "cli", "package.json"), "utf8"),
+    ) as {
+      private: boolean;
+      bin: Record<string, string>;
+      files: string[];
+    };
 
     temporaryDirectories.push(rootDir);
     await mkdir(path.join(rootDir, "apps"), { recursive: true });
@@ -646,7 +572,6 @@ describe("runner bundle runtime artifact staging", () => {
     await mkdir(tarballsDir, { recursive: true });
     await writeFile(path.join(packageDir, "dist", "bin.js"), "#!/usr/bin/env node\n", "utf8");
     await writeFile(path.join(packageDir, "README.md"), "readme\n", "utf8");
-    await writeFile(path.join(packageDir, "CHANGELOG.md"), "changelog\n", "utf8");
     await writeFile(path.join(packageDir, "config.schema.json"), "{}\n", "utf8");
     await writeFile(path.join(packageDir, "LICENSE"), "license\n", "utf8");
     await writeFile(
@@ -655,26 +580,14 @@ describe("runner bundle runtime artifact staging", () => {
         {
           name: "@murphai/murph",
           version: "1.2.3",
+          private: cliManifest.private,
           type: "module",
-          bin: {
-            murph: "dist/bin.js",
-            "vault-cli": "dist/bin.js",
-          },
-          bundleDependencies: [
-            "@murphai/assistant-engine",
-            "@murphai/health-commons",
-          ],
+          bin: cliManifest.bin,
           dependencies: {
             "@murphai/assistant-engine": "workspace:*",
             "@murphai/health-commons": "workspace:*",
           },
-          files: [
-            "dist",
-            "README.md",
-            "CHANGELOG.md",
-            "config.schema.json",
-            "LICENSE",
-          ],
+          files: cliManifest.files,
         },
         null,
         2,
@@ -728,14 +641,36 @@ describe("runner bundle runtime artifact staging", () => {
       await readFile(path.join(extractDir, "package", "package.json"), "utf8"),
     ) as {
       bin?: Record<string, string>;
-      bundleDependencies?: string[];
+      private?: boolean;
+      dependencies?: Record<string, string>;
     };
 
     expect(packedPackageJson.bin).toEqual({
-      murph: "dist/bin.js",
       "vault-cli": "dist/bin.js",
     });
-    expect(packedPackageJson.bundleDependencies).toBeUndefined();
+    expect(packedPackageJson.private).toBe(true);
+    expect(packedPackageJson.dependencies).toEqual({
+      "@murphai/assistant-engine":
+        "file:02-_murphai_assistant-engine/murphai-assistant-engine-1.0.0.tgz",
+      "@murphai/health-commons":
+        "file:03-_murphai_health-commons/murphai-health-commons-1.0.0.tgz",
+    });
+    for (const [entry, contents] of [
+      ["dist/bin.js", "#!/usr/bin/env node\n"],
+      ["config.schema.json", "{}\n"],
+      ["README.md", "readme\n"],
+      ["LICENSE", "license\n"],
+    ]) {
+      expect(await readFile(path.join(extractDir, "package", entry), "utf8"))
+        .toBe(contents);
+    }
+    await expect(packWorkspacePackageArtifacts(
+      ["@murphai/murph"],
+      tarballsDir,
+      { repoRoot: rootDir, skipPreflights: true },
+    )).rejects.toThrow(
+      "@murphai/murph depends on workspace package @murphai/assistant-engine, but no sibling runner tarball was prepared for that dependency.",
+    );
     await expect(
       readFile(path.join(extractDir, "package", "node_modules", "@murphai", "health-commons", "package.json"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -967,35 +902,6 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
     })}\n`,
     "utf8",
   );
-  await writeFile(
-    path.join(generatedDir, "protocol-index.json"),
-    `${JSON.stringify({
-      catalogHash: "sha256:test",
-      protocols: [],
-      schemaVersion: "murph.commons.protocol-index.v1",
-    })}\n`,
-    "utf8",
-  );
-  await writeFile(
-    path.join(generatedDir, "protocol-run-specs.json"),
-    `${JSON.stringify({
-      catalogHash: "sha256:test",
-      protocols: [],
-      schemaVersion: "murph.commons.protocol-run-specs.v1",
-    })}\n`,
-    "utf8",
-  );
-  await writeFile(
-    path.join(generatedDir, "protocol-family-graph.json"),
-    `${JSON.stringify({
-      catalogHash: "sha256:test",
-      edges: [],
-      families: [],
-      protocols: [],
-      schemaVersion: "murph.commons.protocol-family-graph.v1",
-    })}\n`,
-    "utf8",
-  );
 }
 
 async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<void> {
@@ -1067,7 +973,6 @@ async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<
     "{}\n",
     "utf8",
   );
-  await writeFile(path.join(nodeModulesDir, ".bin", "murph"), "#!/bin/sh\n", "utf8");
   await writeFile(
     path.join(nodeModulesDir, ".bin", "vault-cli"),
     "#!/bin/sh\n",
@@ -1079,17 +984,6 @@ async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<
     releaseSha: "0123456789abcdef0123456789abcdef01234567",
     repoRoot,
   });
-}
-
-function findProtocolArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
-  if (!isRecord(artifact) || !Array.isArray(artifact.protocols)) {
-    return null;
-  }
-
-  return artifact.protocols.find((entity) =>
-    isRecord(entity) &&
-      entity.key === key
-  ) ?? null;
 }
 
 function findGoalArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
@@ -1113,18 +1007,6 @@ function findBiomarkerDesiredDirectionEntry(
   return artifact.biomarkers.find((entity) =>
     isRecord(entity) &&
       entity.key === key
-  ) ?? null;
-}
-
-function findProtocolFamilyGraphEdge(artifact: unknown, sourceKey: string): Record<string, unknown> | null {
-  if (!isRecord(artifact) || !Array.isArray(artifact.edges)) {
-    return null;
-  }
-
-  return artifact.edges.find((edge) =>
-    isRecord(edge) &&
-      edge.sourceKey === sourceKey &&
-      edge.type === "parent_family"
   ) ?? null;
 }
 

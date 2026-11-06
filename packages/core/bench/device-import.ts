@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, utimes, writeFile } from "node:fs/promises";
 import { Session } from "node:inspector/promises";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 
 import {
-  createDeviceBatchImportSession,
   importDeviceBatch,
   initializeVault,
   inspectCanonicalWriteLock,
@@ -74,11 +73,12 @@ console.log(JSON.stringify({
 }));
 
 if (abortAfterMs > 0) {
+  // Seeding warms the process cache; this scenario specifically interrupts a cold scan.
+  await utimes(path.join(vaultRoot, [...seedShardPaths][0]!), new Date(0), new Date(0));
   const before = await Promise.all([...seedShardPaths].map((shardPath) =>
     readFile(path.join(vaultRoot, shardPath))));
   const controller = new AbortController();
   const reason = new Error("Synthetic foreground preemption");
-  const importSession = createDeviceBatchImportSession();
   const request = {
     vaultRoot,
     provider: "synthetic",
@@ -93,7 +93,6 @@ if (abortAfterMs > 0) {
   }, abortAfterMs);
   try {
     await assert.rejects(importDeviceBatch(request, {
-      session: importSession,
       signal: controller.signal,
     }), (error) => error === reason);
   } finally {
@@ -105,8 +104,8 @@ if (abortAfterMs > 0) {
   const after = await Promise.all([...seedShardPaths].map((shardPath) =>
     readFile(path.join(vaultRoot, shardPath))));
   assert.deepEqual(after, before);
-  const resumed = await importDeviceBatch(request, { session: importSession, signal: liveSignal });
-  const replay = await importDeviceBatch(request, { session: importSession, signal: liveSignal });
+  const resumed = await importDeviceBatch(request, { signal: liveSignal });
+  const replay = await importDeviceBatch(request, { signal: liveSignal });
   assert.equal(resumed.applied, true);
   assert.equal(replay.applied, false);
   assert.equal(replay.events[0]?.id, resumed.events[0]?.id);
@@ -119,6 +118,8 @@ if (abortAfterMs > 0) {
   }));
 }
 
+// Keep the first measured incremental import cold, including after the abort/retry proof.
+await utimes(path.join(vaultRoot, [...seedShardPaths][0]!), new Date(0), new Date(0));
 const profilePath = process.env.MURPH_BENCH_PROFILE;
 const profiler = profilePath ? new Session() : null;
 if (profiler) {
@@ -126,7 +127,6 @@ if (profiler) {
   await profiler.post("Profiler.enable");
   await profiler.post("Profiler.start");
 }
-const session = createDeviceBatchImportSession();
 const scenarios = ["new", "disjoint", "replay", "correction"] as const;
 for (const scenario of scenarios) {
   const version = scenario === "correction"
@@ -144,7 +144,7 @@ for (const scenario of scenarios) {
     importedAt: version,
     events: Array.from({ length: 12 }, (_, index) => observation(offset + index, version,
       scenario === "correction" ? index + 100 : offset + index)),
-  }, { session, signal: liveSignal, onTiming: (value) => { timing = value; } });
+  }, { signal: liveSignal, onTiming: (value) => { timing = value; } });
   const used = process.cpuUsage(cpu);
   assert.equal(result.applied, scenario !== "replay");
   assert.equal(result.events.length, 12);

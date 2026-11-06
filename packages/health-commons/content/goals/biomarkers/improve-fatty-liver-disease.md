@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:improve-fatty-liver-disease
 slug: improve-fatty-liver-disease
-title: Improve Fatty Liver Disease
-summary: Improve metabolic fatty liver disease by reducing liver fat, treating metabolic risks, and following fibrosis with the right clinical tools.
+title: Understand Fatty Liver Disease
+summary: Learn about fatty liver disease, lifestyle evidence, and questions for your care team.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: improve fatty liver disease
+  goalPhrase: understand fatty liver disease
   successSignals:
     - id: liver_disease_markers
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me improve fatty liver disease.
+  startPrompt: Hey Murph, help me understand fatty liver disease.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -86,4 +86,4 @@ Don’t use “liver detox” products. Some supplements can injure the liver, a
 
 ## Related goals
 
-[Reduce My Liver Fat](/goals/reduce-liver-fat) · [Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Lower My Triglycerides](/goals/lower-triglycerides)
+[Understand My Liver Fat](/goals/reduce-liver-fat) · [Track My Blood Sugar](/goals/improve-blood-sugar-control) · [Understand My Triglycerides](/goals/lower-triglycerides)

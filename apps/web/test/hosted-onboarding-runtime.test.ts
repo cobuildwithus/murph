@@ -45,9 +45,8 @@ function createHostedOnboardingEnvironment(
     linqSmsInstantStartEnabled: false,
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 5 * 60_000,
-    privyAppId: null,
-    privyAppSecret: null,
-    privyVerificationKey: null,
+
+
     publicBaseUrl: "https://join.example.test",
     stripeFamilyPriceIdsByPlan: {
       edge: "price_family_edge_123",

@@ -49,7 +49,6 @@ export function buildJoinInvitePreviewStatus(
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: {
       code: inviteCode,

@@ -3,6 +3,9 @@ import path from 'node:path'
 import { resolveAssistantSkillsRoot } from '../../src/assistant-skill-assets.js'
 
 export const WORKFLOW_SKILL_REFERENCES = {
+  'behavior-followthrough': [
+    'references/support-runtime.md',
+  ],
   'experiment-onboarding': [
     'references/session-support.md',
   ],

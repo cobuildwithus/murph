@@ -1,8 +1,11 @@
+import { isHostedRetiredMailboxKind } from "@murphai/hosted-execution/runtime-control";
 import {
+  isHostedRetiredAssistantNotificationProfile,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
   type HostedExecutionSystemWake,
+  type HostedExecutionMealPhotoCapturedWake,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 
@@ -11,6 +14,7 @@ import {
 } from "./mailbox-conversation-import.ts";
 import {
   importHostedMealPhotoCapturedMailboxItem,
+  isHostedManualMealPhotoWake,
 } from "./meal-photo-import.ts";
 import {
   importHostedReportedDailyMetricMailboxItem,
@@ -101,14 +105,17 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
   runtime: HostedRuntimeBridgeNormalizedRuntime;
   vaultRoot: string;
 }): HostedWorkspaceRuntimeBridgeImportItem {
-  return async (item, context) => {
-    const importConversationItem = createHostedConversationMailboxImportItem({
+  const createConversationImporter = (
+    items: readonly HostedWorkspaceRuntimeBridgeImportItemInput[],
+    context?: HostedWorkspaceRuntimeBridgeImportItemContext,
+  ) => createHostedConversationMailboxImportItem({
       assistantBootstrap: context?.assistantBootstrap ?? null,
       assistantTarget: context?.assistantTarget ?? null,
       decodePayload: {
         decode: async (decodeInput) => {
-          const decoded = item.payload.decodedWake
-            ? { status: "decoded" as const, wake: item.payload.decodedWake }
+          const decodedWake = items.find((item) => item.item.id === decodeInput.itemRef.id)?.payload.decodedWake;
+          const decoded = decodedWake
+            ? { status: "decoded" as const, wake: decodedWake }
             : await input.decodeMailboxPayload.decode({
                 itemRef: decodeInput.itemRef,
                 payloadCiphertext: decodeInput.payloadCiphertext,
@@ -140,17 +147,32 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
           resolveHostedDeviceSyncMessagingReturnTarget(wake),
         );
       },
-      runtime: input.runtime,
+      runtime: {
+        ...input.runtime,
+        platform: {
+          ...input.runtime.platform,
+          // Preparation and the foreground turn share one invocation authority.
+          providerFetch: context?.providerFetch === undefined
+            ? input.runtime.platform.providerFetch
+            : context.providerFetch,
+        },
+      },
       vaultRoot: input.vaultRoot,
     });
 
-    return importHostedWorkspaceBridgeMailboxItem({
-      ...input,
-      context,
-      importConversationItem,
-      item,
-    });
-  };
+  return Object.assign(
+    (item: HostedWorkspaceRuntimeBridgeImportItemInput, context?: HostedWorkspaceRuntimeBridgeImportItemContext) =>
+      importHostedWorkspaceBridgeMailboxItem({
+        ...input, context, item,
+        importConversationItem: createConversationImporter([item], context),
+      }),
+    {
+      importAudioPair: (
+        items: readonly [HostedWorkspaceRuntimeBridgeImportItemInput, HostedWorkspaceRuntimeBridgeImportItemInput],
+        context?: HostedWorkspaceRuntimeBridgeImportItemContext,
+      ) => createConversationImporter(items, context).importAudioPair(items, context),
+    },
+  );
 }
 
 async function importHostedWorkspaceBridgeMailboxItem(
@@ -184,9 +206,9 @@ async function importHostedWorkspaceBridgeMailboxItem(
   }
 
   if (input.item.route.action === "skip-retired-mailbox-item") {
-    if (input.item.item.kind !== "group-newsletter.email-needed") {
+    if (!isHostedRetiredMailboxKind(input.item.item.kind)) {
       return {
-        reasonCode: "legacy_group_newsletter_email_needed.route_mismatch",
+        reasonCode: "mailbox.retired_kind_mismatch",
         retryable: false,
         status: "blocked",
       };
@@ -195,7 +217,7 @@ async function importHostedWorkspaceBridgeMailboxItem(
     // This compatibility reader only advances past rows accepted before the
     // producer was retired. It deliberately does not decrypt or import them.
     return {
-      reasonCode: "legacy_group_newsletter_email_needed.retired",
+      reasonCode: "mailbox.kind_retired",
       status: "skipped",
     };
   }
@@ -231,6 +253,13 @@ async function importHostedWorkspaceBridgeMailboxItem(
   }
 
   if (
+    wake.kind === "assistant.notification.requested" &&
+    isHostedRetiredAssistantNotificationProfile(wake.notification.notificationPromptProfile)
+  ) {
+    return { reasonCode: "mailbox.notification_profile_retired", status: "skipped" };
+  }
+
+  if (
     input.context?.assistantAskRequestTargetKind &&
     wake.kind === "assistant.ask.requested" &&
     wake.ask.target.kind !== input.context.assistantAskRequestTargetKind
@@ -242,19 +271,8 @@ async function importHostedWorkspaceBridgeMailboxItem(
   }
 
   if (
-    input.item.route.action === "import-vault-share-delivery" ||
-    wake.kind === "vault-share.delivery"
-  ) {
-    return {
-      reasonCode: "payload.decode_mismatch",
-      retryable: false,
-      status: "blocked",
-    };
-  }
-
-  if (
-    input.item.route.action === "import-vault-share-revoke" ||
-    wake.kind === "vault-share.revoke"
+    ["import-vault-share-delivery", "import-vault-share-revoke"].includes(input.item.route.action) ||
+    ["vault-share.delivery", "vault-share.revoke"].includes(wake.kind)
   ) {
     return {
       reasonCode: "payload.decode_mismatch",
@@ -275,12 +293,7 @@ async function importHostedWorkspaceBridgeMailboxItem(
     input.item.route.action === "import-meal-photo" &&
     wake.kind === "meal-photo.captured"
   ) {
-    return await importHostedMealPhotoCapturedMailboxItem({
-      effectsPort: input.runtime.platform.effectsPort,
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
+    return importHostedWorkspaceBridgeMealPhoto(input, wake);
   }
 
   if (
@@ -414,4 +427,32 @@ function hostedMailboxInstantsMatch(left: string, right: string): boolean {
   return Number.isFinite(leftTimestamp)
     && Number.isFinite(rightTimestamp)
     && leftTimestamp === rightTimestamp;
+}
+
+async function importHostedWorkspaceBridgeMealPhoto(
+  input: HostedWorkspaceBridgeMailboxImportInput,
+  wake: HostedExecutionMealPhotoCapturedWake,
+): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
+  const outcome = await importHostedMealPhotoCapturedMailboxItem({
+    effectsPort: input.runtime.platform.effectsPort,
+    item: input.item,
+    vaultRoot: input.vaultRoot,
+    wake,
+  });
+  if (
+    outcome.status === "imported"
+    && !input.item.durablyConsumed
+    && isHostedManualMealPhotoWake(wake)
+  ) {
+    const queued = await enqueueHostedSystemMailboxItem({
+      item: {
+        ...input.item,
+        route: { ...input.item.route, action: "dispatch-assistant-notification" },
+      },
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+    if (queued.status !== "imported") return queued;
+  }
+  return outcome;
 }

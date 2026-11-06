@@ -51,7 +51,7 @@ const firstReplyText = "The rejected publication probe completed.";
 const secondReplyText = "The prior workspace snapshot restored cleanly.";
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-snapshot-publication-fallback-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const vaultRelativePath = `bank/hosted-e2e/snapshot-publication-${runId}.md`;
 const baselineMarker = `snapshot-publication-baseline-${runId}`;
 const baselineFileContents = [
@@ -131,9 +131,9 @@ describe("hosted local snapshot publication fallback e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_EXECUTION_RETRY_DELAY_MS: "120000",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
+
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

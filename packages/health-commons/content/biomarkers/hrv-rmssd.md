@@ -88,64 +88,37 @@ biomarker:
       - device changes
       - signal quality
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:norwegian-4x4/norwegian-4x4
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: related_protocol
-    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/bryan-johnson-blueprint
-  -
-    type: cites
+  - type: cites
     target: source_artifact:hrv-bibliography-2026-04-23
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-8598068
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29034226
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39351472
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-30852243
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39955401
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39015867
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39077654
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-40834291
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-40285070
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29486547
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29549064
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-33262801
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-31331560
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-40611569
+
 claims:
 
   -

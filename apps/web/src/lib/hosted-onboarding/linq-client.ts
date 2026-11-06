@@ -84,6 +84,17 @@ export async function readHostedLinqFailedMessage(messageId: string): Promise<Me
   });
 }
 
+/** Refresh a received attachment locator only for an authorized import. Never persist it. */
+export async function readHostedLinqAttachment(attachmentId: string) {
+  return requestHostedLinqSdkOrThrow({
+    operation: "attachment retrieve",
+    request: (client) => client.attachments.retrieve(attachmentId),
+    timeoutMessage: "Linq attachment retrieval timed out.",
+    timeoutMs: 3_000,
+    maxResponseBytes: 16 * 1024,
+  });
+}
+
 export async function resendHostedLinqMessage(input: {
   chatId: string;
   message: MessageSendParams["message"];
@@ -99,6 +110,19 @@ export async function resendHostedLinqMessage(input: {
   return { chatId: response.chat_id, messageId: response.message.id };
 }
 
+/** Pure preflight, shared by immutable first-message producers and provider entry. */
+export function validateHostedLinqChatFirstMessage(message: string): ReturnType<typeof splitTrailingHttpsLink> {
+  const split = splitTrailingHttpsLink(message);
+  if (containsHttpUrlText(split.linkUrl ? split.message : message)) {
+    throw new TypeError("A new Linq chat cannot include URL text in its first message.");
+  }
+  if (split.linkUrl && !split.message.trim()) {
+    throw new TypeError("A new Linq chat with a rich link must include caller-supplied text.");
+  }
+  normalizeRequiredString(split.message, "message");
+  return split;
+}
+
 export async function createHostedLinqChat(input: {
   from: string;
   idempotencyKey?: string | null;
@@ -106,25 +130,8 @@ export async function createHostedLinqChat(input: {
   signal?: AbortSignal;
   to: string[];
 }): Promise<HostedLinqSendResult> {
-  const split = splitTrailingHttpsLink(input.message);
-  if (!split.linkUrl) {
-    if (containsHttpUrlText(input.message)) {
-      throw new TypeError(
-        "A new Linq chat cannot include URL text in its first message.",
-      );
-    }
-    return createHostedLinqChatWithPrimaryMessage(input);
-  }
-  if (!split.message.trim()) {
-    throw new TypeError(
-      "A new Linq chat with a rich link must include caller-supplied text.",
-    );
-  }
-  if (containsHttpUrlText(split.message)) {
-    throw new TypeError(
-      "A new Linq chat cannot include URL text in its first message.",
-    );
-  }
+  const split = validateHostedLinqChatFirstMessage(input.message);
+  if (!split.linkUrl) return createHostedLinqChatWithPrimaryMessage(input);
 
   const result = await createHostedLinqChatWithPrimaryMessage({
     ...input,
@@ -542,6 +549,43 @@ export async function sendHostedLinqReadReceipt(input: {
   });
 }
 
+/** 👍 goes out as iMessage's native Like tapback, not a custom emoji. */
+const HOSTED_LINQ_NATIVE_LIKE_EMOJI = "👍";
+
+/**
+ * Adds one tapback from the line to an inbound message: the native Like for
+ * 👍, a custom-emoji tapback for anything else.
+ */
+export async function addHostedLinqMessageReaction(input: {
+  emoji: string;
+  messageId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<{
+  ok: boolean;
+  status: number;
+}> {
+  return requestHostedLinqNoContentStatus({
+    request: async (client) => {
+      const result = await client.messages.addReaction(
+        normalizeRequiredString(input.messageId, "message id"),
+        input.emoji === HOSTED_LINQ_NATIVE_LIKE_EMOJI
+          ? { operation: "add", type: "like" }
+          : {
+              custom_emoji: normalizeRequiredString(input.emoji, "emoji"),
+              operation: "add",
+              type: "custom",
+            },
+        { signal: input.signal },
+      ).withResponse();
+      return result.response.status;
+    },
+    signal: input.signal,
+    timeoutMessage: "Linq message reaction timed out.",
+    timeoutMs: input.timeoutMs,
+  });
+}
+
 export async function startHostedLinqChatTypingIndicator(input: {
   chatId: string;
   signal?: AbortSignal;
@@ -594,11 +638,16 @@ export type HostedLinqChatHandleSummary = {
   status: string | null;
 };
 
-export type HostedLinqChatSummary = {
-  displayName?: string | null;
-  handleCount?: number;
-  handlesComplete?: boolean;
+/** One provider roster read. observedAt precedes the read, so it is a lower bound for both presence and absence. */
+export type HostedLinqChatRosterObservation = {
+  handleCount: number;
   handles: HostedLinqChatHandleSummary[];
+  handlesComplete: boolean;
+  observedAt: Date;
+};
+
+export type HostedLinqChatSummary = HostedLinqChatRosterObservation & {
+  displayName?: string | null;
   isGroup: boolean | null;
 };
 
@@ -678,6 +727,7 @@ export async function getHostedLinqChatSummary(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<HostedLinqChatSummary> {
+  const observedAt = new Date();
   const payload = await requestHostedLinqSdkOrThrow({
     operation: "chat read",
     request: (client) => client.chats.retrieve(
@@ -702,6 +752,7 @@ export async function getHostedLinqChatSummary(input: {
     handleCount: handles.length,
     handles: parsedHandles,
     handlesComplete: canonical !== null && parsedHandles.length === handles.length,
+    observedAt,
     isGroup,
   };
 }
@@ -799,14 +850,6 @@ function readHostedLinqCanonicalChat(
     handles: record.handles,
     is_group: record.is_group,
   };
-}
-
-export async function getHostedLinqChatHandles(input: {
-  chatId: string;
-  signal?: AbortSignal;
-  timeoutMs?: number;
-}): Promise<HostedLinqChatHandleSummary[]> {
-  return (await getHostedLinqChatSummary(input)).handles;
 }
 
 function parseHostedLinqChatHandleSummary(value: unknown): HostedLinqChatHandleSummary | null {

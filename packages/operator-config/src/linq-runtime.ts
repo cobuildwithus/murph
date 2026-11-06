@@ -48,7 +48,7 @@ import {
   errorMessage,
   normalizeNullableString,
 } from './text/shared.js'
-import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
+import { normalizeAssistantResponseMediaUrl } from './assistant-delivery-contracts.js'
 import {
   renderMarkdownMessageText,
   sanitizeUserFacingMessageLinks,
@@ -61,6 +61,7 @@ import {
   buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
+  readSleepSummaryNote,
   type AssistantResponseCard,
   type LinqIMessageAppLayout,
 } from './assistant-response-cards.js'
@@ -68,6 +69,8 @@ import type {
   AssistantMessageReaction,
   AssistantProviderMessageEffect,
 } from './assistant-cli-contracts.js'
+
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from './hosted-assistant-config-constants.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
 const LINQ_HTTP_TIMEOUT_MS = 30_000
@@ -226,8 +229,13 @@ type LinqSafeRequestDetails = {
   requestMessageLength?: number
   requestMessagePartCount?: number
   requestPublicUrlMediaPartCount?: number
+  requestPublicUrlMediaFormatSummary?: string
   requestTextPartCount?: number
   providerErrorCode?: string
+  providerErrorFieldHints?: string
+  providerErrorReasonHints?: string
+  providerErrorMediaTypeHints?: string
+  providerErrorMessageLength?: number
   providerRequestId?: string
   responseBodyKeyCount?: number
   responseBodyKind?: string
@@ -312,6 +320,7 @@ export interface SendLinqVoiceMemoResult {
   providerThreadId: string | null
   target: string
   voiceMemoAttachmentId: string | null
+  voiceMemoDurationMs: number | null
   voiceMemoUrl: string | null
 }
 
@@ -701,7 +710,19 @@ export async function checkLinqIMessageCapability(
     signal: dependencies.signal,
     singleAttemptTimeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
   })
-  return response?.available === true
+  if (typeof response?.available !== 'boolean') {
+    throw new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq capability response was missing a boolean availability.',
+      {
+        failureStage: 'http',
+        operation: 'check_imessage_capability',
+        provider: 'linq',
+        retryable: true,
+      },
+    )
+  }
+  return response.available
 }
 
 export async function sendLinqIMessageAppCard(
@@ -709,46 +730,94 @@ export async function sendLinqIMessageAppCard(
     card: AssistantResponseCard
     chatId: string
     idempotencyKey: string
+    companionMessage?: string | null
   },
   dependencies: {
     env?: NodeJS.ProcessEnv
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   } = {},
-): Promise<MessageSendResponse> {
+): Promise<LinqMessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const idempotencyKey = normalizeRequiredString(
     input.idempotencyKey,
     'iMessage app card idempotency key',
   )
+  const note = readSleepSummaryNote(input.card, input.companionMessage)
+  if (note) {
+    assertLinqMessagePartsWithinLimits({
+      message: note,
+      operation: 'send_message',
+      requestAttachmentMediaPartCount: 0,
+      requestMediaPartCount: 0,
+      requestPublicUrlMediaPartCount: 0,
+    })
+  }
   const body: MessageSendParams = {
     message: {
       preferred_service: 'iMessage',
       idempotency_key: buildLinqProviderIdempotencyKey(idempotencyKey),
       parts: [{
         type: 'imessage_app',
-        // `app_store_id` is intentionally absent. Linq otherwise substitutes
-        // square artwork in app-absent static Messages cards.
         app: {
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
+          app_store_id: 6786145859,
         },
-        interactive: true,
+        interactive: input.card.kind !== 'sleep_summary'
+          || (dependencies.env ?? process.env)[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV] === '1',
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: buildLinqIMessageAppFallbackText(input.card),
-        layout: buildLinqIMessageAppLayout(input.card),
+        layout: buildLinqIMessageAppLayout(input.card, input.companionMessage),
       }],
     },
   }
 
-  return sendLinqChatMessageBody({
+  const cardResponse = await sendLinqChatMessageBody({
     body,
     chatId,
     idempotencyKey,
     operation: 'send_imessage_app_card',
     replyToMessageId: null,
   }, dependencies)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body,
+    providerMessageId: cardResponse.message.id,
+  })
+  if (!note) return { ...cardResponse, providerMessageEffects }
+
+  const cardMessageIds = collectLinqProviderMessageIds(cardResponse.message.id)
+  try {
+    const noteResponse = await sendLinqChatMessageParts({
+      chatId,
+      idempotencyKey: `${idempotencyKey}:note`,
+      message: note,
+    }, dependencies)
+    const providerMessageIds = collectLinqProviderMessageIds(
+      cardResponse.message.id,
+      noteResponse.message.id,
+    )
+    if (providerMessageIds.length !== 2) {
+      throw new Error('Linq did not return distinct identities for the card and note.')
+    }
+    return {
+      ...noteResponse,
+      providerMessageIds,
+      providerMessageEffects: [
+        ...providerMessageEffects,
+        ...(noteResponse.providerMessageEffects ?? []),
+      ],
+    }
+  } catch (error) {
+    throw createLinqRichLinkPartialDeliveryFailure(
+      error,
+      idempotencyKey,
+      providerMessageEffects,
+      cardMessageIds,
+      chatId,
+    )
+  }
 }
 
 async function createLinqAttachmentUpload(
@@ -2201,8 +2270,33 @@ function buildLinqRequestBodyDiagnostics(
     requestMessagePartCount: parts.length,
     requestPublicUrlMediaPartCount:
       mediaParts.filter((part) => typeof part.url === 'string').length,
+    requestPublicUrlMediaFormatSummary: summarizeLinqPublicMediaFormats(mediaParts),
     requestTextPartCount: partRecords.filter((part) => part.type === 'text').length,
   }
+}
+
+// URL suffixes describe the request, not the downloaded content type. Unknown
+// suffixes collapse to one label; paths, hosts, queries and fragments never leave.
+const LINQ_DIAGNOSTIC_MEDIA_FORMATS = [
+  'avif', 'bmp', 'gif', 'heic', 'heif', 'jpeg', 'jpg', 'png', 'svg', 'tif',
+  'tiff', 'webp',
+] as const
+
+function summarizeLinqPublicMediaFormats(parts: Record<string, unknown>[]): string {
+  const counts = new Map<string, number>()
+  for (const part of parts) {
+    if (typeof part.url !== 'string') continue
+    let format = 'unknown'
+    try {
+      const suffix = new URL(part.url).pathname.split('.').at(-1)?.toLowerCase()
+      format = LINQ_DIAGNOSTIC_MEDIA_FORMATS.find((value) => value === suffix) ?? 'unknown'
+    } catch {
+      // Invalid URLs are diagnostics only; request validation owns their rejection.
+    }
+    counts.set(format, (counts.get(format) ?? 0) + 1)
+  }
+  return [...counts].sort(([left], [right]) => left.localeCompare(right))
+    .map(([format, count]) => `${format}:${count}`).join(',') || 'none'
 }
 
 function buildLinqErrorResponseDiagnostics(
@@ -2245,6 +2339,7 @@ function buildLinqErrorResponseDiagnostics(
     )
     const providerRequestId = readSafeLinqDiagnosticToken(record, ['request_id', 'trace_id'])
     return {
+      ...buildLinqProviderErrorFieldDiagnostics(providerError ?? record),
       ...(providerErrorCode ? { providerErrorCode } : {}),
       ...(providerRequestId ? { providerRequestId } : {}),
       responseBodyKind: 'json_object',
@@ -2267,6 +2362,53 @@ function buildLinqErrorResponseDiagnostics(
     responseBodySha256: hashLinqDiagnosticBody(serialized),
     responseBodyTextLength: serialized.length,
   }
+}
+
+// These are lexical hints, not a claim that the provider identified the failing
+// field. Emit only fixed schema names, never provider prose or request values.
+function buildLinqProviderErrorFieldDiagnostics(
+  error: Record<string, unknown>,
+): Partial<LinqSafeRequestDetails> {
+  const message = readStringField(error, 'message')
+  if (message === null) {
+    return {}
+  }
+  const words = new Set(message.toLowerCase().match(/[a-z_]+/gu))
+  const fields = [
+    'url', 'attachment_id', 'parts', 'reply_to', 'message_id', 'part_index',
+    'idempotency_key', 'content_type', 'size_bytes', 'filename', 'preferred_service',
+    'from', 'to', 'text_decorations', 'effect', 'app_id',
+  ].filter((field) => words.has(field))
+  return {
+    providerErrorFieldHints: fields.join(',') || 'none',
+    providerErrorReasonHints: buildLinqProviderErrorReasonHints(message),
+    providerErrorMediaTypeHints: LINQ_DIAGNOSTIC_MEDIA_FORMATS
+      .filter((format) => words.has(format)).join(',') || 'none',
+    providerErrorMessageLength: message.length,
+  }
+}
+
+// Deliberately lexical hints, never a retry decision or a claimed root cause.
+// Unknown prose stays unknown instead of entering logs through redaction guesses.
+function buildLinqProviderErrorReasonHints(message: string): string {
+  const patterns: ReadonlyArray<readonly [string, RegExp]> = [
+    ['invalid', /\binvalid\b/iu],
+    ['unsupported', /\b(?:unsupported|not supported)\b/iu],
+    ['not_allowed', /\b(?:not allowed|not permitted|disallowed)\b/iu],
+    ['missing_required', /\b(?:missing|required)\b/iu],
+    ['not_found', /\b(?:not found|does not exist)\b/iu],
+    ['expired', /\bexpired\b/iu],
+    ['too_large', /\b(?:too large|too long|exceeds?|maximum)\b/iu],
+    ['too_small', /\b(?:too small|too short|minimum)\b/iu],
+    ['download', /\b(?:download|fetch)(?:ing|ed)?\b/iu],
+    ['timeout', /\b(?:timeout|timed out)\b/iu],
+    ['type_mismatch', /\b(?:mismatch|does not match)\b/iu],
+    ['uuid', /\buuid\b/iu],
+    ['https', /\bhttps\b/iu],
+    ['empty', /\bempty\b/iu],
+  ]
+  return patterns.filter(([, pattern]) => pattern.test(message))
+    .map(([hint]) => hint).join(',') || 'unknown'
 }
 
 function hashLinqDiagnosticBody(value: string): string {
@@ -2594,6 +2736,19 @@ function parseLinqVoiceMemoResponse(input: {
   const voiceMemoRecord = readRecord(input.response.voice_memo)
   const nestedVoiceMemo = readRecord(voiceMemoRecord?.voice_memo)
   const chatRecord = readRecord(voiceMemoRecord?.chat)
+  const rawDuration = nestedVoiceMemo?.duration_ms
+  const voiceMemoDurationMs = typeof rawDuration === 'number'
+    && Number.isFinite(rawDuration) && rawDuration >= 0
+    ? rawDuration
+    : null
+  if (voiceMemoDurationMs === 0) {
+    // The send is already accepted. Throwing here could duplicate the memo.
+    console.warn('Linq accepted a voice memo with zero duration.', {
+      provider: 'linq',
+      operation: 'send_voice_memo',
+      durationMs: 0,
+    })
+  }
   return {
     providerMessageId: normalizeNullableString(readStringField(voiceMemoRecord, 'id')),
     providerThreadId:
@@ -2602,6 +2757,7 @@ function parseLinqVoiceMemoResponse(input: {
     voiceMemoAttachmentId:
       normalizeNullableString(readStringField(nestedVoiceMemo, 'id')) ??
       input.attachmentId,
+    voiceMemoDurationMs,
     voiceMemoUrl: normalizeNullableString(readStringField(nestedVoiceMemo, 'url')),
   }
 }

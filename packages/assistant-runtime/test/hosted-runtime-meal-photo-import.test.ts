@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createBrowserVaultReplica, readVault } from "@murphai/query/browser-replica-server";
+import { editMealRecord, deleteMealRecord } from "@murphai/vault-usecases/records";
 
 import {
   HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER,
@@ -27,6 +29,13 @@ import {
 import type { HostedRuntimeEffectsPort } from "../src/hosted-runtime/platform.ts";
 import type { HostedMailboxResolvedImportItem } from "../src/hosted-runtime/mailbox-import.ts";
 import { importHostedMealPhotoCapturedMailboxItem } from "../src/hosted-runtime/meal-photo-import.ts";
+import { createHostedWorkspaceBridgeMailboxImporter } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
+import {
+  readHostedSystemMailboxState,
+  resolveHostedSystemMailboxNextWakeCandidate,
+  selectHostedModelFreeSystemMailboxItems,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
+import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
 const CAPTURED_AT = "2026-07-12T21:15:00.000Z";
 const CAPTURE_ID = "a".repeat(64);
@@ -43,6 +52,94 @@ afterEach(async () => {
 });
 
 describe("hosted meal photo mailbox import", () => {
+  it.each(["manual", "automatic", "consumed"] as const)(
+    "queues immediate estimation only for an unconsumed manual capture: %s",
+    async (mode) => {
+      const vaultRoot = await createTestVault();
+      const wake = createMealPhotoWake();
+      if (mode !== "automatic") wake.eventId = `meal-photo:manual:${CAPTURE_ID}`;
+      const item = createMealPhotoMailboxItem();
+      item.item.dedupeKey = wake.eventId;
+      item.durablyConsumed = mode === "consumed";
+      const readMealPhoto = vi.fn(async () => JPEG_BYTES);
+      const deleteMealPhoto = vi.fn(async () => undefined);
+      const importer = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: { decode: async () => ({ status: "decoded", wake }) },
+        runtime: {
+          commitTimeoutMs: null,
+          forwardedEnv: {},
+          parserToolchain: { tools: {} },
+          platformEnv: {},
+          resolvedConfig: createHostedRuntimeResolvedConfig(),
+          userEnv: {},
+          platform: {
+            artifactStore: { get: async () => null, put: async () => undefined },
+            deviceSyncPort: null,
+            effectsPort: createEffectsPort({ readMealPhoto, deleteMealPhoto }),
+            usageRecordPort: null,
+          },
+        },
+        vaultRoot,
+      });
+      const first = await importer(item);
+      expect(first.status).toBe("imported");
+      expect((await importer(item)).status).toBe("imported");
+      expect(readMealPhoto).toHaveBeenCalledTimes(1);
+      expect(deleteMealPhoto).not.toHaveBeenCalled();
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      expect(state.pending).toHaveLength(mode === "manual" ? 1 : 0);
+      expect(selectHostedModelFreeSystemMailboxItems(state).pending).toHaveLength(0);
+      if (mode === "manual") {
+        expect(await resolveHostedSystemMailboxNextWakeCandidate({
+          now: () => CAPTURED_AT, vaultRoot,
+        })).toMatchObject({ at: CAPTURED_AT, executionClass: "default_owned" });
+        expect(state.pending[0]).toMatchObject({
+          itemId: item.item.id,
+          mailboxDedupeKey: wake.eventId,
+          routeAction: "dispatch-assistant-notification",
+          status: "pending",
+          wake,
+        });
+      }
+      expect(await findEventByExternalRef({
+        resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot,
+      })).not.toBeNull();
+      if (first.status === "imported") await first.afterCheckpoint?.();
+      expect(deleteMealPhoto).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["2f1c1fdc-c7b0-4d90-b902-8e6295959243", CAPTURE_ID, undefined])("preserves a phone upload link through import, enrichment, projection and removal (%s)", async uploadId => {
+    const vaultRoot = await createTestVault();
+    const wake = createMealPhotoWake();
+    if (uploadId !== undefined) wake.mealPhoto.uploadId = uploadId;
+    const input = { effectsPort: createEffectsPort({ readMealPhoto: async () => JPEG_BYTES }), item: createMealPhotoMailboxItem(), vaultRoot, wake };
+    expect(await importHostedMealPhotoCapturedMailboxItem(input)).toMatchObject({ status: "imported" });
+    const stored = await findEventByExternalRef({ resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot });
+    if (!stored || stored.kind !== "meal") throw new Error("Expected imported synthetic meal");
+    expect(stored.uploadId).toBe(uploadId);
+    await editMealRecord({ vault: vaultRoot, lookup: stored.mealId, set: ["title=Roasted vegetable bowl", "note=One bowl", "nutrition.totals.calories=500", "nutrition.totals.proteinGrams=20", "nutrition.totals.carbsGrams=60", "nutrition.totals.fatGrams=20", "nutrition.totals.fiberGrams=10"] });
+    expect(await importHostedMealPhotoCapturedMailboxItem(input)).toMatchObject({ status: "imported" });
+    const project = async () => createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [], generatedAt: CAPTURED_AT, sourceBundleHash: "a".repeat(64) });
+    expect((await project()).meals?.days[0]?.meals).toEqual([expect.objectContaining({ id: stored.mealId, name: "Roasted vegetable bowl", calories: 500, proteinGrams: 20, uploadId: uploadId ?? null })]);
+    await deleteMealRecord({ vault: vaultRoot, lookup: stored.mealId });
+    expect((await project()).meals?.days).toEqual([]);
+  });
+
+  it("does not backfill an older imported meal when a retry carries an upload ID", async () => {
+    const vaultRoot = await createTestVault();
+    const wake = createMealPhotoWake();
+    const readMealPhoto = vi.fn(async () => JPEG_BYTES);
+    const input = { effectsPort: createEffectsPort({ readMealPhoto }), item: createMealPhotoMailboxItem(), vaultRoot, wake };
+    expect(await importHostedMealPhotoCapturedMailboxItem(input)).toMatchObject({ status: "imported" });
+    wake.mealPhoto.uploadId = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+    expect(await importHostedMealPhotoCapturedMailboxItem(input)).toMatchObject({ status: "imported" });
+    const stored = await findEventByExternalRef({ resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot });
+    expect(stored).not.toBeNull();
+    expect(stored).not.toHaveProperty("uploadId");
+    expect(readMealPhoto).toHaveBeenCalledTimes(1);
+  });
+
   it("imports one canonical meal idempotently and deletes staging only after checkpoint", async () => {
     const vaultRoot = await createTestVault();
     const readMealPhoto = vi.fn(async () => JPEG_BYTES);

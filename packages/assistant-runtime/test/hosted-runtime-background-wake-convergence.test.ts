@@ -14,6 +14,7 @@ import {
   enqueueDeviceSyncSystemMailboxItemForTest,
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
+  stagePendingLinqAssistantInputForMailboxItem,
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
@@ -76,8 +77,9 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
           const state = await readHostedSystemMailboxState(vaultRoot);
           if (state.pending.length === 0) {
             injectedWakes += 1;
+            assert.ok(injectedWakes <= 3, JSON.stringify(events));
             runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-            if (scenario === "conversation after empty") {
+            if (scenario === "conversation after empty" && invocation > 0) {
               await withRealTimeout(emptyWakeChecked.promise, 2_000, () => "Empty wake was not checked.");
               await setImmediate();
               mailboxItems.push(conversationItem);
@@ -100,8 +102,15 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
           artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return { snapshotRef: snapshot.snapshotRef };
         },
-        async importItem() { throw new Error("The initial mailbox was already imported."); },
+        async importItem({ item }) {
+          assert.equal(item.lane, "conversation", "Previously imported system work must not repeat.");
+          const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+          events.push("foreground.imported");
+          return { assistantInputId, status: "imported" };
+        },
         async runAssistantPhase() {
+          assert.equal(events.filter((event) => event === "foreground.imported").length, 1,
+            "Import the qualified conversation exactly once before foreground admission.");
           assert.equal(scenario, "conversation after empty");
           assert.equal(interruptedCompletions, 1);
           throw foregroundReached;
@@ -129,11 +138,12 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
           },
         }),
       });
-      if (scenario === "conversation after empty") {
+      if (scenario === "conversation after empty" && invocation > 0) {
         await assert.rejects(run, (error) => error === foregroundReached);
         assert.equal(interruptedCompletions, 1);
         assert.equal(wakeChecks, 2);
-        assert.equal(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "0");
+        assert.equal(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1",
+          "The preceding invocation already durably published completion metadata.");
         return;
       }
       const result = await run;

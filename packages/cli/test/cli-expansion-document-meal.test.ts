@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import {
+  addMeal,
   initializeVault,
   listInboxDocumentDefaultPromotionCorrelations,
 } from '@murphai/core'
@@ -623,6 +626,104 @@ test('meal edit rejects a non-IANA timezone in the final repair envelope', async
   assert.doesNotMatch(JSON.stringify(result.envelope), /Private\/TimezoneSentinel/u)
 })
 
+test('meal edit leaves source to the host and keeps the capture reviewable', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-capture-edit-'))
+
+  try {
+    const vaultRoot = path.join(root, 'vault')
+    const photoPath = path.join(root, 'capture.jpg')
+    await initializeVault({ vaultRoot })
+    await writeFile(photoPath, 'synthetic image bytes')
+    const { mealId } = await addMeal({
+      vaultRoot,
+      photoPath,
+      source: 'device',
+      occurredAt: '2030-01-15T23:05:51.000Z',
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' },
+    })
+    const cli = createDocumentMealSchemaCli()
+    const run = (args: string[]) => runInProcessJsonCli<{
+      entity: { data: { attachments: Array<{ role: string }>; externalRef: { system: string }; source: string } }
+    }>(cli, ['meal', ...args, '--vault', vaultRoot])
+
+    for (const flag of [['--source', 'device'], ['--clear-source']]) {
+      const rejected = await run(['edit', mealId, '--note', 'Rejected edit', ...flag])
+      assert.equal(rejected.exitCode, 1)
+      assert.equal(rejected.envelope.ok, false)
+    }
+
+    const edited = requireData((await run(['edit', mealId, '--note', 'Visible grain bowl'])).envelope).entity.data
+    assert.equal(edited.source, 'manual')
+    assert.equal(edited.externalRef.system, 'meal-photo-capture')
+
+    const reviewed = requireData((await run(['remove-photo', mealId])).envelope).entity.data
+    assert.deepEqual(reviewed.attachments.map(attachment => attachment.role), ['reviewed_photo'])
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test('the meal commands move a typed meal onto its capture', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-capture-merge-'))
+
+  try {
+    const vaultRoot = path.join(root, 'vault')
+    const photoPath = path.join(root, 'capture.jpg')
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    await writeFile(photoPath, 'synthetic image bytes')
+    const typed = await addMeal({
+      vaultRoot,
+      occurredAt: '2030-01-15T12:00:30.000Z',
+      name: 'Grain bowl',
+      note: 'Typed note.',
+      ingredients: ['rice'],
+      tags: ['lunch'],
+      nutrition: { totals: { calories: 520 }, provenance: { source: 'estimated', confidence: 'low' } },
+    })
+    const capture = await addMeal({
+      vaultRoot,
+      photoPath,
+      source: 'device',
+      occurredAt: '2030-01-15T12:00:00.000Z',
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' },
+    })
+    const cli = createDocumentMealSchemaCli()
+    const run = (args: string[]) => runInProcessJsonCli<{
+      entity: { data: {
+        attachments: Array<{ role: string }>
+        externalRef: { system: string }
+        ingredients: string[]
+        note: string
+        nutrition: { totals: { calories: number } }
+        tags: string[]
+        title: string
+      } }
+      mealCount: number
+      totals: { calories: { total: number } }
+    }>(cli, ['meal', ...args, '--vault', vaultRoot])
+
+    await run([
+      'edit', capture.mealId, '--name', 'Grain bowl', '--note', 'Typed note.', '--ingredient', 'rice', '--tag', 'lunch',
+      '--nutrition-calories', '520', '--nutrition-source', 'estimated', '--nutrition-confidence', 'low',
+    ])
+    assert.equal((await run(['delete', typed.mealId])).envelope.ok, true)
+    const merged = requireData((await run(['remove-photo', capture.mealId])).envelope).entity.data
+
+    assert.equal(merged.title, 'Grain bowl')
+    assert.equal(merged.note, 'Typed note.')
+    assert.deepEqual(merged.ingredients, ['rice'])
+    assert.deepEqual(merged.tags, ['lunch'])
+    assert.equal(merged.nutrition.totals.calories, 520)
+    assert.equal(merged.externalRef.system, 'meal-photo-capture')
+    assert.deepEqual(merged.attachments.map(attachment => attachment.role), ['reviewed_photo'])
+    const totals = requireData((await run(['totals', '--from', '2030-01-15', '--to', '2030-01-15'])).envelope)
+    assert.equal(totals.mealCount, 1)
+    assert.equal(totals.totals.calories.total, 520)
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
 test('meal import-json help documents the structured payload path and override rule', async () => {
   const help = await runRawSourceCli(['meal', 'import-json', '--help'])
 
@@ -833,6 +934,7 @@ test.sequential(
         await runSourceCli<MealAddEnvelope>([
           'meal',
           'add',
+          '--name', 'Sample meal',
           '--photo',
           sampleDocumentPath,
           '--occurred-at',
@@ -998,7 +1100,7 @@ test.sequential(
       assert.equal(requireData(deletedMeal).entityId, mealRecord.mealId)
       assert.equal(requireData(deletedMeal).kind, 'meal')
       assert.equal(requireData(deletedMeal).deleted, true)
-      assert.equal(requireData(deletedMeal).retainedPaths.length > 0, true)
+      assert.deepEqual(requireData(deletedMeal).retainedPaths, [])
       await access(path.join(vaultRoot, mealManifest.manifestFile))
 
       const missingMeal = await runSourceCli([
@@ -1025,6 +1127,7 @@ test.sequential(
       const whitespaceOnlyMeal = await runSourceCli([
         'meal',
         'add',
+        '--name', 'Sample meal',
         '--note',
         '   ',
         '--vault',
@@ -1039,6 +1142,7 @@ test.sequential(
         await runSourceCli<MealAddEnvelope>([
           'meal',
           'add',
+          '--name', 'Sample meal',
           '--photo',
           sampleDocumentPath,
           '--occurred-at',
@@ -1055,6 +1159,7 @@ test.sequential(
         await runSourceCli<MealAddEnvelope>([
           'meal',
           'add',
+          '--name', 'Sample meal',
           '--photo',
           sampleDocumentPath,
           '--occurred-at',
@@ -1194,6 +1299,7 @@ test.sequential(
       const createdMeal = await runSourceCli<MealAddEnvelope>([
         'meal',
         'import-json',
+        '--name', 'Sample meal',
         '--input',
         `@${payloadPath}`,
         '--vault',
@@ -1315,6 +1421,7 @@ test.sequential(
         [
           'meal',
           'import-json',
+          '--name', 'Sample meal',
           '--input',
           '-',
           '--vault',
@@ -1354,6 +1461,7 @@ test.sequential(
         [
           'meal',
           'import-json',
+          '--name', 'Sample meal',
           '--input',
           '-',
           '--note',
@@ -1465,6 +1573,7 @@ test.sequential(
       const result = await runSourceCli([
         'meal',
         'import-json',
+        '--name', 'Sample meal',
         '--input',
         `@${payloadPath}`,
         '--vault',
@@ -1506,4 +1615,37 @@ test('meal totals resolves same-date goal context through the canonical query wi
     const invalid = await runInProcessJsonCli(cli, ['meal', 'totals', '--resolve-goals', '--vault', vaultRoot])
     assert.equal(invalid.envelope.ok, false)
   } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+
+test('meal remove-photo and validate accept a settled sole-copy photo with absent local bytes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-capture-hosted-review-'))
+  try {
+    const vaultRoot = path.join(root, 'vault')
+    const photoPath = path.join(root, 'capture.jpg')
+    await initializeVault({ vaultRoot })
+    const bytes = Buffer.from('synthetic image bytes')
+    await writeFile(photoPath, bytes)
+    const meal = await addMeal({ vaultRoot, photoPath, source: 'device',
+      occurredAt: '2030-01-15T23:05:51.000Z',
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' } })
+    const relativePath = meal.photo!.relativePath
+    const cataloguePath = resolveHostedMediaReferenceCataloguePath(vaultRoot)
+    await mkdir(path.dirname(cataloguePath), { recursive: true })
+    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{
+      relativePath, byteSize: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+      mediaId: 'a'.repeat(64), mediaKind: 'image', mimeType: 'image/jpeg',
+      recordedAt: '2030-01-15T23:05:51.000Z', expiresAt: null, pendingUpload: false,
+    }] }))
+    await rm(path.join(vaultRoot, relativePath))
+    const cli = createDocumentMealSchemaCli()
+    const reviewed = await runInProcessJsonCli<{ entity: { data: { attachments: Array<{ role: string }> } } }>(cli,
+      ['meal', 'remove-photo', meal.mealId, '--vault', vaultRoot])
+    assert.equal(reviewed.exitCode, null)
+    assert.deepEqual(requireData(reviewed.envelope).entity.data.attachments.map(attachment => attachment.role), ['reviewed_photo'])
+    const validated = await runInProcessJsonCli<{ valid: boolean }>(cli, ['validate', '--vault', vaultRoot])
+    assert.equal(validated.exitCode, null)
+    assert.equal(requireData(validated.envelope).valid, true)
+    await assert.rejects(readFile(path.join(vaultRoot, relativePath)), { code: 'ENOENT' })
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

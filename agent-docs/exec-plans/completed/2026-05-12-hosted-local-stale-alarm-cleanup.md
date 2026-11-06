@@ -45,7 +45,7 @@ Updated: 2026-05-12
 - Commands to run: focused hosted-local runtime cleanup tests; broader checks per verification routing if code changes require them.
 - Expected outcomes: tests pass and prove UserRunner DO state is removed for the active namespace.
 - `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/runtime.cleanup.test.ts --no-coverage`: passed before and after final-review test coverage cleanup.
-- `pnpm test:diff scripts/dev-hosted-local/runtime.ts scripts/dev-hosted-local/runtime.cleanup.test.ts`: blocked by unrelated repo TS tools failure in `scripts/murph-age/r399-midus2-biomarker-increment.ts` (`uniqueColumns` missing and argument mismatch).
-- `pnpm test:repo-tools`: blocked by unrelated `scripts/murph-age/r399-midus2-biomarker-increment.test.ts` failures and unrelated hosted-local environment expectations around legacy internal proxy vars.
-- `pnpm typecheck`: blocked by the same unrelated Murph Age script TypeScript errors.
+- `pnpm test:diff scripts/dev-hosted-local/runtime.ts scripts/dev-hosted-local/runtime.cleanup.test.ts`: blocked by unrelated repo TS tools failure in unrelated code (`uniqueColumns` missing and argument mismatch).
+- `pnpm test:repo-tools`: blocked by unrelated code failures and unrelated hosted-local environment expectations around legacy internal proxy vars.
+- `pnpm typecheck`: blocked by the same unrelated script TypeScript errors.
 Completed: 2026-05-12

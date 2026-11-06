@@ -22,7 +22,16 @@ import {
   type EncryptedR2BucketLike,
 } from "./crypto.js";
 
+export interface RuntimeMultipartUpload {
+  uploadId: string;
+  uploadPart(partNumber: number, value: import("./crypto.ts").R2PutValueLike): Promise<{ partNumber: number; etag: string }>;
+  complete(parts: Array<{ partNumber: number; etag: string }>): Promise<unknown>;
+  abort(): Promise<void>;
+}
+
 export interface R2BucketLike extends EncryptedR2BucketLike {
+  createMultipartUpload?(key: string, options?: import("./crypto.ts").R2PutOptionsLike): Promise<RuntimeMultipartUpload>;
+  resumeMultipartUpload?(key: string, uploadId: string): RuntimeMultipartUpload;
   delete?(key: string | string[]): Promise<void>;
   head?(key: string): Promise<Omit<EncryptedR2ObjectBodyLike, "arrayBuffer" | "body"> | null>;
   list?(input: {
@@ -50,7 +59,7 @@ export interface HostedArtifactStore {
   }): Promise<void>;
 }
 
-export type HostedMediaKind = "image" | "video";
+export type HostedMediaKind = "image" | "video" | "integration-ingest";
 
 export interface HostedMediaDescriptor {
   byteSize: number;
@@ -416,7 +425,7 @@ function normalizeHostedMediaDescriptor(input: HostedMediaDescriptor): HostedMed
   if (!/^[a-f0-9]{64}$/u.test(input.sha256)) {
     throw new Error("Hosted media sha256 is invalid.");
   }
-  if (input.mediaKind !== "image" && input.mediaKind !== "video") {
+  if (input.mediaKind !== "image" && input.mediaKind !== "video" && input.mediaKind !== "integration-ingest") {
     throw new Error("Hosted media kind is invalid.");
   }
   if (!Number.isSafeInteger(input.byteSize) || input.byteSize < 0) {

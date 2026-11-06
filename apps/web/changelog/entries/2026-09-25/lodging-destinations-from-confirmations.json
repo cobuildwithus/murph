@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "lodging-destinations-from-confirmations",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer destinations for lodging plans",
+    "summary": "Murph checks booking details before using a lodging destination in your travel context.",
+    "details": "When a confirmation does not establish the destination, Murph keeps the confirmed dates and marks the location as unknown. Existing imported plans can be corrected when their booking details support a change.",
+    "relevanceTags": [
+      "journal",
+      "travel"
+    ],
+    "sourcePullRequests": [
+      3717
+    ]
+  }
+}

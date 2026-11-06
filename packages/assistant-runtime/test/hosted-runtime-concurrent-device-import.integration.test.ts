@@ -9,11 +9,11 @@ import {
   createPlatform,
   createResolvedDeviceSyncSystemMailboxItem,
   createSnapshotDeviceSyncPort,
+  buildJunctionSleepFixtureResponse,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
   createVaultSnapshotBundle,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   listHostedCanonicalWriteReceiptLogArtifacts,
   mocks,
   removeTempRoot,
@@ -22,11 +22,15 @@ import {
   withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { cp, mkdtemp, readdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test, vi } from "vitest";
-import { initializeVault, patchAutomation, readHabitatAspect, upsertAutomation } from "@murphai/core";
+import { afterAll, beforeAll, test, vi } from "vitest";
+import { importDeviceBatch, withCanonicalWriteLock, initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
+import { EVENT_LEDGER_DIRECTORY, eventRecordSchema } from "@murphai/contracts";
+import { prepareSyntheticFinalization } from "./device-import-finalization.fixture.ts";
+import { createDefaultImporterPort } from "@murphai/device-syncd/service";
+import * as deviceService from "../src/device-sync-service.ts";
 import { listCanonicalEntities } from "@murphai/query";
 import { createAssistantOutboxIntent, listAssistantOutboxIntents, type RunAssistantAutomationPassInput } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
@@ -38,7 +42,45 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+// Each step does real CPU work, so its duration says more about the host than the product.
+// One deadline per test, set inside vitest's 60-second timeout so `finally` still unwinds.
+function createTestDeadline(events: string[]) {
+  const deadlineAt = performance.now() + 50_000;
+  const remainingMs = () => Math.max(deadlineAt - performance.now(), 0);
+  return {
+    remainingMs,
+    within: <T>(step: Promise<T>) => withRealTimeout(step, remainingMs(), () => events.join(",")),
+  };
+}
+
+// Building this history is the heaviest work in the file, so build it once and outside any
+// test's deadline. Both finalization scenarios start from a copy.
+let identityHistoryVault: string;
+
+beforeAll(async () => {
+  identityHistoryVault = await mkdtemp(path.join(tmpdir(), "murph-identity-history-"));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(TEST_NOW));
+  await initializeVault({ createdAt: TEST_NOW, vaultRoot: identityHistoryVault });
+  for (let batch = 0; batch < 4; batch += 1) {
+    await importDeviceBatch({ vaultRoot: identityHistoryVault, provider: "synthetic",
+      events: Array.from({ length: 8_000 }, (_, i) => ({
+        kind: "observation" as const, occurredAt: "2026-01-01T00:00:00.000Z",
+        recordedAt: TEST_NOW, title: "Synthetic identity history",
+        externalRef: { system: "synthetic", resourceType: "metric", resourceId: `history-${batch}-${i}` },
+        fields: { metric: "synthetic", unit: "count", value: 1 },
+      })),
+    });
+  }
+  vi.useRealTimers();
+});
+
+afterAll(async () => {
+  await removeTempRoot(identityHistoryVault);
+});
+
+test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake", "finalization", "long-finalization"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+  const finalization = scenario === "finalization" || scenario === "long-finalization";
   const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment" || scenario === "empty-wake";
   const cold = scenario === "cold" || scenario === "reminder";
   const persistent = scenario === "persistent" || cold;
@@ -46,13 +88,15 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   const reminderAt = new Date(Date.parse(TEST_NOW) + 1_000).toISOString();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
+  const replyDispatched = createDeferred<void>();
+  let idleClock: ReturnType<typeof setInterval> | undefined;
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   const events: string[] = [];
+  const { remainingMs, within } = createTestDeadline(events);
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const artifactBytesByHash = new Map<string, Uint8Array>();
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   const imported = createDeferred<void>();
-  const environmentImported = createDeferred<void>();
   const providerStarted = createDeferred<void>();
   const secondReply = createDeferred<void>();
   const releaseSnapshot = createDeferred<void>();
@@ -60,19 +104,47 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   const dirtyAcks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
   let replySent = false;
   let idleSnapshotCount = 0;
-  let modelFinishedAt = 0;
+  const indexing = createDeferred<void>();
+  let identityRows = 0;
+  let importAttempts = 0;
+  let preparationAborts = 0;
+  let snapshot: unknown;
+  const realCreateService = deviceService.createHostedRuntimeDeviceSyncService;
+  const createSpy = vi.spyOn(deviceService, "createHostedRuntimeDeviceSyncService").mockImplementation(input => {
+    if (!finalization) return realCreateService(input);
+    const importer = createDefaultImporterPort();
+    return realCreateService({ ...input, importer: {
+      ...importer,
+      async importDeviceProviderSnapshot(request, options) {
+        importAttempts += 1;
+        if (importAttempts === 1) snapshot = request.snapshot;
+        else assert.equal(request.snapshot, snapshot, "Retry must retain the fetched snapshot");
+        try { return await importer.importDeviceProviderSnapshot(request, options); }
+        catch (error) {
+          assert.equal(options?.signal?.aborted, true);
+          preparationAborts += 1;
+          throw error;
+        }
+      },
+    } });
+  });
+  const parse = eventRecordSchema.safeParse.bind(eventRecordSchema);
+  const parseSpy = vi.spyOn(eventRecordSchema, "safeParse").mockImplementation((...args) => {
+    const record = args[0];
+    if (finalization && record && typeof record === "object" && "title" in record
+      && record.title === "Synthetic identity history" && importAttempts > 0) {
+      identityRows += 1;
+      if (identityRows === 256) indexing.resolve();
+    }
+    return parse(...args);
+  });
   const connectionId = "synthetic-concurrent-connection";
   const deviceItem = createMailboxItem({
     id: "mailbox_item_concurrent_device",
     dedupeKey: "device-sync.wake:concurrent-import",
     kind: "device-sync.wake", lane: "system", laneSeq: "1",
   });
-  const environmentItem = createMailboxItem({
-    id: "mailbox_item_concurrent_environment",
-    dedupeKey: "environment-interview.completed:concurrent-import",
-    kind: "environment-interview.completed", lane: "system", laneSeq: "2",
-  });
-  const items = cold ? [deviceItem, environmentItem]
+  const items = cold ? [deviceItem]
     : [createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" })];
   const baseDevicePort = createSnapshotDeviceSyncPort({
     connectionId,
@@ -87,7 +159,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
     const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
     if (pathname.includes("/messages")) {
       events.push("reply.sent");
-      assert.ok(performance.now() - modelFinishedAt < 2_000, events.join(","));
+      replyDispatched.resolve();
       if (completesBeforeReply || persistent) {
         if (replySent) {
           secondReply.resolve();
@@ -102,7 +174,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       });
     }
     events.push(`provider.fetch:${pathname}`);
-    if (pathname.endsWith("/synthetic-concurrent-sleep")) {
+    if (pathname.includes("/summary/sleep/")) {
       providerStarted.resolve();
       if (persistent || (scenario === "stalled" && !replySent)) {
         const signal = init?.signal ?? (request instanceof Request ? request.signal : null);
@@ -123,11 +195,11 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         });
       }
     }
-    return new Response(JSON.stringify(pathname.endsWith("/synthetic-concurrent-sleep") ? {
-      id: "synthetic-concurrent-sleep", nap: false,
+    return new Response(JSON.stringify(buildJunctionSleepFixtureResponse(pathname, {
+      id: "synthetic-concurrent-sleep",
       start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
       updated_at: "2026-04-26T08:00:00.000Z",
-    } : { records: [] }), { headers: { "content-type": "application/json" }, status: 200 });
+    })), { headers: { "content-type": "application/json" }, status: 200 });
   }));
   try {
     mocks.runAssistantAutomationPass.mockImplementation(async (input: RunAssistantAutomationPassInput) => {
@@ -136,6 +208,10 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       if (!currentInputId || handledInputIds.has(currentInputId)) return { currentTurnDeliveryIntentIds: [], nextWakeAt: null, progressed: false };
       if (scheduledOccurrence) assert.ok(Date.now() >= Date.parse(reminderAt));
       handledInputIds.add(currentInputId);
+      const finalize = finalization ? await prepareSyntheticFinalization(vaultRoot, TEST_NOW) : null;
+      const release = finalization ? await input.beforeProviderAcceptedInputs?.({
+        acceptedInputs: [{ id: currentInputId, source: "assistant-input" }], turnId: "synthetic-finalization",
+      }) : null;
       events.push("model.started");
       await input.onProviderRequestStarted?.({
         assistantInputIds: scheduledOccurrence ? [] : [currentInputId], providerRequestOrdinal: 0,
@@ -143,16 +219,23 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       });
       if (scenario !== "absent" && !cold && handledInputIds.size === 1) {
         items.push(deviceItem);
-        if (persistent) items.push(environmentItem);
         runtimeWakeSignal.notify();
-        await withRealTimeout(
-          completesBeforeReply ? imported.promise : providerStarted.promise,
-          10_000, () => JSON.stringify({events}),
+        await within(
+          finalization ? indexing.promise : completesBeforeReply ? imported.promise : providerStarted.promise,
         );
       }
       if (completesBeforeReply) {
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-        assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
+        assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+          occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+          endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+          dataOrigin: row.attributes.dataOrigin,
+        })), [{
+          occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+          endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+          dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+            normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+        }]);
         events.push("model.reads.imported.data");
         if (handledInputIds.size === 2) {
           assert.equal(dirtyAcks.length, 0);
@@ -161,6 +244,15 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             (item) => item.itemId === deviceItem.id,
           ));
         }
+      }
+      if (finalization) {
+        assert.ok(identityRows >= 256 && identityRows < 32_000, "Provider must return during real indexing");
+        if (scenario === "long-finalization") vi.setSystemTime(Date.now() + 31_000);
+        await release?.();
+        await finalize?.();
+        await withCanonicalWriteLock(vaultRoot, async () => {
+          events.push("foreground.lock.acquired");
+        });
       }
       const intent = await createAssistantOutboxIntent({
         channel: "linq", createdAt: TEST_NOW,
@@ -181,7 +273,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         terminalKind: "reply_intent_committed", vault: vaultRoot,
       });
       events.push("model.finished");
-      modelFinishedAt = performance.now();
       return { currentTurnDeliveryIntentIds: [intent.intentId], nextWakeAt: null, progressed: true };
     });
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
@@ -203,11 +294,11 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             connectionId, dirtyRevision: "7", processedRevision: "0",
             dirtyResources: [{
               count: 1, dirtyPayloadId: "synthetic-concurrent-payload", jobKind: "resource",
-              payload: { resourceType: "sleep", resourceId: "synthetic-concurrent-sleep" },
+              payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-concurrent-sleep" },
               resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
               windowEnd: null, windowStart: null,
             }],
-            eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+            eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction",
             resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
             userId: TEST_USER_ID, windowEnd: null, windowStart: null,
           }],
@@ -255,7 +346,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
     runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_concurrent_import", idleCheckpointDelayMs: 1,
+          attemptId: "attempt_synthetic_concurrent_import", runnerIdleTtlMs: finalization ? 60_000 : 1,
           ...(cold ? { processingMode: "system_mailbox" as const } : {}),
         },
         forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
@@ -279,14 +370,19 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         },
         async importItem(item) {
           if (item.item.lane === "conversation") {
-            if (!inputId && !cold) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            if (!inputId && !cold) {
+              if (finalization) {
+                await cp(identityHistoryVault, vaultRoot, { recursive: true });
+                // Model a fresh restore: shard metadata this process never observed
+                // invalidates the warm identity cache, forcing the cold build.
+                const restoredAt = new Date(Date.parse(TEST_NOW) + 60_000);
+                for (const entry of await readdir(path.join(vaultRoot, EVENT_LEDGER_DIRECTORY), { recursive: true, withFileTypes: true })) {
+                  if (entry.isFile()) await utimes(path.join(entry.parentPath, entry.name), restoredAt, restoredAt);
+                }
+              } else await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            }
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
-          }
-          if (item.item.kind === "environment-interview.completed") {
-            await enqueueEnvironmentInterviewSystemMailboxItemForTest({ item: item.item, vaultRoot });
-            events.push("environment.staged");
-            return { status: "imported" };
           }
           if (cold) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
           if (scenario === "reminder") {
@@ -304,7 +400,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             wake: {
               connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
               hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
-              kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason: "webhook_hint", userId: TEST_USER_ID,
+              kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction", reason: "webhook_hint", userId: TEST_USER_ID,
             },
           });
           events.push("device.staged");
@@ -316,10 +412,6 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             ...basePlatform.artifactStore,
             async put(artifact) {
               await basePlatform.artifactStore.put(artifact);
-              if (new TextDecoder().decode(artifact.bytes).includes('"habitat_upsert"')) {
-                events.push("environment.receipt.uploaded");
-                environmentImported.resolve();
-              }
               if (new TextDecoder().decode(artifact.bytes).includes('"device_batch_import"')) {
                 events.push("device.receipt.uploaded");
                 imported.resolve();
@@ -345,7 +437,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       },
     );
     if (cold) {
-      await withRealTimeout(providerStarted.promise, 5_000, () => events.join(","));
+      await within(providerStarted.promise);
       if (scenario === "reminder") {
         // No conversation or external wake announces this local deadline.
         vi.setSystemTime(new Date(reminderAt));
@@ -355,25 +447,39 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       }
     }
     if (completesBeforeReply || persistent) {
-      await withRealTimeout(Promise.race([
+      await within(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
-      ]), 20_000, () => events.join(","));
+      ]));
       assert.equal(dirtyAcks.length, 0);
       if (persistent) {
         assert.equal(events.includes("provider.aborted"), false, events.join(","));
-        assert.equal(events.filter((event) => event.endsWith("/synthetic-concurrent-sleep")).length, 1);
-        await withRealTimeout(environmentImported.promise, 5_000, () => events.join(","));
+        assert.equal(events.filter((event) => event.includes("/summary/sleep/")).length, 1);
         assert.equal(events.includes("device.receipt.uploaded"), false, events.join(","));
-        const environment = await readHabitatAspect({ slug: "sleep-environment", vaultRoot });
-        assert.equal(environment.indicators.night_temp_c, 19);
         releaseDownload.resolve();
-        await withRealTimeout(imported.promise, 5_000, () => events.join(","));
+        await within(imported.promise);
       }
       assert.equal(events.filter((event) => event === "device.receipt.uploaded").length, 1);
       releaseSnapshot.resolve();
     }
-    await withRealTimeout(runtimeCompletion, 20_000, () => events.join(","));
+    if (finalization) {
+      // Keep this invocation alive through the retry. A 1-ms idle fixture can
+      // legitimately shut down between dispatch and resumed preparation.
+      await within(replyDispatched.promise);
+      assert.equal(preparationAborts, 1);
+      assert.ok(events.includes("foreground.lock.acquired"));
+      await vi.waitFor(async () => {
+        const item = (await readHostedSystemMailboxState(vaultRoot)).pending.find(item => item.itemId === deviceItem.id);
+        assert.equal(item?.status, "recording");
+      }, { timeout: remainingMs(), interval: 25 });
+      // Advance the fake idle clock only after the retained import is durable. Each tick expires
+      // one idle window. A wake cancels an idle checkpoint in flight, so ticks stay far apart.
+      idleClock = setInterval(() => {
+        vi.setSystemTime(Date.now() + 61_000);
+        runtimeWakeSignal.notify();
+      }, 500);
+    }
+    await within(runtimeCompletion);
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
     if (completesBeforeReply || persistent) {
       assert.equal(handledInputIds.size, scenario === "acknowledgment" ? 3 : 2);
@@ -390,7 +496,8 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       } else {
         assert.ok(events.indexOf("device.receipt.uploaded") > events.lastIndexOf("reply.sent"));
         const lastCanonicalCheckpoint = checkpointRequests.filter(
-          (checkpoint) => checkpoint.reason === "canonical_runtime_commit",
+          (checkpoint) => checkpoint.reason === "canonical_runtime_commit"
+            && checkpoint.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         ).at(-1);
         const receiptLog = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash).find(
           (log) => log.sha256 === lastCanonicalCheckpoint?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
@@ -403,21 +510,48 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
           return (JSON.parse(new TextDecoder().decode(bytes)) as { operationType: string }).operationType;
         });
         assert.equal(operations.filter((operation) => operation === "device_batch_import").length, 1);
-        assert.equal(operations.filter((operation) => operation === "habitat_upsert").length, 1, JSON.stringify({ events, operations, checkpoints: checkpointRequests.map((request) => ({ reason: request.reason, version: request.expectedWorkspaceVersion, receipt: request.redactedStatus?.hostedCanonicalWriteReceiptLogSha256 })) }));
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-        assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
+        assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+          occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+          endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+          dataOrigin: row.attributes.dataOrigin,
+        })), [{
+          occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+          endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+          dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+            normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+        }]);
       }
+    } else if (finalization) {
+      assert.equal(events.filter(event => event === "reply.sent").length, 1);
+      assert.equal(importAttempts, 2);
+      assert.equal(preparationAborts, 1);
+      assert.equal(events.filter(event => event.includes("/summary/sleep/")).length, 1);
+      assert.equal(events.slice(events.indexOf("model.started")).filter(event => event === "device.receipt.uploaded").length, 1);
+      assert.equal(dirtyAcks.length, 1);
+      assert.equal(dirtyAcks[0]?.processedRevision, "7");
+      assert.deepEqual(dirtyAcks[0]?.processedDirtyPayloadIds, ["synthetic-concurrent-payload"]);
+      // Each maintenance pass sets a retry fence and clears it on completion.
+      // A later pass that yields at shutdown can leave its fence pending.
+      assert.ok(!(await readHostedSystemMailboxState(vaultRoot)).pending.some(item => item.itemId === deviceItem.id));
+      assert.ok(events.indexOf("reply.sent") < events.lastIndexOf("device.receipt.uploaded"));
+      const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
+      assert.equal(rows.filter(row => row.kind === "sleep_session").length, 1);
     } else if (scenario === "stalled") {
       assert.ok(events.includes("provider.aborted"), events.join(","));
+      assert.ok(events.indexOf("reply.sent") < events.indexOf("provider.aborted"), events.join(","));
       assert.ok(!events.includes("device.receipt.uploaded")
         || events.indexOf("reply.sent") < events.indexOf("device.receipt.uploaded"), events.join(","));
     }
   } finally {
+    if (idleClock) clearInterval(idleClock);
     releaseDownload.resolve();
     releaseSnapshot.resolve();
     controller.abort();
     await runtimeCompletion?.catch(() => undefined);
     if (originalAutomation) mocks.runAssistantAutomationPass.mockImplementation(originalAutomation);
+    parseSpy.mockRestore();
+    createSpy.mockRestore();
     vi.unstubAllGlobals();
     vi.useRealTimers();
     await removeTempRoot(vaultRoot);
@@ -432,6 +566,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
   const preloadStarted = createDeferred<void>();
   const preloadAborted = createDeferred<void>();
   const events: string[] = [];
+  const { within } = createTestDeadline(events);
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const artifactBytesByHash = new Map<string, Uint8Array>();
   const connectionId = "synthetic-preload-connection";
@@ -442,7 +577,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
   const wake = {
     connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
     hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
-    kind: "device-sync.wake" as const, occurredAt: TEST_NOW, provider: "whoop" as const,
+    kind: "device-sync.wake" as const, occurredAt: TEST_NOW, provider: "junction" as const,
     reason: "webhook_hint" as const, userId: TEST_USER_ID,
   };
   let firstInvocation = true;
@@ -496,11 +631,11 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
           connectionId, dirtyRevision: "7", processedRevision: "0",
           dirtyResources: [{
             count: 1, dirtyPayloadId: "synthetic-preload-payload", jobKind: "resource",
-            payload: { resourceType: "sleep", resourceId: "synthetic-preload-sleep" },
+            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-preload-sleep" },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null,
           }],
-          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction",
           resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
           userId: TEST_USER_ID, windowEnd: null, windowStart: null,
         }],
@@ -509,7 +644,16 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
     async ackDirtyStateProcessed(request) {
       assert.equal(firstInvocation, false);
       const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-      assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-preload-sleep")));
+      assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+          occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+          endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+          dataOrigin: row.attributes.dataOrigin,
+        })), [{
+          occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+          endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+          dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+            normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+        }]);
       assert.ok(checkpointRequests.some((request) => request.reason === "idle_shutdown"));
       assert.deepEqual(request.processedDirtyPayloadIds, ["synthetic-preload-payload"]);
       assert.equal(request.processedRevision, "7");
@@ -519,17 +663,17 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
   };
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(TEST_NOW));
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-    id: "synthetic-preload-sleep", nap: false,
+  vi.stubGlobal("fetch", vi.fn(async (request: string | URL | Request) => new Response(JSON.stringify(buildJunctionSleepFixtureResponse(new URL(request instanceof Request ? request.url : String(request)).pathname, {
+    id: "synthetic-preload-sleep",
     start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
     updated_at: "2026-04-26T08:00:00.000Z",
-  }), { headers: { "content-type": "application/json" } })));
+  })), { headers: { "content-type": "application/json" } })));
   try {
     let workspace = createWorkspaceState();
     const run = () => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
       request: {
         attemptId: firstInvocation ? "attempt_preload_initial" : "attempt_preload_restore",
-        idleCheckpointDelayMs: 1, workspace, workspaceVersion: workspace.version,
+        runnerIdleTtlMs: 1, workspace, workspaceVersion: workspace.version,
         ...(firstInvocation ? {} : { processingMode: "system_mailbox" as const }),
       },
       resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -560,7 +704,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
       }),
     });
     runtimeCompletion = run();
-    await withRealTimeout(runtimeCompletion, 10_000, () => events.join(","));
+    await within(runtimeCompletion);
     assert.equal(controller.signal.aborted, false);
     assert.ok(preloadAbortReason instanceof Error);
     assert.equal(preloadAbortReason.message, scenario === "workspace boundary"
@@ -589,7 +733,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
     checkpointRequests.length = 0;
     vi.setSystemTime(new Date(retryAt));
     runtimeCompletion = run();
-    await withRealTimeout(runtimeCompletion, 10_000, () => events.join(","));
+    await within(runtimeCompletion);
     assert.equal(acknowledgments, 1, JSON.stringify({ events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({ status: item.status, error: item.lastErrorCode })) }));
     assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
     assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1");

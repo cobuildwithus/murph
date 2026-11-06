@@ -79,102 +79,6 @@
     animation: none;
   }
 }
-
-@media print {
-  @page {
-    size: 1600px 900px;
-    margin: 0;
-  }
-
-  html,
-  body {
-    width: 1600px;
-    margin: 0;
-    background: #f5f0e8;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-
-  [data-pitch-deck] {
-    height: auto !important;
-    min-height: 0 !important;
-    overflow: visible !important;
-    scroll-snap-type: none !important;
-  }
-
-  [data-pitch-chrome] {
-    display: none !important;
-  }
-
-  [data-pitch-slide] {
-    box-sizing: border-box;
-    width: 1600px;
-    height: 900px;
-    min-height: 900px !important;
-    overflow: hidden !important;
-    break-after: page;
-    page-break-after: always;
-    scroll-snap-align: none !important;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-
-  [data-pitch-slide]:last-of-type {
-    break-after: auto;
-    page-break-after: auto;
-  }
-
-  [data-pitch-slide] *,
-  [data-pitch-slide]::before,
-  [data-pitch-slide]::after {
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-
-  [data-pitch-slide] .animate-fade-up {
-    opacity: 1 !important;
-    animation: none !important;
-    transform: none !important;
-  }
-}
-
-@keyframes habitat-pop {
-  from {
-    opacity: 0;
-    transform: translateY(7px) scale(0.9);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes habitat-ghost-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.habitat-pop {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: habitat-pop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.habitat-ghost {
-  animation: habitat-ghost-in 0.9s ease-out both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .habitat-pop,
-  .habitat-ghost {
-    animation: none;
-  }
-}
-
 @keyframes dot-pulse {
   0%, 100% {
     transform: scale(1);
@@ -206,23 +110,6 @@
 @media (prefers-reduced-motion: reduce) {
   .murph-loader-dot {
     animation: none;
-  }
-}
-
-/*
- * Privy's link/login modal renders as a bottom sheet on mobile: a fixed panel
- * pinned to bottom: 0 whose content container (#privy-modal-content) has only
- * `padding: 0 16px`. With no bottom padding and no safe-area inset, the primary
- * action (e.g. "Submit") sits flush against the viewport edge / home indicator
- * and gets clipped. Privy exposes no config for this and ships no safe-area
- * handling, so we give the sheet bottom clearance ourselves. The 440px query
- * matches Privy's own bottom-sheet breakpoint; the ID selector outranks Privy's
- * styled-component classes so no !important is needed. env() only resolves when
- * viewport-fit=cover is set, hence the fixed floor from max().
- */
-@media (max-width: 440px) {
-  #privy-modal-content {
-    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
   }
 }
 

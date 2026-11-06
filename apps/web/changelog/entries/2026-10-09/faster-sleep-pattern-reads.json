@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-09",
+  "order": 100,
+  "item": {
+    "id": "faster-sleep-pattern-reads",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Less waiting for sleep-pattern answers",
+    "summary": "Sleep-pattern questions can avoid extra waiting after new wearable data arrives.",
+    "details": "The summary still uses the same wearable data, with the same sleep timing, duration and source details.",
+    "relevanceTags": ["sleep", "wearables"],
+    "sourcePullRequests": [4118]
+  }
+}

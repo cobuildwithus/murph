@@ -6,17 +6,6 @@ import type {
   DeviceSyncProvider,
   DeviceSyncProviderCredentialPolicy,
 } from "./types.ts";
-import type { ConfiguredDeviceSyncProviderKey } from "./config/provider-types.ts";
-
-export const configuredDeviceSyncProviderCredentialPolicies = Object.freeze(
-  Object.fromEntries(
-    (["junction", "oura", "whoop", "strava"] satisfies ConfiguredDeviceSyncProviderKey[])
-      .map((provider) => [
-        provider,
-        Object.freeze({ ...resolveConfiguredDeviceSyncProviderManifest(provider)!.credentialPolicy }),
-      ]),
-  ),
-) as Readonly<Record<ConfiguredDeviceSyncProviderKey, DeviceSyncProviderCredentialPolicy>>;
 
 export function resolveConfiguredDeviceSyncProviderCredentialPolicy(
   provider: string,

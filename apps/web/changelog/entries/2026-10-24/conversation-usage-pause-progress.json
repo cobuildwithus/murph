@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-24",
+  "order": 100,
+  "item": {
+    "id": "conversation-usage-pause-progress",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable conversation progress at usage limits",
+    "summary": "Reaching a usage limit no longer prematurely clears completed conversation work that is still waiting to be saved.",
+    "details": "New AI work still pauses at the same usage limit. This change preserves completion tracking; it does not add usage or resend messages.",
+    "relevanceTags": [
+      "conversations",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4348
+    ]
+  }
+}

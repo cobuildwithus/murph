@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
 
 import { HOSTED_EMAIL_SEND_BINDING_NAME } from "../../src/hosted-email/constants.ts";
-import { readSmallRunnerEnabled } from "../../src/small-runner-profile.ts";
 import type { HostedDeployAutomationEnvironment } from "./environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./secrets.ts";
 
@@ -13,19 +12,14 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+// A rollout leaves a member shell alone until it has been connected this long.
+// Idle shells stop after the conversation idle TTL (10 minutes by default) and
+// start on the new image, so most conversations are never interrupted; older
+// shells still drain through SIGTERM. Immediate releases stage zero instead.
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 1200;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
-const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
 const DEVICE_WEBHOOK_DLQ_SUFFIX = "device-webhooks-dlq";
-
-function resolveContainerRolloutStepPercentage(maxInstances: number): number[] {
-  if (maxInstances >= CONTAINER_ROLLOUT_STEP_PERCENTAGE.length) {
-    return [...CONTAINER_ROLLOUT_STEP_PERCENTAGE];
-  }
-
-  return CONTAINER_ROLLOUT_STEP_PERCENTAGE.slice(-maxInstances);
-}
 
 export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
@@ -36,7 +30,6 @@ export function buildHostedWranglerDeployConfig(
     } | null;
   } = {},
 ): Record<string, unknown> {
-  readSmallRunnerEnabled(environment.workerVars);
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
@@ -71,16 +64,9 @@ export function buildHostedWranglerDeployConfig(
       ...(input.constraints ? { constraints: input.constraints } : {}),
       image: "../../../Dockerfile.cloudflare-hosted-runner",
       image_build_context: "..",
-      instance_type: input.className === "SmallRunnerContainer"
-        ? { vcpu: 1, memory_mib: 3072, disk_mb: 6000 }
-        : environment.containerInstanceType,
+      instance_type: environment.containerInstanceType,
       max_instances: input.maxInstances,
       rollout_active_grace_period: input.rolloutActiveGracePeriodSeconds,
-      // Wrangler limits the array length to max_instances. A retained zero-cap
-      // legacy application must omit this option (slice(-0) would keep all steps).
-      ...(input.maxInstances > 0
-        ? { rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances) }
-        : {}),
       ssh: { enabled: false },
     };
 
@@ -124,20 +110,15 @@ export function buildHostedWranglerDeployConfig(
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
+      // Existing native resources are retained by stageHostedRunnerRelease.
+      // This declaration never provisions or rolls out the retired experiment.
       buildRunnerContainerConfig({
-        className: "SmallRunnerContainer",
-        // Immutable replacement targets need admission headroom while the
-        // provider releases previous capacity. This is a ceiling, not prewarm.
-        maxInstances: 10,
+        className: "SmallRunnerContainer", maxInstances: 0,
         rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
     ],
     durable_objects: {
       bindings: [
-        {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
@@ -213,6 +194,7 @@ export function buildHostedWranglerDeployConfig(
         new_sqlite_classes: ["NextRunnerContainer"],
       },
       { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],
@@ -249,13 +231,14 @@ export function buildHostedWranglerDeployConfig(
     ],
     analytics_engine_datasets: [
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
+        binding: "HOSTED_STANDBY_ANALYTICS",
+        dataset: "murph_hosted_standby_inventory",
       },
     ],
     ai: {
       binding: "AI",
     },
+    images: { binding: "GAME_IMAGES" },
     ...(sendEmailBindings.length > 0
       ? {
           send_email: sendEmailBindings,

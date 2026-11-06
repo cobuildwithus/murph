@@ -19,7 +19,6 @@ import {
 
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
-  "hosted-inference-connection",
   "clinical-records-oauth",
   "clinical-records-page-cursor",
   "clinical-records-patient-id",
@@ -269,6 +268,97 @@ export async function openHostedUserSecureBoxString(input: {
       scope: input.scope,
       serializedEnvelope,
       userId: input.userId,
+    });
+  } finally {
+    rootKey.fill(0);
+  }
+}
+
+/**
+ * Byte twins of the single-value string seal and open, for payloads too big
+ * or too binary for a string (a game photo). Same lanes, root unwrap and AAD.
+ */
+export async function sealHostedUserSecureBoxBytes(input: {
+  aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+  lane: HostedCryptoLane;
+  scope: string;
+  signal?: AbortSignal;
+  userId: string;
+  value: Uint8Array;
+}): Promise<string> {
+  if (!WEB_SEAL_LANES.has(input.lane)) {
+    throw new Error(`Web is not allowed to encrypt hosted ${input.lane} values.`);
+  }
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  const { unwrapHostedDomainRootForWeb } = await import("./domain-root-store");
+  const { envelope, rootKey } = await unwrapHostedDomainRootForWeb({
+    domain,
+    signal: input.signal,
+    userId: input.userId,
+  });
+  try {
+    return serializeHostedSecureBoxEnvelope(
+      await sealHostedSecureBox({
+        aad: buildHostedSecureBoxAad({
+          ...input.aad,
+          domain,
+          lane: input.lane,
+          scope: input.scope,
+          tenant: "murph-hosted",
+          userId: input.userId,
+        }),
+        domain,
+        lane: input.lane,
+        plaintext: input.value,
+        rootKey,
+        rootKeyId: envelope.rootKeyId,
+        scope: input.scope,
+      }),
+    );
+  } finally {
+    rootKey.fill(0);
+  }
+}
+
+export async function openHostedUserSecureBoxBytes(input: {
+  aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+  lane: HostedCryptoLane;
+  scope: string;
+  signal?: AbortSignal;
+  userId: string;
+  value: string;
+}): Promise<Uint8Array> {
+  if (!WEB_SEAL_LANES.has(input.lane)) {
+    throw new Error(`Web is not allowed to decrypt hosted ${input.lane} values.`);
+  }
+  const serializedEnvelope = parseSerializedHostedSecureBoxEnvelope(input.value);
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  if (serializedEnvelope.domain !== domain) {
+    throw new Error(`Hosted secure-box envelope domain mismatch for lane ${input.lane}.`);
+  }
+  const { unwrapHostedDomainRootForWebByRootKeyId } = await import("./domain-root-store");
+  const { rootKey } = await unwrapHostedDomainRootForWebByRootKeyId({
+    domain,
+    rootKeyId: serializedEnvelope.rootKeyId,
+    signal: input.signal,
+    userId: input.userId,
+  });
+  try {
+    return await openHostedSecureBox({
+      aad: buildHostedSecureBoxAad({
+        ...input.aad,
+        domain,
+        lane: input.lane,
+        scope: input.scope,
+        tenant: "murph-hosted",
+        userId: input.userId,
+      }),
+      envelope: serializedEnvelope,
+      expectedDomain: domain,
+      expectedLane: input.lane,
+      expectedRootKeyId: serializedEnvelope.rootKeyId,
+      expectedScope: input.scope,
+      rootKey,
     });
   } finally {
     rootKey.fill(0);

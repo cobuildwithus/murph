@@ -1,6 +1,10 @@
 import type {
   HostedExecutionMemberActionRequestedWake,
 } from "@murphai/hosted-execution";
+import { deleteMealRecord } from "@murphai/vault-usecases/records";
+import { resolveMetricDefinition } from "@murphai/query";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { addMeasurement, deterministicContractId, ID_PREFIXES, setMemoryDemographics, setMemoryDisplayName } from "@murphai/core";
 import {
   applyLiveWorkoutMemberAction,
   readLiveWorkoutCardSnapshot,
@@ -17,6 +21,106 @@ export async function executeHostedMemberActionWake(input: {
   wake: HostedExecutionMemberActionRequestedWake;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
+    case "measurement.add": {
+      const { actionId, requestedAt } = input.wake.request;
+      const definition = resolveMetricDefinition(input.wake.request.action.metric)!;
+      const result = await addMeasurement({
+        vaultRoot: input.vaultRoot,
+        onExisting: "keep",
+        draft: {
+          id: deterministicContractId(ID_PREFIXES.event, `member-action:${actionId}`),
+          occurredAt: requestedAt,
+          source: "manual",
+          title: definition.displayName,
+          measurements: [{
+            metric: input.wake.request.action.metric,
+            value: input.wake.request.action.value,
+            unit: definition.canonicalUnit!,
+          }],
+        },
+      });
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId, completedAt: new Date().toISOString(),
+            schemaVersion: 1, status: result.created ? "applied" : "unchanged", reason: null,
+          },
+        },
+      });
+    }
+    case "display-name.set": {
+      const request = input.wake.request;
+      const result = await setMemoryDisplayName(input.vaultRoot, {
+        displayName: input.wake.request.action.displayName,
+      });
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: request.actionId, completedAt: new Date().toISOString(),
+            schemaVersion: 1, status: result.changed ? "applied" : "unchanged", reason: null,
+          },
+        },
+      });
+    }
+    case "demographics.set": {
+      const request = input.wake.request;
+      const result = await setMemoryDemographics(input.vaultRoot, {
+        ...input.wake.request.action.patch,
+        memberAction: { actionId: request.actionId, requestedAt: request.requestedAt },
+      });
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: request.actionId, completedAt: new Date().toISOString(),
+            schemaVersion: 1, status: result.status, reason: result.reason,
+          },
+        },
+      });
+    }
+    case "meal.names.repair": {
+      // Retired operator action: drain old Web dispatches and restored requests
+      // through the ordinary checkpoint owner without model, meal, or usage work.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: input.wake.request.actionId,
+            completedAt: new Date().toISOString(),
+            schemaVersion: 1,
+            status: "unchanged",
+            reason: null,
+          },
+        },
+      });
+    }
+    case "meal.delete": {
+      const reason = await removeMeal(input.vaultRoot, input.wake.request.action.mealId);
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: input.wake.request.actionId,
+            completedAt: new Date().toISOString(),
+            schemaVersion: 1,
+            status: reason === null ? "applied" : "rejected",
+            reason,
+          },
+        },
+      });
+    }
     case "workout.live.apply": {
       const action = input.wake.request.action;
       const result = await applyLiveWorkoutMemberAction({
@@ -76,5 +180,17 @@ export async function executeHostedMemberActionWake(input: {
         },
       });
     }
+  }
+}
+
+async function removeMeal(vaultRoot: string, mealId: string): Promise<"meal_not_found" | "meal_changed" | null> {
+  try {
+    await deleteMealRecord({ vault: vaultRoot, lookup: mealId });
+    return null;
+  } catch (error) {
+    if (!(error instanceof VaultCliError)) throw error;
+    if (error.code === "not_found") return "meal_not_found";
+    if (error.code === "conflict") return "meal_changed";
+    throw error;
   }
 }

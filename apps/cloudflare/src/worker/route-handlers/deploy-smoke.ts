@@ -147,7 +147,9 @@ export async function handleDeployContainerSmokeRoute(
   let primaryError: unknown = null;
 
   try {
-    if (checkServing && (!standbyInventory || standbyInventory.readyCount === 0)) {
+    // Inventory records can predate native image replacement. Keep the fresh
+    // serving-target proof independent of the coordinator's cached ready count.
+    if (checkServing) {
       await proveDeployRunnerTarget(context.env);
     }
     result = await container.smokeHealth({
@@ -212,7 +214,7 @@ export async function handleDeployContainerSmokeRoute(
   });
 }
 
-/** Even without warm inventory, prove the actual image target before promotion. */
+/** Prove the actual serving target before promotion, independently of warm inventory. */
 async function proveDeployRunnerTarget(env: WorkerEnvironmentSource): Promise<void> {
   const deployment = readHostedRunnerDeployment(env);
   if (!deployment) return;
@@ -222,12 +224,16 @@ async function proveDeployRunnerTarget(env: WorkerEnvironmentSource): Promise<vo
   const slotName = createHostedRunnerSlotName(release.id);
   const slot = requireHostedRunnerSlotLifecycle(namespace.getByName(slotName));
   try {
-    await slot.prepareStandbySlot({
+    const proof = await slot.prepareStandbySlot({
       releaseId: release.id,
       region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
     });
+    if (proof.runnerImage?.bundleFingerprint !== release.bundleFingerprint
+      || proof.runnerImage?.sourceFingerprint !== release.sourceFingerprint) {
+      throw new Error("Deploy runner target image proof does not match the candidate.");
+    }
   } finally {
     await slot.retireStandbySlot({});
   }

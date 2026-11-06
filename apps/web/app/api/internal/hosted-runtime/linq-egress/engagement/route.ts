@@ -1,3 +1,6 @@
+import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
+import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
+import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
   requireHostedCloudflareCallbackRequest,
@@ -5,13 +8,17 @@ import {
 import {
   assertHostedAssistantAskCompletionDeliveryAuthorityTx,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
+import { isHostedGroupCurrentSenderPrivateLinqCompletionTx } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  hasLaterHostedLinqMemberMessage,
+  isHostedLinqProactivityPaused,
   resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
+  type HostedLinqInstantFirstTurnRuntimeEgressDisposition,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   hostedOnboardingError,
@@ -24,6 +31,12 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { readOptionalJsonObject } from "@/src/lib/http";
+import {
+  isHostedLinqAckReactionCoveringCurrentBurst,
+  readHostedLinqAckReactionOnMessage,
+} from "@/src/lib/hosted-onboarding/linq-ack-reaction-store";
+import type { Prisma } from "@prisma/client";
+
 import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
@@ -34,6 +47,14 @@ import {
 import type {
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
+
+async function isRequestedAskReply(
+  input: Parameters<typeof isHostedGroupCurrentSenderPrivateLinqCompletionTx>[0],
+): Promise<boolean> {
+  return input.idempotencyKey?.startsWith(
+    HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  ) || await isHostedGroupCurrentSenderPrivateLinqCompletionTx(input);
+}
 
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
@@ -70,6 +91,14 @@ export const POST = withJsonError(async (request: Request) => {
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
 
+  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
+  const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
+
+  const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
+    ? { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
+    : gameChatPlayers && "memberIds" in gameChatPlayers
+    ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
+
   const assertion = await prisma.$transaction(async (tx) => {
     const chatLockTarget = targetKind === "participant"
       ? null
@@ -103,37 +132,19 @@ export const POST = withJsonError(async (request: Request) => {
       target,
       targetKind,
     });
-    const providerTarget = asserted.resolvedRoute.target;
-    const providerTargetKind = asserted.resolvedRoute.targetKind;
-    if (
-      providerTargetKind !== "participant"
-      && providerTarget
-      && providerTarget !== target
-      && !authorityCheckOnly
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
-        httpStatus: 403,
-        message: "Hosted Linq send-time route authority changed before provider entry.",
-        retryable: false,
-      });
-    }
     const finalAuthority = asserted;
+    assertResolvedLinqDeliveryAuthority({
+      authorityCheckOnly, expectedResolvedRoute,
+      resolvedRoute: finalAuthority.resolvedRoute, target,
+    });
 
-    if (
-      expectedResolvedRoute
-      && !resolvedLinqDeliveryRoutesEqual(
-        finalAuthority.resolvedRoute,
-        expectedResolvedRoute,
-      )
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
-        httpStatus: 403,
-        message: "Hosted Linq send-time route authority changed before provider entry.",
-        retryable: false,
-      });
-    }
+    const requestedGameProposal = await assertGameProposalDeliveryCurrentTx({
+      deliveryIdempotencyKey: idempotencyKey,
+      containerMemberId: userId,
+      ...gameAuthority,
+      rematchTermsVersion,
+      tx,
+    });
 
     const sourceEpisode = await isHostedSourceDeliveryStallEpisodeCurrentTx({
       deliveryIdempotencyKey: idempotencyKey,
@@ -161,18 +172,21 @@ export const POST = withJsonError(async (request: Request) => {
           linqChatId: finalAuthority.resolvedRoute.target,
           prisma: tx,
         });
-      if (instantFirstTurn !== "available") {
-        throw hostedOnboardingError({
-          code: instantFirstTurn === "already_answered"
-            ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
-            : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
-          httpStatus: instantFirstTurn === "already_answered" ? 409 : 503,
-          message: instantFirstTurn === "already_answered"
-            ? "The exact inbound already has a Web-owned reply."
-            : "The exact inbound remains owned by its Web reply.",
-          retryable: instantFirstTurn !== "already_answered",
-        });
-      }
+      assertHostedLinqInstantFirstTurnEgress({
+        disposition: instantFirstTurn,
+        deliveryPurpose: body.deliveryPurpose,
+        laterMemberMessage: instantFirstTurn === "held" && await hasLaterHostedLinqMemberMessage({
+          memberId: userId,
+          prisma: tx,
+          replyToMessageId,
+          sourceEventId: finalAuthority.sourceEventId,
+          target: finalAuthority.resolvedRoute.target,
+        }),
+        turnCommitProbe: isHostedLinqTurnCommitProbe({
+          authorityCheckOnly, idempotencyKey, intentId,
+          deliveryPurpose: body.deliveryPurpose,
+        }),
+      });
     }
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({
@@ -189,6 +203,8 @@ export const POST = withJsonError(async (request: Request) => {
         asserted: finalAuthority,
         deliveryBlockCode: health.policy.code,
         deliveryPosture: null,
+        ackReaction: null,
+        progressUpdateSuppressed: false,
         providerDispatchClaimed: null,
       };
     }
@@ -203,40 +219,55 @@ export const POST = withJsonError(async (request: Request) => {
         tx,
       });
 
-    let providerDispatchClaimed: boolean | null = null;
-    if (
-      !authorityCheckOnly
-      && assistantAskAuthority?.assistantAskFallbackRequired !== true
-    ) {
-      if (!idempotencyKey) {
-        throw hostedOnboardingError({
-          code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
-          httpStatus: 400,
-          message: "Hosted Linq provider dispatch requires an idempotency key.",
-          retryable: false,
-        });
-      }
-      const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
-        idempotencyKey,
-        linqChatId: finalAuthority.resolvedRoute.targetKind === "participant"
-          ? null
-          : finalAuthority.resolvedRoute.target,
-        phoneNumber: finalAuthority.resolvedRoute.fromPhoneNumber,
-        prisma: tx,
-        sourceRef: intentId ?? idempotencyKey,
-        targetKind: finalAuthority.resolvedRoute.targetKind,
-      });
-      if (!claim.claimed) {
-        throw hostedOnboardingError({
-          code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
-          httpStatus: 409,
-          message: "Hosted Linq provider dispatch is already started.",
-          retryable: false,
-        });
-      }
-      providerDispatchClaimed = claim.claimed;
+    // The reviewed validator returns void on success, so its return value is
+    // not an authorization discriminator. It has already validated this key.
+    const requestedAskReply = await isRequestedAskReply({
+      answeredMailboxItemIds,
+      boundRuntimeMemberId: userId,
+      idempotencyKey,
+      target: finalAuthority.resolvedRoute.target,
+      targetKind: finalAuthority.resolvedRoute.targetKind,
+      tx,
+    });
+    // App-requested proposals may start a new room with no inbound history.
+    // Only the current proposal and freshly proven exact audience qualify.
+    if (!requestedGameProposal && !requestedAskReply && await isHostedLinqProactivityPaused({
+      answeredMailboxItemIds,
+      replyToMessageId,
+      service: health.service,
+      authority: finalAuthority,
+      memberId: userId,
+      now: new Date(),
+      prisma: tx,
+    })) {
+      return {
+        assistantAskFallbackRequired: false,
+        asserted: finalAuthority,
+        deliveryBlockCode: "automation_engagement_paused" as const,
+        deliveryPosture: null,
+        ackReaction: null,
+        progressUpdateSuppressed: false,
+        providerDispatchClaimed: null,
+      };
     }
+
+    const dispatch = await claimHostedLinqEngagementProviderDispatchTx({
+      assistantAskFallbackRequired:
+        assistantAskAuthority?.assistantAskFallbackRequired === true,
+      authorityCheckOnly,
+      deliveryPurpose: body.deliveryPurpose,
+      idempotencyKey,
+      intentId,
+      resolvedRoute: finalAuthority.resolvedRoute,
+      tx,
+    });
     return {
+      ackReaction: await readHostedLinqEngagementAckReactionTx({
+        deliveryPurpose: body.deliveryPurpose,
+        replyToMessageId,
+        resolvedRoute: finalAuthority.resolvedRoute,
+        tx,
+      }),
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
       asserted: finalAuthority,
@@ -244,13 +275,14 @@ export const POST = withJsonError(async (request: Request) => {
       deliveryPosture: health.policy.posture === "normal"
         ? null
         : health.policy.posture,
-      providerDispatchClaimed,
+      ...dispatch,
     };
   });
 
   const resolvedRoute = assertion.asserted.resolvedRoute;
   return jsonOk({
     ok: true,
+    ...(idempotencyKey?.startsWith("game-rematch:") ? { gameRematchAuthorityChecked: true } : {}),
     ...(assertion.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
       : {}),
@@ -264,8 +296,146 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
+    ...readHostedLinqAckEngagementResponseFields(assertion),
   });
 });
+
+function assertHostedLinqInstantFirstTurnEgress(input: {
+  deliveryPurpose: unknown;
+  disposition: HostedLinqInstantFirstTurnRuntimeEgressDisposition;
+  laterMemberMessage: boolean;
+  turnCommitProbe: boolean;
+}): void {
+  if (
+    input.disposition === "available"
+    || (input.disposition === "held"
+      && input.laterMemberMessage
+      && input.turnCommitProbe)
+  ) {
+    return;
+  }
+  // This reply can never send; terminal supersede ends it without retry, recovery input or wake.
+  // ALREADY_ANSWERED is imperfect, but is the only terminal contract older runners understand.
+  const superseded = input.disposition === "held"
+    && input.laterMemberMessage
+    && input.deliveryPurpose === undefined;
+  const terminal = input.disposition === "already_answered" || superseded;
+  throw hostedOnboardingError({
+    code: terminal
+      ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
+      : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
+    httpStatus: terminal ? 409 : 503,
+    message: input.disposition === "already_answered"
+      ? "The exact inbound already has a Web-owned reply."
+      : superseded
+        ? "The exact inbound reply has been superseded by a later member message."
+        : "The exact inbound remains owned by its Web reply.",
+    retryable: !terminal,
+  });
+}
+
+function isHostedLinqTurnCommitProbe(input: {
+  authorityCheckOnly: boolean;
+  deliveryPurpose: unknown;
+  idempotencyKey: string | null;
+  intentId: string | null;
+}): boolean {
+  // Real sends carry an intent and idempotency key; reaction and progress checks
+  // carry a purpose, so a changed probe shape restores the veto.
+  return input.authorityCheckOnly === true
+    && input.idempotencyKey === null
+    && input.intentId === null
+    && input.deliveryPurpose === undefined;
+}
+
+/** Tapback facts for the runtime; absent fields keep older runners unchanged. */
+function readHostedLinqAckEngagementResponseFields(assertion: {
+  ackReaction: string | null;
+  progressUpdateSuppressed: boolean;
+}): { ackReaction?: string; progressUpdateSuppressed?: true } {
+  return {
+    ...(assertion.ackReaction ? { ackReaction: assertion.ackReaction } : {}),
+    ...(assertion.progressUpdateSuppressed ? { progressUpdateSuppressed: true as const } : {}),
+  };
+}
+
+/**
+ * Before Murph reacts to a member message itself (`react_to_message`), the
+ * runtime asks with `deliveryPurpose: "reaction"` whether Linq already
+ * accepted Web's tapback on that exact message in this direct chat. Read-only.
+ */
+async function readHostedLinqEngagementAckReactionTx(input: {
+  deliveryPurpose: unknown;
+  replyToMessageId: string | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  if (
+    input.deliveryPurpose !== "reaction"
+    || !input.replyToMessageId
+    || input.resolvedRoute.targetKind !== "thread"
+    || !input.resolvedRoute.threadIsDirect
+  ) {
+    return null;
+  }
+  return readHostedLinqAckReactionOnMessage({
+    linqChatId: input.resolvedRoute.target,
+    messageId: input.replyToMessageId,
+    prisma: input.tx,
+  });
+}
+
+/**
+ * Records the provider-dispatch fence for a final (non-authority-only) call.
+ * A progress update is skipped instead, with no fence, when Linq already
+ * accepted the Web tapback for this direct chat's current burst. This runs in
+ * the caller's transaction under the chat ownership lock, so it serializes
+ * with tapback claims. Older runners omit `deliveryPurpose` and keep today's
+ * behavior.
+ */
+async function claimHostedLinqEngagementProviderDispatchTx(input: {
+  assistantAskFallbackRequired: boolean;
+  authorityCheckOnly: boolean;
+  deliveryPurpose: unknown;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  tx: Prisma.TransactionClient;
+}): Promise<{ progressUpdateSuppressed: boolean; providerDispatchClaimed: boolean | null }> {
+  if (input.authorityCheckOnly || input.assistantAskFallbackRequired) {
+    return { progressUpdateSuppressed: false, providerDispatchClaimed: null };
+  }
+  if (
+    input.deliveryPurpose === "progress_update"
+    && input.resolvedRoute.targetKind === "thread"
+    && input.resolvedRoute.threadIsDirect
+    && await isHostedLinqAckReactionCoveringCurrentBurst({
+      linqChatId: input.resolvedRoute.target,
+      prisma: input.tx,
+    })
+  ) {
+    return { progressUpdateSuppressed: true, providerDispatchClaimed: null };
+  }
+  if (!input.idempotencyKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
+      httpStatus: 400,
+      message: "Hosted Linq provider dispatch requires an idempotency key.",
+      retryable: false,
+    });
+  }
+  const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
+    idempotencyKey: input.idempotencyKey,
+    linqChatId: input.resolvedRoute.targetKind === "participant"
+      ? null
+      : input.resolvedRoute.target,
+    phoneNumber: input.resolvedRoute.fromPhoneNumber,
+    prisma: input.tx,
+    sourceRef: input.intentId ?? input.idempotencyKey,
+    targetKind: input.resolvedRoute.targetKind,
+  });
+  return { progressUpdateSuppressed: false, providerDispatchClaimed: claim.claimed };
+}
 
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
@@ -290,6 +460,27 @@ function throwResolvedLinqDeliveryRouteInvalid(): never {
     message: "Hosted Linq expected resolved route is invalid.",
     retryable: false,
   });
+}
+
+function assertResolvedLinqDeliveryAuthority(input: {
+  authorityCheckOnly: boolean;
+  expectedResolvedRoute: HostedExecutionResolvedLinqDeliveryRoute | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  target: string | null;
+}): void {
+  const providerTargetChanged = !input.authorityCheckOnly
+    && input.resolvedRoute.targetKind !== "participant"
+    && input.resolvedRoute.target !== input.target;
+  const expectedRouteChanged = input.expectedResolvedRoute
+    && !resolvedLinqDeliveryRoutesEqual(input.resolvedRoute, input.expectedResolvedRoute);
+  if (providerTargetChanged || expectedRouteChanged) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq send-time route authority changed before provider entry.",
+      retryable: false,
+    });
+  }
 }
 
 function resolvedLinqDeliveryRoutesEqual(

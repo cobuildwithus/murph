@@ -19,7 +19,6 @@ import {
 import {
   HOSTED_WEB_NEXT_TSCONFIG_PATH,
   HOSTED_WEB_PRODUCTION_BUILD_CPUS,
-  HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   assertHostedBrowserDeviceSyncCallbackHostnameConfiguration,
   buildHostedWebClientEnv,
@@ -29,9 +28,8 @@ import {
   buildHostedWebSecurityHeaders,
   configureHostedWebWebpack,
   configureHostedWebWorkflowLocalDataDir,
-  resolveHostedPrivyOrigin,
-  resolveHostedPrivyOrigins,
-  resolvePrivyBaseDomainOrigin,
+
+
 } from "../next.config";
 
 const productionNextConfig = buildHostedWebNextConfig(
@@ -118,6 +116,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"],
     ["../../packages/hosted-execution/src/plan-usage.ts"],
+  );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/usage-diagnostics"],
+    ["../../packages/hosted-execution/src/usage-diagnostics.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/subscription"],
@@ -292,7 +294,7 @@ test("next.config scopes Workflow local-world storage to the hosted web dist dir
 
   assert.equal(
     devEnvironment.WORKFLOW_LOCAL_DATA_DIR,
-    path.join(HOSTED_WEB_DEV_DIST_DIR, "workflow-data"),
+    path.join(HOSTED_WEB_DEV_DIST_DIR, "workflow-data-v5"),
   );
 
   const smokeEnvironment = createHostedWebSmokeEnvironment(createProcessEnv({
@@ -303,7 +305,7 @@ test("next.config scopes Workflow local-world storage to the hosted web dist dir
 
   assert.equal(
     smokeEnvironment.WORKFLOW_LOCAL_DATA_DIR,
-    path.join(HOSTED_WEB_SMOKE_DIST_DIR, "workflow-data"),
+    path.join(HOSTED_WEB_SMOKE_DIST_DIR, "workflow-data-v5"),
   );
 });
 
@@ -473,87 +475,7 @@ test("connect-link routes use the lightweight device-sync error entrypoint", () 
   }
 });
 
-test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops", () => {
-  assert.deepEqual(HOSTED_WEB_WORKFLOW_OPTIONS, {
-    workflows: {
-      lazyDiscovery: true,
-    },
-  });
-});
-
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/goals"],
-    [
-      "../../packages/health-commons/generated/web/browse/goals.json",
-    ],
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/goals/[goalId]"],
-    [
-      "../../packages/health-commons/generated/web/browse/goals.json",
-      "../../packages/health-commons/generated/web/routes/index.json",
-      "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-    ],
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/api/goals/contact"],
-    [
-      "../../packages/health-commons/generated/web/browse/goals.json",
-    ],
-  );
-  for (const route of [
-    "/api/hosted-onboarding/linq/webhook",
-    "/api/hosted-onboarding/telegram/webhook",
-  ]) {
-    assert.deepEqual(
-      productionNextConfig.outputFileTracingIncludes?.[route],
-      ["../../packages/health-commons/generated/web/browse/goals.json"],
-    );
-  }
-  const expectedGoalTraceExcludes = [
-    "../../packages/health-commons/generated/web/browse/biomarkers.json",
-    "../../packages/health-commons/generated/web/browse/experiments.json",
-    "../../packages/health-commons/generated/web/bundles/**/*.json",
-    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-    "../../packages/health-commons/generated/web/shell/**/*.json",
-    "../../packages/health-commons/generated/web/tabs/**/*.json",
-  ];
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/goals"],
-    expectedGoalTraceExcludes,
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/goals/[goalId]"],
-    expectedGoalTraceExcludes,
-  );
-  const expectedGoalIndexOnlyTraceExcludes = [
-    "../../packages/health-commons/generated/web/pages/goals/**/*.json",
-    "../../packages/health-commons/generated/web/routes/index.json",
-  ];
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/goals!(/**)"],
-    expectedGoalIndexOnlyTraceExcludes,
-  );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingExcludes?.["/api/goals/contact"],
-    [
-      ...expectedGoalTraceExcludes,
-      ...expectedGoalIndexOnlyTraceExcludes,
-    ],
-  );
-  for (const route of [
-    "/api/hosted-onboarding/linq/webhook",
-    "/api/hosted-onboarding/telegram/webhook",
-  ]) {
-    assert.deepEqual(
-      productionNextConfig.outputFileTracingExcludes?.[route],
-      [
-        ...expectedGoalTraceExcludes,
-        ...expectedGoalIndexOnlyTraceExcludes,
-      ],
-    );
-  }
   assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
@@ -561,15 +483,7 @@ test("next.config traces generated Health Commons route files without the monoli
       "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
     ],
   );
-  assert.deepEqual(
-    productionNextConfig.outputFileTracingIncludes?.["/biomarkers"],
-    [
-      "../../packages/health-commons/generated/web/browse/biomarkers.json",
-      "../../packages/health-commons/generated/web/routes/index.json",
-      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-    ],
-  );
+  assert.equal(productionNextConfig.outputFileTracingIncludes?.["/biomarkers"], undefined);
   assert.equal(
     productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]"],
     undefined,
@@ -603,6 +517,17 @@ test("next.config traces every selectable contact-card avatar into its route", (
     [
       "public/brand-logos/murph-logo-avatar-*.png",
       "public/murph-headshots/*-sm.png",
+    ],
+  );
+});
+
+test("next.config traces the App Review game seed's photos into its ops route", () => {
+  assert.deepEqual(
+    [...(productionNextConfig.outputFileTracingIncludes?.["/api/ops/app-review-game"] ?? [])].sort(),
+    [
+      "public/design-assets/hero-at-home-static-stretching-latest.jpeg",
+      "public/design-assets/hero-morning-outdoor-light-exposure.jpeg",
+      "public/design-assets/hero-walking-after-every-meal.jpeg",
     ],
   );
 });
@@ -648,34 +573,6 @@ test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", (
   }
 });
 
-test("configureHostedWebWebpack disables the production cache and aliases Privy's missing optional Farcaster peer", () => {
-  const webpackConfig = {
-    cache: { type: "filesystem" },
-    resolve: {
-      alias: {
-        existing: "/existing-module.ts",
-      },
-    },
-  };
-  const configured = configureHostedWebWebpack(webpackConfig, { dev: false });
-  const hasOptionalModule = resolveHostedOptionalModule();
-
-  assert.equal(configured, webpackConfig);
-  assert.equal(configured.cache, false);
-  if (hasOptionalModule) {
-    assert.deepEqual(configured.resolve.alias, {
-      existing: "/existing-module.ts",
-    });
-  } else {
-    assert.deepEqual(configured.resolve.alias, {
-      existing: "/existing-module.ts",
-      "@farcaster/mini-app-solana": path.join(
-        repoRoot,
-        "apps/web/src/lib/empty-module.ts",
-      ),
-    });
-  }
-});
 
 test("the Webpack callback retains Next compiler caching only for explicit CI opt-in", () => {
   const cache = {
@@ -712,67 +609,6 @@ test("configureHostedWebWebpack preserves development caching", () => {
   assert.equal(cache.maxMemoryGenerations, Infinity);
 });
 
-test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {
-  assert.equal(resolvePrivyBaseDomainOrigin("example.com"), "https://privy.example.com");
-  assert.equal(
-    resolvePrivyBaseDomainOrigin("https://privy.example.com/dashboard"),
-    "https://privy.example.com",
-  );
-  assert.equal(resolvePrivyBaseDomainOrigin("https://www.example.com/join"), "https://privy.example.com");
-  assert.equal(resolvePrivyBaseDomainOrigin("   "), null);
-});
-
-test("resolveHostedPrivyOrigin prefers an explicit custom auth domain and otherwise falls back to the hosted public origin", () => {
-  assert.equal(
-    resolveHostedPrivyOrigin(createProcessEnv({
-      PRIVY_CUSTOM_AUTH_DOMAIN: "privy.custom.example.com",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com",
-    })),
-    "https://privy.custom.example.com",
-  );
-  assert.equal(
-    resolveHostedPrivyOrigin(createProcessEnv({
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com",
-    })),
-    "https://privy.example.com",
-  );
-});
-
-test("resolveHostedPrivyOrigin rejects hosted public base URLs with non-root paths", () => {
-  assert.throws(
-    () => resolveHostedPrivyOrigin(createProcessEnv({
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com/join",
-    })),
-    /must not include a path/u,
-  );
-});
-
-test("resolveHostedPrivyOrigin rejects a pathful HOSTED_WEB_BASE_URL fallback", () => {
-  assert.throws(
-    () => resolveHostedPrivyOrigin(createProcessEnv({
-      HOSTED_WEB_BASE_URL: "https://www.example.com/app",
-    })),
-    /must not include a path/u,
-  );
-});
-
-test("resolveHostedPrivyOrigin rejects a pathful Vercel production fallback", () => {
-  assert.throws(
-    () => resolveHostedPrivyOrigin(createProcessEnv({
-      VERCEL_PROJECT_PRODUCTION_URL: "www.example.com/app",
-    })),
-    /must not include a path/u,
-  );
-});
-
-test("resolveHostedPrivyOrigin falls back to the Vercel production URL when no hosted public base URL is configured", () => {
-  assert.equal(
-    resolveHostedPrivyOrigin(createProcessEnv({
-      VERCEL_PROJECT_PRODUCTION_URL: "www.example.com",
-    })),
-    "https://privy.example.com",
-  );
-});
 
 test("hosted Web accepts a path-capable device callback on every configured app-session hostname", () => {
   assert.doesNotThrow(() => {
@@ -824,77 +660,7 @@ test("hosted Web accepts an implicit callback when every browser surface shares 
   );
 });
 
-test("resolveHostedPrivyOrigins adds the base-domain fallback for common hosted-web subdomains", () => {
-  assert.deepEqual(
-    resolveHostedPrivyOrigins(createProcessEnv({
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.withmurph.ai",
-    })),
-    [
-      "https://privy.app.withmurph.ai",
-      "https://privy.withmurph.ai",
-    ],
-  );
-});
 
-test("resolveHostedPrivyOrigins prefers PRIVY_BASE_DOMAIN over hosted public subdomain fallbacks", () => {
-  assert.deepEqual(
-    resolveHostedPrivyOrigins(createProcessEnv({
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.withmurph.ai",
-      PRIVY_BASE_DOMAIN: "withmurph.ai",
-    })),
-    ["https://privy.withmurph.ai"],
-  );
-});
-
-test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hosted browser protections", () => {
-  const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
-    HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
-    NODE_ENV: "production",
-    PRIVY_CUSTOM_AUTH_DOMAIN: "https://privy.custom.example.com",
-  }));
-
-  assert.match(csp, /default-src 'self'/);
-  assert.match(csp, /script-src [^;]*https:\/\/auth\.privy\.io/);
-  assert.match(csp, /script-src [^;]*https:\/\/telegram\.org/);
-  assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
-  assert.match(csp, /script-src-attr 'none'/);
-  assert.match(csp, /style-src 'self' 'unsafe-inline'/);
-  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
-  assert.match(csp, /manifest-src 'self'/);
-  assert.match(csp, /media-src 'self' blob:/);
-  assert.match(csp, /object-src 'none'/);
-  assert.match(csp, /frame-ancestors 'none'/);
-  assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
-  assert.match(csp, /child-src [^;]*https:\/\/privy\.custom\.example\.com/);
-  assert.match(csp, /frame-src [^;]*https:\/\/privy\.custom\.example\.com/);
-  assert.match(csp, /frame-src [^;]*https:\/\/\*\.kernel\.sh:8443/);
-  assert.match(csp, /frame-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
-  assert.doesNotMatch(csp, /https:\/\/kernel\.example\.test/);
-  assert.match(csp, /frame-src [^;]*https:\/\/oauth\.telegram\.org/);
-  assert.match(csp, /frame-src [^;]*https:\/\/verify\.walletconnect\.com/);
-  assert.match(csp, /connect-src [^;]*https:\/\/privy\.custom\.example\.com/);
-  assert.match(csp, /connect-src [^;]*https:\/\/\*\.kernel\.sh:8443/);
-  assert.match(csp, /connect-src [^;]*wss:\/\/\*\.kernel\.sh:8443/);
-  assert.match(csp, /connect-src [^;]*https:\/\/\*\.onkernel\.com:8443/);
-  assert.match(csp, /connect-src [^;]*wss:\/\/\*\.onkernel\.com:8443/);
-  assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
-  assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
-  assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
-  assert.match(csp, /connect-src [^;]*https:\/\/api\.brandfetch\.io/);
-  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
-  assert.match(csp, /upgrade-insecure-requests/);
-  assert.doesNotMatch(csp, /'unsafe-eval'/);
-});
-
-test("next.config permits only the Brandfetch CDN for remote brand images", () => {
-  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
-    {
-      protocol: "https",
-      hostname: "cdn.brandfetch.io",
-      pathname: "/**",
-    },
-  ]);
-});
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {
   const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
@@ -904,7 +670,6 @@ test("buildHostedWebContentSecurityPolicy keeps production script origins on a t
   const expectedScriptSources = [
     "'self'",
     "'unsafe-inline'",
-    "https://auth.privy.io",
     "https://telegram.org",
     "https://challenges.cloudflare.com",
   ];
@@ -919,22 +684,6 @@ test("buildHostedWebContentSecurityPolicy keeps production script origins on a t
   assert.doesNotMatch(csp, /cdncookieyes/u);
 });
 
-test("buildHostedWebContentSecurityPolicy includes the base-domain Privy fallback for common hosted-web subdomains", () => {
-  for (const hostedPublicBaseUrl of [
-    "https://app.withmurph.ai",
-    "https://www.withmurph.ai",
-    "https://web.withmurph.ai",
-  ]) {
-    const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
-      NODE_ENV: "production",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedPublicBaseUrl,
-    }));
-
-    assert.match(csp, /child-src [^;]*https:\/\/privy\.withmurph\.ai/);
-    assert.match(csp, /frame-src [^;]*https:\/\/privy\.withmurph\.ai/);
-    assert.match(csp, /connect-src [^;]*https:\/\/privy\.withmurph\.ai/);
-  }
-});
 
 test("buildHostedWebContentSecurityPolicy keeps Next development relaxations scoped to development", () => {
   const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
@@ -1003,11 +752,11 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
   );
 });
 
-test("next.config serves global security headers and stricter Murph Safe referrer privacy", async () => {
+test("next.config serves global security headers", async () => {
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 2);
+  assert.equal(routes.length, 1);
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -1029,13 +778,6 @@ test("next.config serves global security headers and stricter Murph Safe referre
       value: "strict-origin",
     },
   );
-  assert.equal(routes[1]?.source, "/search/:path*");
-  assert.deepEqual(routes[1]?.headers, [
-    {
-      key: "Referrer-Policy",
-      value: "no-referrer",
-    },
-  ]);
 });
 
 function resolveHostedOptionalModule(): boolean {

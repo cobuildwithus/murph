@@ -1,0 +1,128 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { addMeal, initializeVault, readEvent, removeAutomaticMealPhoto, runMealPhotoMaintenance } from '@murphai/core'
+import { readMealNutritionTotals, readVault } from '@murphai/query'
+import { createBrowserVaultReplica } from '@murphai/query/browser-replica'
+import { deleteMealRecord, listAutomaticMealPhotoCloseoutWorkRecords, listMealRecords, showMealRecord } from '@murphai/vault-usecases/records'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
+
+describe('automatic meal closeout eligibility', () => {
+  let root: string
+  let vaultRoot: string
+  const occurrenceAt = '2030-05-09T01:00:00.000Z'
+  const check = (overrides = {}) => canSkipManagedAutomaticMealCloseout({
+    automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+    occurrenceAt, timeZone: 'America/New_York', vaultRoot, ...overrides,
+  })
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2030-05-08T18:00:00.000Z'))
+    root = await mkdtemp(path.join(tmpdir(), 'meal-closeout-eligibility-'))
+    vaultRoot = path.join(root, 'vault')
+    await initializeVault({ timezone: 'America/New_York', vaultRoot })
+  })
+  afterEach(async () => {
+    vi.useRealTimers()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function capture(occurredAt = '2030-05-08T16:00:00.000Z') {
+    const photoPath = path.join(root, 'meal.jpg')
+    await writeFile(photoPath, 'synthetic meal photo')
+    return addMeal({ vaultRoot, occurredAt, source: 'device', photoPath,
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' },
+    })
+  }
+
+  it('skips an empty vault and manual meals', async () => {
+    expect(await check()).toBe(true)
+    await addMeal({ vaultRoot, source: 'manual', occurredAt: '2030-05-08T16:00:00.000Z', note: 'Synthetic lunch' })
+    expect(await check()).toBe(true)
+  })
+
+  it.each(['2030-05-08T16:00:00.000Z', '2030-05-09T00:30:00.000Z', '2030-05-02T16:00:00.000Z'])(
+    'admits retained automatic photos from %s', async (at) => {
+      await capture(at)
+      expect(await check()).toBe(false)
+    },
+  )
+
+  it('skips cleaned historical captures but retains same-occurrence retry evidence', async () => {
+    const meal = await capture()
+    await removeAutomaticMealPhoto({ vaultRoot, eventId: meal.event.id, now: new Date(occurrenceAt) })
+    expect(await check()).toBe(false)
+    expect(await check({ occurrenceAt: '2030-05-10T01:00:00.000Z' })).toBe(true)
+  })
+
+  it('deleting a device stub retires both photos and removes it from canonical meals, totals, projection, and retry work', async () => {
+    const stub = await addMeal({ vaultRoot, source: 'device', occurredAt: '2030-05-08T16:00:00.000Z',
+      photoCapturedAt: '2030-05-08T16:00:00.000Z',
+      photoPath: fileURLToPath(new URL('../../../apps/web/public/brand-logos/connect/runkeeper.png', import.meta.url)),
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-nonfood' },
+    })
+    await runMealPhotoMaintenance({ vaultRoot, now: new Date('2030-05-08T18:00:00.000Z') })
+    const before = (await readEvent({ vaultRoot, eventId: stub.event.id })).event
+    if (before.kind !== 'meal' || !before.photoThumbnail || !stub.photo) throw new Error('Expected both meal photos')
+    expect((await readMealNutritionTotals(vaultRoot, {})).mealCount).toBe(1)
+    expect(await check()).toBe(false)
+    expect(await deleteMealRecord({ vault: vaultRoot, lookup: stub.mealId })).toMatchObject({ deleted: true })
+    await expect(showMealRecord(vaultRoot, stub.mealId)).rejects.toMatchObject({ code: 'not_found' })
+    expect((await listMealRecords({ vault: vaultRoot })).items).toEqual([])
+    expect((await readMealNutritionTotals(vaultRoot, {})).mealCount).toBe(0)
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [],
+      generatedAt: occurrenceAt, sourceBundleHash: 'a'.repeat(64) })
+    expect(replica.meals?.days).toEqual([])
+    expect(await check()).toBe(true)
+    expect((await listAutomaticMealPhotoCloseoutWorkRecords({ vault: vaultRoot, occurrenceAt, to: '2030-05-08', limit: 20 })).items).toEqual([])
+    for (const photo of [stub.photo.relativePath, before.photoThumbnail.relativePath]) {
+      expect(JSON.parse(await readFile(path.join(vaultRoot, photo), 'utf8'))).toMatchObject({ reason: 'meal_deleted' })
+    }
+    await expect(deleteMealRecord({ vault: vaultRoot, lookup: stub.mealId })).rejects.toMatchObject({ code: 'not_found' })
+  })
+
+  it('drains a full corrected non-food batch instead of selecting it forever', async () => {
+    const photoPath = path.join(root, 'nonfood.jpg')
+    await writeFile(photoPath, 'synthetic non-food image')
+    const stubs = []
+    for (let index = 0; index < 20; index += 1) {
+      stubs.push(await addMeal({ vaultRoot, source: 'device', photoPath,
+        occurredAt: '2030-05-02T16:00:00.000Z', note: 'Non-food image; no food or drink consumed.',
+        externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `nonfood-${index}` },
+      }))
+    }
+    const genuine = await capture()
+    const first = await listAutomaticMealPhotoCloseoutWorkRecords({ vault: vaultRoot, occurrenceAt, to: '2030-05-08', limit: 20 })
+    expect(first.items.map(item => item.id).sort()).toEqual(stubs.map(meal => meal.mealId).sort())
+    for (const meal of stubs) {
+      await removeAutomaticMealPhoto({ vaultRoot, eventId: meal.event.id, now: new Date(occurrenceAt) })
+    }
+    const next = await capture('2030-05-09T16:00:00.000Z')
+    const second = await listAutomaticMealPhotoCloseoutWorkRecords({ vault: vaultRoot,
+      occurrenceAt: '2030-05-10T01:00:00.000Z', to: '2030-05-09', limit: 20 })
+    expect(second.items.map(item => item.id).sort()).toEqual([genuine.mealId, next.mealId].sort())
+  })
+
+  it('uses the occurrence local date even when delayed past midnight', async () => {
+    await capture('2030-05-09T04:30:00.000Z')
+    vi.setSystemTime(new Date('2030-05-09T05:00:00.000Z'))
+    expect(await check()).toBe(true)
+    expect(await check({ occurrenceAt: '2030-05-10T01:00:00.000Z' })).toBe(false)
+    expect(await check({ timeZone: null })).toBe(false)
+  })
+
+  it('does not read the queue for another automation', async () => {
+    expect(await check({ automationId: 'aut_unrelated', vaultRoot: path.join(root, 'missing') })).toBe(false)
+  })
+
+  it('propagates cancellation and unreadable vault failures', async () => {
+    await expect(check({ signal: AbortSignal.abort(new Error('cancelled')) })).rejects.toThrow('cancelled')
+    const invalidVault = path.join(root, 'not-a-directory')
+    await writeFile(invalidVault, 'invalid vault')
+    await expect(check({ vaultRoot: invalidVault })).rejects.toThrow()
+  })
+})

@@ -36,7 +36,9 @@ import {
 } from "../config/connect-routes.ts";
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
-import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "../junction-request-timeout-diagnostics.ts";
+import type { JunctionRequestStage } from "../types.ts";
+import { buildProviderApiError as buildProviderApiErrorBase } from "./provider-api-error.ts";
 import {
   createProviderRequestAbortSignal,
   isProviderParentAbortError,
@@ -510,7 +512,9 @@ export class JunctionClient {
     }
     return this.fetchWindowedCollection(
       { ...input, dateQueryFormat: resolveJunctionSummaryDateQueryFormat(input) },
-      extractCollectionRecords,
+      input.requireStructurallyCompleteCollection
+        ? extractStructurallyCompleteSummaryRecords
+        : extractCollectionRecords,
       (cursor) => this.requestSummaryPage(input, cursor),
     );
   }
@@ -593,19 +597,35 @@ export class JunctionClient {
       resource: "electrocardiogram_voltage",
       sourceProviderSlug,
     };
+    const collection = {
+      pageCount: 0,
+      groupCount: 0,
+      providerMatchGroupCount: 0,
+      instanceMatchGroupCount: 0,
+      instanceMissingGroupCount: 0,
+      matchedGroupCount: 0,
+    };
     const records = await this.fetchWindowedCollection(
       requestInput,
-      (payload) => extractBoundElectrocardiogramVoltageRecords(payload, {
-        recordingId,
-        sessionEnd: input.windowEnd,
-        sessionStart: input.windowStart,
-        sourceInstanceId: normalizeString(input.sourceInstanceId),
-        sourceProviderSlug,
-        sourceType: normalizeString(input.sourceType),
-      }),
+      (payload) => {
+        collection.pageCount += 1;
+        return extractBoundElectrocardiogramVoltageRecords(payload, {
+          recordingId,
+          sessionEnd: input.windowEnd,
+          sessionStart: input.windowStart,
+          sourceInstanceId: normalizeString(input.sourceInstanceId),
+          sourceProviderSlug,
+          sourceType: normalizeString(input.sourceType),
+        }, collection);
+      },
       (cursor) => this.requestTimeseriesPage(requestInput, cursor),
     );
     assertSingleElectrocardiogramCollectionSource(records);
+    if (records.length === 0) {
+      const reason = collection.groupCount === 0 ? "voltage_collection_empty"
+        : collection.matchedGroupCount === 0 ? "voltage_source_mismatch" : "voltage_samples_empty";
+      throw junctionElectrocardiogramBindingError(reason, collection);
+    }
     return records;
   }
 
@@ -987,13 +1007,19 @@ export class JunctionClient {
       queryParameterNames: options.queryParameterNames ?? [],
     });
 
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       throwIfProviderRequestAborted(options.signal);
+      const requestStartedAt = performance.now();
       const requestAbort = createProviderRequestAbortSignal({
         signal: options.signal ?? null,
-        timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
+        timeoutMs,
       });
-      let capturedResponse: JunctionSdkResponseCapture | null = null;
+      const observation: {
+        capturedResponse: JunctionSdkResponseCapture | null;
+        headersReceived: boolean;
+        stage: JunctionRequestStage;
+      } = { capturedResponse: null, headersReceived: false, stage: "request_setup" };
       let observedOptionalNotFound = false;
       const sdkFetch: typeof fetch = async (input, init) => {
         const rewrittenRequest = rewriteJunctionSdkProviderRequest(
@@ -1001,13 +1027,17 @@ export class JunctionClient {
           init,
           options.providerSlugRewrite,
         );
+        observation.stage = "awaiting_headers";
         const response = await this.fetchImpl(rewrittenRequest.input, {
           ...rewrittenRequest.init,
           signal: requestAbort.signal,
         });
+        observation.headersReceived = true;
+        observation.stage = response.body ? "response_body" : "post_body";
         if (options.optional404 && response.status === 404) {
           observedOptionalNotFound = true;
           await response.body?.cancel().catch(() => undefined);
+          observation.stage = "post_body";
           return new Response(null, {
             headers: response.headers,
             status: response.status,
@@ -1024,7 +1054,7 @@ export class JunctionClient {
         }
 
         const capture = createJunctionSdkResponseCapture(response);
-        capturedResponse = capture;
+        observation.capturedResponse = capture;
         return new Response(
           createJunctionSdkBoundedBodyStream(response.body, capture, maxResponseBytes),
           {
@@ -1034,7 +1064,7 @@ export class JunctionClient {
           },
         );
       };
-      const timeoutInSeconds = (options.timeoutMs ?? this.requestTimeoutMs) / 1_000;
+      const timeoutInSeconds = timeoutMs / 1_000;
       const clientOptions: JunctionSdkClientOptions = {
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
@@ -1075,7 +1105,15 @@ export class JunctionClient {
             message: `Junction API request timed out for ${options.endpointKind}.`,
             retryable: method === "GET",
             httpStatus: 504,
-            details: requestDiagnostics,
+            details: {
+              ...requestDiagnostics,
+              ...buildJunctionSdkTimeoutDiagnostics({
+                timeoutMs,
+                requestStartedAt,
+                attempt,
+                ...observation,
+              }),
+            },
             cause: providerError,
           });
         }
@@ -1087,7 +1125,7 @@ export class JunctionClient {
 
         const sdkFailure = readJunctionSdkHttpFailure(error)
           ?? (error instanceof Error && error.name === "ParseError"
-            ? readCapturedJunctionSdkHttpFailure(capturedResponse)
+            ? readCapturedJunctionSdkHttpFailure(observation.capturedResponse)
             : null);
         if (options.optional404 && sdkFailure?.response.status === 404) {
           throwIfProviderRequestAborted(requestAbort.signal);
@@ -1120,7 +1158,7 @@ export class JunctionClient {
         }
 
         if (error instanceof Error && error.name === "ParseError") {
-          const legacyPayload = readCapturedJunctionSdkSuccess(capturedResponse);
+          const legacyPayload = readCapturedJunctionSdkSuccess(observation.capturedResponse);
           if (legacyPayload.present) {
             return legacyPayload.payload as T;
           }
@@ -1207,6 +1245,25 @@ interface JunctionSdkResponseCapture {
   exceededLimit: boolean;
   rawResponse: Response;
   totalBytes: number;
+}
+
+function buildJunctionSdkTimeoutDiagnostics(input: {
+  timeoutMs: number;
+  requestStartedAt: number;
+  attempt: number;
+  capturedResponse: JunctionSdkResponseCapture | null;
+  headersReceived: boolean;
+  stage: JunctionRequestStage;
+}) {
+  return readSafeJunctionRequestTimeoutDiagnostics("JUNCTION_API_REQUEST_TIMEOUT", {
+    providerRequestTimeoutMs: input.timeoutMs,
+    providerRequestElapsedMs: Math.floor(performance.now() - input.requestStartedAt),
+    providerRequestAttempt: input.attempt,
+    // EOF is observed by the existing bounded stream, not inferred
+    // from elapsed time. This phase is not a decode/network diagnosis.
+    providerRequestStage: input.capturedResponse?.complete ? "post_body" : input.stage,
+    providerResponseHeadersPresent: input.headersReceived,
+  });
 }
 
 function createJunctionSdkResponseCapture(response: Response): JunctionSdkResponseCapture {
@@ -1435,17 +1492,6 @@ function isJunctionDisabledEndpointError(error: unknown): boolean {
 
   const status = error.details?.status;
   return status === 403 || status === 404;
-}
-
-export function resolveJunctionTimeseriesApiResource(resource: string): string {
-  switch (resource) {
-    case "fat":
-      return "body_fat";
-    case "weight":
-      return "body_weight";
-    default:
-      return resource;
-  }
 }
 
 function resolveJunctionSummaryDateQueryFormat(input: JunctionWindowInput): JunctionDateQueryFormat {
@@ -1943,8 +1989,27 @@ function extractCollectionRecords(payload: unknown, resource?: string): unknown[
   return resource ? [record] : [];
 }
 
+function extractStructurallyCompleteSummaryRecords(payload: unknown, resource: string): unknown[] {
+  const envelope = readPlainObject(payload);
+  const candidates = Array.isArray(payload) ? [payload] : envelope
+    ? [...resolveCollectionEnvelopeKeys(resource), "data", "results", "items", "records"].map((key) => envelope[key])
+    : [];
+  const records = candidates.find(Array.isArray);
+  if (!records || records.some((record) => !readPlainObject(record))) {
+    throw deviceSyncError({
+      code: "JUNCTION_SUMMARY_COLLECTION_INCOMPLETE",
+      message: "Junction summary response did not contain a complete collection.",
+      retryable: true,
+    });
+  }
+  return records;
+}
+
 function resolveCollectionEnvelopeKeys(resource: string): readonly string[] {
-  return resource === "meal" ? ["meal", "meals"] : [resource];
+  if (resource === "meal") return ["meal", "meals"];
+  if (resource === "sleep_cycle") return ["sleep_cycle", "sleepCycle"];
+  if (resource === "menstrual_cycle") return ["menstrual_cycle", "menstrualCycle"];
+  return [resource];
 }
 
 function extractTimeseriesRecords(payload: unknown, resource: string): unknown[] {
@@ -1964,6 +2029,13 @@ interface BoundElectrocardiogramVoltageIdentity {
 function extractBoundElectrocardiogramVoltageRecords(
   payload: unknown,
   identity: BoundElectrocardiogramVoltageIdentity,
+  collection: {
+    groupCount: number;
+    providerMatchGroupCount: number;
+    instanceMatchGroupCount: number;
+    instanceMissingGroupCount: number;
+    matchedGroupCount: number;
+  },
 ): unknown[] {
   const envelope = readPlainObject(payload);
   const groups = readPlainObject(envelope?.groups);
@@ -1988,6 +2060,7 @@ function extractBoundElectrocardiogramVoltageRecords(
       throw junctionElectrocardiogramBindingError("group_collection_invalid");
     }
     for (const rawGroup of rawGroups) {
+      collection.groupCount += 1;
       const group = readPlainObject(rawGroup);
       if (!group || !Array.isArray(group.data)) {
         throw junctionElectrocardiogramBindingError("group_invalid");
@@ -2011,16 +2084,20 @@ function extractBoundElectrocardiogramVoltageRecords(
       ) {
         continue;
       }
+      collection.providerMatchGroupCount += 1;
       if (
         identity.sourceInstanceId
         && origin.sourceInstanceId !== identity.sourceInstanceId
       ) {
+        collection.instanceMissingGroupCount += Number(!origin.sourceInstanceId);
         continue;
       }
+      collection.instanceMatchGroupCount += 1;
       if (identity.sourceType && origin.sourceType !== identity.sourceType) {
         continue;
       }
 
+      collection.matchedGroupCount += 1;
       matchingGroupCount += 1;
       if (matchingGroupCount > 1) {
         throw junctionElectrocardiogramBindingError("group_ambiguous");
@@ -2218,10 +2295,10 @@ function incompleteJunctionCalendarCollectionError() {
   });
 }
 
-function junctionElectrocardiogramBindingError(reason: string) {
+function junctionElectrocardiogramBindingError(reason: string, details: Record<string, unknown> = {}) {
   return deviceSyncError({
     code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
-    details: { reason },
+    details: { ...details, reason },
     message: "Junction ECG summary and voltage response were inconsistent.",
     retryable: true,
     httpStatus: 502,

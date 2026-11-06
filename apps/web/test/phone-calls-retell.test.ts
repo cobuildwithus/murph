@@ -76,12 +76,49 @@ describe("Retell phone-call runtime", () => {
     vi.unstubAllEnvs();
   });
 
+  describe.each(["member", "third_party"] as const)("%s audience", (callAudience) => {
+    it.each([
+      { allowTransferToUser: true, transferNumber: "+12125550123", expected: "+12125550123" },
+      { allowTransferToUser: false, transferNumber: "+12125550123", expected: "" },
+      { allowTransferToUser: true, transferNumber: null, expected: "" },
+      { allowTransferToUser: false, transferNumber: null, expected: "" },
+    ])("sends audience with transfer allowed=$allowTransferToUser and number=$transferNumber", async ({
+      allowTransferToUser, transferNumber, expected,
+    }) => {
+      vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+      vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+      vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+      vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+      vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", undefined);
+      const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+        call_id: "retell_audience",
+        data_storage_setting: "basic_attributes_only",
+      }), { headers: { "content-type": "application/json" } }));
+
+      await createRetellPhoneCallRuntime({ fetchImpl }).start({
+        brief: { ...VALID_BRIEF, allowTransferToUser },
+        callAudience,
+        id: "hpc_audience",
+        memberId: "member_1",
+        transferNumber,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      const body = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body));
+      expect(body.retell_llm_dynamic_variables).toMatchObject({
+        call_audience: callAudience,
+        transfer_number: expected,
+      });
+    });
+  });
+
   it("creates calls with the current Retell override shape and server-owned transfer number", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
     vi.stubEnv("RETELL_AGENT_VERSION", "prod");
     vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", undefined);
     const fetchCalls: Array<{
       init?: RequestInit;
       url: RequestInfo | URL;
@@ -100,6 +137,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -115,6 +153,12 @@ describe("Retell phone-call runtime", () => {
     expect(headers.get("content-type")).toBe("application/json");
     const body = JSON.parse(String(fetchCalls[0]!.init?.body));
     expect(body).toEqual({
+      agent_override: {
+        retell_llm: {
+          start_speaker: "agent",
+          begin_message: "Hey",
+        },
+      },
       from_number: "+12125559999",
       metadata: {
         murph_phone_call_id: "hpc_123",
@@ -122,13 +166,13 @@ describe("Retell phone-call runtime", () => {
       override_agent_id: "agent_123",
       override_agent_version: "prod",
       retell_llm_dynamic_variables: {
+        call_audience: "third_party",
         call_brief: JSON.stringify(VALID_BRIEF),
         murph_timezone: "America/New_York",
         transfer_number: "+12125550000",
       },
       to_number: "+12125550123",
     });
-    expect(body).not.toHaveProperty("agent_override");
   });
 
   it("passes a configured Retell webhook public base as a per-call agent override", async () => {
@@ -156,6 +200,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -163,14 +208,31 @@ describe("Retell phone-call runtime", () => {
     });
 
     const body = JSON.parse(String(fetchCalls[0]!.init?.body));
-    expect(body.agent_override).toEqual({
-      agent: {
-        webhook_events: ["call_ended", "call_analyzed", "transfer_ended"],
-        webhook_url: "https://local-tunnel.example.test/api/retell/webhook",
+    expect(body).toEqual({
+      agent_override: {
+        agent: {
+          webhook_events: ["call_ended", "call_analyzed", "transfer_ended"],
+          webhook_url: "https://local-tunnel.example.test/api/retell/webhook",
+        },
+        retell_llm: {
+          start_speaker: "agent",
+          begin_message: "Hey",
+        },
       },
-    });
-    expect(body.retell_llm_dynamic_variables).toMatchObject({
-      murph_public_base_url: "https://local-tunnel.example.test",
+      from_number: "+12125559999",
+      metadata: {
+        murph_phone_call_id: "hpc_123",
+      },
+      override_agent_id: "agent_123",
+      override_agent_version: "prod",
+      retell_llm_dynamic_variables: {
+        call_audience: "third_party",
+        call_brief: JSON.stringify(VALID_BRIEF),
+        murph_public_base_url: "https://local-tunnel.example.test",
+        murph_timezone: "America/New_York",
+        transfer_number: "",
+      },
+      to_number: "+12125550123",
     });
   });
 
@@ -228,38 +290,84 @@ describe("Retell phone-call runtime", () => {
     );
   });
 
-  it("does not send a scripted opening line to Retell", async () => {
+  it.each([undefined, "", "https://local-tunnel.example.test"])(
+    "opens member calls with Hey and no opening_line variable (webhook base: %s)",
+    async (publicBaseOrigin) => {
+      vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+      vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+      vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+      vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+      vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+      vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", publicBaseOrigin);
+      const fetchCalls: Array<{
+        init?: RequestInit;
+        url: RequestInfo | URL;
+      }> = [];
+      const fetchImpl: typeof fetch = async (url, init) => {
+        fetchCalls.push({ init, url });
+        return new Response(JSON.stringify({
+          call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      };
+
+      await createRetellPhoneCallRuntime({ fetchImpl }).start({
+        callAudience: "member",
+        brief: {
+          ...VALID_BRIEF,
+          allowTransferToUser: false,
+          goal: "Ask the member for their preferred check-in time.",
+          instructions: ["Ask which time works best."],
+          successCriteria: "The member shares their preferred check-in time.",
+          to: { label: "Member", phoneNumber: "+12125550111" },
+        },
+        id: "hpc_123",
+        memberId: "member_123",
+        transferNumber: null,
+      });
+
+      const body = JSON.parse(String(fetchCalls[0]!.init?.body));
+      expect(body.agent_override.retell_llm).toEqual({
+        start_speaker: "agent",
+        begin_message: "Hey",
+      });
+      expect(body).not.toHaveProperty("agent_override.agent.begin_message_delay_ms");
+      expect(body.retell_llm_dynamic_variables).not.toHaveProperty("opening_line");
+      expect(body.retell_llm_dynamic_variables.call_audience).toBe("member");
+      expect(body.retell_llm_dynamic_variables.transfer_number).toBe("");
+    },
+  );
+
+  it.each([undefined, "", "  "])("defaults the agent version to latest_published when unset (%j)", async (version) => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
-    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_VERSION", version);
     vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
-    const fetchCalls: Array<{
-      init?: RequestInit;
-      url: RequestInfo | URL;
-    }> = [];
-    const fetchImpl: typeof fetch = async (url, init) => {
-      fetchCalls.push({ init, url });
+    vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", undefined);
+    const bodies: unknown[] = [];
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
       return new Response(JSON.stringify({
-        call_id: "retell_call_123",
+        call_id: "retell_call_default_version",
         data_storage_setting: "basic_attributes_only",
-      }), {
-        headers: {
-          "content-type": "application/json",
-        },
-        status: 200,
-      });
+      }), { headers: { "content-type": "application/json" }, status: 200 });
     };
 
     await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
       transferNumber: null,
     });
 
-    const body = JSON.parse(String(fetchCalls[0]!.init?.body));
-    expect(body.retell_llm_dynamic_variables).not.toHaveProperty("opening_line");
+    expect(bodies[0]).toMatchObject({ override_agent_version: "latest_published" });
   });
 
   it("rejects malformed Retell webhook public bases before creating a call", async () => {
@@ -272,6 +380,7 @@ describe("Retell phone-call runtime", () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -305,6 +414,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -335,6 +445,7 @@ describe("Retell phone-call runtime", () => {
     }));
 
     const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -428,6 +539,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -447,6 +559,7 @@ describe("Retell phone-call runtime", () => {
     controller.abort();
 
     const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -468,6 +581,7 @@ describe("Retell phone-call runtime", () => {
     }));
 
     const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",

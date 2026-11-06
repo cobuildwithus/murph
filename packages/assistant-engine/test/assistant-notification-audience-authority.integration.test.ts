@@ -41,7 +41,6 @@ const boundaries = vi.hoisted(() => ({
   persistTurn: vi.fn<typeof persistAssistantTurnAndSession>(),
   recordDiagnostic: vi.fn(),
   recordUsage: vi.fn(),
-  refreshStatus: vi.fn(),
   resolveDefaults: vi.fn(),
   saveSession: vi.fn(),
   startLinqTyping: vi.fn(),
@@ -78,9 +77,7 @@ vi.mock('../src/assistant/runtime-state-service.js', () => ({
     sessions: {
       save: boundaries.saveSession,
     },
-    status: {
-      refreshSnapshot: boundaries.refreshStatus,
-    },
+
     transcripts: {
       append: boundaries.appendTranscript,
     },
@@ -121,8 +118,8 @@ const opaqueLocator = {
 const modelTarget = createAssistantModelTarget({
   provider: 'codex-cli',
   approvalPolicy: 'never',
-  model: 'gpt-5.6-terra',
-  modelProvider: 'vercel-ai-gateway',
+  model: 'gpt-6.1-sol',
+  modelProvider: 'hosted-openai',
   reasoningEffort: 'medium',
   sandbox: 'danger-full-access',
 })
@@ -130,7 +127,7 @@ const continuityCompatiblePreviousModelTarget = createAssistantModelTarget({
   provider: 'codex-cli',
   approvalPolicy: 'never',
   model: 'gpt-5.4',
-  modelProvider: 'vercel-ai-gateway',
+  modelProvider: 'hosted-openai',
   reasoningEffort: 'low',
   sandbox: 'danger-full-access',
 })
@@ -149,7 +146,7 @@ beforeEach(() => {
   boundaries.startLinqTyping.mockResolvedValue(null)
   boundaries.recordDiagnostic.mockResolvedValue(undefined)
   boundaries.recordUsage.mockResolvedValue(undefined)
-  boundaries.refreshStatus.mockResolvedValue(undefined)
+
   boundaries.createReceipt.mockResolvedValue(undefined)
   boundaries.finalizeReceipt.mockResolvedValue(undefined)
   boundaries.appendTranscript.mockResolvedValue([])

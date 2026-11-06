@@ -1,6 +1,10 @@
+import { GAME_PHOTO_CHAT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
+import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
+import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
+import { resolveElevenLabsModelId } from '@murphai/operator-config/elevenlabs-runtime'
 import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
@@ -29,7 +33,6 @@ import {
   readAssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from '../managed-automations.js'
@@ -53,9 +56,6 @@ import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
-import {
-  resolveAssistantModelBehaviorProfile,
-} from '../model-behavior.js'
 import {
   resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
@@ -90,12 +90,12 @@ import {
 } from '../turn-progress.js'
 import {
   resolveAssistantHostedScheduledInvocationScope,
+  resolveAssistantHostedDeviceActivityOccurrence,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
-  buildAssistantCreativeNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
@@ -129,6 +129,7 @@ import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_MEMBER_MEMORY_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tool-catalog.js'
@@ -173,7 +174,10 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantRoutePlanningDiagnostics {
+  threadRotationReason: 'binding_absent' | 'route_mismatch' | 'contract_mismatch' | 'profile_isolated' | 'native_resume_disabled' | null
   assistantContextSnapshotElapsedMs: number | null
+  assistantContextSnapshotRefreshElapsedMs: number | null
+  followUpContextElapsedMs: number | null
   cliBootstrapElapsedMs: number | null
   dynamicToolCount: number
   messageTargetingAvailable: boolean
@@ -191,6 +195,8 @@ export interface AssistantRoutePlanningDiagnostics {
 
 type AssistantRoutePlanningSpanKey =
   | 'assistantContextSnapshotElapsedMs'
+  | 'assistantContextSnapshotRefreshElapsedMs'
+  | 'followUpContextElapsedMs'
   | 'cliBootstrapElapsedMs'
   | 'primarySystemPromptElapsedMs'
   | 'routeResumeBindingElapsedMs'
@@ -202,6 +208,8 @@ type AssistantRoutePlanningSpanMetrics = Partial<
 
 export type AssistantRoutePlanningStage =
   | 'assistant_context_snapshot'
+  | 'assistant_context_snapshot_refresh'
+  | 'follow_up_context'
   | 'cli_bootstrap'
   | 'primary_instructions'
   | 'resume_binding'
@@ -211,6 +219,14 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   key: AssistantRoutePlanningSpanKey
   stage: AssistantRoutePlanningStage
 }[] = [
+  {
+    key: 'assistantContextSnapshotRefreshElapsedMs',
+    stage: 'assistant_context_snapshot_refresh',
+  },
+  {
+    key: 'followUpContextElapsedMs',
+    stage: 'follow_up_context',
+  },
   {
     key: 'assistantContextSnapshotElapsedMs',
     stage: 'assistant_context_snapshot',
@@ -260,13 +276,13 @@ export type AssistantCodexTurnPromptProfile =
   | 'maintenance'
   | 'assistant-ask-continuation'
   | 'system-notification'
-  | 'creative-notification'
   | 'operator-message'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'maintenance-turn'
   | 'output-only-turn'
+  | 'game-host-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -443,7 +459,7 @@ export async function buildCodexTurnAttemptPlan(input: {
   }
 }
 
-export async function resolveAssistantRouteTurnPlan(input: {
+interface AssistantRouteTurnPlanInput {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   allowFinishWithoutReply?: boolean | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
@@ -457,7 +473,430 @@ export async function resolveAssistantRouteTurnPlan(input: {
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   messageTargetAuthorizerAvailable?: boolean | null
-}): Promise<AssistantRouteTurnPlan> {
+}
+
+/** Reads accept a current player message or the verified scheduled occurrence for this room; writes need a player. */
+function isConversationGameReadAvailable(
+  input: AssistantRouteTurnPlanInput,
+  acceptedInputIds: readonly string[],
+  scope: string,
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
+): boolean {
+  return input.hostedToolContext?.groupTool != null && scope === 'group' && (acceptedInputIds.length > 0 || scheduledInvocationScope !== null)
+}
+
+function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
+  return input.hostedToolContext?.groupTool != null && scope === 'group' && acceptedInputIds.length > 0
+}
+
+export function resolveAssistantGameHostDynamicTools(
+  context: Pick<AssistantHostedToolContext, 'currentGameRecapScope' | 'currentGameMissedCheckInScope'> | null,
+): MurphDynamicTool[] {
+  if (context?.currentGameRecapScope?.() != null) {
+    return [MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL]
+  }
+  if (context?.currentGameMissedCheckInScope?.() != null) {
+    return [MURPH_GAME_LORE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL]
+  }
+  return []
+}
+
+async function prepareAssistantGameLoreGuidance(input: {
+  authenticatedGroupProviderTurn: boolean
+  gameHostTurn: boolean
+  hostedToolContext: AssistantHostedToolContext | null
+}): Promise<string | null> {
+  if (![input.authenticatedGroupProviderTurn, input.gameHostTurn].includes(true)) return null
+  return await input.hostedToolContext?.prepareGameLore?.() ?? null
+}
+
+function optionalPrompt(prompt: string | null): string[] {
+  return prompt ? [prompt] : []
+}
+
+function resolveAssistantAllowFinishWithoutReply(input: {
+  configured: boolean | null | undefined
+  hostedToolContext: AssistantHostedToolContext | null
+  toolProfile: AssistantCodexTurnToolProfile
+}): boolean {
+  if (input.configured != null) return input.configured
+  return [
+    input.toolProfile === 'provider-turn',
+    input.hostedToolContext?.currentGameMissedCheckInScope?.() != null,
+  ].includes(true)
+}
+
+function resolveAssistantSpecializedDynamicTools(input: {
+  gameHostTurn: boolean
+  hostedToolContext: AssistantHostedToolContext | null
+  maintenanceProfile: AssistantMessageInput['maintenanceProfile']
+  maintenanceTurn: boolean
+  outputOnlyTurn: boolean
+  scheduledAutomationId: string | null | undefined
+}): MurphDynamicTool[] | null {
+  if (input.outputOnlyTurn) return []
+  if (input.gameHostTurn) return resolveAssistantGameHostDynamicTools(input.hostedToolContext)
+  if (!input.maintenanceTurn) return null
+  if (input.maintenanceProfile === 'group-room-model'
+    && input.scheduledAutomationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID) {
+    return [MURPH_GROUP_ROOM_MODEL_TOOL]
+  }
+  if (input.maintenanceProfile === 'member-memory'
+    && input.scheduledAutomationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID) {
+    return [MURPH_MEMBER_MEMORY_TOOL]
+  }
+  return []
+}
+
+function gamePhotoContextPrompts(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): string[] {
+  return input.input.channel === 'linq' && areConversationGamesAvailable(input, acceptedInputIds, scope) ? [GAME_PHOTO_CHAT_GUIDANCE] : []
+}
+
+function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null, scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>): boolean {
+  return (acceptedInputIds.length > 0 || scheduledInvocationScope !== null) && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
+}
+
+/** A clock occurrence or a private wearable event can each key a one-shot effect. */
+function hasOccurrenceEffectAuthority(
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
+  deviceActivityOccurrence: ReturnType<typeof resolveAssistantHostedDeviceActivityOccurrence>,
+): boolean {
+  return scheduledInvocationScope !== null || deviceActivityOccurrence !== null
+}
+
+function resolvePrivateMemberToolAvailability({
+  input,
+  privateInteractiveAudience,
+  privateInteractiveProviderTurn,
+  userActionAcceptedInputIds,
+  scheduledInvocationScope,
+  deviceActivityOccurrence,
+  currentAudienceDeliveryFields,
+}: {
+  input: AssistantRouteTurnPlanInput
+  privateInteractiveAudience: boolean
+  privateInteractiveProviderTurn: boolean
+  userActionAcceptedInputIds: readonly string[]
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>
+  deviceActivityOccurrence: ReturnType<typeof resolveAssistantHostedDeviceActivityOccurrence>
+  currentAudienceDeliveryFields: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>
+}) {
+  const privateUserAction =
+    privateInteractiveAudience && userActionAcceptedInputIds.length > 0
+  return {
+    assistantConfigurationAvailable:
+      privateInteractiveAudience &&
+      input.hostedToolContext?.assistantConfigurationTool != null,
+    computerToolsAvailable:
+      privateInteractiveAudience &&
+      input.hostedToolContext?.computerToolsAvailable === true,
+    deviceAvailable:
+      privateInteractiveAudience &&
+      input.hostedToolContext?.deviceTool != null,
+    clinicalRecordsConnectLinkAvailable:
+      privateInteractiveAudience &&
+      (userActionAcceptedInputIds.length > 0 ||
+        hasOccurrenceEffectAuthority(scheduledInvocationScope, deviceActivityOccurrence)) &&
+      input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
+    familyPlanAvailable:
+      privateInteractiveAudience &&
+      input.hostedToolContext?.familyPlanTool != null,
+    labsAvailable:
+      privateInteractiveProviderTurn &&
+      input.hostedToolContext?.labsTool != null,
+    ...resolvePrivateUsageToolAvailability(privateInteractiveAudience, input.hostedToolContext),
+    imessageContactAvailable:
+      privateUserAction &&
+      currentAudienceDeliveryFields.channel === 'telegram' &&
+      currentAudienceDeliveryFields.threadIsDirect === true &&
+      input.hostedToolContext?.imessageContactTool != null,
+    subscriptionAvailable:
+      privateUserAction &&
+      input.hostedToolContext?.subscriptionTool != null,
+    pendingVaultFilesAvailable:
+      privateUserAction &&
+      input.hostedToolContext?.pendingVaultFilesAvailable === true,
+    vaultFileSendAvailable:
+      privateInteractiveAudience &&
+      input.hostedToolContext?.vaultFileSendAvailable === true,
+  }
+}
+
+function resolvePrivateUsageToolAvailability(
+  privateAudience: boolean,
+  context: AssistantRouteTurnPlanInput['hostedToolContext'],
+) {
+  return {
+    usageDiagnosticsAvailable: privateAudience && context?.usageDiagnostics != null,
+    planUsageAvailable: privateAudience && context?.planUsageTool != null,
+  }
+}
+
+function resolveGroupToolAvailability({
+  input,
+  authenticatedGroupChatRuntime,
+  hostedGroupRuntime,
+  userActionAcceptedInputIds,
+  assistantStyleSettingsAvailable,
+}: {
+  input: AssistantRouteTurnPlanInput
+  authenticatedGroupChatRuntime: boolean
+  hostedGroupRuntime: boolean
+  userActionAcceptedInputIds: readonly string[]
+  assistantStyleSettingsAvailable: boolean
+}) {
+  return {
+    groupAssistantConfigurationAvailable:
+      authenticatedGroupChatRuntime &&
+      userActionAcceptedInputIds.length > 0 &&
+      input.hostedToolContext?.assistantConfigurationTool != null,
+    groupAvailable: input.hostedToolContext?.groupTool != null,
+    groupRoomModelAvailable:
+      authenticatedGroupChatRuntime &&
+      userActionAcceptedInputIds.length > 0,
+    groupPermissionOfferAvailable:
+      hostedGroupRuntime &&
+      input.hostedToolContext?.groupPermissionOfferTool != null,
+    groupSharedReadAvailable:
+      hostedGroupRuntime &&
+      input.hostedToolContext?.groupSharedReader != null,
+    personalizationAvailable:
+      assistantStyleSettingsAvailable &&
+      input.hostedToolContext?.personalizationTool != null,
+  }
+}
+
+function hasPrivateLinqUserInput(
+  privateInteractiveProviderTurn: boolean,
+  delivery: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>,
+  acceptedInputIds: readonly string[],
+): boolean {
+  return privateInteractiveProviderTurn && delivery.channel === 'linq'
+    && delivery.threadIsDirect === true && acceptedInputIds.length > 0
+}
+
+/** Status is a read bound server-side to the call owner, so any private turn or a verified call scope suffices. */
+function isPhoneCallStatusAvailable(
+  input: AssistantRouteTurnPlanInput,
+  privateInteractiveProviderTurn: boolean,
+  interactivePhoneCallAction: boolean,
+  scheduledPhoneCallScope: ReturnType<typeof resolveAssistantHostedScheduledPhoneCallScope>,
+): boolean {
+  return (privateInteractiveProviderTurn || interactivePhoneCallAction || scheduledPhoneCallScope !== null)
+    && typeof input.hostedToolContext?.phoneCalls?.status === 'function'
+}
+
+/** A calendar link only builds a URL for the reply, so any private direct Linq turn may make one. */
+function isPrivateLinqTurn(
+  privateInteractiveProviderTurn: boolean,
+  delivery: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>,
+): boolean {
+  return privateInteractiveProviderTurn && delivery.channel === 'linq' && delivery.threadIsDirect === true
+}
+
+function resolveCommunicationToolAvailability({
+  input,
+  privateInteractiveAudience,
+  privateInteractiveProviderTurn,
+  authenticatedGroupChatRuntime,
+  authenticatedGroupProviderTurn,
+  userActionAcceptedInputIds,
+  scheduledPhoneCallScope,
+  currentAudienceDeliveryFields,
+  interactivePhoneCallAudience,
+}: {
+  input: AssistantRouteTurnPlanInput
+  privateInteractiveAudience: boolean
+  privateInteractiveProviderTurn: boolean
+  authenticatedGroupChatRuntime: boolean
+  authenticatedGroupProviderTurn: boolean
+  userActionAcceptedInputIds: readonly string[]
+  scheduledPhoneCallScope: ReturnType<typeof resolveAssistantHostedScheduledPhoneCallScope>
+  currentAudienceDeliveryFields: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>
+  interactivePhoneCallAudience: boolean
+}) {
+  const interactivePhoneCallAction =
+    interactivePhoneCallAudience && userActionAcceptedInputIds.length > 0
+  const physicalNoteAudience =
+    privateInteractiveAudience || authenticatedGroupChatRuntime
+  const conversationMediaTurn = isConversationMediaTurn(
+    privateInteractiveProviderTurn,
+    authenticatedGroupProviderTurn,
+    userActionAcceptedInputIds,
+  )
+  const privateLinqInput = hasPrivateLinqUserInput(
+    privateInteractiveProviderTurn, currentAudienceDeliveryFields, userActionAcceptedInputIds,
+  )
+  return {
+    physicalNotesAvailable:
+      physicalNoteAudience &&
+      input.hostedToolContext?.physicalNotes != null &&
+      input.hostedToolContext?.privateImageUrlPublisher != null,
+    physicalNoteRecoveryAvailable:
+      physicalNoteAudience &&
+      userActionAcceptedInputIds.length > 0 &&
+      typeof input.hostedToolContext?.physicalNotes?.resolve === 'function',
+    senderContactAvailable:
+      input.hostedToolContext != null && privateLinqInput,
+    phoneCallsAvailable:
+      input.hostedToolContext?.phoneCalls != null &&
+      (
+        scheduledPhoneCallScope !== null ||
+        interactivePhoneCallAction
+      ),
+    phoneCallStatusAvailable: isPhoneCallStatusAvailable(
+      input, privateInteractiveProviderTurn, interactivePhoneCallAction, scheduledPhoneCallScope,
+    ),
+    phoneCallStopAvailable:
+      interactivePhoneCallAction &&
+      typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
+    calendarLinkAvailable: isPrivateLinqTurn(privateInteractiveProviderTurn, currentAudienceDeliveryFields),
+    conversationAttachmentsAvailable:
+      conversationMediaTurn &&
+      input.hostedToolContext?.currentConversationAttachmentAuthorities !== undefined,
+    analyzeVideoAvailable:
+      conversationMediaTurn &&
+      normalizeNullableString(
+        input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
+      ) !== null,
+  }
+}
+
+// A card only shapes the reply this turn already delivers, and that reply's
+// delivery identity dedupes retries. So every private or authenticated group
+// conversation turn may attach one, whatever woke it: a message, a clock or
+// device-activity automation, a manual run, or an interactive notification.
+function resolveResponseCardAvailability({
+  input,
+  privateInteractiveProviderTurn,
+  resolvedChannel,
+  authenticatedGroupProviderTurn,
+}: {
+  input: AssistantRouteTurnPlanInput
+  privateInteractiveProviderTurn: boolean
+  resolvedChannel: string | null | undefined
+  authenticatedGroupProviderTurn: boolean
+}) {
+  const responseCardsAvailable = privateInteractiveProviderTurn
+  const channel = resolvedChannel?.trim().toLowerCase()
+  const groupResponseCardsAvailable = authenticatedGroupProviderTurn
+  const telegramPresentationResponseCardsAvailable =
+    channel === 'telegram' &&
+    (responseCardsAvailable || groupResponseCardsAvailable)
+  const exerciseRoutineResponseCardsAvailable =
+    telegramPresentationResponseCardsAvailable
+  const telegramRichContentResponseCardsAvailable =
+    telegramPresentationResponseCardsAvailable
+  const groupChallengeResponseCardsAvailable =
+    groupResponseCardsAvailable &&
+    channel === 'linq' &&
+    input.hostedToolContext?.groupSharedReader != null
+  return {
+    responseCardsAvailable,
+    exerciseRoutineResponseCardsAvailable,
+    telegramRichContentResponseCardsAvailable,
+    groupChallengeResponseCardsAvailable,
+  }
+}
+
+function resolveRouteStylePreferences(
+  preferenceContext: AssistantTurnPreferenceContext,
+  applyPersona: boolean,
+) {
+  const explicitAssistantPersona =
+    applyPersona
+    ? preferenceContext.assistantPersona ?? null
+    : null
+  const effectiveAssistantStyle = explicitAssistantPersona
+    ? resolveAssistantEffectiveStyle({
+        persona: explicitAssistantPersona,
+        ...(preferenceContext.assistantTone
+          ? { tone: preferenceContext.assistantTone }
+          : {}),
+        ...(preferenceContext.assistantVoice
+          ? { voice: preferenceContext.assistantVoice }
+          : {}),
+        ...(preferenceContext.assistantPersonality
+          ? { personality: preferenceContext.assistantPersonality }
+          : {}),
+      })
+    : null
+  const assistantTone = effectiveAssistantStyle?.tone
+    ?? preferenceContext.assistantTone
+  // Unhinged is not part of persona identity: every persona resolves it to the
+  // neutral default 0. Rendering that default band for a member who never set
+  // Unhinged would violate the sparse-dial thread contract and rotate every
+  // persona user's thread fingerprint on deploy. Keep the persona-derived
+  // Humor/Push/Detail bands, but include Unhinged in the thread personality only
+  // when the member's saved sparse preference explicitly owns that key.
+  const assistantPersonality = resolveThreadPersonalityForPrompt(
+    effectiveAssistantStyle?.personality ?? null,
+    preferenceContext.assistantPersonality,
+  )
+  const assistantVoice = preferenceContext.assistantVoice
+    ?? effectiveAssistantStyle?.voice
+    ?? null
+  return { explicitAssistantPersona, assistantTone, assistantPersonality, assistantVoice }
+}
+
+function resolveRouteNativeResumeThreadId({
+  input,
+  resumeBinding,
+  supportsNativeResume,
+  assistantContractFingerprint,
+  threadStartDeveloperInstructions,
+  dynamicTools,
+}: {
+  input: AssistantRouteTurnPlanInput
+  resumeBinding: ReturnType<typeof resolveAssistantRouteResumeBinding>
+  supportsNativeResume: boolean
+  assistantContractFingerprint: string
+  threadStartDeveloperInstructions: string | null
+  dynamicTools: readonly MurphDynamicTool[]
+}): { resumeCodexThreadId: string | null; threadRotationReason: AssistantRoutePlanningDiagnostics['threadRotationReason'] } {
+  const storedAssistantContractFingerprint = normalizeNullableString(
+    resumeBinding?.assistantContractFingerprint,
+  )
+  const assistantContractMatches =
+    storedAssistantContractFingerprint === assistantContractFingerprint ||
+    (
+      resumeBinding !== null &&
+      [readCodexThreadCompatibilityFingerprint(input.route), resumeBinding.routeFingerprint]
+        .some((routeFingerprint) =>
+          storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
+            developerInstructions: threadStartDeveloperInstructions,
+            dynamicTools,
+            routeFingerprint,
+          }),
+        )
+    )
+  const nativeResumeEnabled =
+    input.profile.threadScope === 'session-thread'
+  const resumeCodexThreadId =
+    nativeResumeEnabled &&
+    supportsNativeResume &&
+    resumeBinding !== null &&
+    assistantContractMatches
+      ? resolveAssistantEffectiveCodexResumeThreadId({
+          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
+            resumeState: resumeBinding,
+          }),
+        })
+      : null
+  return {
+    resumeCodexThreadId,
+    threadRotationReason: resumeCodexThreadId !== null ? null
+      : !nativeResumeEnabled ? 'profile_isolated'
+      : !supportsNativeResume ? 'native_resume_disabled'
+      : resumeBinding === null
+        ? readAssistantCodexResume(input.session) === null ? 'binding_absent' : 'route_mismatch'
+        : 'contract_mismatch',
+  }
+}
+
+export async function resolveAssistantRouteTurnPlan(
+  input: AssistantRouteTurnPlanInput,
+): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
   const preferenceContext =
     input.preferenceContext ?? DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT
@@ -501,6 +940,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       messageInput: input.input,
       originSessionId: input.session.sessionId,
     })
+  const deviceActivityOccurrence =
+    resolveAssistantHostedDeviceActivityOccurrence({
+      conversationScope,
+      messageInput: input.input,
+    })
   const hostedGroupRuntime =
     conversationScope === 'group' && input.executionContext?.hosted != null
   const authenticatedGroupChatRuntime =
@@ -515,6 +959,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const gameHostTurn = input.profile.toolProfile === 'game-host-turn'
   // Context handoff is the only conversation profile that is both isolated
   // and output-only. Keep the existing profile shape so ordinary conversation
   // planning remains its owner while this detached delivery contract stays
@@ -533,20 +978,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const systemNotificationTurn =
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'system-notification' ||
-    input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn
   const conversationProviderTurn =
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience && conversationProviderTurn
-  const followUp = await resolveAssistantFollowUpTurnContext({
-    message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
-    interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
-    outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
-    onboardingGoalCheckin: onboardingGoalCheckinTurn,
-    supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
-  })
+  const followUp = await measureRoutePlanningAsync(
+    routePlanningSpans,
+    'followUpContextElapsedMs',
+    () => resolveAssistantFollowUpTurnContext({
+      message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
+      interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
+      outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
+      onboardingGoalCheckin: onboardingGoalCheckinTurn,
+      supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
+    }),
+  )
   const followUpInvocation = followUp.invocation
   const followUpAttachmentAllowed = followUp.attachmentAllowed
   const authenticatedGroupProviderTurn =
@@ -559,44 +1007,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
       input.input.turnTrigger === 'manual-ask' ||
       input.input.turnTrigger === 'automation-auto-reply'
     )
-  const responseCardsAvailable =
-    privateInteractiveProviderTurn &&
-    (scheduledInvocationScope !== null ||
-      (ordinaryInboundTurn &&
-        input.input.scheduledInvocationAuthority == null) ||
-      input.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
-  const telegramPresentationResponseCardsAvailable =
-    resolvedChannel?.trim().toLowerCase() === 'telegram' &&
-    (
-      responseCardsAvailable ||
-      (
-        authenticatedGroupProviderTurn &&
-        (
-          scheduledInvocationScope !== null ||
-          (
-            ordinaryInboundTurn &&
-            input.input.scheduledInvocationAuthority == null
-          )
-        )
-      )
-    )
-  const exerciseRoutineResponseCardsAvailable =
-    telegramPresentationResponseCardsAvailable
-  const telegramRichContentResponseCardsAvailable =
-    telegramPresentationResponseCardsAvailable
-  const groupChallengeResponseCardsAvailable =
-    authenticatedGroupProviderTurn &&
-    resolvedChannel?.trim().toLowerCase() === 'linq' &&
-    input.hostedToolContext?.groupSharedReader != null &&
-    (scheduledInvocationScope !== null ||
-      (ordinaryInboundTurn &&
-        input.input.scheduledInvocationAuthority == null))
+  const {
+    responseCardsAvailable,
+    exerciseRoutineResponseCardsAvailable,
+    telegramRichContentResponseCardsAvailable,
+    groupChallengeResponseCardsAvailable,
+  } = resolveResponseCardAvailability({
+    input,
+    privateInteractiveProviderTurn,
+    resolvedChannel,
+    authenticatedGroupProviderTurn,
+  })
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
     contextHandoffNotificationTurn ||
-    input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn ||
     followUp.requiresExplicitHistory
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -628,39 +1053,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     hostedGroupRuntime && conversationProviderTurn
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
-  const explicitAssistantPersona =
-    privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
-    ? preferenceContext.assistantPersona ?? null
-    : null
-  const effectiveAssistantStyle = explicitAssistantPersona
-    ? resolveAssistantEffectiveStyle({
-        persona: explicitAssistantPersona,
-        ...(preferenceContext.assistantTone
-          ? { tone: preferenceContext.assistantTone }
-          : {}),
-        ...(preferenceContext.assistantVoice
-          ? { voice: preferenceContext.assistantVoice }
-          : {}),
-        ...(preferenceContext.assistantPersonality
-          ? { personality: preferenceContext.assistantPersonality }
-          : {}),
-      })
-    : null
-  const assistantTone = effectiveAssistantStyle?.tone
-    ?? preferenceContext.assistantTone
-  // Unhinged is not part of persona identity: every persona resolves it to the
-  // neutral default 0. Rendering that default band for a member who never set
-  // Unhinged would violate the sparse-dial thread contract and rotate every
-  // persona user's thread fingerprint on deploy. Keep the persona-derived
-  // Humor/Push/Detail bands, but include Unhinged in the thread personality only
-  // when the member's saved sparse preference explicitly owns that key.
-  const assistantPersonality = resolveThreadPersonalityForPrompt(
-    effectiveAssistantStyle?.personality ?? null,
-    preferenceContext.assistantPersonality,
-  )
-  const assistantVoice = preferenceContext.assistantVoice
-    ?? effectiveAssistantStyle?.voice
-    ?? null
+  const { explicitAssistantPersona, assistantTone, assistantPersonality, assistantVoice } =
+    resolveRouteStylePreferences(
+      preferenceContext,
+      privateInteractiveProviderTurn || groupAssistantStylePreferencesApply,
+    )
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -706,6 +1103,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       '- do not call `murph.generate_image` while this status is present, even for a different image. if asked for another image, say that request was not started and ask the user to wait for this result first.',
     ].join('\n')
   })()
+  const gameLoreGuidance = await prepareAssistantGameLoreGuidance({
+    authenticatedGroupProviderTurn,
+    gameHostTurn,
+    hostedToolContext: input.hostedToolContext ?? null,
+  })
   const hostedDynamicContextPrompts =
     maintenanceTurn || systemNotificationTurn
       ? []
@@ -714,6 +1116,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           ...(pendingHostedImageContextPrompt
             ? [pendingHostedImageContextPrompt]
             : []),
+          ...optionalPrompt(gameLoreGuidance),
         ]
   const groupRoomModelPrompt = authenticatedGroupProviderTurn
     ? await readAssistantGroupRoomModelPrompt({
@@ -723,14 +1126,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const assistantResearchAvailable = normalizeNullableString(
-    input.sharedPlan.cliAccess.env.EXA_API_KEY,
-  ) !== null
-    && input.profile.promptProfile === 'conversation'
-    && (privateInteractiveAudience || authenticatedGroupChatRuntime)
+
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
+    acceptedInputItems: input.acceptedInputItems ?? [],
+    turnTrigger: input.input.turnTrigger ?? null,
+  })
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
@@ -741,39 +1145,37 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation' && privateInteractiveAudience
-  let cliBootstrapElapsedMs: number | null = null
   const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
         () => readAssistantCliSurfaceBootstrapContext(),
-        (elapsedMs) => {
-          cliBootstrapElapsedMs = elapsedMs
-        },
       )
     : null
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
-    researchAvailable: assistantResearchAvailable,
   })
   if (privateInteractiveProviderTurn) {
     // A small vault can repair its navigation snapshot before provider start.
     // Larger vaults yield to the degraded prompt instead of delaying the turn.
     let remainingRefreshSteps =
       ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS
-    await refreshAssistantContextSnapshotBestEffort({
-      shouldYield: () => {
-        if (remainingRefreshSteps <= 0) {
-          return true
-        }
-        remainingRefreshSteps -= 1
-        return false
-      },
-      vaultRoot: input.input.vault,
-    })
+    await measureRoutePlanningAsync(
+      routePlanningSpans,
+      'assistantContextSnapshotRefreshElapsedMs',
+      () => refreshAssistantContextSnapshotBestEffort({
+        shouldYield: () => {
+          if (remainingRefreshSteps <= 0) {
+            return true
+          }
+          remainingRefreshSteps -= 1
+          return false
+        },
+        vaultRoot: input.input.vault,
+      }),
+    )
   }
-  let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
       ? null
@@ -783,13 +1185,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
         () => readAssistantCurrentStatePrompt({
           vaultRoot: input.input.vault,
         }),
-        (elapsedMs) => {
-          assistantContextSnapshotElapsedMs = elapsedMs
-        },
       )
-  const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
-    input.route.providerOptions,
-  )
+  const currentAudienceDeliveryFields =
+    resolveAssistantCurrentAudienceDeliveryFields({
+      input: input.input,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+    })
+  const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel, scheduledInvocationScope)
   const toolSchemaHash = null
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
@@ -829,14 +1232,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
     }
 
-    if (input.profile.promptProfile === 'creative-notification') {
-      return buildAssistantCreativeNotificationPromptWithCacheMetadata({
-        channel: resolvedChannel,
-      }, {
-        toolSchemaHash,
-      })
-    }
-
     if (input.profile.promptProfile === 'operator-message') {
       return buildAssistantOperatorMessagePromptWithCacheMetadata({
         channel: resolvedChannel,
@@ -870,8 +1265,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
             : 'none',
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+      assistantPollsAvailable: pollsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
-      assistantResearchAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
@@ -893,7 +1288,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.sharedPlan.cliAccess.env,
       ),
       onboardingGuidance: options.injectOnboardingGuidance,
-      modelBehaviorProfile,
       ordinaryInboundTurn,
       scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
       turnTrigger: input.input.turnTrigger ?? null,
@@ -930,12 +1324,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const threadStartDeveloperInstructions = normalizeNullableString(
     buildDeveloperInstructions(threadStartPromptResult),
   )
-  const currentAudienceDeliveryFields =
-    resolveAssistantCurrentAudienceDeliveryFields({
-      input: input.input,
-      session: input.session,
-      sharedPlan: input.sharedPlan,
-    })
   const imageGenerationAvailable =
     scheduledInvocationScope === null ||
     getAssistantChannelAdapter(
@@ -952,92 +1340,55 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const interactivePhoneCallAudience =
     privateInteractiveAudience ||
     (hostedGroupRuntime && messageTargetingAvailable)
-  const productFeedbackAuthorized =
-    resolveAssistantProductFeedbackAcceptedInputIds(
-      input.acceptedInputItems ?? [],
-    ).length > 0
-  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
-    acceptedInputItems: input.acceptedInputItems ?? [],
-    turnTrigger: input.input.turnTrigger ?? null,
+  const productFeedbackAuthorized = hasProductFeedbackAuthority(input, conversationScope)
+  const allowFinishWithoutReply = resolveAssistantAllowFinishWithoutReply({
+    configured: input.allowFinishWithoutReply,
+    hostedToolContext: input.hostedToolContext ?? null,
+    toolProfile: input.profile.toolProfile,
   })
-  const allowFinishWithoutReply =
-    input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
   // Maintenance turns run without a delivery target. Each mutable profile
   // receives only its host-owned tool for the exact managed automation.
-  const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
-      ? []
-      : maintenanceTurn
-      ? input.input.maintenanceProfile === 'group-room-model' &&
-      input.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
-        ? [MURPH_GROUP_ROOM_MODEL_TOOL]
-        : input.input.maintenanceProfile === 'member-memory' &&
-          input.input.scheduledInvocationAuthority?.automationId ===
-            MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-          ? [MURPH_MEMBER_MEMORY_TOOL]
-          : []
-      : resolveMurphDynamicTools({
+  const specializedDynamicTools = resolveAssistantSpecializedDynamicTools({
+    gameHostTurn,
+    hostedToolContext: input.hostedToolContext ?? null,
+    maintenanceProfile: input.input.maintenanceProfile,
+    maintenanceTurn,
+    outputOnlyTurn,
+    scheduledAutomationId: input.input.scheduledInvocationAuthority?.automationId,
+  })
+  const dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
+        gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
+        gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
+        gameLoreAvailable: gameLoreGuidance !== null,
+        gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,
+        pollsAvailable,
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         imageGenerationAvailable,
         messageTargetingAvailable,
-        assistantConfigurationAvailable:
-          privateInteractiveAudience &&
-          input.hostedToolContext?.assistantConfigurationTool != null,
-        groupAssistantConfigurationAvailable:
-          authenticatedGroupChatRuntime &&
-          userActionAcceptedInputIds.length > 0 &&
-          input.hostedToolContext?.assistantConfigurationTool != null,
+        ...resolvePrivateMemberToolAvailability({
+          input,
+          privateInteractiveAudience,
+          privateInteractiveProviderTurn,
+          userActionAcceptedInputIds,
+          scheduledInvocationScope,
+          deviceActivityOccurrence,
+          currentAudienceDeliveryFields,
+        }),
+        ...resolveGroupToolAvailability({
+          input,
+          authenticatedGroupChatRuntime,
+          hostedGroupRuntime,
+          userActionAcceptedInputIds,
+          assistantStyleSettingsAvailable,
+        }),
         followUpAttachmentAvailable: followUpAttachmentAllowed,
         automationAvailable: input.hostedToolContext?.automationTool != null,
-        computerToolsAvailable:
-          privateInteractiveAudience &&
-          input.hostedToolContext?.computerToolsAvailable === true,
         progressUpdatesAvailable: input.progressDelivery != null,
         progressUpdateMode:
           conversationScope === 'group' ? 'group' : 'direct',
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
         connectedAppsManageAvailable: privateInteractiveAudience,
-        deviceAvailable:
-          privateInteractiveAudience &&
-          input.hostedToolContext?.deviceTool != null,
-        clinicalRecordsConnectLinkAvailable:
-          privateInteractiveAudience &&
-          (userActionAcceptedInputIds.length > 0 ||
-            scheduledInvocationScope !== null) &&
-          input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
-        familyPlanAvailable:
-          privateInteractiveAudience &&
-          input.hostedToolContext?.familyPlanTool != null,
-        labsAvailable:
-          privateInteractiveProviderTurn &&
-          input.hostedToolContext?.labsTool != null,
-        planUsageAvailable:
-          privateInteractiveAudience &&
-          input.hostedToolContext?.planUsageTool != null,
-        imessageContactAvailable:
-          privateInteractiveAudience &&
-          currentAudienceDeliveryFields.channel === 'telegram' &&
-          currentAudienceDeliveryFields.threadIsDirect === true &&
-          userActionAcceptedInputIds.length > 0 &&
-          input.hostedToolContext?.imessageContactTool != null,
-        subscriptionAvailable:
-          privateInteractiveAudience &&
-          userActionAcceptedInputIds.length > 0 &&
-          input.hostedToolContext?.subscriptionTool != null,
-        groupAvailable: input.hostedToolContext?.groupTool != null,
-        groupRoomModelAvailable:
-          authenticatedGroupChatRuntime &&
-          userActionAcceptedInputIds.length > 0,
-        groupPermissionOfferAvailable:
-          hostedGroupRuntime &&
-          input.hostedToolContext?.groupPermissionOfferTool != null,
-        groupSharedReadAvailable:
-          hostedGroupRuntime &&
-          input.hostedToolContext?.groupSharedReader != null,
-        personalizationAvailable:
-          assistantStyleSettingsAvailable &&
-          input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
           productFeedbackAuthorized &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
@@ -1046,61 +1397,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
         exerciseRoutineResponseCardsAvailable,
         telegramRichContentResponseCardsAvailable,
         groupChallengeResponseCardsAvailable,
-        physicalNotesAvailable:
-          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
-          input.hostedToolContext?.physicalNotes != null &&
-          input.hostedToolContext?.privateImageUrlPublisher != null,
-        physicalNoteRecoveryAvailable:
-          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
-          userActionAcceptedInputIds.length > 0 &&
-          typeof input.hostedToolContext?.physicalNotes?.resolve === 'function',
-        phoneCallsAvailable:
-          input.hostedToolContext?.phoneCalls != null &&
-          (
-            scheduledPhoneCallScope !== null ||
-            (
-              userActionAcceptedInputIds.length > 0 &&
-              interactivePhoneCallAudience
-            )
-          ),
-        phoneCallStatusAvailable:
-          interactivePhoneCallAudience &&
-          userActionAcceptedInputIds.length > 0 &&
-          typeof input.hostedToolContext?.phoneCalls?.status === 'function',
-        phoneCallStopAvailable:
-          interactivePhoneCallAudience &&
-          userActionAcceptedInputIds.length > 0 &&
-          typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
+        ...resolveCommunicationToolAvailability({
+          input,
+          privateInteractiveAudience,
+          privateInteractiveProviderTurn,
+          authenticatedGroupChatRuntime,
+          authenticatedGroupProviderTurn,
+          userActionAcceptedInputIds,
+          scheduledPhoneCallScope,
+          currentAudienceDeliveryFields,
+          interactivePhoneCallAudience,
+        }),
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
-        calendarLinkAvailable:
-          privateInteractiveProviderTurn &&
-          currentAudienceDeliveryFields.channel === 'linq' &&
-          currentAudienceDeliveryFields.threadIsDirect === true &&
-          userActionAcceptedInputIds.length > 0,
-        conversationAttachmentsAvailable:
-          isConversationMediaTurn(privateInteractiveProviderTurn, authenticatedGroupProviderTurn, userActionAcceptedInputIds) &&
-          input.hostedToolContext?.currentConversationAttachmentAuthorities !== undefined,
-        analyzeVideoAvailable:
-          isConversationMediaTurn(privateInteractiveProviderTurn, authenticatedGroupProviderTurn, userActionAcceptedInputIds) &&
-          normalizeNullableString(
-            input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
-          ) !== null,
+        voiceMemoModelId: resolveElevenLabsModelId(input.sharedPlan.cliAccess.env),
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
-        pendingVaultFilesAvailable:
-          privateInteractiveAudience &&
-          userActionAcceptedInputIds.length > 0 &&
-          input.hostedToolContext?.pendingVaultFilesAvailable === true,
-        vaultFileSendAvailable:
-          privateInteractiveAudience &&
-          input.hostedToolContext?.vaultFileSendAvailable === true,
       })
-  const dynamicTools: readonly MurphDynamicTool[] =
-    input.profile.promptProfile === 'creative-notification'
-      ? availableDynamicTools.filter(
-          (tool) => tool.namespace === 'murph' && tool.name === 'generate_song',
-        )
-      : availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
@@ -1109,36 +1421,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
       (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
     )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
-    developerInstructions: threadStartDeveloperInstructions,
+    developerInstructions: supportsCodexTurnDeveloperInstructions({ env: input.sharedPlan.cliAccess.env })
+      ? undefined
+      : threadStartDeveloperInstructions,
     dynamicTools,
     routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
-  const storedAssistantContractFingerprint = normalizeNullableString(
-    resumeBinding?.assistantContractFingerprint,
-  )
-  const assistantContractMatches =
-    storedAssistantContractFingerprint === assistantContractFingerprint ||
-    (
-      resumeBinding !== null &&
-      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
-        developerInstructions: threadStartDeveloperInstructions,
-        dynamicTools,
-        routeFingerprint: resumeBinding.routeFingerprint,
-      })
-    )
-  const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread'
-  const resumeCodexThreadId =
-    nativeResumeEnabled &&
-    followUp.supportsNativeResume &&
-    resumeBinding !== null &&
-    assistantContractMatches
-      ? resolveAssistantEffectiveCodexResumeThreadId({
-          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
-            resumeState: resumeBinding,
-          }),
-        })
-      : null
+  const { resumeCodexThreadId, threadRotationReason } = resolveRouteNativeResumeThreadId({
+    input,
+    resumeBinding,
+    supportsNativeResume: followUp.supportsNativeResume,
+    assistantContractFingerprint,
+    threadStartDeveloperInstructions,
+    dynamicTools,
+  })
   const conversationHistoryMessages = resumeCodexThreadId === null
     ? await resolveCommittedTranscriptHistoryMessages()
     : []
@@ -1168,10 +1464,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
           ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_OUTPUT_CONTRACT,
         ].join('\n\n')
       : threadStartPromptResult.prompt
-  const developerInstructions =
-    resumeCodexThreadId === null
-      ? threadStartDeveloperInstructions
-      : null
   const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
   const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
     routePlanningSpans,
@@ -1193,7 +1485,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     cliEnv: {
       ...input.sharedPlan.cliAccess.env,
     },
-    developerInstructions: normalizeNullableString(developerInstructions),
+    developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
     environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
@@ -1206,12 +1498,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
       resumeCodexThreadId,
     }),
     planningDiagnostics: {
-      assistantContextSnapshotElapsedMs,
-      cliBootstrapElapsedMs,
+      threadRotationReason,
+      assistantContextSnapshotElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'assistantContextSnapshotElapsedMs'),
+      assistantContextSnapshotRefreshElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'assistantContextSnapshotRefreshElapsedMs'),
+      followUpContextElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'followUpContextElapsedMs'),
+      cliBootstrapElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'cliBootstrapElapsedMs'),
       dynamicToolCount: dynamicTools.length,
       messageTargetingAvailable,
-      primarySystemPromptElapsedMs:
-        routePlanningSpans.primarySystemPromptElapsedMs ?? null,
+      primarySystemPromptElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'primarySystemPromptElapsedMs'),
       messageTargetDynamicToolsAvailable,
       routePlanningElapsedMs,
       routePlanningMeasuredElapsedMs,
@@ -1219,10 +1513,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       routePlanningSlowestStageElapsedMs:
         routePlanningSlowestSpan?.elapsedMs ?? null,
       routePlanningUnaccountedElapsedMs,
-      routeResumeBindingElapsedMs:
-        routePlanningSpans.routeResumeBindingElapsedMs ?? null,
-      routeTargetCapabilitiesElapsedMs:
-        routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
+      routeResumeBindingElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'routeResumeBindingElapsedMs'),
+      routeTargetCapabilitiesElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'routeTargetCapabilitiesElapsedMs'),
       shouldPrepareBootstrapContext,
     },
     resume,
@@ -1515,15 +1807,12 @@ async function measureRoutePlanningAsync<TResult>(
   spans: AssistantRoutePlanningSpanMetrics,
   key: AssistantRoutePlanningSpanKey,
   work: () => Promise<TResult>,
-  record?: (elapsedMs: number) => void,
 ): Promise<TResult> {
   const startedAt = Date.now()
   try {
     return await work()
   } finally {
-    const elapsedMs = elapsedSince(startedAt)
-    spans[key] = elapsedMs
-    record?.(elapsedMs)
+    spans[key] = elapsedSince(startedAt)
   }
 }
 
@@ -1538,6 +1827,13 @@ function measureRoutePlanningSync<TResult>(
   } finally {
     spans[key] = elapsedSince(startedAt)
   }
+}
+
+function readRoutePlanningSpan(
+  spans: AssistantRoutePlanningSpanMetrics,
+  key: AssistantRoutePlanningSpanKey,
+): number | null {
+  return spans[key] ?? null
 }
 
 function sumRoutePlanningSpanMetrics(
@@ -1670,4 +1966,13 @@ function isConversationMediaTurn(
   acceptedInputIds: readonly string[],
 ): boolean {
   return (privateTurn || groupTurn) && acceptedInputIds.length > 0
+}
+
+function hasProductFeedbackAuthority(
+  input: Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+  conversationScope: string,
+): boolean {
+  return resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? []).length > 0
+    || resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext: input.executionContext,
+      messageInput: input.input }) !== null
 }

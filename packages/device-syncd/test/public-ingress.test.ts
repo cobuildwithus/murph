@@ -3161,18 +3161,15 @@ test("public ingress rejects provider-config connection seeds with the wrong pro
 test("configured provider manifests own credential policy over provider instances", async () => {
   const store = new InMemoryPublicIngressStore();
   const provider = createFakeProvider({
-    provider: "oura",
-    credentialPolicy: {
-      kind: "provider_config",
-      providerConfigKey: "junction",
-    },
+    provider: "junction",
+    credentialPolicy: { kind: "oauth_tokens" },
     descriptor: {
-      provider: "oura",
-      displayName: "Fake Oura",
+      provider: "junction",
+      displayName: "Fake Junction",
       transportModes: ["external_link", "scheduled_poll"],
       connection: {
         kind: "external_link",
-        callbackPath: "/connect/oura/callback",
+        callbackPath: "/connect/junction/callback",
       },
       normalization: {
         metricFamilies: ["sleep"],
@@ -3187,19 +3184,16 @@ test("configured provider manifests own credential policy over provider instance
     },
     async beginConnection() {
       return {
-        authorizationUrl: "https://oura.example/link",
+        authorizationUrl: "https://junction.example/link",
         connectionSeed: {
-          externalAccountId: "oura-account-1",
-          credential: {
-            kind: "provider_config",
-            providerConfigKey: "junction",
-          },
+          externalAccountId: "junction-account-1",
+          credential: { kind: "oauth_tokens", tokens: { accessToken: "synthetic-token" } },
         },
       };
     },
     async completeConnection() {
       return {
-        externalAccountId: "oura-account-1",
+        externalAccountId: "junction-account-1",
         credential: {
           kind: "provider_config",
           providerConfigKey: "junction",
@@ -3214,13 +3208,13 @@ test("configured provider manifests own credential policy over provider instance
   });
 
   await assert.rejects(
-    () => ingress.startConnection({ provider: "oura", ownerId: "<REDACTED_OWNER_ID>" }),
+    () => ingress.startConnection({ provider: "junction", ownerId: "<REDACTED_OWNER_ID>" }),
     (error: unknown) =>
       error instanceof DeviceSyncError
       && error.code === "CONNECTION_CREDENTIAL_POLICY_MISMATCH"
       && error.httpStatus === 500,
   );
-  assert.equal(store.getConnectionByExternalAccount("oura", "oura-account-1"), null);
+  assert.equal(store.getConnectionByExternalAccount("junction", "junction-account-1"), null);
 });
 
 test("public ingress validates OAuth callback state ownership and required parameters", async () => {
@@ -5999,18 +5993,18 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
-        provider: "strava",
+        provider: "junction",
         descriptor: {
-          provider: "strava",
-          displayName: "Strava",
+          provider: "junction",
+          displayName: "Junction",
           transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
           connection: {
             kind: "oauth2",
-            callbackPath: "/oauth/strava/callback",
+            callbackPath: "/oauth/junction/callback",
             defaultScopes: ["activity:read"],
           },
           webhook: {
-            path: "/webhooks/strava",
+            path: "/webhooks/junction",
             deliveryMode: "notification",
             supportsAdmin: false,
           },
@@ -6027,14 +6021,11 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
         },
         async exchangeAuthorizationCode(_context, code) {
           return {
-            externalAccountId: `strava-${code}`,
-            displayName: `Strava ${code}`,
+            externalAccountId: `junction-${code}`,
+            displayName: `Junction ${code}`,
             scopes: ["activity:read"],
             metadata: {},
-            tokens: {
-              accessToken: "<REDACTED_ACCESS_TOKEN>",
-              refreshToken: "<REDACTED_REFRESH_TOKEN>",
-            },
+            credential: { kind: "provider_config", providerConfigKey: "junction" },
             initialJobs: [
               {
                 kind: "backfill",
@@ -6051,12 +6042,12 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
     store,
   });
 
-  const begin = await ingress.startConnection({ provider: "strava" });
+  const begin = await ingress.startConnection({ provider: "junction" });
 
   await assert.rejects(
     () =>
       ingress.handleOAuthCallback({
-        provider: "strava",
+        provider: "junction",
         state: begin.state,
         code: "abc",
       }),
@@ -6064,8 +6055,8 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
   );
 
   assert.equal(
-    store.getConnectionByExternalAccount("strava", "strava-abc")?.status,
-    "reauthorization_required",
+    store.getConnectionByExternalAccount("junction", "junction-abc"),
+    null,
   );
 });
 
@@ -6075,18 +6066,18 @@ test("public ingress rejects built-in webhook jobs that drift from the provider 
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
-        provider: "whoop",
+        provider: "junction",
         descriptor: {
-          provider: "whoop",
-          displayName: "WHOOP",
+          provider: "junction",
+          displayName: "Junction",
           transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
           connection: {
             kind: "oauth2",
-            callbackPath: "/oauth/whoop/callback",
+            callbackPath: "/oauth/junction/callback",
             defaultScopes: ["offline"],
           },
           webhook: {
-            path: "/webhooks/whoop",
+            path: "/webhooks/junction",
             deliveryMode: "notification",
             supportsAdmin: false,
           },
@@ -6103,15 +6094,15 @@ test("public ingress rejects built-in webhook jobs that drift from the provider 
         },
         async verifyAndParseWebhook() {
           return {
-            externalAccountId: "whoop-abc",
+            externalAccountId: "junction-abc",
             eventType: "sleep.updated",
             traceId: "trace-1",
             jobs: [
               {
                 kind: "resource",
                 payload: {
-                  resourceId: 123,
-                  resourceType: "sleep",
+                  resource: 123,
+                  resourceCategory: "summary",
                 },
               },
             ],
@@ -6123,8 +6114,8 @@ test("public ingress rejects built-in webhook jobs that drift from the provider 
   });
 
   await assert.rejects(
-    () => ingress.handleWebhook("whoop", new Headers(), Buffer.from("{}")),
-    /resourceId must be a string/u,
+    () => ingress.handleWebhook("junction", new Headers(), Buffer.from("{}")),
+    /resource must be a string/u,
   );
 
   assert.equal(store.completedWebhookTraceCalls, 0);

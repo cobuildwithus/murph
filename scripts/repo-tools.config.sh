@@ -49,7 +49,7 @@ required_files=(
 )
 repo_tools_join_lines COBUILD_DRIFT_REQUIRED_FILES "${required_files[@]}"
 export COBUILD_DRIFT_CODE_CHANGE_PATTERN='^(src/|app/|apps/|contracts/|scripts/|\.github/workflows/|package\.json$|README\.md$|ARCHITECTURE\.md$|AGENTS\.md$)'
-export COBUILD_DRIFT_CODE_CHANGE_LABEL='Architecture-sensitive code/process'
+export COBUILD_DRIFT_CODE_CHANGE_LABEL='Code/process covered by the documentation guard'
 export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD='10'
 export COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN='^agent-docs/generated/|^agent-docs/exec-plans/(active|completed)/|^pnpm-lock\.yaml$'
 export COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY='0'
@@ -66,6 +66,19 @@ export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'
 audit_context_binary_exclude_globs=(
+  # Review packets are text-only, including vector artwork and nested assets.
+  "**/*.svg"
+  "**/*.png"
+  "**/*.jpg"
+  "**/*.jpeg"
+  "**/*.gif"
+  "**/*.webp"
+  "**/*.avif"
+  "**/*.ico"
+  "**/*.bmp"
+  "**/*.tif"
+  "**/*.tiff"
+  "**/*.heic"
   "apps/*/public/design-assets/**"
   "apps/*/public/audio/**"
   "apps/*/public/legal/*.pdf"
@@ -108,6 +121,8 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
   "Dockerfile.cloudflare-hosted-runner-base" \
+  "patches/codex-public-live.patch" \
+  "patches/@cloudflare__containers@0.3.7.patch" \
   "README.md" \
   "PRODUCT.md" \
   "DESIGN.md" \
@@ -131,6 +146,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "agent-docs/operations/imessage-deliverability.md" \
   "agent-docs/operations/pr-reviewgpt-loop.md" \
   "package.json" \
+  "pnpm-lock.yaml" \
   "pnpm-workspace.yaml" \
   "tsconfig.test-runtime.json" \
   "tsconfig.json" \

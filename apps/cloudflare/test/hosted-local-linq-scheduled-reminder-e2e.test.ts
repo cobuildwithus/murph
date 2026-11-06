@@ -39,8 +39,7 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledReminderImageAlt = "Sleep reminder illustration";
-const scheduledReminderDeliveredText =
-  `${reminderText}\n\n${scheduledReminderImageAlt}`;
+const scheduledReminderDeliveredText = reminderText;
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
@@ -90,7 +89,7 @@ const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
 const shutdownCheckpointBarrierWaitMs = 30_000;
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-terra";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -628,12 +627,12 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     });
 
     expect(fullTiming).toEqual({
-      idleCheckpointDelayMs: 10_000,
+      runnerIdleTtlMs: 10_000,
       leadMs: 90_000,
       setupLeadText: "about two minutes",
     });
     expect(fastTiming).toEqual({
-      idleCheckpointDelayMs: 1,
+      runnerIdleTtlMs: 1,
       leadMs: 90_000,
       setupLeadText: "about two minutes",
     });
@@ -858,8 +857,8 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
   expect(cronRows.length).toBeGreaterThan(0);
 
   const expectedPricingVersion = input.expectedTokenPricingBasis === "openai-flex"
-    ? "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex"
-    : "openai-api-pricing-2026-08-21-gpt-5.6-standard";
+    ? "openai-api-pricing-2026-10-26-gpt-6.1-terra-openai-flex"
+    : "openai-api-pricing-2026-10-26-gpt-6.1-terra-standard";
   const expectedAdjustmentDenominator =
     input.expectedTokenPricingBasis === "openai-flex" ? "2" : "1";
 
@@ -898,8 +897,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-        String(scheduledReminderTiming.idleCheckpointDelayMs),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+        String(Math.max(1_000, scheduledReminderTiming.runnerIdleTtlMs)),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -1260,12 +1259,12 @@ function resolveScheduledReminderLocalAt(dueAtIso: string): {
 function resolveScheduledReminderTiming(
   env: NodeJS.ProcessEnv = process.env,
 ): {
-  idleCheckpointDelayMs: number;
+  runnerIdleTtlMs: number;
   leadMs: number;
   setupLeadText: string;
 } {
   return {
-    idleCheckpointDelayMs:
+    runnerIdleTtlMs:
       env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 10_000,
     leadMs: 90_000,
     setupLeadText: "about two minutes",

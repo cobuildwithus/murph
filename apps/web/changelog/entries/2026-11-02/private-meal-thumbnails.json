@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "private-meal-thumbnails",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Older meal photos stay useful",
+    "summary": "Murph keeps a small private thumbnail of meal photos so you can revisit a meal after its full-size photo expires.",
+    "details": "Full-size photos have a 90-day retention target. Thumbnails stay while the meal exists; deleting the meal removes its photos. Older meals gain thumbnails as they are processed, when an original photo is still available.",
+    "relevanceTags": [
+      "meals",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      4455
+    ],
+    "tryIt": {
+      "label": "Revisit a meal",
+      "prompt": "Look at the saved photo for my last meal and help me describe it."
+    }
+  }
+}

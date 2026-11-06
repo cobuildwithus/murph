@@ -18,14 +18,13 @@ import {
 } from "#hosted-web-testing";
 
 import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
+import { fetchHostedLocalWorkerWithRestartRetry } from "./hosted-local-worker-restart.ts";
 import {
   createHostedWebCallbackSignatureHeaders,
   readHostedWebCallbackSigningEnvironment,
 } from "../../src/web-callback-auth.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
-const HOSTED_LOCAL_WORKER_RESTART_BODY = "Your worker restarted mid-request.";
-const HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES = 4;
 const HOSTED_LOCAL_RETRY_LATER_INITIAL_DELAY_MS = 250;
 const HOSTED_LOCAL_RETRY_LATER_MAX_DELAY_MS = 2_000;
 
@@ -250,71 +249,41 @@ async function fetchHostedLocalWorkerControl(
   url: URL,
   init: RequestInit,
 ): Promise<Response> {
-  for (let attempt = 0; attempt <= HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES; attempt += 1) {
-    let response: Response;
-    try {
-      response = await fetch(url, init);
-    } catch (error) {
-      throw new Error(formatHostedLocalWorkerControlNetworkFailure({
-        error,
-        harness,
-        method: init.method ?? "GET",
-        url: String(url),
-      }));
-    }
-
-    if (response.ok) {
-      return response;
-    }
-
-    let body: string;
-    try {
-      body = await response.text();
-    } catch (error) {
-      throw new Error(formatHostedLocalWorkerControlNetworkFailure({
-        error,
-        harness,
-        method: init.method ?? "GET",
-        url: String(url),
-      }));
-    }
-    if (
-      shouldRetryHostedLocalWorkerRestart({
-        attempt,
-        body,
-        status: response.status,
-      })
-    ) {
-      await sleep(250 * (attempt + 1));
-      continue;
-    }
-
-    throw new Error(formatHostedLocalWorkerControlFailure({
-      body,
+  let response: Response;
+  try {
+    response = await fetchHostedLocalWorkerWithRestartRetry(url, init);
+  } catch (error) {
+    throw new Error(formatHostedLocalWorkerControlNetworkFailure({
+      error,
       harness,
       method: init.method ?? "GET",
-      status: response.status,
+      url: String(url),
+    }));
+  }
+
+  if (response.ok) {
+    return response;
+  }
+
+  let body: string;
+  try {
+    body = await response.text();
+  } catch (error) {
+    throw new Error(formatHostedLocalWorkerControlNetworkFailure({
+      error,
+      harness,
+      method: init.method ?? "GET",
       url: String(url),
     }));
   }
 
   throw new Error(formatHostedLocalWorkerControlFailure({
-    body: "Exceeded local worker restart retries.",
+    body,
     harness,
     method: init.method ?? "GET",
-    status: 503,
+    status: response.status,
     url: String(url),
   }));
-}
-
-function shouldRetryHostedLocalWorkerRestart(input: {
-  attempt: number;
-  body: string;
-  status: number;
-}): boolean {
-  return input.status === 503
-    && input.body.includes(HOSTED_LOCAL_WORKER_RESTART_BODY)
-    && input.attempt < HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES;
 }
 
 async function sleep(ms: number): Promise<void> {

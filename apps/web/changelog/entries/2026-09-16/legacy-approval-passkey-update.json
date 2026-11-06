@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-16",
+  "order": 100,
+  "item": {
+    "id": "legacy-approval-passkey-update",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Update an older approval passkey without leaving the request",
+    "summary": "Eligible accounts with an older approval setup can add a Murph passkey directly from the Approve button.",
+    "details": "You may be asked to sign in again with a verified method already linked to your account. After saving the passkey, confirm the original request separately. Existing Murph passkeys are not replaced by this flow.",
+    "relevanceTags": ["account", "security"],
+    "sourcePullRequests": []
+  }
+}

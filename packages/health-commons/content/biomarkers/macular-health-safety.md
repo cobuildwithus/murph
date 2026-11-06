@@ -14,11 +14,8 @@ categories:
   - "vision"
   - "safety"
   - "evening-light-reduction"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:evening-light-reduction/red-light-glasses-before-bed"
 measurementContexts:
   - "safety_boundary"
   - "clinical_context"

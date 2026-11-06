@@ -1,3 +1,4 @@
+import { HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
 import {
   buildJunctionProviderSourceInstanceKey,
   canonicalizeJunctionProviderSlug,
@@ -66,6 +67,7 @@ import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   appendHostedScheduledDeviceSyncWakeEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
+  runWithPreparedHostedMailboxItemAppendCrypto,
   type AppendHostedMailboxItemResult,
   type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
@@ -110,6 +112,7 @@ import {
 } from "./prisma-store/connection-records";
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
+import type { HostedDeviceSyncDeferredDirtyWakeRecord } from "./prisma-store/dirty-connections";
 import {
   buildHostedTokenRefreshStateUnknownError,
   classifyHostedTokenRefreshLease,
@@ -2519,7 +2522,13 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
   };
 }
 
+const RECOVERY_ADMISSION_OPTIONS = {
+  memberRowLockTimeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS,
+  transaction: HOSTED_RECOVERY_TRANSACTION_OPTIONS,
+} as const;
+
 export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
+  abortSignal?: AbortSignal;
   connectionId: string;
   createdAt: string;
   eventId: string;
@@ -2565,40 +2574,72 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     traceId: input.traceId ?? null,
     userId: input.userId,
   });
-  const appendResult = await persistHostedDeviceSyncWake({
-    appendMailbox: (tx) => appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-      envelope: wake,
-      tx,
+  const appendResult = await runWithPreparedHostedMailboxItemAppendCrypto({
+    signal: input.abortSignal,
+    prisma,
+    userId: input.userId,
+    append: (prepared) => persistHostedDeviceSyncWake({
+      abortSignal: input.abortSignal,
+      admission: RECOVERY_ADMISSION_OPTIONS,
+      appendMailbox: (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
+        appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+          envelope: wake,
+          prepared,
+          tx,
+        })
+      ),
+      healthDataConnectionId: input.connectionId,
+      healthDataUserId: input.userId,
+      signalFailureMode: "throw",
+      // The first append owns the direct Temporal handoff. A later recovery
+      // bucket can encounter the same durable schedule tuple while its imported
+      // runtime work is still pending; the shared mailbox-handoff sweep recovers
+      // only a never-imported first signal, while imported work keeps its own
+      // persisted retry owner.
+      startWorkflowOnDuplicate: false,
+      wake,
+      store,
+      persist: async (tx) => {
+        // The sweep selected this tuple before crypto preparation and may now
+        // be behind a checkpoint publication. Both owners hold this connection lock.
+        const current = await tx.$queryRaw<Array<{ current: number }>>`
+          SELECT 1 AS current FROM device_connection
+          WHERE id = ${input.connectionId} AND user_id = ${input.userId}
+            AND provider = ${input.provider} AND status = 'active'
+            AND connected_at = ${new Date(input.expectedConnectedAt)}
+            AND next_reconcile_at = ${new Date(input.nextReconcileAt)}
+            AND next_reconcile_at <= NOW() AT TIME ZONE 'UTC'
+        `;
+        if (current.length === 0) throw deviceSyncError({
+          code: "SCHEDULED_RECONCILE_SUPERSEDED", httpStatus: 409, retryable: false,
+          message: "The selected device schedule is no longer current.",
+        });
+      },
+      complete: async () => {
+        await store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: input.provider,
+          kind: "reconcile_due",
+          occurredAt: hint.occurredAt ?? null,
+          traceId: normalizeNullableString(hint.traceId),
+          eventType: null,
+          resourceCategory: null,
+          reason: null,
+          nextReconcileAt: hint.nextReconcileAt ?? null,
+          revokeWarning: null,
+          createdAt: input.createdAt,
+        });
+      },
     }),
-    healthDataConnectionId: input.connectionId,
-    healthDataUserId: input.userId,
-    signalFailureMode: "throw",
-    // The first append owns the direct Temporal handoff. A later recovery
-    // bucket can encounter the same durable schedule tuple while its imported
-    // runtime work is still pending; the shared mailbox-handoff sweep recovers
-    // only a never-imported first signal, while imported work keeps its own
-    // persisted retry owner.
-    startWorkflowOnDuplicate: false,
-    wake,
-    store,
-    persist: async () => {},
-    complete: async () => {
-      await store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: input.provider,
-        kind: "reconcile_due",
-        occurredAt: hint.occurredAt ?? null,
-        traceId: normalizeNullableString(hint.traceId),
-        eventType: null,
-        resourceCategory: null,
-        reason: null,
-        nextReconcileAt: hint.nextReconcileAt ?? null,
-        revokeWarning: null,
-        createdAt: input.createdAt,
-      });
-    },
+  }).catch((error: unknown) => {
+    if (isDeviceSyncError(error) && error.code === "SCHEDULED_RECONCILE_SUPERSEDED") return null;
+    throw error;
   });
+  if (!appendResult) return {
+    reason: "schedule_superseded", wakeAccepted: false, wakeAppended: false,
+    wakeDuplicate: false, wakeInserted: false,
+  };
   const wakeAccepted = appendResult.inserted
     || (appendResult.duplicate && !appendResult.dedupeConflict);
 
@@ -2626,11 +2667,173 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   ].join(":");
 }
 
+export type HostedDeviceSyncDeferredWakeReleaseResult =
+  | { outcome: "released"; wakeInserted: boolean }
+  | { outcome: "cleared"; reason: "consent_withdrawn" | "superseded" };
+
+/**
+ * Releases one due routine-batch deadline as the ordinary dirty-transition
+ * wake. Mailbox crypto is prepared outside the short locked transaction, which
+ * rechecks the deadline, dirt and connection before appending and clearing it.
+ */
+export async function releaseHostedDeviceSyncDeferredDirtyWake(input: {
+  abortSignal?: AbortSignal;
+  connectionId: string;
+  now: Date;
+  userId: string;
+}): Promise<HostedDeviceSyncDeferredWakeReleaseResult> {
+  const prisma = getPrisma();
+  const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+  const facts = await store.readDueDeferredDirtyConnectionWake({
+    connectionId: input.connectionId,
+    dueAt: input.now,
+    userId: input.userId,
+  });
+  // Another owner already cleared or moved this deadline; nothing to write.
+  if (!facts) return { outcome: "cleared", reason: "superseded" };
+  const clear = async (
+    reason: "consent_withdrawn" | "superseded",
+    dirtyRevision: bigint,
+  ): Promise<HostedDeviceSyncDeferredWakeReleaseResult> => {
+    await store.clearDeferredDirtyConnectionWake({
+      connectionId: input.connectionId,
+      dirtyRevision,
+      dueAt: input.now,
+      userId: input.userId,
+    });
+    return { outcome: "cleared", reason };
+  };
+  if (await readHostedHealthDataConsentState({
+    memberId: input.userId,
+    prisma,
+  }) === "revoked") {
+    return clear("consent_withdrawn", facts.dirtyRevision);
+  }
+  if (!isReleasableDeferredDirtyWake(facts)) {
+    return clear("superseded", facts.dirtyRevision);
+  }
+  const expectedConnectedAt = facts.connectedAt.toISOString();
+  const occurredAt = facts.latestDirtyAt.toISOString();
+  const wake = buildHostedDeviceSyncWake({
+    connectionId: input.connectionId,
+    eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+      connectionId: input.connectionId,
+      dirtyRevision: facts.dirtyRevision,
+      expectedConnectedAt,
+      provider: facts.provider,
+      userId: input.userId,
+    }),
+    expectedConnectedAt,
+    hint: buildHostedDeviceSyncSignalPayload({
+      hint: {
+        ...(facts.latestEventType ? { eventType: facts.latestEventType } : {}),
+        occurredAt,
+        reason: "webhook_dirty_transition",
+        resourceCategory: facts.latestResourceCategory,
+      },
+      occurredAt,
+    }),
+    occurredAt,
+    provider: facts.provider,
+    source: "webhook-hint",
+    userId: input.userId,
+  });
+  let lockedRevision: bigint | null = null;
+  try {
+    const appendResult = await runWithPreparedHostedMailboxItemAppendCrypto({
+      signal: input.abortSignal,
+      prisma,
+      userId: input.userId,
+      append: (prepared) => persistHostedDeviceSyncWake({
+        abortSignal: input.abortSignal,
+        admission: RECOVERY_ADMISSION_OPTIONS,
+        appendMailbox: (tx) => appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: wake,
+          prepared,
+          tx,
+        }),
+        healthDataConnectionId: input.connectionId,
+        healthDataUserId: input.userId,
+        startWorkflowOnDuplicate: false,
+        store,
+        wake,
+        persist: async (tx) => {
+          const current = await store.readDueDeferredDirtyConnectionWake({
+            connectionId: input.connectionId,
+            dueAt: input.now,
+            tx,
+            userId: input.userId,
+          });
+          // A newer batch opened after this observation's revision was
+          // processed keeps its deadline; the next sweep wakes it afresh.
+          const newerBatch = current !== null
+            && current.processedRevision >= facts.dirtyRevision
+            && current.dirtyRevision > current.processedRevision;
+          lockedRevision = newerBatch ? null : current?.dirtyRevision ?? null;
+          if (
+            !current
+            || newerBatch
+            || !isReleasableDeferredDirtyWake(current)
+            || current.connectedAt.toISOString() !== expectedConnectedAt
+          ) {
+            throw deviceSyncError({
+              code: "DEFERRED_DIRTY_WAKE_SUPERSEDED",
+              httpStatus: 409,
+              message: "The deferred device-sync wake is no longer current.",
+              retryable: false,
+            });
+          }
+          await store.clearDeferredDirtyConnectionWake({
+            connectionId: input.connectionId,
+            dirtyRevision: current.dirtyRevision,
+            dueAt: input.now,
+            tx,
+            userId: input.userId,
+          });
+        },
+      }),
+    });
+    if (appendResult.dedupeConflict) {
+      throw deviceSyncError({
+        code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+        httpStatus: 503,
+        message: "Hosted device-sync deferred wake conflicted with an existing wake identity.",
+        retryable: true,
+      });
+    }
+    return { outcome: "released", wakeInserted: appendResult.inserted };
+  } catch (error) {
+    if (isDeviceSyncError(error) && error.code === "DEFERRED_DIRTY_WAKE_SUPERSEDED") {
+      // The rolled-back recheck saw no due batch, a newer one, or this one.
+      return lockedRevision === null
+        ? { outcome: "cleared", reason: "superseded" }
+        : clear("superseded", lockedRevision);
+    }
+    if (
+      isDeviceSyncError(error)
+      && error.code === "HEALTH_DATA_CONSENT_REQUIRED"
+      && !error.retryable
+    ) {
+      return clear("consent_withdrawn", facts.dirtyRevision);
+    }
+    throw error;
+  }
+}
+
+function isReleasableDeferredDirtyWake(
+  facts: HostedDeviceSyncDeferredDirtyWakeRecord,
+): boolean {
+  return facts.connectionStatus === "active"
+    && facts.dirtyRevision > facts.processedRevision;
+}
+
 type HostedDeviceSyncMailboxAppendResult = AppendHostedMailboxItemResult & {
   runtimeOwnedRetiredDuplicate?: boolean;
 };
 
 async function persistHostedDeviceSyncWake(input: {
+  abortSignal?: AbortSignal;
+  admission?: Parameters<PrismaDeviceSyncControlPlaneStore["withHealthDataAdmissionLock"]>[3];
   appendMailbox?(
     tx: HostedPrismaTransactionClient,
   ): Promise<HostedDeviceSyncMailboxAppendResult>;
@@ -2668,11 +2871,13 @@ async function persistHostedDeviceSyncWake(input: {
     mailboxAppendState.result = mailboxAppend;
     await input.persistAfterAppend?.(tx, mailboxAppend);
   };
+  input.abortSignal?.throwIfAborted();
   if (input.healthDataUserId && input.healthDataConnectionId) {
     await input.store.withHealthDataAdmissionLock(
       input.healthDataUserId,
       input.healthDataConnectionId,
       persistInTransaction,
+      input.admission,
     );
   } else {
     await input.store.prisma.$transaction(persistInTransaction);
@@ -2699,6 +2904,7 @@ async function persistHostedDeviceSyncWake(input: {
     )
   ) {
     await startHostedDeviceSyncWakeWorkflow(mailboxItemId, {
+      abortSignal: input.abortSignal,
       failureMode: input.signalFailureMode ?? "best_effort",
     });
   }
@@ -2716,11 +2922,13 @@ async function persistHostedDeviceSyncWake(input: {
 async function startHostedDeviceSyncWakeWorkflow(
   mailboxItemId: string,
   options: {
+    abortSignal?: AbortSignal;
     failureMode?: "best_effort" | "throw";
   } = {},
 ): Promise<void> {
   try {
     await signalHostedDeviceSyncMailboxRuntime({
+      abortSignal: options.abortSignal,
       mailboxItemId,
     });
   } catch (error) {
@@ -2799,6 +3007,34 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   status: PublicDeviceSyncAccount["status"];
   traceId: string | null;
   userId: string;
+}
+
+function shouldPrepareHostedWebhookMailbox(
+  input: HostedDeviceSyncWebhookAdmissionInput,
+  preparation: {
+    attempt: number;
+    hasPayloadResources: boolean;
+    hasPendingDirtySnapshot: boolean;
+    migrationPending: boolean;
+    dirtyNeedsWake: boolean;
+    admissionNeedsWake: boolean;
+  },
+): boolean {
+  // A deferred batch discovered in the final transaction rolls back and
+  // uses the existing bounded replan to prepare crypto outside the lock.
+  const retryingUrgentBatch = preparation.attempt > 0
+    && !preparation.migrationPending
+    && input.provider === "junction"
+    && !isHostedJunctionRoutineDailyTotalWebhook(input);
+  return input.sourceObservation !== null
+    || retryingUrgentBatch
+    || preparation.dirtyNeedsWake
+    || preparation.admissionNeedsWake
+    || (
+      input.preparationAuthorityProven
+      && !preparation.hasPayloadResources
+      && !preparation.hasPendingDirtySnapshot
+    );
 }
 
 async function persistHostedDeviceSyncWebhookAccepted(
@@ -2930,14 +3166,14 @@ async function persistHostedDeviceSyncWebhookAccepted(
             ownerId: input.userId,
           })
         : null;
-      const shouldPrepareMailbox = input.sourceObservation !== null
-        || preparedDirty?.shouldRequestWake === true
-        || initialAdmission?.shouldPrepareWake === true
-        || (
-          input.preparationAuthorityProven
-          && !hasPayloadResources
-          && pendingDirtySnapshot === null
-        );
+      const shouldPrepareMailbox = shouldPrepareHostedWebhookMailbox(input, {
+        attempt,
+        hasPayloadResources,
+        hasPendingDirtySnapshot: pendingDirtySnapshot !== null,
+        migrationPending: initialAdmission?.status.kind === "migration_pending",
+        dirtyNeedsWake: preparedDirty?.shouldRequestWake === true,
+        admissionNeedsWake: initialAdmission?.shouldPrepareWake === true,
+      });
       const preparedMailbox = shouldPrepareMailbox
         ? await prepareHostedMailboxItemAppendCrypto({
             prisma: input.store.prisma,
@@ -3083,7 +3319,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
             }
 
             // Every accepted hint merges into dirty state so coalesced timing remains
-            // representative. Only the clean-to-dirty transition appends a wake.
+            // representative. Clean transitions and claimed deferred batches append a wake.
             const dirtyUpdate = preparedDirty
               ? await input.store.upsertDirtyConnectionWithPreparedPlanTx({
                   prepared: preparedDirty,
@@ -3112,8 +3348,12 @@ async function persistHostedDeviceSyncWebhookAccepted(
             await completeHostedWebhookTraceTx(input, tx);
 
             if (
-              dirtyUpdate.shouldRequestWake
-              && !sourceEstablishmentOwnsWebhookHandoff
+              !sourceEstablishmentOwnsWebhookHandoff
+              && await settleHostedDeviceSyncWebhookWakeDeferralTx({
+                ...input,
+                shouldRequestWake: dirtyUpdate.shouldRequestWake,
+                tx,
+              })
             ) {
               if (!preparedMailbox) {
                 throw createHostedDeviceSyncDirtyPreparationMismatchError("wake_preparation_missing");
@@ -3512,6 +3752,75 @@ export function hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(
 
 function isHostedJunctionDailyDataWebhookEvent(eventType: string): boolean {
   return eventType.startsWith("daily.data.");
+}
+
+// Daily totals Junction republishes through the day. Their wakes batch for a
+// bounded window; sleep, workouts, body, glucose and unknown events stay urgent.
+const HOSTED_JUNCTION_ROUTINE_DAILY_RESOURCES = new Set([
+  "activity",
+  "blood_oxygen",
+  "calories_active",
+  "calories_basal",
+  "distance",
+  "floors_climbed",
+  "heartrate",
+  "hrv",
+  "respiratory_rate",
+  "steps",
+  "stress_level",
+  "vo2_max",
+]);
+export const HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS = 30 * 60_000;
+
+/**
+ * Applies routine batching to a webhook's dirty-transition wake and returns
+ * whether the ordinary immediate wake should still be appended.
+ */
+async function settleHostedDeviceSyncWebhookWakeDeferralTx(input: {
+  acceptedAt: string;
+  connectionId: string;
+  eventType: string;
+  provider: string;
+  shouldRequestWake: boolean;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<boolean> {
+  const routine = isHostedJunctionRoutineDailyTotalWebhook(input);
+  if (input.shouldRequestWake && routine) {
+    // The recovery sweep releases this batch's ordinary dirty wake unless
+    // runtime work drains the connection first.
+    await input.store.deferDirtyConnectionWakeTx({
+      connectionId: input.connectionId,
+      deferredUntil: new Date(
+        Date.parse(input.acceptedAt) + HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS,
+      ),
+      tx: input.tx,
+      userId: input.userId,
+    });
+    return false;
+  }
+  if (!input.shouldRequestWake && !routine && input.provider === "junction") {
+    // Clearing the batch and appending its ordinary wake share this transaction.
+    // A concurrent hint or sweep can no longer release the same pending batch.
+    return input.store.claimDeferredDirtyConnectionWakeTx({
+      connectionId: input.connectionId,
+      tx: input.tx,
+      userId: input.userId,
+    });
+  }
+  return input.shouldRequestWake;
+}
+
+export function isHostedJunctionRoutineDailyTotalWebhook(input: {
+  eventType: string;
+  provider: string;
+}): boolean {
+  const resource = /^daily\.data\.([a-z0-9_]+)\.(?:created|updated)$/u
+    .exec(input.eventType)?.[1];
+  return input.provider === "junction"
+    && resource !== undefined
+    && HOSTED_JUNCTION_ROUTINE_DAILY_RESOURCES.has(resource);
 }
 
 function buildHostedFitbitMigrationSuccessorEventId(input: {
@@ -3925,11 +4234,15 @@ function buildHostedWebhookDirtyResources(input: {
     const payloadSourceProviderSlug = readHostedDirtyResourceString(
       payload.sourceProviderSlug,
     );
+    // The provider's own job identity rides along so the runtime enqueues a
+    // re-sent webhook onto the job or continuation already carrying that key.
+    const providerDedupeKey = readHostedDirtyResourceString(job.dedupeKey);
     resources.push({
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: job.kind,
       payload: readHostedDirtyResourcePayload(payload),
+      ...(providerDedupeKey ? { providerDedupeKey } : {}),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
       // This field participates in resource execution identity and can be

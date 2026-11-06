@@ -2,7 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 
 import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
 
-export function resolveHostedSubscriptionBillingStatus(input: {
+function resolveHostedSubscriptionBillingStatus(input: {
   currentBillingPhase?: string | null;
   currentBillingStatus: HostedBillingStatus;
   currentCheckoutOffer?: string | null;

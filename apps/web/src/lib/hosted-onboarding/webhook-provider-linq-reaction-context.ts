@@ -35,7 +35,6 @@ import {
 import { getHostedLinqChatSummary } from "./linq-client";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import {
-  isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "./linq-provider-events";
 import type { HostedLinqWebhookEvent } from "./linq-webhook";
@@ -81,11 +80,10 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
   event: ParsedHostedLinqProviderEvent;
   signal?: AbortSignal;
 }): Promise<HostedLinqWebhookEvent | null> {
-  if (!isHostedLinqAffirmativeReaction({
-    customEmoji: input.event.reactionCustomEmoji,
-    eventType: input.event.eventType,
-    reactionType: input.event.reactionType,
-  })) {
+  // Keep the legacy synthetic-reaction wire marker; semantics are decided only
+  // after the runtime attests the exact sent assistant target. Join-offer
+  // ownership runs before this adapter. Removals remain context-only.
+  if (input.event.eventType !== "reaction.added") {
     return null;
   }
   const eventContext = readHostedLinqReactionEventContext(input.event);

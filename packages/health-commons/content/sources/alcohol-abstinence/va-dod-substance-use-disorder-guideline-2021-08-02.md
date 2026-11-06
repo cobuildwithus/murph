@@ -13,13 +13,8 @@ aliases:
 - candidate:withdrawal-safety-screening:004
 categories:
 - alcohol-abstinence
-relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
+relations: []
+
 source:
   kind: guideline
   title: VA/DoD Clinical Practice Guideline for the Management of Substance Use Disorders

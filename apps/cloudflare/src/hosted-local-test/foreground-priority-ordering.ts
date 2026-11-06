@@ -12,6 +12,7 @@ import type {
 
 export interface HostedLocalForegroundPriorityOrderingOutboundContext {
   containerId?: string;
+  className?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -58,7 +59,6 @@ export type HostedLocalForegroundPriorityOrderingEvent =
       ordinal: number;
       probeKind:
         | "checkpoint_interrupt"
-        | "checkpoint_interrupt_rearm"
         | "other"
         | "runtime_wake"
         | null;
@@ -260,7 +260,7 @@ async function observeForegroundPriorityWebControlRequest(
     if (
       response.ok
       && requestSummary.conversationLaneRequested === true
-      && requestSummary.probeKind === "checkpoint_interrupt_rearm"
+      && requestSummary.probeKind === "checkpoint_interrupt"
       && summary.conversationItemCount === 0
       && foregroundPriorityOrderingObservationHasEvent(
         userId,
@@ -353,7 +353,6 @@ async function readMailboxFetchRequestSummary(
   conversationLaneRequested: boolean | null;
   probeKind:
     | "checkpoint_interrupt"
-    | "checkpoint_interrupt_rearm"
     | "other"
     | "runtime_wake"
     | null;
@@ -387,15 +386,11 @@ function classifyForegroundPriorityOrderingProbeKind(
   requestId: string | null,
 ):
   | "checkpoint_interrupt"
-  | "checkpoint_interrupt_rearm"
   | "other"
   | "runtime_wake"
   | null {
   if (requestId === null) {
     return null;
-  }
-  if (requestId.includes(":checkpoint-interrupt-rearm-")) {
-    return "checkpoint_interrupt_rearm";
   }
   if (requestId.includes(":checkpoint-interrupt-")) {
     return "checkpoint_interrupt";

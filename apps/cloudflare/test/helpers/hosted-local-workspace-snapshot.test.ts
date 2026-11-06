@@ -34,19 +34,26 @@ import {
   TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
 } from "../hosted-execution-fixtures.ts";
 import { uploadHostedLocalWorkspaceSnapshot } from "./hosted-local-workspace-snapshot.ts";
+import { startHostedLocalDevHarness } from "./hosted-local-dev-harness.ts";
 
 const testkit = vi.hoisted(() => ({
   createDeps: vi.fn(),
   disconnect: vi.fn(),
   ensureWorkspace: vi.fn(),
   randomBytes: vi.fn((length: number) => Buffer.alloc(length, 0xff)),
+  startStack: vi.fn(),
 }));
 vi.mock("node:crypto", async () => ({
   ...await vi.importActual<typeof import("node:crypto")>("node:crypto"),
   randomBytes: testkit.randomBytes,
 }));
 vi.mock("#hosted-web-testing", () => ({
+  agePostgresRuntimeForTest: vi.fn(),
   createHostedWebTestkitDeps: testkit.createDeps,
+  startStuckPostgresRuntimeForTest: vi.fn(),
+}));
+vi.mock("@murphai/hosted-local-harness/dev-hosted-local/stack", () => ({
+  startHostedLocalDevStack: testkit.startStack,
 }));
 
 const userId = "member_snapshot_fixture";
@@ -70,9 +77,9 @@ afterEach(async () => {
 
 describe("hosted-local v2 workspace snapshot fixture", () => {
   it.each([
-    { endpoint: "http://127.0.0.1:9100", bridgeHost: undefined },
-    { endpoint: "http://172.17.0.1:9100", bridgeHost: "172.17.0.1" },
-  ])("verifies, uploads, and restores canonical bytes through $endpoint", async ({ endpoint, bridgeHost }) => {
+    { endpoint: "http://127.0.0.1:9100", bridgeHost: undefined, restartLocator: false },
+    { endpoint: "http://172.17.0.1:9100", bridgeHost: "172.17.0.1", restartLocator: true },
+  ])("verifies, uploads once, and restores canonical bytes through $endpoint with locator restart: $restartLocator", async ({ endpoint, bridgeHost, restartLocator }) => {
     const fixture = await createFixture();
     const envelope = await createSignedRuntimeEnvelope();
     const calls: string[] = [];
@@ -83,14 +90,7 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
       workspaceProvisioned = true;
     });
     let encryptedBytes = new Uint8Array();
-    const request = vi.fn(async (pathname: string, init?: RequestInit) => {
-      calls.push("locator");
-      expect(pathname).toBe(`/__test/users/${userId}/direct-r2-locator-marker`);
-      expect(new Headers(init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(userId);
-      const marker = JSON.parse(String(init?.body));
-      expect(marker.objectKey).toBe(uploadedObjectKey);
-      return Response.json({ ok: true });
-    });
+    const markers: { body: string; headers: Record<string, string>; method: string; url: string }[] = [];
     let uploadedObjectKey = "";
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const outgoing = new Request(input, init);
@@ -108,6 +108,23 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
           userId,
         });
       }
+      if (url.pathname === `/__test/users/${userId}/direct-r2-locator-marker`) {
+        calls.push("locator");
+        expect(outgoing.method).toBe("POST");
+        expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-snapshot-oidc-token");
+        expect(outgoing.headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(userId);
+        const body = await outgoing.text();
+        expect(JSON.parse(body).objectKey).toBe(uploadedObjectKey);
+        markers.push({
+          body, headers: Object.fromEntries(outgoing.headers), method: outgoing.method, url: outgoing.url,
+        });
+        return restartLocator && markers.length === 1
+          ? new Response(
+            "Your worker restarted mid-request. Please try sending the request again. Only GET or HEAD requests are retried automatically.",
+            { status: 503 },
+          )
+          : Response.json({ ok: true });
+      }
       calls.push("upload");
       expect(outgoing.method).toBe("PUT");
       expect(url.origin).toBe(endpoint);
@@ -123,19 +140,40 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
     });
     vi.stubGlobal("fetch", fetchImpl);
 
+    testkit.startStack.mockResolvedValue({
+      oidcToken: "synthetic-snapshot-oidc-token",
+      processes: { cloudflare: null, stripe: null },
+      ready: Promise.resolve(),
+      runtimeEnv: {},
+      stderrTail: () => "",
+      stdoutTail: () => "",
+      stop: vi.fn(),
+      workerRuntimeEnv: localEnvironment({
+        HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: endpoint,
+        HOSTED_R2_PRESIGN_ENDPOINT: endpoint,
+        MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: bridgeHost,
+      }),
+    });
+    const harness = await startHostedLocalDevHarness({
+      env: { MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub", NEXT_DIST_DIR_MODE: "smoke" },
+      persistDirPrefix: "snapshot-fixture-harness-",
+      testControls: true,
+    });
     const ref = await uploadHostedLocalWorkspaceSnapshot({
       ...fixture,
-      harness: {
-        request,
-        workerRuntimeEnv: localEnvironment({
-          HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: endpoint,
-          HOSTED_R2_PRESIGN_ENDPOINT: endpoint,
-          MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: bridgeHost,
-        }),
-      },
+      harness,
       userId,
-    });
-    expect(calls).toEqual(["workspace", "crypto", "upload", "locator"]);
+    }).finally(() => harness.stop());
+    expect(calls).toEqual([
+      "workspace", "crypto", "upload", "locator", ...(restartLocator ? ["locator"] : []),
+    ]);
+    expect(markers).toHaveLength(restartLocator ? 2 : 1);
+    if (restartLocator) {
+      expect(markers[1]).toEqual(markers[0]);
+    }
+    expect(JSON.parse(markers[0]!.body)).toEqual({ objectKey: ref.objectKey, snapshotId: ref.snapshotId });
+    expect(testkit.ensureWorkspace).toHaveBeenCalledOnce();
+    expect(testkit.randomBytes).toHaveBeenCalledOnce();
     expect(testkit.createDeps).toHaveBeenCalledWith(fixture.environment);
     expect(testkit.disconnect).toHaveBeenCalledOnce();
     // These bytes contain '/' in ordinary base64; checkpoint publication requires base64url.

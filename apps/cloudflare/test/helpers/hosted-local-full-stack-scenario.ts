@@ -18,7 +18,6 @@ import {
   DEFAULT_DATABASE_URL,
 } from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 import { loadHostedLocalBaseEnvironment } from "@murphai/hosted-local-harness/dev-hosted-local/environment";
-import { shouldUseHostedWebProductionStart } from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
@@ -112,9 +111,7 @@ interface HostedActiveMemberSeedArgs {
 interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   homePhone: string;
   memberPhone: string;
-  privyUserId?: string | null;
   recentInboundAt?: Date | string | null;
-  walletAddress?: string | null;
 }
 
 type HostedJunctionDeviceSyncReplaySeedArgs =
@@ -122,6 +119,11 @@ type HostedJunctionDeviceSyncReplaySeedArgs =
 
 type HostedJunctionDeviceSyncConnectionSeedArgs =
   Omit<HostedJunctionDeviceSyncConnectionSeedInput, "environment">;
+
+interface HostedLocalProviderCountDiagnosticScope {
+  providerBaseline: number;
+  promptMarker: string;
+}
 
 export interface HostedLocalFullStackScenario {
   assistantProviderRequests: HostedLocalAssistantProviderStubRequest[];
@@ -190,14 +192,17 @@ export interface HostedLocalFullStackScenario {
   ): Promise<HostedRunnerStatusResponse>;
   /** Passively observes new hosted work; it never triggers runtime processing. */
   waitForLatestPendingWake(userId: string): Promise<HostedRunnerStatusResponse>;
-  buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
+  buildFailureMessage(
+    userId: string,
+    summaryLines: readonly string[],
+    providerCountScope?: HostedLocalProviderCountDiagnosticScope,
+  ): Promise<string>;
   /**
    * Mints a real hosted app session cookie for a seeded member using the same
    * HMAC key the hosted web process runs with.
    */
   issueHostedAppSession(input: {
     memberId: string;
-    privyUserId: string;
   }): Promise<HostedAppSessionForTest>;
   issueHostedIMessageMiniAppCredential(input: {
     memberId: string;
@@ -380,9 +385,8 @@ async function startHostedLocalFullStackScenarioAttempt(
       ...hostedAssistantDevEnv,
       ...buildHostedLocalDeviceSyncProviderEnvClearances(),
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "125000",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "120000",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
@@ -485,8 +489,27 @@ async function startHostedLocalFullStackScenarioAttempt(
       buildFailureMessage: async (
         userId: string,
         summaryLines: readonly string[],
+        providerCountScope?: HostedLocalProviderCountDiagnosticScope,
       ): Promise<string> => {
+        // Snapshot the capture before awaiting the secondary status read.
+        const providerCounts = providerCountScope
+          ? summarizeAssistantProviderRequestCounts(assistantProviderRequests, providerCountScope)
+          : null;
         const status = await scenarioHarness.readUserStatus(userId).catch(() => null);
+        if (providerCounts) {
+          // Count failures need bounded observations, without request paths or log tails.
+          return [
+            ...summaryLines,
+            `assistant provider request counts: ${JSON.stringify(providerCounts)}`,
+            `hosted count-check status: ${JSON.stringify({
+              available: status !== null,
+              lastErrorPresent: status ? Boolean(status.lastErrorCode) : null,
+              mailboxLaggingLaneCount: status
+                ? status.mailboxLag.filter((lane) => lane.lag !== "0").length
+                : null,
+            })}`,
+          ].join("\n");
+        }
         const assistantProviderRequestLog = assistantProviderRequests.map((request) => ({
           bodyBytes: Buffer.byteLength(request.body, "utf8"),
           bodyFingerprint: fingerprintProviderRequestBody(
@@ -561,12 +584,11 @@ async function startHostedLocalFullStackScenarioAttempt(
         await issueHostedAppSessionForTest({
           environment: buildScenarioSeedEnvironment({
             HOSTED_APP_SESSION_HMAC_KEY: scenarioHarness.hostedAppSessionHmacKey,
-            NODE_ENV: await shouldUseHostedWebProductionStart({
-              env: scenarioRuntimeEnv,
-            }) ? "production" : "test",
+            HOSTED_BETTER_AUTH_SECRET: scenarioHarness.hostedBetterAuthSecret,
+            HOSTED_AUTH_STORAGE_KEY: scenarioHarness.hostedAuthStorageKey,
+            NODE_ENV: "test",
           }),
           memberId: sessionInput.memberId,
-          privyUserId: sessionInput.privyUserId,
           secureCookieMode: scenarioHarness.webUsesProductionArtifact,
         }),
       issueHostedIMessageMiniAppCredential: async (credentialInput) =>
@@ -587,13 +609,11 @@ async function startHostedLocalFullStackScenarioAttempt(
           homePhone: seedInput.homePhone,
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
-          privyUserId: seedInput.privyUserId,
           recentInboundAt: seedInput.recentInboundAt === undefined
             ? new Date().toISOString()
             : seedInput.recentInboundAt,
           stripeCustomerId: seedInput.stripeCustomerId,
           stripeSubscriptionId: seedInput.stripeSubscriptionId,
-          walletAddress: seedInput.walletAddress,
         });
       },
       seedActiveHostedMember: async (seedInput) => {
@@ -864,6 +884,66 @@ function summarizeHostedRuntimeAuthFailureLog(log: HostedRuntimeLogForTestRow): 
 function readHostedRuntimeLogString(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
+}
+
+export async function rethrowHostedLocalProviderCountFailure(
+  error: unknown,
+  input: HostedLocalProviderCountDiagnosticScope & {
+    scenario: Pick<HostedLocalFullStackScenario, "buildFailureMessage">;
+    userId: string;
+  },
+): Promise<never> {
+  let diagnostics = "assistant provider count diagnostics: unavailable";
+  try {
+    diagnostics = await input.scenario.buildFailureMessage(input.userId, [], {
+      providerBaseline: input.providerBaseline,
+      promptMarker: input.promptMarker,
+    });
+  } catch {
+    // A secondary diagnostic failure must never replace the original assertion.
+  }
+  if (error instanceof Error) {
+    error.message += `\n${diagnostics}`;
+  }
+  throw error;
+}
+
+function summarizeAssistantProviderRequestCounts(
+  requests: readonly HostedLocalAssistantProviderStubRequest[],
+  scope: HostedLocalProviderCountDiagnosticScope,
+) {
+  const countedRequests = requests.filter((request) => request.url === "/v1/responses");
+  const requestsSinceBaseline = countedRequests.slice(scope.providerBaseline);
+  const categories = new Map<string, {
+    promptMarkerPresent: boolean;
+    requestKind: NonNullable<HostedLocalAssistantProviderStubRequest["requestKind"]>;
+    fixtureMatch: NonNullable<HostedLocalAssistantProviderStubRequest["fixtureMatch"]>;
+    count: number;
+  }>();
+  let promptMarkerMatchesSinceBaseline = 0;
+  for (const request of requestsSinceBaseline) {
+    // Marker presence is an observation, not proof of request ownership or replay.
+    const promptMarkerPresent = request.body.includes(scope.promptMarker);
+    if (promptMarkerPresent) promptMarkerMatchesSinceBaseline += 1;
+    const requestKind = (["turn", "prewarm", "compaction", "memory", "unknown"] as const)
+      .find((kind) => kind === request.requestKind) ?? "unknown";
+    const fixtureMatch = (["scoped", "unscoped", "none", "compaction", "not_applicable"] as const)
+      .find((match) => match === request.fixtureMatch) ?? "not_applicable";
+    const key = `${promptMarkerPresent}:${requestKind}:${fixtureMatch}`;
+    const category = categories.get(key);
+    if (category) category.count += 1;
+    else categories.set(key, { promptMarkerPresent, requestKind, fixtureMatch, count: 1 });
+  }
+  return {
+    providerBaseline: scope.providerBaseline,
+    observedGlobalCount: countedRequests.length,
+    promptMarkerMatchesBeforeBaseline: countedRequests.slice(0, scope.providerBaseline)
+      .filter((request) => request.body.includes(scope.promptMarker)).length,
+    requestsSinceBaseline: requestsSinceBaseline.length,
+    promptMarkerMatchesSinceBaseline,
+    // At most 2 marker states × 5 request kinds × 5 fixture categories.
+    categories: [...categories.values()],
+  };
 }
 
 function fingerprintProviderRequestBody(value: string, secret: string): string {

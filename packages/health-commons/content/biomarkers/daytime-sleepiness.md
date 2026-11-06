@@ -18,31 +18,21 @@ categories:
   - "sleep-regularity"
   - "self-experiment-metric"
 relations:
+  - type: cites
+    target: source_artifact:pmid-22294820
+  - type: cites
+    target: source_artifact:pmid-33864369
+  - type: cites
+    target: source_artifact:pmid-37684151
+  - type: cites
+    target: source_artifact:pmid-24497651
+  - type: cites
+    target: source_artifact:pmid-26414989
+  - type: cites
+    target: source_artifact:pmid-30239905
+  - type: cites
+    target: source_artifact:aaafoundation-acute-sleep-deprivation-crash-risk-2016-12-01
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:consistent-wake-time/consistent-wake-time"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-22294820"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-33864369"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-37684151"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-24497651"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-26414989"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-30239905"
-  -
-    type: "cites"
-    target: "source_artifact:aaafoundation-acute-sleep-deprivation-crash-risk-2016-12-01"
 measurementContexts:
   - "manual_rating"
   - "validated_questionnaire"

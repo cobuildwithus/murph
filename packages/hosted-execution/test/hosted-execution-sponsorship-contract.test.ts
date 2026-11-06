@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -22,7 +21,7 @@ const ROUTE = {
 };
 
 describe("hosted group sponsorship contracts", () => {
-  it("round-trips only the narrow creative notification prompt profile", () => {
+  it("keeps exactly the retired creative profiles readable and rejects unknown profiles", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "assistant.notification.requested:group-sponsorship:test",
       memberId: "member-group-runtime",
@@ -61,61 +60,18 @@ describe("hosted group sponsorship contracts", () => {
     })).toThrow(/notificationPromptProfile/u);
   });
 
-  it("strictly parses the optional expiring group-bit sidecar", () => {
+  it.each([
+    null,
+    { schema: "murph.group-sponsorship-bit.v1", expiresAt: "2026-07-28T12:00:00.000Z", publicAlias: "Synthetic contributor", requestedBit: "Use a nautical greeting." },
+    { expiresAt: "invalid", permission: "admin" },
+    "obsolete payload",
+  ])("ignores a running bit from an older Web: %j", (groupRunningBit) => {
     const response = {
-      assistantProvider: "openai",
       fetchedAt: "2026-07-27T12:00:00.000Z",
-      groupRunningBit: {
-        expiresAt: "2026-07-28T12:00:00.000Z",
-        publicAlias: "Jake’s Lower Back",
-        requestedBit: "Treat me like the exhausted CFO.",
-        schema: "murph.group-sponsorship-bit.v1",
-      },
       items: [],
       maxSeqByLane: [],
       userId: "member-group-runtime",
     };
-    expect(parseHostedMailboxFetchResponse(response)).toEqual(response);
-    expect(() => parseHostedMailboxFetchResponse({
-      ...response,
-      groupRunningBit: {
-        ...response.groupRunningBit,
-        permission: "admin",
-      },
-    })).toThrow(/unknown fields/u);
-    expect(() => parseHostedMailboxFetchResponse({
-      ...response,
-      groupRunningBit: {
-        ...response.groupRunningBit,
-        expiresAt: "tomorrow",
-      },
-    })).toThrow(/canonical/u);
+    expect(parseHostedMailboxFetchResponse({ ...response, groupRunningBit })).toEqual(response);
   });
-  it("documents the strict usage contract and old-Web sponsorship rollback floor", () => {
-    const deployGuide = readFileSync(
-      new URL("../../../apps/cloudflare/DEPLOY.md", import.meta.url),
-      "utf8",
-    );
-    const section = deployGuide.match(
-      /## Group Usage Projection Privacy and Monthly Sponsorship Rollout[\s\S]*?(?=\n## )/u,
-    )?.[0];
-    const normalizedSection = section?.replace(/\s+/gu, " ");
-
-    expect(section).toBeDefined();
-    expect(normalizedSection).toContain(
-      "There is no strip-only reader phase or rollout-only feature flag",
-    );
-    expect(normalizedSection).toContain(
-      "A mixed-version Web/runner window may temporarily make the strict read fail",
-    );
-    expect(normalizedSection).toContain(
-      "Confirm both the migration and new Web have converged before enabling monthly authorization creation or automatic refill admission",
-    );
-    expect(normalizedSection).toContain(
-      "The first monthly authorization is the old-Web rollback floor",
-    );
-    expect(normalizedSection).toContain("Recover with a forward fix");
-    expect(normalizedSection).toContain("not a permanent rollout framework");
-  });
-
 });

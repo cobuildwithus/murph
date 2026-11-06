@@ -13,11 +13,8 @@ categories:
   - "self-rating"
   - "recovery"
   - "intermittent-pneumatic-compression"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants"
 measurementContexts:
   - "self_rating"
   - "session_log"

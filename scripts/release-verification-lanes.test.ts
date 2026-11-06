@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,7 +15,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const releaseCheckPath = path.join(repoRoot, "scripts", "release-check.sh");
 const releasePlanPath = path.join(
   repoRoot,
   "scripts",
@@ -107,13 +108,12 @@ function discoverCoveragePackageDirs(): string[] {
 
   return readdirSync(packagesRoot, { withFileTypes: true })
     .flatMap((entry) => {
-      if (!entry.isDirectory()) {
+      const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
+      if (!entry.isDirectory() || !existsSync(packageJsonPath)) {
         return [];
       }
 
-      const packageJson: unknown = JSON.parse(
-        readFileSync(path.join(packagesRoot, entry.name, "package.json"), "utf8"),
-      );
+      const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       if (!isRecord(packageJson) || !isRecord(packageJson.scripts)) {
         return [];
       }
@@ -164,9 +164,10 @@ describe("release verification executable lanes", () => {
       expect(packageShards).toEqual([
         "cli",
         "assistant-engine",
+        "assistant-runtime",
+        "platform-b1",
         "platform-a",
-        "platform-b",
-        "health-commons",
+        "platform-b2",
         "hosted-local-harness",
       ]);
       expect(new Set(packageShards).size).toBe(packageShards.length);
@@ -189,78 +190,38 @@ describe("release verification executable lanes", () => {
       expect(packageDirsByShard).toEqual({
         cli: ["packages/cli"],
         "assistant-engine": ["packages/assistant-engine"],
+        "assistant-runtime": ["packages/assistant-runtime"],
         "platform-a": [
-          "packages/assistant-runtime",
           "packages/cloudflare-hosted-control",
           "packages/exercise-library",
           "packages/gateway-core",
+          "packages/health-commons",
           "packages/health-metrics",
           "packages/hosted-execution",
           "packages/importers",
           "packages/inbox-services",
-          "packages/openclaw-plugin",
           "packages/operator-config",
         ],
-        "platform-b": [
+        "platform-b1": [
           "packages/core",
-          "packages/setup-cli",
-          "packages/assistant-cli",
           "packages/contracts",
-          "packages/clinical-records",
           "packages/device-syncd",
-          "packages/inboxd",
           "packages/messaging-ingress",
+        ],
+        "platform-b2": [
+          "packages/clinical-records",
+          "packages/inboxd",
           "packages/parsers",
           "packages/query",
           "packages/runtime-state",
           "packages/vault-usecases",
         ],
-        "health-commons": ["packages/health-commons"],
         "hosted-local-harness": ["packages/hosted-local-harness"],
       });
 
       const packageDirs = Object.values(packageDirsByShard).flat();
       expect(new Set(packageDirs).size).toBe(packageDirs.length);
       expect([...packageDirs].sort()).toEqual(discoverCoveragePackageDirs());
-    } finally {
-      rmSync(harnessRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("executes distinct preflight and full release-check tails", () => {
-    const harnessRoot = createHarnessRoot();
-
-    try {
-      const { binDir, logPath } = createFakeCommandPath(harnessRoot);
-      const env = fakeCommandEnvironment(binDir, logPath);
-      const preflight = spawnSync("/bin/bash", [releaseCheckPath, "--preflight"], {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env,
-      });
-      expect(preflight.status, preflight.stderr).toBe(0);
-      const preflightLog = readCommandLog(logPath);
-      expect(preflightLog).toContain("corepack pnpm build:workspace:clean");
-      expect(preflightLog).toContain("corepack pnpm typecheck");
-      expect(preflightLog).toContain(
-        "bash scripts/doc-gardening.sh --fail-on-issues",
-      );
-      expect(preflightLog).not.toContain("corepack pnpm verify:acceptance");
-
-      writeFileSync(logPath, "", "utf8");
-      const full = spawnSync("/bin/bash", [releaseCheckPath], {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env,
-      });
-      expect(full.status, full.stderr).toBe(0);
-      const fullLog = readCommandLog(logPath);
-      expect(fullLog).toContain("corepack pnpm build:workspace:clean");
-      expect(fullLog).toContain("corepack pnpm verify:acceptance");
-      expect(fullLog).not.toContain("corepack pnpm typecheck");
-      expect(fullLog).not.toContain(
-        "bash scripts/doc-gardening.sh --fail-on-issues",
-      );
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true });
     }

@@ -61,24 +61,17 @@ biomarker:
     - protein load
     - travel
 relations:
--
-  type: related_protocol
-  target: protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides
--
-  type: cites
-  target: source_artifact:pmid-40507417
--
-  type: cites
-  target: source_artifact:pmid-30061579
--
-  type: cites
-  target: source_artifact:pmid-36912494
--
-  type: cites
-  target: source_artifact:pmid-40685650
--
-  type: cites
-  target: source_artifact:pmid-11071580
+  - type: cites
+    target: source_artifact:pmid-40507417
+  - type: cites
+    target: source_artifact:pmid-30061579
+  - type: cites
+    target: source_artifact:pmid-36912494
+  - type: cites
+    target: source_artifact:pmid-40685650
+  - type: cites
+    target: source_artifact:pmid-11071580
+
 ---
 
 # GI Symptom Score

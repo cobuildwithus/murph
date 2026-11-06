@@ -1,7 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
-import { assistantBasePersonaIdValues, assistantTonePreferenceValues, assistantVoiceOptionIdValues } from '@murphai/contracts'
+import { assistantTonePreferenceValues, assistantVoiceOptionIdValues } from '@murphai/contracts'
 
 import {
   executeMurphDynamicToolRequest,
@@ -17,13 +17,9 @@ const advertisedInput = compileToolInputSchema(MURPH_PERSONALIZATION_TOOL.inputS
 describe('assistant personalization tool', () => {
   it('keeps every advertised enum value and invalid field type aligned with runtime admission', () => {
     const properties = MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1].properties
-    expect(properties.mainPersona.enum).toEqual(assistantBasePersonaIdValues)
-    expect(properties.supportingPersona.anyOf[0].enum).toEqual(assistantBasePersonaIdValues)
     expect(properties.tone.enum).toEqual(assistantTonePreferenceValues)
     expect(properties.voice.enum).toEqual(assistantVoiceOptionIdValues)
     const fields = [
-      { name: 'mainPersona', schema: properties.mainPersona, values: assistantBasePersonaIdValues, paired: { supportingPersona: null } },
-      { name: 'supportingPersona', schema: properties.supportingPersona, values: [...assistantBasePersonaIdValues, null], paired: {} },
       { name: 'tone', schema: properties.tone, values: assistantTonePreferenceValues, paired: {} },
       { name: 'voice', schema: properties.voice, values: assistantVoiceOptionIdValues, paired: {} },
     ]
@@ -32,41 +28,90 @@ describe('assistant personalization tool', () => {
       for (const value of [...field.values, 'unsupported_value', '', 42, false, {}, []]) {
         const accepted = field.values.some((allowed) => allowed === value)
         expect(advertised(value), `${field.name} advertised value`).toBe(accepted)
-        // Satisfy the separate persona-pair constraint when testing an enum.
-        const paired = field.name === 'supportingPersona'
-          ? { mainPersona: assistantBasePersonaIdValues.find((persona) => persona !== value) }
-          : field.paired
         const parsed = readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
           namespace: 'murph', tool: 'personalization',
-          arguments: { action: 'update', ...paired, [field.name]: value },
+          arguments: { action: 'update', [field.name]: value },
         } })
         expect(parsed?.kind, `${field.name} runtime value`).toBe(accepted ? 'personalization' : 'invalid-personalization-arguments')
       }
     }
   })
 
-  it('advertises sparse updates with paired persona fields and preserves runtime admission', () => {
-    expect(MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1]).toMatchObject({
-      type: 'object', additionalProperties: false, required: ['action'], minProperties: 2,
-      dependentRequired: {
-        mainPersona: ['supportingPersona'], supportingPersona: ['mainPersona'],
+  it('advertises only sparse tone and voice updates', () => {
+    const properties = MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1].properties
+    expect(Object.keys(properties)).toEqual(['action', 'message_ref', 'tone', 'voice'])
+    for (const args of [
+      { action: 'update' },
+      { action: 'update', mainPersona: 'classic', supportingPersona: null },
+      { action: 'update', tone: 'formal', mainPersona: 'classic' },
+    ]) {
+      expect(advertisedInput(args)).toBe(false)
+      expect(readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
+        arguments: args, namespace: 'murph', tool: 'personalization',
+      } })?.kind).toBe('invalid-personalization-arguments')
+    }
+    expect(advertisedInput({ action: 'update', tone: 'formal' })).toBe(true)
+    expect(advertisedInput({ action: 'update', voice: 'warm' })).toBe(true)
+  })
+
+  it.each([
+    { messageRef: `ain_${'1'.repeat(32)}`, accepted: true },
+    { messageRef: `ain_${'2'.repeat(32)}`, accepted: true },
+    { messageRef: `ain_${'3'.repeat(32)}`, accepted: false },
+    { messageRef: undefined, accepted: false },
+  ])('binds a personalization batch update to selected source $messageRef', async ({ messageRef, accepted }) => {
+    const args = {
+      action: 'update', tone: 'formal',
+      ...(messageRef === undefined ? {} : { message_ref: messageRef }),
+    }
+    expect(advertisedInput(args)).toBe(true)
+    const request = readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: { arguments: args, namespace: 'murph', tool: 'personalization' },
+    })
+    if (!request) throw new Error('Expected a personalization request.')
+    const personalizationTool = { request: vi.fn(async () => ({ action: 'read' as const, result: {
+      mainPersona: "classic" as const,
+      supportingPersona: null,
+      model: 'gpt-6-sol' as const, solAvailable: true, tone: 'formal' as const, voice: 'warm' as const,
+    } })) }
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentAssistantInputId: () => `ain_${'2'.repeat(32)}`,
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'1'.repeat(32)}`, `ain_${'2'.repeat(32)}`],
+          conversationId: 'conversation_personalization', conversationScope: 'direct',
+          inboundMailboxItemIds: [], originSessionId: 'session_personalization', recipientKey: null,
+        }),
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        personalizationTool, vaultFileSendAvailable: false,
+        sendVaultFile: async () => { throw new Error('unavailable') },
       },
     })
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain('send only the fields the user wants changed')
-    const fields = ['mainPersona', 'supportingPersona', 'tone', 'voice'] as const
-    for (const supportingPersona of ['classic', null]) {
-      const values = { mainPersona: 'scientist', supportingPersona, tone: 'formal', voice: 'upbeat' }
-      for (let mask = 0; mask < 16; mask += 1) {
-        const argumentsValue = { action: 'update', ...Object.fromEntries(
-          fields.filter((_field, bit) => mask & (1 << bit)).map((field) => [field, values[field]]),
-        ) }
-        const valid = mask !== 0 && Boolean(mask & 1) === Boolean(mask & 2)
-        expect(advertisedInput(argumentsValue), 'advertised nonempty and paired-field contract').toBe(valid)
-        const parsed = readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
-          arguments: argumentsValue, namespace: 'murph', tool: 'personalization',
-        } })
-        expect(parsed?.kind, JSON.stringify(argumentsValue)).toBe(valid ? 'personalization' : 'invalid-personalization-arguments')
-      }
+    expect(result.rpcResult.success).toBe(accepted)
+    if (accepted) {
+      expect(personalizationTool.request).toHaveBeenCalledExactlyOnceWith(
+        { action: 'update', tone: 'formal' },
+        { assistantInputId: messageRef, toolCallId: 'call-test' },
+      )
+    } else {
+      expect(personalizationTool.request).not.toHaveBeenCalled()
+    }
+  })
+
+  it('rejects source-only updates, malformed refs, and refs on reads', () => {
+    for (const args of [
+      { action: 'update', message_ref: `ain_${'1'.repeat(32)}` },
+      { action: 'update', tone: 'casual', message_ref: 'invalid' },
+      { action: 'read', message_ref: `ain_${'1'.repeat(32)}` },
+    ]) {
+      expect(advertisedInput(args)).toBe(false)
+      expect(readTestMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: { arguments: args, namespace: 'murph', tool: 'personalization' },
+      })?.kind).toBe('invalid-personalization-arguments')
     }
   })
 
@@ -99,20 +144,15 @@ describe('assistant personalization tool', () => {
       'lowercase means casual',
     )
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'Confirm casing as sentence case or lowercase in the reply.',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'rather than an unsupported setting',
     )
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'a one-reply formatting request does not persist',
     )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'Persona changes require current accepted user input',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'both mainPersona and supportingPersona',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'scheduled automation occurrences may update tone and voice but never personas',
-    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).not.toMatch(/mainPersona|supportingPersona|persona changes/iu)
     expect(JSON.stringify(MURPH_PERSONALIZATION_TOOL.inputSchema)).not.toContain(
       'memberId',
     )
@@ -124,8 +164,6 @@ describe('assistant personalization tool', () => {
       params: {
         arguments: {
           action: 'update',
-          mainPersona: 'scientist',
-          supportingPersona: 'classic',
           tone: 'formal',
           voice: 'upbeat',
         },
@@ -138,8 +176,6 @@ describe('assistant personalization tool', () => {
       kind: 'personalization',
       request: {
         action: 'update',
-        mainPersona: 'scientist',
-        supportingPersona: 'classic',
         tone: 'formal',
         voice: 'upbeat',
       },
@@ -153,13 +189,13 @@ describe('assistant personalization tool', () => {
       request: vi.fn(async () => ({
         action: 'update' as const,
         result: {
-          mainPersona: 'scientist' as const,
-          model: 'gpt-5.6-terra' as const,
+          mainPersona: "classic" as const,
+          supportingPersona: null,
+          model: 'gpt-6-sol' as const,
           modelChangeAppliesNextRun: false as const,
           modelUpdated: false as const,
           solAvailable: true,
           status: 'saved' as const,
-          supportingPersona: 'classic' as const,
           tone: 'formal' as const,
           voice: 'upbeat' as const,
         },
@@ -192,8 +228,6 @@ describe('assistant personalization tool', () => {
     expect(personalizationTool.request).toHaveBeenCalledWith(
       {
         action: 'update',
-        mainPersona: 'scientist',
-        supportingPersona: 'classic',
         tone: 'formal',
         voice: 'upbeat',
       },
@@ -205,7 +239,7 @@ describe('assistant personalization tool', () => {
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('"status":"saved"')
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"mainPersona":"scientist"',
+      '"voice":"upbeat"',
     )
   })
 

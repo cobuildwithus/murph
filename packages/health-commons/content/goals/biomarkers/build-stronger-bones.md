@@ -93,4 +93,4 @@ Sudden severe back pain, height loss, or pain after a minor fall can signal a fr
 
 ## Related goals
 
-[Lower My Risk of Fractures](/goals/reduce-fracture-risk) · [Correct My Vitamin D Deficiency](/goals/correct-vitamin-d-deficiency)
+[Understand My Fracture Risk](/goals/reduce-fracture-risk) · [Understand My Vitamin D Deficiency](/goals/correct-vitamin-d-deficiency)

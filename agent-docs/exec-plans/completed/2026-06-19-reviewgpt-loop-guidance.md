@@ -18,7 +18,7 @@ Updated: 2026-06-19
 ## Scope
 
 - In scope: PR ReviewGPT loop docs, docs index summary, and the PR ReviewGPT preset text.
-- Out of scope: ReviewGPT tool implementation changes, historical completed plans, Murph Age scientific ReviewGPT gates, and non-PR review presets.
+- Out of scope: ReviewGPT tool implementation changes, historical completed plans, scientific ReviewGPT gates, and non-PR review presets.
 
 ## Constraints
 

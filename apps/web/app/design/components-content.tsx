@@ -1,78 +1,34 @@
 "use client";
 
-import {
-  HOSTED_ASSISTANT_OPENAI_PROVIDER,
-} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
-import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
+import { CheckIcon, ContactRound } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
   DeviceSyncCompletionDialog,
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
-import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
-import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
+import { ComputerHandoffIsland } from "@/src/components/computer-use/computer-handoff-active-view";
 import {
-  GroupUsageFundingActions,
-  GroupUsageFundingShell,
-} from "@/src/components/hosted-groups/group-usage-funding-shell";
-import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
+import { GroupFundingCheckout } from "@/src/components/hosted-groups/group-funding-checkout";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
-import { TimelineEntry } from "@/src/components/ui/timeline-entry";
-import { ConclusionCard } from "@/src/components/conclusion-card";
-import { NextStepCard } from "@/src/components/next-step-card";
-import { ExpectedSignalCard } from "@/src/components/experiments/experiment-detail/expected-signal-card";
-import { StartExperimentChannelDialog } from "@/src/components/experiments/experiment-detail/start-experiment-button";
 import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
-import {
-  HostedPhonePrivyHandOffStatus,
-  HostedPhoneLinkAction,
-  HostedPhoneLinkCardPresentation,
-} from "@/src/components/settings/hosted-phone-settings";
-import {
-  HostedIdentitySessionLoading,
-  HostedIdentitySessionMismatch,
-  HostedSettingsIdentityRemovalView,
-} from "@/src/components/settings/hosted-settings-identity-link-dialog";
+
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
 import {
-  AssistantProviderDialog,
-  AssistantProviderSummary,
-  type AssistantRoutingChoice,
-} from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
-import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
-import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
-import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
-import { ProfileStats } from "@/src/components/overview/profile-stats";
-import {
-  HostedAuthPanelAlternateMethods,
-  HostedResumableAuthState,
-} from "@/src/components/hosted-onboarding/hosted-auth-panel";
-import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
-import { EmailIcon } from "@/src/components/homepage/email-icon";
-import {
-  resolveAuthDialogHeaderPresentation,
-} from "@/src/components/hosted-onboarding/auth-dialog";
-import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
-import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
-import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
-import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
-import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
-import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
 } from "@/src/components/legal/hosted-legal-consent-card";
+import { dashboardLegalUpdateDescription } from "@/src/components/legal/dashboard-legal-consent-gate";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
@@ -129,18 +85,17 @@ import {
   MurphContactCardPicker,
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
-import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
-import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
-import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import {
+  FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  type DeviceSyncCompletionDialogModel,
+} from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import {
   CHECKOUT_CORE_FEATURES,
   CHECKOUT_PULSE_FEATURES,
   EDGE_ONLY_FEATURES,
-  JOIN_EDGE_FEATURES,
   JOIN_FAMILY_FEATURES,
-  JOIN_PULSE_FEATURES,
   SETTINGS_CORE_FEATURES,
   SETTINGS_EDGE_FEATURES,
   SETTINGS_FAMILY_FEATURES,
@@ -152,7 +107,7 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
-import { FoodBrandVisualStudy } from "./food-label-lab-study";
+import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -163,7 +118,6 @@ import {
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
-  GroupFundingSupportersStudy,
   GroupSponsorshipManagementConfirmationStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
@@ -178,53 +132,24 @@ import {
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
-import {
-  EnvironmentCaptureCard,
-  EnvironmentEmptyState,
-  EnvironmentVoiceRefreshNotice,
-} from "../(dashboard)/environment/environment-page-client";
 import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
 import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
-import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
-import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
+import { ImessageSleepCardStudy } from "./imessage-sleep-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { ApprovalPasskeyStudy } from "./approval-passkey-study";
+import { BetterAuthAdoptionStudy } from "./better-auth-adoption-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+import { GroupJoinDrawerStudy } from "./group-join-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
-import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
 import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
-
-const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
-  dialogTitle: "Fill the gaps in your report",
-  flow: "fill-gaps",
-  idleTitle: "Only the missing details",
-  topics: [
-    {
-      eyebrow: "Sleep",
-      focus: ["Bedroom CO₂"],
-      id: "sleep",
-      prompt:
-        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your sleep setup",
-    },
-    {
-      eyebrow: "Workspace",
-      focus: ["Breaks"],
-      id: "workspace",
-      prompt:
-        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your remaining workspace details",
-    },
-  ],
-};
 
 function Section({
   children,
@@ -269,34 +194,6 @@ function PlanBulletListStudy({
   );
 }
 
-function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
-        <DialogPreviewHeader />
-        <div className="mt-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function DialogPreviewHeader() {
-  const header = resolveAuthDialogHeaderPresentation({
-    panelView: "auth-active",
-  });
-
-  return (
-    <div className={header.headerClassName}>
-      <h3 className="text-xl font-bold tracking-tight text-foreground">
-        {header.title}
-      </h3>
-      <p className="text-sm text-pretty text-muted-foreground">
-        {header.description}
-      </p>
-    </div>
-  );
-}
 
 function resolveDesignPhoneCountryOption(value: string) {
   const option =
@@ -310,30 +207,6 @@ function resolveDesignPhoneCountryOption(value: string) {
 }
 
 
-const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
-  {
-    connected: true,
-    description: "Preview a prepared Messages draft.",
-    href: "#experiment-start-channel-picker-study",
-    kind: "text",
-    label: "Messages",
-  },
-  {
-    connected: true,
-    description: "Preview a prepared Telegram draft.",
-    href: "#experiment-start-channel-picker-study",
-    kind: "telegram",
-    label: "Telegram",
-  },
-  {
-    connected: true,
-    description: "Preview a prepared email draft.",
-    href: "#experiment-start-channel-picker-study",
-    kind: "email",
-    label: "Email",
-  },
-];
-
 const WHOOP_COMPLETION_SETUP_GUIDE = buildWhoopAppleHealthSetupGuide(
   "/audio/whoop-sync-memos/grandpa.mp3",
 );
@@ -342,7 +215,7 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   contactAction: {
     href: "sms:?body=I%20just%20connected%20my%20WHOOP",
     kind: "imessage",
-    label: "Text Murph",
+    label: "Open Messages",
   },
   detail:
     "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
@@ -350,7 +223,17 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   kind: "device-sync",
   retryHref: null,
   setupGuide: WHOOP_COMPLETION_SETUP_GUIDE,
-  title: "WHOOP is connected",
+  title: "WHOOP is connected.",
+  unverified: false,
+};
+
+const FITBIT_LINK_FAILED_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
+  contactAction: null,
+  detail: FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  failed: true,
+  kind: "device-sync",
+  retryHref: "/connect",
+  title: "Fitbit didn’t connect.",
   unverified: false,
 };
 
@@ -475,14 +358,6 @@ const DESIGN_DASHBOARD_CONSENT_STATUS = createDesignLaunchConsentStatus({
   healthDataGranted: false,
   legalGranted: false,
 });
-const DESIGN_LEGAL_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
-  healthDataGranted: true,
-  legalGranted: false,
-});
-const DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
-  healthDataGranted: false,
-  legalGranted: true,
-});
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   SegmentedControlOption<SegmentedControlDemoValue>
@@ -490,129 +365,6 @@ const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   { label: "Phone", value: "phone" },
   { label: "Email", value: "email" },
   { label: "Telegram", value: "telegram" },
-];
-
-const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
-  {
-    category: "Nutrition",
-    description: "Synthetic completed run for component review.",
-    hasPrivateData: true,
-    href: "/design",
-    id: "design-earlier-evening-meals",
-    image: "/design-assets/hero-01.png",
-    privateBadgeLabel: "Private data",
-    runStatus: "finished",
-    runSummary: {
-      completionPercent: 100,
-      dateRange: "Jun 2 – Jun 22",
-      day: 21,
-      metrics: [
-        {
-          current: "54.7 bpm",
-          delta: "-2.1 bpm",
-          label: "Resting heart rate",
-          sentiment: "positive",
-        },
-        {
-          current: "93.8 percent",
-          delta: "+1.4 percent",
-          label: "Sleep efficiency",
-          sentiment: "positive",
-        },
-      ],
-    },
-    searchText: "design earlier evening meals",
-    startedOn: "2026-06-02",
-    statusLabel: "Completed",
-    statusVariant: "outline",
-    title: "Earlier Evening Meals",
-  },
-  {
-    category: "Recovery",
-    description: "Synthetic completed run for component review.",
-    hasPrivateData: true,
-    href: "/design",
-    id: "design-consistent-wake-time",
-    image: "/design-assets/hero-02.png",
-    privateBadgeLabel: "Private data",
-    runStatus: "finished",
-    runSummary: {
-      completionPercent: 100,
-      dateRange: "May 8 – May 28",
-      day: 21,
-      metrics: [
-        {
-          current: "91.3 percent",
-          delta: "+2.3 percent",
-          label: "Sleep efficiency",
-          sentiment: "positive",
-        },
-        {
-          current: "105 min",
-          delta: "+14 min",
-          label: "Deep sleep",
-          sentiment: "positive",
-        },
-        {
-          current: "57.9 ms",
-          delta: "+0.8 ms",
-          label: "HRV RMSSD",
-          sentiment: "neutral",
-        },
-        {
-          current: "57 min",
-          delta: "+9 min",
-          label: "Sleep latency",
-          sentiment: "negative",
-        },
-      ],
-    },
-    searchText: "design consistent wake time",
-    startedOn: "2026-05-08",
-    statusLabel: "Completed",
-    statusVariant: "outline",
-    title: "Consistent Wake Time",
-  },
-  {
-    category: "Movement",
-    description: "Synthetic completed run for component review.",
-    hasPrivateData: true,
-    href: "/design",
-    id: "design-easy-aerobic-base",
-    image: "/design-assets/hero-03.png",
-    privateBadgeLabel: "Private data",
-    runStatus: "finished",
-    runSummary: {
-      completionPercent: 100,
-      dateRange: "Apr 12 – May 3",
-      day: 22,
-      metrics: [
-        {
-          current: "49.8 bpm",
-          delta: "-3.2 bpm",
-          label: "Resting heart rate",
-          sentiment: "positive",
-        },
-        {
-          current: "61.4 ms",
-          delta: "+4.6 ms",
-          label: "HRV RMSSD",
-          sentiment: "positive",
-        },
-        {
-          current: "89.1 percent",
-          delta: "-0.5 percent",
-          label: "Blood oxygen saturation (SpO₂)",
-          sentiment: "negative",
-        },
-      ],
-    },
-    searchText: "design easy aerobic base",
-    startedOn: "2026-04-12",
-    statusLabel: "Completed",
-    statusVariant: "outline",
-    title: "Easy Aerobic Base",
-  },
 ];
 
 const DESIGN_GROUP_PRIVATE_CONVERSIONS = {
@@ -642,7 +394,6 @@ const callbackRecoveryNotice = createConnectCallbackNotice({
 
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
-  const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
   const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
@@ -654,19 +405,15 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
-  const [choiceCardValue, setChoiceCardValue] = useState("terra");
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
-    HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  );
+  const [choiceCardValue, setChoiceCardValue] = useState("sol");
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
-  const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
-    useState(false);
+
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
+  const [fitbitLinkFailedPreviewKey, setFitbitLinkFailedPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
@@ -683,16 +430,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <div data-design-component="food-brand-visual" id="food-brand-visual" inert>
-          <Section title="Food brand visual">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Brand-aware food identity with a local category-art fallback.
-            </p>
-            <FoodBrandVisualStudy />
-          </Section>
-        </div>
-
-        <Separator />
 
         <div data-design-component="public-trust-page" id="public-trust-page">
           <Section title="Public trust page">
@@ -701,31 +438,6 @@ export function ComponentsContent() {
             </p>
             <div className="overflow-hidden border border-[#c4a882]/35">
               <PublicTrustPageContent content={CONTACT_MURPH_CONTENT} />
-            </div>
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div data-design-component="experiment-library-cards" id="experiment-library-cards" inert>
-          <Section title="Experiment library cards">
-            <div className="grid items-start gap-6 md:grid-cols-2">
-              <ExperimentHeroCard
-                id="design-featured"
-                title="Featured experiment"
-                category="Movement"
-                image="/design-assets/hero-daily-step-floor.jpeg"
-                metadata="Featured card study"
-                href={null}
-              />
-              <ExperimentBrowseCard
-                id="design-browse"
-                title="Browse experiment"
-                category="Movement"
-                image="/design-assets/hero-daily-step-floor.jpeg"
-                metadata="Browse card study"
-                href={null}
-              />
             </div>
           </Section>
         </div>
@@ -767,227 +479,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Home experiment history cards">
-          <div
-            className="grid items-start gap-5 lg:grid-cols-3"
-            data-design-home-experiment-history-cards
-            inert
-          >
-            {DESIGN_HOME_HISTORY_CARDS.map((card) => (
-              <HomeExperimentCard key={card.id} card={card} variant="history" />
-            ))}
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Homepage auth transitions">
-          <div
-            className="flex flex-col gap-6"
-            data-design-homepage-auth-transitions
-            id="homepage-auth-transitions"
-          >
-            <p className="text-sm text-muted-foreground">
-              Secure sign in keeps the ordinary methods visible while the
-              provider initializes. A selected method owns the pending state
-              immediately. If hydration discovers an existing session before
-              submission, method actions pause until its linked account is
-              known, then recovery takes priority. Otherwise account completion
-              stays on that production action through the next view.
-            </p>
-            <div
-              className="grid items-start gap-5 lg:grid-cols-2"
-              data-design-homepage-auth-readiness
-              inert
-            >
-              <DialogPreviewFrame label="Queued action delay">
-                <HostedPrivyReadinessState
-                  onRestart={() => {}}
-                  restartAvailable={false}
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Repeated provider delay">
-                <HostedPrivyReadinessState
-                  onRestart={() => {}}
-                  restartAvailable
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Enabled alternate methods">
-                <div className="grid grid-cols-2 gap-3">
-                  <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                  <HostedInlineAuthButton
-                    icon={<EmailIcon className="size-5" />}
-                    onClick={() => {}}
-                  >
-                    Email
-                  </HostedInlineAuthButton>
-                </div>
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Telegram authorization available">
-                <HostedTelegramAuthButtonPresentation
-                  active
-                  onClick={() => {}}
-                />
-              </DialogPreviewFrame>
-            </div>
-            <div
-              className="grid items-start gap-5 lg:grid-cols-2"
-              id="homepage-auth-hydrated-session-recovery"
-              inert
-            >
-              <DialogPreviewFrame label="Session identity hydration">
-                <HostedPrivyReadinessState
-                  message="Secure sign in is checking your existing session."
-                  onRestart={() => {}}
-                  restartAvailable={false}
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Hydrated email session recovery">
-                <div className="space-y-4">
-                  <HostedResumableAuthState
-                    auth={{ identityLabel: "member@example.com", method: "email" }}
-                    disabled={false}
-                    onContinue={() => {}}
-                    onSignOut={() => {}}
-                    pending={false}
-                  />
-                  <HostedAuthPanelAlternateMethods>
-                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                    <HostedInlineAuthButton
-                      icon={<EmailIcon className="size-5" />}
-                      onClick={() => {}}
-                    >
-                      Email
-                    </HostedInlineAuthButton>
-                  </HostedAuthPanelAlternateMethods>
-                </div>
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Hydrated phone session recovery">
-                <div className="space-y-4">
-                  <HostedAuthenticatedPhoneAuthState
-                    body=""
-                    description=""
-                    disabled={false}
-                    onContinue={() => {}}
-                    onUseDifferentNumber={() => {}}
-                    pendingAction={null}
-                    secondaryActionSize="lg"
-                    title=""
-                    view="manual-resume"
-                  />
-                  <HostedAuthPanelAlternateMethods>
-                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                    <HostedInlineAuthButton
-                      icon={<EmailIcon className="size-5" />}
-                      onClick={() => {}}
-                    >
-                      Email
-                    </HostedInlineAuthButton>
-                  </HostedAuthPanelAlternateMethods>
-                </div>
-              </DialogPreviewFrame>
-            </div>
-            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
-              <DialogPreviewFrame label="Telegram completion">
-                <div className="grid grid-cols-2 gap-3">
-                  <HostedTelegramAuthButtonPresentation
-                    active
-                    completionPending
-                    disabled
-                    onClick={() => {}}
-                  />
-                  <HostedInlineAuthButton
-                    disabled
-                    icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
-                    onClick={() => {}}
-                  >
-                    Email
-                  </HostedInlineAuthButton>
-                </div>
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Phone verification completion">
-                <HostedCodeEntryStep
-                  autoFocus={false}
-                  code="123456"
-                  disableSignup={false}
-                  disabled
-                  onCodeChange={() => {}}
-                  onResendCode={() => {}}
-                  onUseDifferentNumber={() => {}}
-                  onVerifyCode={() => {}}
-                  pendingAction="verify-code"
-                  secondaryActionSize="lg"
-                  size="compact"
-                  verificationPhoneNumberHint="*** 2671"
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Phone resume completion">
-                <HostedAuthenticatedPhoneAuthState
-                  body=""
-                  description=""
-                  disabled
-                  onContinue={() => {}}
-                  onUseDifferentNumber={() => {}}
-                  pendingAction="continue"
-                  secondaryActionSize="lg"
-                  title=""
-                  view="manual-resume"
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Resumable completion">
-                <HostedResumableAuthState
-                  auth={{ identityLabel: null, method: "telegram" }}
-                  disabled
-                  onContinue={() => {}}
-                  onSignOut={() => {}}
-                  pending
-                />
-              </DialogPreviewFrame>
-            </div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Consent appears directly from completion status
-            </p>
-            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="combined"
-              >
-                <HostedLegalConsentCard
-                  initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
-                  mode="compact"
-                  onDecline={() => {}}
-                  source="design-homepage-consent-combined"
-                />
-              </div>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="health-data"
-              >
-                <HostedLegalConsentCard
-                  initialStatus={DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS}
-                  mode="compact"
-                  onDecline={() => {}}
-                  source="design-homepage-consent-health-data"
-                />
-              </div>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="legal"
-              >
-                <HostedLegalConsentCard
-                  initialStatus={DESIGN_LEGAL_ONLY_CONSENT_STATUS}
-                  mode="compact"
-                  onDecline={() => {}}
-                  source="design-homepage-consent-legal"
-                />
-              </div>
-            </div>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Dashboard legal update">
+        <Section id="dashboard-legal-update" title="Dashboard legal update">
           <div
             className="rounded-2xl border border-border bg-background px-5 py-6 sm:px-8"
             data-design-dashboard-legal-composition="true"
@@ -996,7 +488,7 @@ export function ComponentsContent() {
               acceptedPendingLabel="Refreshing..."
               acceptScope={acceptDesignDashboardConsentScope}
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
-              launchDescription="We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
+              launchDescription={dashboardLegalUpdateDescription(DESIGN_DASHBOARD_CONSENT_STATUS)}
               launchTitle="Review what changed"
               mode="compact"
               onAccepted={completeDesignDashboardConsentPreview}
@@ -1033,120 +525,6 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
-
-        <Separator />
-
-        <div
-          data-design-component="personal-patterns"
-          id="personal-patterns-component"
-          inert
-        >
-          <Section title="Personal patterns matrix">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production overview component. It compares repeated actions with
-              next-day outcomes and shows evidence strength without causal or
-              good-versus-bad labels.
-            </p>
-            <PersonalPatternsComponentStudy />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-empty-state"
-          id="environment-empty-state-component"
-        >
-          <Section title="Environment empty state">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production zero-data state. One voice-first action leads to the
-              walkthrough, while the real report categories preview what Murph
-              will build without showing empty scores or missing facts.
-            </p>
-            <EnvironmentEmptyState
-              contactOptions={[
-                {
-                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
-                  kind: "text",
-                  label: "Messages",
-                },
-                {
-                  href: "https://t.me/withmurph_bot",
-                  kind: "telegram",
-                  label: "Telegram",
-                },
-              ]}
-            />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-capture-card"
-          id="environment-capture-card-component"
-          inert
-        >
-          <Section title="Environment progressive capture">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production partial-data state. The action opens a voice script
-              built only from facts Murph still does not know.
-            </p>
-            <EnvironmentCaptureCard
-              contactOptions={[]}
-              coverage={70}
-              known={21}
-              script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
-            />
-          </Section>
-        </div>
-
-        <Separator />
-
-        <div
-          data-design-component="environment-voice-refresh-notice"
-          id="environment-voice-refresh-notice-component"
-          inert
-        >
-          <Section title="Environment voice processing feedback">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              The open report keeps ownership after upload: processing,
-              private-report refresh, updated, no-clear-facts, and delayed
-              recovery remain visible without requiring a reload. Processing
-              stays animated, and the delayed action rechecks the owned phase.
-            </p>
-            <div className="grid gap-4">
-              <EnvironmentVoiceRefreshNotice
-                state={{ baselineValues: "{}", status: "processing" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{
-                  factsAdded: 3,
-                  factsChanged: true,
-                  remainingDetails: 4,
-                  remainingTopics: 2,
-                  status: "updated",
-                }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{
-                  factsAdded: 0,
-                  factsChanged: false,
-                  remainingDetails: 4,
-                  remainingTopics: 2,
-                  status: "updated",
-                }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ status: "delayed" }}
-                onCheckAgain={() => {}}
-              />
-            </div>
-          </Section>
-        </div>
 
         <Separator />
 
@@ -1195,7 +573,6 @@ export function ComponentsContent() {
             />
           </div>
         </Section>
-
 
         <Separator />
 
@@ -1334,13 +711,11 @@ export function ComponentsContent() {
         <Separator />
 
         <Section
-          id="assistant-provider-picker"
-          title="Radio group, choice cards & inference routing"
+          id="assistant-model-picker"
+          title="Radio group and model choice cards"
         >
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards, provider privacy labels, and the
-            included-capacity disclosure and its accessible Save association
-            shown after Venice is selected.
+            Compare model choice cards and their selection states.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -1357,56 +732,26 @@ export function ComponentsContent() {
               value="luna"
             />
             <ChoiceCard
-              artwork={<AssistantModelArtwork variant="terra" />}
-              badge={<Badge variant="outline">Recommended</Badge>}
-              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.terra}
-              description="Advanced health intelligence"
-              id="design-choice-terra"
-              meta="Balanced usage"
-              title="Terra"
-              value="terra"
-            />
-            <ChoiceCard
               artwork={<AssistantModelArtwork variant="sol" />}
-              badge={<Badge variant="outline">Edge</Badge>}
+              badge={<Badge variant="outline">Recommended</Badge>}
               className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.sol}
-              description="Highest health intelligence"
+              description="Deep health intelligence"
               id="design-choice-sol"
-              meta="High usage · Edge plan"
+              meta="Balanced usage"
               title="Sol"
               value="sol"
             />
-          </RadioGroup>
-          <AssistantProviderSummary
-            connection={DESIGN_INFERENCE_CONNECTION}
-            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftRouting={providerValue}
-            onChangeClick={() => setProviderDialogOpen(true)}
-          />
-          <AssistantProviderDialog
-            chatCompletionsAvailable
-            connection={DESIGN_INFERENCE_CONNECTION}
-            customInferenceAvailable
-            onOpenChange={setProviderDialogOpen}
-            onRoutingChange={setProviderValue}
-            open={providerDialogOpen}
-            routing={providerValue}
-            veniceAvailable
-          />
-        </Section>
-
-        <Separator />
-
-        <Section title="Custom inference endpoint pane">
-          <div inert>
-            <HostedInferenceConnectionPane
-              chatCompletionsAvailable
-              configurationAvailable={false}
-              connection={null}
-              onConnectionChange={() => {}}
-              selected={false}
+            <ChoiceCard
+              artwork={<AssistantModelArtwork variant="astra" />}
+              badge={<Badge variant="outline">Edge</Badge>}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.astra}
+              description="Frontier health intelligence"
+              id="design-choice-astra"
+              meta="Highest usage · Edge plan"
+              title="Astra"
+              value="astra"
             />
-          </div>
+          </RadioGroup>
         </Section>
 
         <Separator />
@@ -1583,11 +928,9 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Private experiment results share">
-          <ExperimentResultsShareStudy />
+        <Section id="imessage-sleep-card" title="iMessage sleep summary">
+          <ImessageSleepCardStudy />
         </Section>
-
-        <Separator />
 
         <Section
           id="imessage-nutrition-card"
@@ -1625,7 +968,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted plan change">
+        <Section id="hosted-plan-change" title="Hosted plan change">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Immediate upgrades open Stripe&apos;s exact proration confirmation.
             Period-end switches keep their in-product scheduling confirmation.
@@ -1633,7 +976,7 @@ export function ComponentsContent() {
           <div className="grid items-start gap-6 lg:grid-cols-2">
             <div className="space-y-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Period-end switch
+                Period-end switch blocked by cancellation
               </p>
               <Dialog>
                 <div
@@ -1642,10 +985,11 @@ export function ComponentsContent() {
                 >
                   <HostedPlanChangeConfirmationContent
                     currentPeriodEnd="2026-08-27T04:00:00.000Z"
-                    errorMessage={null}
+                    errorMessage="Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again."
                     onClose={() => undefined}
                     onConfirm={() => undefined}
                     pending={false}
+                    showCancellationRecovery
                     targetPlanCode="launch_group_monthly"
                   />
                 </div>
@@ -1736,6 +1080,31 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div id="fitbit-link-failed-dialog" className="scroll-mt-24">
+          <Section title="Fitbit Link Failure Dialog">
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Production failure state when Google Health stops a Fitbit link,
+              usually a missing Google Health profile or a declined permission.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setFitbitLinkFailedPreviewKey((key) => key + 1)}
+              >
+                Preview Fitbit link failure
+              </Button>
+            </div>
+            {fitbitLinkFailedPreviewKey > 0 ? (
+              <DeviceSyncCompletionDialog
+                key={fitbitLinkFailedPreviewKey}
+                model={FITBIT_LINK_FAILED_DIALOG_MODEL}
+              />
+            ) : null}
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Usage credit">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Personal, Family, and group funding use a saved card when available
@@ -1801,46 +1170,31 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingShell
-                action={(
-                  <GroupUsageFundingActions
-                    monthlyAction={(
-                      <GroupSponsorshipDialog
-                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
-                        customizationAllowed
-                        inert
-                        mode="monthly"
-                        monthlyCapMinor={1_000}
-                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                        payerMemberId="design_usage_top_up_payer"
-                      />
-                    )}
-                    oneTimeAction={(
-                      <GroupSponsorshipDialog
-                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
-                        customizationAllowed
-                        inert
-                        mode="one_time"
-                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-                        payerMemberId="design_usage_top_up_payer"
-                        triggerSize="default"
-                        triggerVariant="link"
-                      />
-                    )}
-                  />
-                )}
-                groupName="Sunday sleep crew"
-              />
+              <LinkPageSurface>
+                <GroupFundingCheckout
+                  checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
+                  groupName="Sunday sleep crew"
+                  inert
+                  initialMonthlyCapMinor={1_000}
+                  monthly={{
+                    capOptions: DESIGN_GROUP_MONTHLY_CAPS,
+                    offer: DESIGN_GROUP_SPONSORSHIP_OFFERS[0],
+                  }}
+                  oneTimeOffers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
+                />
+              </LinkPageSurface>
             </div>
             <div
               data-design-component="group-sponsorship-management"
               id="group-sponsorship-management-component"
               inert
             >
+<LinkPageSurface>
               <GroupSponsorshipManagementCard
                 periodEndTimeZone="UTC"
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
+                groupName="Sunday sleep crew"
                 initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1852,8 +1206,10 @@ export function ComponentsContent() {
                   status: "active",
                 }}
               />
+              </LinkPageSurface>
             </div>
             <GroupSponsorshipManagementConfirmationStudy />
+            <GroupJoinDrawerStudy />
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="family-member-usage-top-up"
@@ -1990,35 +1346,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section
-          id="experiment-start-channel-picker-study"
-          title="Experiment Start Channel Picker"
-        >
-          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
-                Continue in the app you already use
-              </p>
-              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                The compact picker keeps the selected experiment visible and
-                prepares a short message for review.
-              </p>
-            </div>
-            <Button onClick={() => setChannelPickerOpen(true)}>
-              Preview picker
-            </Button>
-          </div>
-          <StartExperimentChannelDialog
-            onOpenChange={setChannelPickerOpen}
-            open={channelPickerOpen}
-            options={EXPERIMENT_START_CHANNEL_OPTIONS}
-            protocolDays={14}
-            protocolTitle="Example Evening Routine"
-          />
-        </Section>
-
-        <Separator />
-
         <Section title="Email Murph Picker">
           <p className="text-sm text-muted-foreground">
             Settings link that opens a chooser between the native mail app and the
@@ -2067,177 +1394,6 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section id="phone-account-linking" title="Phone Account Linking">
-          <p className="text-sm leading-6 text-muted-foreground">
-            Settings opens the authenticated identity provider directly, with
-            no second Murph confirmation. After verification or an approved
-            account transfer, Murph saves the exact provider-owned result. If
-            Privy already has a verified phone that Murph has not recorded,
-            Settings repairs that projection directly. A declined transfer
-            closes quietly, and a failed save retries without reopening Privy.
-            Existing phone accounts use the same surface for replacement.
-            Support-required conflicts stop retrying and leave one direct email
-            action without putting account identifiers in the message.
-            Privacy-safe lifecycle diagnostics observe these states without
-            changing any rendered state or action.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2" inert>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Add phone
-              </p>
-              <HostedPhoneLinkAction
-                isChangeFlow={false}
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Replace phone
-              </p>
-              <HostedPhoneLinkAction
-                isChangeFlow
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Provider opening
-              </p>
-              <HostedPhoneLinkAction
-                disabled
-                isChangeFlow={false}
-                isLinking
-                isSyncing={false}
-                onClick={() => {}}
-              />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Session mismatch
-              </p>
-              <HostedIdentitySessionMismatch onSignInAgain={() => {}} />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Provider loading
-              </p>
-              <HostedIdentitySessionLoading />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Recovery failed
-              </p>
-              <HostedIdentitySessionMismatch
-                errorMessage="Sign out did not finish. Try again."
-                onSignInAgain={() => {}}
-              />
-            </div>
-          </div>
-          <p className="text-sm leading-6 text-muted-foreground">
-            The join card composes that action with its reserved status line
-            and the Telegram alternative. The status line holds its height
-            while empty so the button never moves when a message arrives, so
-            these previews show the real resting spacing between the two
-            contact channels.
-          </p>
-          <div
-            aria-label="Composed contact channel card previews"
-            className="grid max-w-3xl gap-4 sm:grid-cols-2"
-            data-design-component="hosted-contact-channel-choice"
-            inert
-          >
-            {[
-              {
-                disabled: false,
-                errorMessage: null,
-                label: "Resting",
-                showPhoneAction: true,
-                state: "resting",
-                statusMessage: null,
-                statusTone: "neutral" as const,
-              },
-              {
-                disabled: false,
-                errorMessage: null,
-                label: "Saved status",
-                showPhoneAction: true,
-                state: "status",
-                statusMessage: "Phone saved.",
-                statusTone: "success" as const,
-              },
-              {
-                disabled: true,
-                errorMessage:
-                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
-                label: "Support required",
-                showPhoneAction: false,
-                state: "support-required",
-                statusMessage:
-                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
-                statusTone: "destructive" as const,
-              },
-            ].map((preview) => (
-              <div
-                className="space-y-3 rounded-xl border border-border bg-card p-5"
-                data-design-state={preview.state}
-                key={preview.label}
-              >
-                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                  {preview.label}
-                </p>
-                <HostedContactChannelChoice
-                  phone={
-                    <HostedPhoneLinkCardPresentation
-                      disabled={preview.disabled}
-                      errorMessage={preview.errorMessage}
-                      isChangeFlow={false}
-                      isLinking={false}
-                      isSyncing={false}
-                      showPhoneAction={preview.showPhoneAction}
-                      statusMessage={preview.statusMessage}
-                      statusTone={preview.statusTone}
-                      onClick={() => {}}
-                    />
-                  }
-                  telegram={
-                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                  }
-                />
-              </div>
-            ))}
-          </div>
-          <div className="space-y-3">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Settings support-required dialog
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => setPhoneTransferSupportDialogOpen(true)}
-            >
-              Preview terminal dialog
-            </Button>
-            {phoneTransferSupportDialogOpen
-              ? (
-                  <HostedPhonePrivyHandOffStatus
-                    errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
-                    isLinking={false}
-                    isRetryAllowed={false}
-                    isSyncing={false}
-                    onAborted={() => setPhoneTransferSupportDialogOpen(false)}
-                    onRetry={() => {}}
-                  />
-                )
-              : null}
           </div>
         </Section>
 
@@ -2301,72 +1457,6 @@ export function ComponentsContent() {
               </div>
             ))}
           </div>
-        </Section>
-
-        <Separator />
-
-        <Section id="linked-account-removal" title="Linked Account Removal">
-          <p className="text-sm leading-6 text-muted-foreground">
-            Settings confirms the exact connection and explains the messaging
-            consequence before disconnecting it. Removal is unavailable until
-            another supported sign-in can keep the account accessible.
-          </p>
-          <div
-            className="grid max-w-4xl gap-4 sm:grid-cols-2"
-            data-design-component="linked-account-removal"
-            inert
-          >
-            <div className="rounded-xl border border-border bg-card p-5">
-              <HostedSettingsIdentityRemovalView
-                displayValue="@preview_member"
-                errorMessage={null}
-                intent="replace"
-                label="Telegram"
-                onCancel={() => {}}
-                onRemove={() => {}}
-                pending={false}
-                providerAccountRemoved={false}
-                removable
-              />
-            </div>
-            <div className="rounded-xl border border-border bg-card p-5">
-              <HostedSettingsIdentityRemovalView
-                displayValue="member@example.test"
-                errorMessage={null}
-                intent="remove"
-                label="Email"
-                onCancel={() => {}}
-                onRemove={() => {}}
-                pending={false}
-                providerAccountRemoved={false}
-                removable={false}
-              />
-            </div>
-            <div className="rounded-xl border border-border bg-card p-5">
-              <HostedSettingsIdentityRemovalView
-                displayValue="Connected"
-                errorMessage="Telegram is disconnected. Finish updating Murph."
-                intent="finish"
-                label="Telegram"
-                onCancel={() => {}}
-                onRemove={() => {}}
-                pending={false}
-                providerAccountRemoved
-                removable
-              />
-            </div>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Group funding supporters">
-          <p className="text-sm text-muted-foreground">
-            The funding page recognizes the current monthly sponsor and recent
-            one-time supporters without exposing contribution amounts or the
-            sponsor&apos;s private monthly maximum.
-          </p>
-          <GroupFundingSupportersStudy />
         </Section>
 
         <Separator />
@@ -2476,10 +1566,17 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section id="murph-style-settings" title="Murph Style Settings">
+          <div inert className="max-w-2xl">
+            <CustomizeMurphSettings assistant={null} />
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Assistant Style Picker">
           <p className="text-sm text-muted-foreground">
-            Tone and voice pickers used in onboarding (chained) and settings
-            (one step at a time). Full-height drawer under 768px, dialog above;
+            Tone and voice pickers used in settings, one step at a time. Full-height drawer under 768px, dialog above;
             the voice grid is two columns on mobile and three on desktop.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
@@ -2721,56 +1818,11 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Metric Card">
-          <div className="flex gap-3">
+        <Section id="metric-card" title="Metric Card">
+          <div className="flex flex-col gap-3 md:flex-row">
             <MetricCard label="HRV" value="53.8" unit="ms" delta="+15.7%" direction="up" baseline="46.5" expected="+10–25%" />
             <MetricCard label="Resting HR" value="60.1" unit="bpm" delta="−6.4%" direction="down" baseline="64.2" expected="−3–8 bpm" />
             <MetricCard label="Deep Sleep" value="1h44m" delta="+18.2%" direction="up" baseline="1h28m" expected="+15–30%" />
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Timeline">
-          <div className="max-w-sm rounded-xl border border-border bg-card p-5">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Plan & Timeline</span>
-            <div className="mt-4 flex flex-col gap-4">
-              <TimelineEntry date="Apr 15" label="End" title="Experiment ends" description="Final analysis generated" variant="default" upcoming />
-              <TimelineEntry date="Apr 14" label="Checkpoint" title="Week 2 review" variant="outline" upcoming />
-              <TimelineEntry date="Apr 6" label="Upcoming" title="Session 3 of 3" upcoming />
-              <TimelineEntry date="Apr 5" label="Today" title="Session logged" description="20 min at 85°C. Deep sleep was 1h50m last night." />
-              <TimelineEntry date="Apr 4" title="HRV milestone" description="HRV crossed 50ms for the first time." />
-              <TimelineEntry date="Apr 3" title="Skipped session" description="Feeling unwell, rest day." variant="muted" />
-              <TimelineEntry date="Apr 1" label="Checkpoint" title="Baseline complete" description="Baseline captured. Active phase started." variant="outline" />
-              <TimelineEntry date="Mar 18" label="Start" title="Experiment started" description="Finnish Sauna Protocol · 28 days" variant="primary" last />
-            </div>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Next Step Card">
-          <NextStepCard title="Sauna session · 15–20 min @ 80–100°C" when="Today evening" instructions="Stay hydrated, electrolytes after" context="Session 2 of 3 this week" nextSession="Friday" />
-        </Section>
-
-        <Separator />
-
-        <Section title="Expected Signal Card">
-          <div className="flex gap-4">
-            <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
-            <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
-            <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Conclusion Card">
-          <div className="flex flex-col gap-4">
-            <ConclusionCard title="What worked" variant="positive" items={[{ icon: "↑", text: "HRV +15.7% — well above ±4% normal variation." }, { icon: "↑", text: "Deep sleep +18.2% — evening timing was key." }]} />
-            <ConclusionCard title="What didn't change" variant="neutral" items={[{ icon: "→", text: "Respiratory rate -2.6% — within normal variation." }]} />
-            <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
-            <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
         </Section>
 
@@ -2788,19 +1840,14 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Data export">
-          <DataExportControlStudy />
+        <Section title="Sign-in and account security">
+          <BetterAuthAdoptionStudy />
         </Section>
 
         <Separator />
 
-        <Section title="Health Domain Card">
-          <div className="grid grid-cols-2 gap-4">
-            <HealthDomainCard title="Sleep & Recovery" description="Deep sleep and HRV below your potential." score={42} status="biggest-opportunity" statusLabel="Biggest opportunity" secondaryInfo="3 experiments available" />
-            <HealthDomainCard title="Cardiovascular & Fitness" description="RHR decent but flat. Zone 2 experiment running." score={64} status="experiment-active" statusLabel="Experiment active" secondaryInfo="Zone 2 RHR Reset · Day 14" />
-            <HealthDomainCard title="Supplements" description="No experiments run yet." score={null} status="not-started" statusLabel="Not started" secondaryInfo="5 experiments available" />
-            <HealthDomainCard title="Stress & Calm" description="HRV patterns suggest elevated baseline stress." score={35} status="worth-attention" statusLabel="Worth attention" secondaryInfo="4 experiments available" />
-          </div>
+        <Section title="Data export">
+          <DataExportControlStudy />
         </Section>
 
         <Separator />
@@ -2832,8 +1879,6 @@ export function ComponentsContent() {
             AI models; the top model requires an active paid Edge plan.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
-            <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
             <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
             <PlanBulletListStudy title="Core · settings" features={SETTINGS_CORE_FEATURES} />
             <PlanBulletListStudy title="Pulse · settings" features={SETTINGS_PULSE_FEATURES} />
@@ -2856,33 +1901,13 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Active Experiment Banner & Profile Stats">
-          <div className="flex items-stretch gap-4">
-            <div className="flex-1"><ActiveExperimentBanner id="demo" title="Zone 2 RHR Reset" day={14} totalDays={28} /></div>
-            <ProfileStats completed={2} daysTracked={47} />
-          </div>
-        </Section>
-
-        <Separator />
-
         <Section title="Floating Island">
           <p className="-mt-3 text-xs text-muted-foreground">
-            Used on the computer handoff page to confirm a manual browser step. Drag the chip by the icon.
+            Used on the computer handoff page to confirm a manual browser step. Drag it by its words.
           </p>
           <div className="relative h-64 overflow-hidden rounded-2xl bg-foreground">
             <div className="absolute inset-x-0 bottom-0 flex justify-center px-3 pb-4">
-              <ComputerHandoffFloatingIsland persistKey={null}
-                handle={
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-                  </span>
-                }
-              >
-                <Button size="lg" type="button">
-                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                  Done
-                </Button>
-              </ComputerHandoffFloatingIsland>
+              <ComputerHandoffIsland keepInViewport={false} persistKey={null} />
             </div>
           </div>
         </Section>

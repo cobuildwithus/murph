@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { JoinInvitePhoneVerificationIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
@@ -12,10 +12,6 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authPanelProps: null as Record<string, unknown> | null,
-  completeAuth: vi.fn(),
-  emailAuthProps: null as Record<string, unknown> | null,
-  logout: vi.fn(),
-  phoneAuthProps: null as Record<string, unknown> | null,
   refresh: vi.fn(),
 }));
 
@@ -26,15 +22,8 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => ({
-    logout: mocks.logout,
-  }),
-  useUser: () => ({ user: null }),
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: Record<string, unknown>) {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel(props: Record<string, unknown>) {
     mocks.authPanelProps = props;
     return createElement(
       "div",
@@ -44,47 +33,17 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
   },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-email-auth-button", () => ({
-  HostedEmailAuthButton(props: Record<string, unknown>) {
-    mocks.emailAuthProps = props;
-    return createElement(
-      "div",
-      { "data-hosted-email-auth": "true" },
-      "Email auth",
-    );
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-invite-phone-auth", () => ({
-  HostedInvitePhoneAuth(props: Record<string, unknown>) {
-    mocks.phoneAuthProps = props;
-    return createElement(
-      "div",
-      { "data-hosted-phone-auth": "true" },
-      "Phone auth",
-    );
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/use-hosted-auth-completion", () => ({
-  useHostedAuthCompletion: () => ({
-    completeAuth: mocks.completeAuth,
-    completingMethod: null,
-    errorMessage: null,
-  }),
-}));
-
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.authPanelProps = null;
-  mocks.emailAuthProps = null;
-  mocks.phoneAuthProps = null;
 });
 
 test("open invites reuse the shared auth panel with every supported method", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInvitePhoneVerificationIsland, {
+      detail: "Choose phone, Telegram, or email to continue with this invite.",
       inviteCode: "invite-code",
+      title: "Log in or sign up.",
       verificationMode: "manual_phone",
     }),
     { requireButton: false },
@@ -99,8 +58,6 @@ test("open invites reuse the shared auth panel with every supported method", asy
     requireLaunchConsentOnCompletion: true,
     size: "compact",
   });
-  expect(mocks.emailAuthProps).toBeNull();
-  expect(mocks.phoneAuthProps).toBeNull();
 
   const onCompleted = mocks.authPanelProps?.onCompleted;
   if (typeof onCompleted !== "function") {
@@ -119,32 +76,74 @@ test("open invites reuse the shared auth panel with every supported method", asy
   await cleanup();
 });
 
-test("targeted phone invites keep their locked phone verification", async () => {
+test("targeted phone invites retain their hint and server-bound first-party verification", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInvitePhoneVerificationIsland, {
+      detail: "We’ll text you a code.",
       inviteCode: "invite-code",
       phoneAuthTarget: {
         kind: "saved",
         phoneHint: "••• 1212",
       },
       phoneHint: "••• 1212",
+      title: "Verify your phone.",
       verificationMode: "invite_phone",
     }),
     { requireButton: false },
   );
 
-  expect(container.querySelector('[data-hosted-phone-auth="true"]')).not.toBeNull();
-  expect(mocks.phoneAuthProps).toMatchObject({
-    inviteCode: "invite-code",
-    phoneAuthTarget: {
-      kind: "saved",
-      phoneHint: "••• 1212",
-    },
-    phoneHint: "••• 1212",
-  });
-  expect(mocks.authPanelProps).toBeNull();
+  expect(container.textContent).toContain("ending in 1212");
+  expect(mocks.authPanelProps).toMatchObject({ inviteCode: "invite-code", methods: ["phone"] });
 
   await cleanup();
+});
+
+test("a verification step keeps the sentence and ticket only while they still apply", async () => {
+  const { cleanup, container } = await renderClientComponent(
+    createElement(JoinInvitePhoneVerificationIsland, {
+      detail: "We’ll text you a code.",
+      inviteCode: "invite-code",
+      phoneHint: "••• 1212",
+      title: "Verify your phone.",
+      verificationMode: "invite_phone",
+    }),
+    { requireButton: false },
+  );
+  const onViewChange = mocks.authPanelProps?.onViewChange;
+  if (typeof onViewChange !== "function") {
+    throw new Error("Expected the verification view callback.");
+  }
+
+  expect(container.textContent).toContain("We’ll text you a code.");
+  expect(container.textContent).toContain("Meet Murph");
+
+  await act(async () => {
+    onViewChange("auth-active");
+  });
+  expect(container.textContent).toContain("Verify your phone.");
+  expect(container.textContent).not.toContain("We’ll text you a code.");
+  expect(container.textContent).not.toContain("Meet Murph");
+  expect(container.textContent).not.toContain("ending in 1212");
+
+  await act(async () => {
+    onViewChange("consent");
+  });
+  expect(container.textContent).toContain("One quick step.");
+  expect(container.textContent).not.toContain("Verify your phone.");
+  expect(container.querySelector('[data-hosted-auth-panel="true"]')).not.toBeNull();
+
+  await cleanup();
+});
+
+test("each verification mode keeps its own headline", () => {
+  const inMode = (verificationMode: string) => ({
+    invite: { verificationMode },
+    stage: "verify",
+  }) as HostedInviteStatusPayload;
+
+  expect(resolveJoinInviteTitle(inMode("invite_phone"))).toBe("Verify your phone.");
+  expect(resolveJoinInviteTitle(inMode("invite_email"))).toBe("Verify your email.");
+  expect(resolveJoinInviteTitle(inMode("manual_phone"))).toBe("Log in or sign up.");
 });
 
 test("open invite copy describes the shared authentication choices", () => {
@@ -155,7 +154,7 @@ test("open invite copy describes the shared authentication choices", () => {
     stage: "verify",
   } as HostedInviteStatusPayload;
 
-  expect(resolveJoinInviteTitle(status)).toBe("Log in or sign up");
+  expect(resolveJoinInviteTitle(status)).toBe("Log in or sign up.");
   expect(resolveJoinInviteSubtitle(status)).toBe(
     "Choose phone, Telegram, or email to continue with this invite.",
   );

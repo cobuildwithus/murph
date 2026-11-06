@@ -120,7 +120,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         schema: "murph.assistant-usage.v1",
         servedModel: "gpt-5.6-luna",
         sessionId: turnId,
-        stripeMeterSource: "murph",
         surface: "hosted-web",
         tokenPricingBasis: "openai-priority",
         totalTokens: 165,
@@ -194,7 +193,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         routeId: null,
         schema: "murph.assistant-usage.v1",
         sessionId: turnId,
-        stripeMeterSource: "murph",
         totalTokens: null,
         turnId,
         usageId,
@@ -240,14 +238,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           select: {
             memberId: true,
             provider: true,
-            stripeMeterStatus: true,
             turnId: true,
           },
           where: { id: usageId },
         })).resolves.toEqual([{
           memberId,
           provider: "retell",
-          stripeMeterStatus: "skipped",
           turnId,
         }]);
       } finally {
@@ -286,7 +282,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         routeId: null,
         schema: "murph.assistant-usage.v1",
         sessionId: turnId,
-        stripeMeterSource: "murph",
         totalTokens: null,
         turnId,
         usageId,
@@ -363,77 +358,5 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("preserves historical terminal Stripe meter state on an exact replay", async () => {
-      const fixtureId = randomUUID();
-      const memberId = `member_usage_terminal_${fixtureId}`;
-      const turnId = `turn_usage_terminal_${fixtureId}`;
-      const usageId = `${turnId}.attempt-1`;
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const meteredAt = new Date("2026-07-22T16:31:00.000Z");
-      const usage = [{
-        attemptCount: 1,
-        credentialSource: "platform",
-        memberId,
-        occurredAt: "2026-07-22T16:30:05.000Z",
-        provider: "retell",
-        routeId: null,
-        schema: "murph.assistant-usage.v1",
-        sessionId: turnId,
-        stripeMeterSource: "murph",
-        totalTokens: null,
-        turnId,
-        usageId,
-      }];
-
-      await prisma.hostedMember.create({
-        data: { billingStatus: "active", id: memberId },
-      });
-
-      try {
-        await recordHostedAiUsageRecords({
-          prisma,
-          trustedUserId: memberId,
-          usage,
-        });
-        await prisma.hostedAiUsage.update({
-          data: {
-            stripeMeterError: null,
-            stripeMeterIdentifier: `meter_${fixtureId}`,
-            stripeMeterLastAttemptedAt: meteredAt,
-            stripeMeterNextAttemptAt: null,
-            stripeMeterStatus: "metered",
-            stripeMeteredAt: meteredAt,
-          },
-          where: { id: usageId },
-        });
-
-        await expect(recordHostedAiUsageRecords({
-          prisma,
-          trustedUserId: memberId,
-          usage,
-        })).resolves.toEqual({ recordedIds: [usageId] });
-        await expect(prisma.hostedAiUsage.findUniqueOrThrow({
-          select: {
-            stripeMeterError: true,
-            stripeMeterIdentifier: true,
-            stripeMeterLastAttemptedAt: true,
-            stripeMeterNextAttemptAt: true,
-            stripeMeterStatus: true,
-            stripeMeteredAt: true,
-          },
-          where: { id: usageId },
-        })).resolves.toEqual({
-          stripeMeterError: null,
-          stripeMeterIdentifier: `meter_${fixtureId}`,
-          stripeMeterLastAttemptedAt: meteredAt,
-          stripeMeterNextAttemptAt: null,
-          stripeMeterStatus: "metered",
-          stripeMeteredAt: meteredAt,
-        });
-      } finally {
-        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
-        await prisma.$disconnect();
-      }
-    });
   },
 );

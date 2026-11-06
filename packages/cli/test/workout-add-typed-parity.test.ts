@@ -424,9 +424,17 @@ test('workout add and edit help teach compact media, exercise, and set examples'
   const addHelp = await runRawInProcessCli(cli, ['workout', 'add', '--help'])
   const editHelp = await runRawInProcessCli(cli, ['workout', 'edit', '--help'])
   const llmsFull = await runRawInProcessCli(cli, ['--llms-full'])
+  const setLogHelp = await runRawInProcessCli(cli, ['workout', 'set', 'log', '--help'])
+  for (const rendered of [setLogHelp, llmsFull]) {
+    assert.match(rendered, /restore an applicable saved every-set instruction with workout exercise set-reps before logging/u)
+    assert.match(rendered, /scope must identify this exact workout exercise/u)
+    assert.match(rendered, /null value is an explicit withdrawal/u)
+  }
 
   for (const rendered of [addHelp, llmsFull]) {
     assert.match(rendered, /Capture workout media plus one structured exercise and set/u)
+    assert.match(rendered, /saved duration default fills an omitted duration; use it without asking/u)
+    assert.match(rendered, /newly stated duration overrides the default/u)
     assert.match(rendered, /raw\/workouts\/2026\/03\/upper\/bench\.jpg/u)
     assert.match(rendered, /--workoutExercise 'order=1;name=Bench press;mode=weight_reps;unitOverride=lb'/u)
     assert.match(rendered, /--workoutSet 'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'/u)

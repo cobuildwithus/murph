@@ -11,14 +11,8 @@ aliases:
   - "Şansal Tanrıöver Türkgüler Aka 2020 outdoor natural light elderly sleep quality"
 categories:
   - "morning-light-exposure"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-  -
-    type: "parent_family"
-    target: "experiment_family:morning-light-exposure"
 source:
   kind: "journal_article"
   title: "Effects of Outdoor Natural Light Exposure on Sleep Quality in the Elderly"

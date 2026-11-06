@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "sleep-chart-whole-night",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Your sleep chart shows the whole night",
+    "summary": "A short extra reading could replace a full night on your sleep chart and pull down your 7-day average. Each day now shows the full night.",
+    "details": "Days with only a short reading still show that reading. Nothing you saved changed, only which number the chart shows.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": [4603]
+  }
+}

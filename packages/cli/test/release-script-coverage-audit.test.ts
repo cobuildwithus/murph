@@ -32,12 +32,6 @@ import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(packageDir, '..', '..')
-const rootPackageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
-) as {
-  name?: string
-  scripts?: Record<string, string>
-}
 const cliPackageJson = JSON.parse(
   readFileSync(path.join(packageDir, 'package.json'), 'utf8'),
 ) as {
@@ -49,25 +43,7 @@ const cliPackageJson = JSON.parse(
   scripts?: Record<string, string>
   version?: string
 }
-const assistantCliPackageJson = JSON.parse(
-  readFileSync(
-    path.join(repoRoot, 'packages', 'assistant-cli', 'package.json'),
-    'utf8',
-  ),
-) as {
-  dependencies?: Record<string, string>
-}
-const setupCliPackageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'packages', 'setup-cli', 'package.json'), 'utf8'),
-) as {
-  dependencies?: Record<string, string>
-}
-const hostedWebPackageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'apps', 'web', 'package.json'), 'utf8'),
-) as {
-  scripts?: Record<string, string>
-}
-const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
+const auditOutputMaxBufferBytes = 16 * 1024 * 1024
 
 type BrowserCommand = {
   listPollCount: number
@@ -135,7 +111,6 @@ type ReviewGptIdleDraftCleaner = {
 type ReviewGptAssistantSnapshot = {
   afterLastUserMessage?: boolean
   hasCopyButton?: boolean
-  modelConfirmationText?: string
   modelSlug?: string
   precedingUserMessageSignature?: string
   signature: string
@@ -642,7 +617,7 @@ function loadReviewGptOpenTargetHarness(
   const minimumMarkedResponseMs = moduleRecord.exports.__minimumMarkedResponseMsTest
   const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
   const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
-  const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
+  const responseModelFailure = moduleRecord.exports.responseModelFailure
   const prepareRuntimeConfig = moduleRecord.exports.__prepareRuntimeConfigTest
   const removeModelVerificationEvidenceFile = moduleRecord.exports.__removeModelVerificationEvidenceFileTest
   const selectAssistantResponseCandidate = moduleRecord.exports.selectAssistantResponseCandidate
@@ -663,7 +638,7 @@ function loadReviewGptOpenTargetHarness(
     typeof minimumMarkedResponseMs !== 'number' ||
     typeof modelAttestationTurnNonce !== 'string' ||
     typeof modelAttestationForSnapshot !== 'function' ||
-    typeof modelConfirmationFailure !== 'function' ||
+    typeof responseModelFailure !== 'function' ||
     typeof prepareRuntimeConfig !== 'function' ||
     typeof removeModelVerificationEvidenceFile !== 'function' ||
     typeof selectAssistantResponseCandidate !== 'function' ||
@@ -752,24 +727,18 @@ function loadReviewGptOpenTargetHarness(
       snapshot: ReviewGptAssistantSnapshot,
       includeEvidence = false,
       committedUserTurnSignature = '',
-      generationElapsedMs = 0,
     ) => Reflect.apply(modelAttestationForSnapshot, undefined, [
       targetModel,
       snapshot,
       includeEvidence,
       committedUserTurnSignature,
-      generationElapsedMs,
     ]) as ModelAttestationResult,
-    modelConfirmationFailure: (
+    responseModelFailure: (
       targetModel: string,
-      responseText: string,
       responseModelSlug = '',
-      generationElapsedMs = 0,
-    ) => String(Reflect.apply(modelConfirmationFailure, undefined, [
+    ) => String(Reflect.apply(responseModelFailure, undefined, [
       targetModel,
-      responseText,
       responseModelSlug,
-      generationElapsedMs,
     ])),
     prepareRuntimeConfig: () => {
       Reflect.apply(prepareRuntimeConfig, undefined, [])
@@ -871,16 +840,6 @@ function loadReviewGptOpenTargetHarness(
   }
 }
 
-type ReviewGptDomTestNode = {
-  childNodes: ReviewGptDomTestNode[]
-  computedStyle?: { display?: string; visibility?: string }
-  getAttribute?: (name: string) => string | null
-  hidden?: boolean
-  nodeType: number
-  nodeValue?: string
-  tagName?: string
-}
-
 type ReviewGptModelPickerTarget = {
   desiredVersion: string
   wantsInstant: boolean
@@ -951,51 +910,6 @@ const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
     desiredChatId?: string
     desiredOrigin?: string
   }) => string
-  extractModelConfirmationText: (
-    node: ReviewGptDomTestNode,
-    getComputedStyleValue?: (
-      node: ReviewGptDomTestNode,
-    ) => { display?: string; visibility?: string } | undefined,
-  ) => string
-}
-
-function reviewGptDomText(value: string): ReviewGptDomTestNode {
-  return {
-    childNodes: [],
-    nodeType: 3,
-    nodeValue: value,
-  }
-}
-
-function reviewGptDomElement(
-  tagName: string,
-  childNodes: ReviewGptDomTestNode[],
-  options: {
-    attributes?: Record<string, string>
-    display?: string
-    hidden?: boolean
-    visibility?: string
-  } = {},
-): ReviewGptDomTestNode {
-  const attributes = options.attributes ?? {}
-  return {
-    childNodes,
-    computedStyle: {
-      display: options.display ?? 'inline',
-      visibility: options.visibility ?? 'visible',
-    },
-    getAttribute: (name) => attributes[name] ?? null,
-    hidden: options.hidden,
-    nodeType: 1,
-    tagName,
-  }
-}
-
-function extractReviewGptModelConfirmationText(node: ReviewGptDomTestNode) {
-  return reviewGptDomSnapshotModule.extractModelConfirmationText(
-    node,
-    (current) => current.computedStyle,
-  )
 }
 
 function runNodeScript(...args: string[]) {
@@ -1053,6 +967,7 @@ exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"`,
       cwd: repoRoot,
       encoding: 'utf8',
       env: withoutNodeV8Coverage(),
+      maxBuffer: auditOutputMaxBufferBytes,
     },
   )
 }
@@ -1066,6 +981,7 @@ function createAuditZip(scriptName: string, prefix: string) {
       cwd: repoRoot,
       encoding: 'utf8',
       env: withoutNodeV8Coverage(),
+      maxBuffer: auditOutputMaxBufferBytes,
     },
   )
   const result =
@@ -1092,7 +1008,7 @@ function listZipEntries(zipPath: string) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: withoutNodeV8Coverage(),
-    maxBuffer: auditZipEntryListMaxBufferBytes,
+    maxBuffer: auditOutputMaxBufferBytes,
   })
     .split(/\r?\n/u)
     .map((entry) => entry.trim())
@@ -1254,37 +1170,7 @@ printf '%s\\n' "$@" > .fake-tools/committer.args
   }
 }
 
-describe('monorepo release flow coverage audit', () => {
-  it('exposes root-owned release scripts', () => {
-    expect(rootPackageJson.name).toBe('murph-workspace')
-    expect(rootPackageJson.scripts?.build).toContain('-- bash -c')
-    expect(rootPackageJson.scripts?.build).toContain('pnpm -r --sort')
-    expect(rootPackageJson.scripts?.build).toContain(
-      '--workspace-concurrency="${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4}"',
-    )
-    expect(rootPackageJson.scripts?.build).toContain('--filter "./packages/**" build')
-    expect(rootPackageJson.scripts?.build).toContain(
-      'node scripts/assemble-assistant-cli-surface.mjs',
-    )
-    expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
-    expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
-    expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
-    expect(rootPackageJson.scripts?.['release:check:preflight']).toBe(
-      'bash scripts/release-check.sh --preflight',
-    )
-    expect(rootPackageJson.scripts?.['release:trust:github']).toBe(
-      'node scripts/configure-trusted-publishing.mjs',
-    )
-    expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
-    expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
-    expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
-    expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
-      'node scripts/check-workspace-package-cycles.mjs',
-    )
-    expect(rootPackageJson.scripts?.['zip:src']).toBe('bash scripts/package-audit-context.sh --zip')
-    expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
-  })
-
+describe('monorepo verification and review tooling audit', () => {
   it('exposes only the package-backed review-gpt runner', async () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
@@ -1292,7 +1178,7 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     const repoToolsPatch = readFileSync(
-      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.17.patch'),
+      path.join(repoRoot, 'patches', '@cobuild__repo-tools@0.1.18.patch'),
       'utf8',
     )
     const reviewGptConfig = readFileSync(
@@ -1348,7 +1234,7 @@ describe('monorepo release flow coverage audit', () => {
       'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).toContain(
-      '--minimum-marked-response-time 180s \\\n    "$@"',
+      '--minimum-marked-response-time 80s \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -1366,13 +1252,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.146')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('0.5.157')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.146'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.157'"])
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
@@ -1389,11 +1275,11 @@ describe('monorepo release flow coverage audit', () => {
     ).toEqual(
       [
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
-        "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.146': patches/@cobuild__review-gpt@0.5.146.patch",
+        "'@cobuild/repo-tools@0.1.18': patches/@cobuild__repo-tools@0.1.18.patch",
+        "'@cobuild/review-gpt@0.5.157': patches/@cobuild__review-gpt@0.5.157.patch",
+        'frog@1.1.0: patches/frog@1.1.0.patch',
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
-        'ink@6.8.0: patches/ink@6.8.0.patch',
         'wrangler@4.90.0: patches/wrangler@4.90.0.patch',
         'wrangler@4.93.0: patches/wrangler@4.93.0.patch',
       ],
@@ -1403,8 +1289,14 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.146.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.157.patch')),
     ).toBe(true)
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.156.patch')),
+    ).toBe(false)
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.154.patch')),
+    ).toBe(false)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
     ).toBe(false)
@@ -1581,18 +1473,15 @@ describe('monorepo release flow coverage audit', () => {
         solTarget,
       ),
     ).toBe(false)
-    expect(reviewGptDriver).toContain(
-      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 5 * 60 * 1000;',
-    )
+    expect(reviewGptDriver).not.toContain('MODEL_CONFIRMATION')
+    expect(reviewGptDriver).not.toMatch(/Page\.bringToFront|Target\.activateTarget/u)
     expect(reviewGptDriver).toContain("status: 'response-too-fast'")
     expect(reviewGptDriver).toContain('markedResponseDurationFailure({')
-    expect(reviewGptDriver).toContain('acceptsTimedUnknown')
     expect(reviewGptReadme).toContain(
-      'require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line',
+      'ReviewGPT does not ask the assistant to identify itself',
     )
-    expect(reviewGptReadme).toContain('the exact turn committed by this run')
+    expect(reviewGptReadme).toContain('the exact user turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
-    expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
       'A marked concrete-model response may complete before the trust threshold only when the same snapshot exposes compatible concrete platform-model metadata',
     )
@@ -1818,18 +1707,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain(
       '&& ! -d "$review_gpt_selected_browser_app" ]]; then',
     )
-    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
-    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
+    expect(reviewGptConfig).not.toContain('hercules)')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "Vonneumann" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "9446" ;;')
     expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "Apollo" ;;')
     expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "9454" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)',
+      'review_gpt_all_browser_lanes=(eragon mountain vonneumann apollo)',
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -2093,7 +1981,7 @@ describe('monorepo release flow coverage audit', () => {
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
       expect(defaultResult.stdout).toContain(
-        'Minimum marked response time: 180000ms',
+        'Minimum marked response time: 80000ms',
       )
 
       writeHarnessFile(
@@ -2107,7 +1995,7 @@ describe('monorepo release flow coverage audit', () => {
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
-        'Minimum marked response time: 180000ms',
+        'Minimum marked response time: 80000ms',
       )
 
       writeHarnessFile(
@@ -2123,7 +2011,7 @@ describe('monorepo release flow coverage audit', () => {
       const callbackResult = runRepositoryDry()
       expect(callbackResult.status, callbackResult.stderr).toBe(0)
       expect(callbackResult.stdout).toContain(
-        'Minimum marked response time: 180000ms',
+        'Minimum marked response time: 80000ms',
       )
 
       const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
@@ -2354,7 +2242,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
-      for (const lane of ['Eragon', 'Phlebas', 'Hercules', 'Mountain']) {
+      for (const lane of ['Eragon', 'Mountain']) {
         writeHarnessFile(
           harnessRoot,
           `Library/Application Support/MurphReviewGPT/${lane}/SingletonLock`,
@@ -2380,7 +2268,7 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
       expect(['vonneumann', 'apollo']).toContain(defaultLane)
-      expect(defaultLaneCount).toBe('6')
+      expect(defaultLaneCount).toBe('4')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2400,13 +2288,13 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=3\n',
       )
       const optedInResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2420,7 +2308,7 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(optedInResult.status, optedInResult.stderr).toBe(0)
       expect(optedInResult.stdout.trim()).toBe(
-        'vonneumann|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'vonneumann|3|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
@@ -2431,9 +2319,9 @@ printf '%s|%s|%s|%s|%s\n' \
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=4\n',
       )
-      const sixLaneResult = spawnSync('bash', ['-c', configHarness], {
+      const fourLaneResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
@@ -2443,15 +2331,15 @@ printf '%s|%s|%s|%s|%s\n' \
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
-      expect(sixLaneResult.status, sixLaneResult.stderr).toBe(0)
-      expect(sixLaneResult.stdout.trim()).toBe(
-        'apollo|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      expect(fourLaneResult.status, fourLaneResult.stderr).toBe(0)
+      expect(fourLaneResult.stdout.trim()).toBe(
+        'apollo|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=7\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
       )
       const invalidLaneCountResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2465,12 +2353,12 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(invalidLaneCountResult.status).not.toBe(0)
       expect(invalidLaneCountResult.stderr).toContain(
-        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6',
+        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 4',
       )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=4\n',
       )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
@@ -2514,7 +2402,7 @@ printf '%s|%s|%s|%s|%s\n' \
         env: {
           ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
-          MURPH_REVIEW_GPT_BROWSER_LANE: 'phlebas',
+          MURPH_REVIEW_GPT_BROWSER_LANE: 'eragon',
           REPO_ROOT: repoRoot,
           REVIEW_GPT_REVIEW_PHASE: 'final',
           REVIEW_GPT_ROUND_NUMBER: '3',
@@ -2563,7 +2451,7 @@ printf '%s|%s|%s|%s|%s\n' \
             ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
-            REVIEW_GPT_BROWSER_LANE: 'phlebas',
+            REVIEW_GPT_BROWSER_LANE: 'eragon',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '3',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
@@ -2573,7 +2461,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
       expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
       expect(existingThreadResult.stdout.trim().split('\n').at(-2)).toMatch(
-        /^phlebas\|/u,
+        /^eragon\|/u,
       )
       expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
         'https://chatgpt.com/c/fallback-thread',
@@ -2582,7 +2470,7 @@ printf '%s|%s|%s|%s|%s\n' \
       const correctionPresetHarness = `${configHarness}
 printf '%s|%s|%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_selected_browser_display" "$review_gpt_selected_browser_port" "$managed_browser_user_data_dir" "$review_gpt_pr_review_prompt_file"
 review_gpt_managed_ports=()
-for review_gpt_lane in main eragon phlebas hercules mountain vonneumann apollo; do
+for review_gpt_lane in main eragon mountain vonneumann apollo; do
   review_gpt_managed_ports+=("$(review_gpt_browser_lane_port "$review_gpt_lane")")
 done
 printf '%s\n' "\${review_gpt_managed_ports[*]}"
@@ -2625,8 +2513,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
       expect(managedPorts).toEqual([
         '9452',
         '9448',
-        '9442',
-        '9444',
         '9450',
         '9446',
         '9454',
@@ -2899,125 +2785,12 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     ).rejects.toThrow('Browser CDP socket closed unexpectedly')
   })
 
-  it('extracts model confirmation only from visible standalone rendered lines', () => {
-    const modelClassifier = loadReviewGptOpenTargetHarness(1)
-    const validConfirmation = reviewGptDomElement('DIV', [
-      reviewGptDomElement('P', [reviewGptDomText('Report ready')], { display: 'block' }),
-      reviewGptDomElement('P', [
-        reviewGptDomElement('STRONG', [reviewGptDomText('MODEL_CONFIRMATION:')]),
-        reviewGptDomElement('EM', [reviewGptDomText(' UNKNOWN')]),
-      ], { display: 'block' }),
-    ], { display: 'block' })
-    const extractedConfirmation = extractReviewGptModelConfirmationText(validConfirmation)
-    expect(extractedConfirmation).toBe('Report ready\nMODEL_CONFIRMATION: UNKNOWN')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        'gpt-5-6-pro',
-        46 * 60 * 1000,
-      ),
-    ).toBe('')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        '',
-        5 * 60 * 1000 - 1,
-      ),
-    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        '',
-        5 * 60 * 1000,
-      ),
-    ).toBe('')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        'gpt-5-5-pro',
-        5 * 60 * 1000,
-      ),
-    ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
-
-    const excludedContainers = reviewGptDomElement('DIV', [
-      reviewGptDomElement('BLOCKQUOTE', [
-        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
-      ], { display: 'block' }),
-      reviewGptDomElement('PRE', [
-        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
-      ], { display: 'block' }),
-      reviewGptDomElement('CODE', [
-        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
-      ]),
-    ], { display: 'block' })
-    expect(extractReviewGptModelConfirmationText(excludedContainers)).toBe('')
-
-    const inlineCodeDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('CODE', [reviewGptDomText('ignored')]),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    const hiddenInlineDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('SPAN', [reviewGptDomText('ignored')], { hidden: true }),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    const hiddenBlockDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('DIV', [reviewGptDomText('ignored')], {
-        display: 'block',
-        hidden: true,
-      }),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    const displayContentsDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('DIV', [reviewGptDomText('ignored')], {
-        display: 'contents',
-      }),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    for (const decoy of [
-      inlineCodeDecoy,
-      hiddenInlineDecoy,
-      hiddenBlockDecoy,
-      displayContentsDecoy,
-    ]) {
-      expect(
-        modelClassifier.modelConfirmationFailure(
-          'gpt-5.6-sol',
-          extractReviewGptModelConfirmationText(decoy),
-          'gpt-5-6-pro',
-        ),
-      ).toContain('did not include MODEL_CONFIRMATION')
-    }
-
-    const multipleConfirmations = reviewGptDomElement('DIV', [
-      reviewGptDomElement('P', [reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN')], {
-        display: 'block',
-      }),
-      reviewGptDomElement('P', [reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol')], {
-        display: 'block',
-      }),
-    ], { display: 'block' })
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractReviewGptModelConfirmationText(multipleConfirmations),
-        'gpt-5-6-pro',
-      ),
-    ).toContain('multiple MODEL_CONFIRMATION lines')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        'MODEL_CONFIRMATION: gpt-5.6-sol',
-        'gpt-5-5-pro',
-      ),
-    ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
+  it('checks response model metadata without requiring self-confirmation', () => {
+    const harness = loadReviewGptOpenTargetHarness(1)
+    expect(harness.responseModelFailure('gpt-5.6-sol', 'gpt-5-6-pro')).toBe('')
+    expect(harness.responseModelFailure('gpt-5.6-sol', '')).toBe('')
+    expect(harness.responseModelFailure('gpt-5.6-sol', 'gpt-5-5-pro'))
+      .toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
 
     const captureExpression = reviewGptDomSnapshotModule.buildChatGptCaptureStateExpression({
       desiredChatId: 'test-chat',
@@ -3063,22 +2836,15 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     expect(collisionPrompt).toContain(
       'Review MODEL_CONFIRMATION: UNKNOWN handling while rejecting the contradictory gpt-5-5-pro response slug.',
     )
-    expect(collisionPrompt.match(/Complete the requested work even if you cannot independently identify the active model\./gu)).toHaveLength(1)
-    expect(collisionPrompt).toContain('MODEL_CONFIRMATION: gpt-5.6-sol')
-    expect(collisionHarness.modelConfirmationFailure(
-      'gpt-5.6-sol',
-      'Review complete without the package-owned final line.',
-    )).toContain('did not include MODEL_CONFIRMATION')
-    expect(collisionHarness.modelConfirmationFailure(
-      'gpt-5.6-sol',
-      'Review complete\nMODEL_CONFIRMATION: gpt-5.6-sol',
-    )).toBe('')
+    expect(collisionPrompt.split('\n').slice(1).join('\n').trim()).toBe(
+      'Review MODEL_CONFIRMATION: UNKNOWN handling while rejecting the contradictory gpt-5-5-pro response slug.',
+    )
+    expect(committedPrompt).not.toMatch(/MODEL_CONFIRMATION|confirm.*model/iu)
     expect(concurrentUserTurnSignature).not.toBe(committedUserTurnSignature)
     const responseText = 'Report\r\nDone\u00a0'
     const exactResponseBytes = 'Report\nDone\n'
     const validSnapshot: ReviewGptAssistantSnapshot = {
       afterLastUserMessage: false,
-      modelConfirmationText: 'MODEL_CONFIRMATION: UNKNOWN',
       modelSlug: 'gpt-5-6-pro',
       precedingUserMessageSignature: committedUserTurnSignature,
       signature: 'fresh-response',
@@ -3086,7 +2852,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     }
     const concurrentSnapshot: ReviewGptAssistantSnapshot = {
       afterLastUserMessage: true,
-      modelConfirmationText: 'MODEL_CONFIRMATION: UNKNOWN',
       modelSlug: 'gpt-5-6-pro',
       precedingUserMessageSignature: concurrentUserTurnSignature,
       signature: 'concurrent-response',
@@ -3142,38 +2907,18 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
       ),
     ).toEqual({ evidence: null, failure: '' })
 
-    const elapsedFallbackSnapshot = {
-      ...validSnapshot,
-      modelSlug: '',
-    }
     expect(
       harness.modelAttestationForSnapshot(
         'gpt-5.6-sol',
-        elapsedFallbackSnapshot,
+        { ...validSnapshot, modelSlug: '' },
         true,
         committedUserTurnSignature,
-        5 * 60 * 1000 - 1,
-      ),
-    ).toMatchObject({ evidence: null, failure: expect.stringContaining('confirmed model UNKNOWN') })
-    expect(
-      harness.modelAttestationForSnapshot(
-        'gpt-5.6-sol',
-        elapsedFallbackSnapshot,
-        true,
-        committedUserTurnSignature,
-        5 * 60 * 1000,
       ),
     ).toEqual({ evidence: null, failure: '' })
 
     for (const invalidSnapshot of [
       concurrentSnapshot,
-      { ...validSnapshot, modelConfirmationText: '' },
       { ...validSnapshot, modelSlug: 'gpt-5-5-pro' },
-      {
-        ...validSnapshot,
-        modelConfirmationText: 'MODEL_CONFIRMATION: gpt-5.6-sol',
-        modelSlug: 'gpt-5-5-pro',
-      },
     ]) {
       const invalidAttestation = harness.modelAttestationForSnapshot(
         'gpt-5.6-sol',
@@ -3625,20 +3370,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     expect(summary.runRepoToolsTests).toBe(true)
   })
 
-  it('keeps the removed coordination ledger path absent', () => {
-    expect(
-      existsSync(
-        path.join(
-          repoRoot,
-          'agent-docs',
-          'exec-plans',
-          'active',
-          'COORDINATION_LEDGER.md',
-        ),
-      ),
-    ).toBe(false)
-  })
-
   it('archives the active plan before invoking committer', () => {
     const harnessRoot = createFinishTaskHarness({
       'agent-docs/exec-plans/active/2026-04-24-harness.md': `# Harness Plan
@@ -4014,7 +3745,7 @@ case "$*" in
   *".baseRefOid"*) printf '%s\\n' "$TEST_BASE_SHA" ;;
   *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
   *".body"*)
-    printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA"
+    printf '## Why and outcome\\nSynthetic packaging change.\\n'
     case "\${TEST_CONTEXT_SENSITIVITY:-routine}" in
       missing) ;;
       duplicate)
@@ -4173,9 +3904,6 @@ printf 'ZIP: %s (%s bytes)\n' \
               REVIEW_GPT_PR_REF: '',
               REVIEW_GPT_PR_URL: '123',
               TEST_BASE_SHA: baseHead,
-              TEST_FIRST_SHA:
-                roundEnv.TEST_RECORDED_FIRST_HEAD ??
-                (roundEnv.REVIEW_GPT_ROUND_NUMBER === '1' ? head : firstHead),
               TEST_HEAD_SHA: head,
               ...roundEnv,
             },
@@ -4202,6 +3930,7 @@ printf 'ZIP: %s (%s bytes)\n' \
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
         REVIEW_GPT_ROUND_NUMBER: '1',
         REVIEW_GPT_RENDERED_EVIDENCE_PATHS: 'audit-packages/desktop.png',
+        TEST_CONTEXT_SENSITIVITY: 'missing',
       })
       expect(roundOne.result.status, roundOne.result.stderr).toBe(0)
       const roundOneMetadata = JSON.parse(
@@ -4216,7 +3945,7 @@ printf 'ZIP: %s (%s bytes)\n' \
         roundNumber: 1,
         reviewScope: 'full',
         contextMode: 'full_snapshot',
-        contextSensitivity: 'routine',
+        contextSensitivity: 'undeclared',
         prChangedLines: 2,
         prChangedFiles: 1,
         contextAnchorHead: firstHead,
@@ -4260,6 +3989,56 @@ printf 'ZIP: %s (%s bytes)\n' \
         ),
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const roundOneExplicitHead = invokePackager('round-one-explicit-head', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: currentHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+      })
+      expect(roundOneExplicitHead.result.status, roundOneExplicitHead.result.stderr).toBe(0)
+      const roundOneExplicitMetadata = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', roundOneExplicitHead.zipPath, 'review-gpt-pr-context/review-round.json'],
+        { encoding: 'utf8' },
+      )) as Record<string, unknown>
+      expect(roundOneExplicitMetadata).toMatchObject({
+        roundNumber: 1,
+        reviewScope: 'full',
+        contextMode: 'full_snapshot',
+        firstReviewedHead: currentHead,
+        contextAnchorHead: currentHead,
+        currentReviewedHead: currentHead,
+        previousReviewedHead: null,
+      })
+      expect(execFileSync(
+        'unzip',
+        ['-p', roundOneExplicitHead.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toBe('## Why and outcome\nSynthetic packaging change.\nReviewGPT context sensitivity: routine\n')
+      for (const delta of ['since-first-reviewed-head.diff', 'since-previous-reviewed-head.diff']) {
+        expect(execFileSync(
+          'unzip',
+          ['-p', roundOneExplicitHead.zipPath, `review-gpt-pr-context/${delta}`],
+          { encoding: 'utf8' },
+        )).toBe('')
+      }
+
+      expect(execFileSync(
+        'unzip',
+        ['-p', roundOne.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toBe('## Why and outcome\nSynthetic packaging change.\n')
+
+      const roundOneWrongHead = invokePackager('round-one-wrong-head', firstHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: baseHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+        TEST_CONTEXT_SENSITIVITY: 'missing',
+      })
+      expect(roundOneWrongHead.result.status).not.toBe(0)
+      expect(roundOneWrongHead.result.stderr).toContain(
+        'round 1 first-reviewed head must equal the current PR head',
+      )
 
       const roundTwo = invokePackager('round-two', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
@@ -4642,6 +4421,16 @@ printf 'ZIP: %s (%s bytes)\n' \
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
+      const missingFirst = invokePackager('missing-first', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(missingFirst.result.status).not.toBe(0)
+      expect(missingFirst.result.stderr).toContain(
+        'later ReviewGPT rounds require REVIEW_GPT_FIRST_REVIEWED_HEAD and REVIEW_GPT_PREVIOUS_REVIEWED_HEAD',
+      )
+
       const malformedFirst = invokePackager('malformed-first', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: 'not-a-sha',
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
@@ -4653,22 +4442,11 @@ printf 'ZIP: %s (%s bytes)\n' \
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
-      const resetBaseline = invokePackager('reset-baseline', currentHead, {
-        REVIEW_GPT_FIRST_REVIEWED_HEAD: baseHead,
-        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
-        REVIEW_GPT_ROUND_NUMBER: '2',
-      })
-      expect(resetBaseline.result.status).not.toBe(0)
-      expect(resetBaseline.result.stderr).toContain(
-        'REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline',
-      )
-
       const unavailableHead = 'f'.repeat(40)
       const unavailableBaseline = invokePackager('unavailable-baseline', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: unavailableHead,
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_ROUND_NUMBER: '2',
-        TEST_RECORDED_FIRST_HEAD: unavailableHead,
       })
       expect(unavailableBaseline.result.status).not.toBe(0)
       expect(unavailableBaseline.result.stderr).toContain(
@@ -4679,7 +4457,6 @@ printf 'ZIP: %s (%s bytes)\n' \
         REVIEW_GPT_FIRST_REVIEWED_HEAD: nonAncestorHead,
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_ROUND_NUMBER: '2',
-        TEST_RECORDED_FIRST_HEAD: nonAncestorHead,
       })
       expect(nonAncestorBaseline.result.status).not.toBe(0)
       expect(nonAncestorBaseline.result.stderr).toContain(
@@ -4697,6 +4474,23 @@ printf 'ZIP: %s (%s bytes)\n' \
     try {
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
+      for (const entries of [leanEntries, fullEntries]) {
+        expect(entries.filter(entry => /\.(svg|png|jpe?g|gif|webp|avif|ico|bmp|tiff?|heic)$/iu.test(entry))).toEqual([])
+      }
+
+      const containersPatch = 'patches/@cloudflare__containers@0.3.7.patch'
+      expect(fullEntries).toContain('apps/cloudflare/test/containers-helper-readiness.test.ts')
+      for (const [bundle, entries] of [[fullBundle, fullEntries], [leanBundle, leanEntries]] as const) {
+        for (const dependencyInput of [containersPatch, 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
+          expect(entries, `missing dependency input: ${dependencyInput}`).toContain(dependencyInput)
+          const archived = execFileSync('unzip', ['-p', bundle.zipPath, dependencyInput])
+          expect(archived.equals(readFileSync(path.join(repoRoot, dependencyInput)))).toBe(true)
+        }
+      }
+      expect(readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'))
+        .toContain(`'@cloudflare/containers@0.3.7': ${containersPatch}`)
+      expect(readFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'utf8'))
+        .toContain(`path: ${containersPatch}`)
 
       for (const relativePath of [
         '.github/native-hosted-e2e-controller.json',
@@ -4743,7 +4537,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
-      expect(fullEntries).toContain('.github/workflows/release.yml')
+      expect(fullEntries).not.toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
       expect(fullEntries).toContain('agent-docs/prompts/seam-audits/README.md')
       expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
@@ -4770,137 +4564,6 @@ printf 'ZIP: %s (%s bytes)\n' \
     }
   }, 120_000)
 
-  it('keeps release:check focused on release guards, typecheck, clean workspace build, and coverage verification', () => {
-    const releaseCheck = readFileSync(
-      path.join(repoRoot, 'scripts', 'release-check.sh'),
-      'utf8',
-    )
-
-    expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
-    expect(releaseCheck).toContain('node scripts/release-verification-plan.mjs --check')
-    expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
-    expect(releaseCheck).toContain('corepack pnpm build:workspace:clean')
-    expect(releaseCheck).toContain('if [[ "$release_check_mode" == "--preflight" ]]')
-    expect(releaseCheck).toContain('corepack pnpm typecheck')
-    expect(releaseCheck).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
-    expect(releaseCheck).toContain('corepack pnpm verify:acceptance')
-    expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
-    expect(releaseCheck).not.toContain('pnpm verify:repo')
-    expect(releaseCheck).not.toContain('--out-dir "$temp_dir/tarballs"')
-
-    expect(releaseCheck.indexOf('node scripts/verify-release-target.mjs')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm build:workspace:clean'),
-    )
-    expect(releaseCheck.indexOf('corepack pnpm build:workspace:clean')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm verify:acceptance'),
-    )
-  })
-
-  it('keeps acceptance web verification on prepared setup paths after root typecheck', () => {
-    const workspaceVerify = readFileSync(
-      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
-      'utf8',
-    )
-    const webVerify = readFileSync(
-      path.join(repoRoot, 'apps', 'web', 'scripts', 'verify-fast.sh'),
-      'utf8',
-    )
-
-    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).toContain(
-      'apps/web/scripts/dev-local.ts',
-    )
-    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).not.toContain(
-      'health-commons:generate',
-    )
-    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).not.toContain(
-      'legal:pdf',
-    )
-    expect(hostedWebPackageJson.scripts?.['test']).toBe(
-      'pnpm health-commons:generate && pnpm test:prepared',
-    )
-    expect(hostedWebPackageJson.scripts?.['test:prepared']).toContain(
-      'tsx apps/web/scripts/run-hosted-web-vitest.mts',
-    )
-    expect(webVerify).toContain('MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke')
-    expect(webVerify).toContain('pnpm test:prepared')
-    expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
-    expect(workspaceVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1')
-    expect(workspaceVerify).toContain(
-      'skip Health Commons generated artifacts; root acceptance typecheck already prepared them',
-    )
-    expect(workspaceVerify).toContain(
-      'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"',
-    )
-    expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE')
-    expect(workspaceVerify).toContain(
-      'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
-    )
-    expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
-    expect(workspaceVerify).toContain('resolve_acceptance_app_verify_delay_default()')
-    expect(workspaceVerify).toContain(
-      'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
-    )
-    expect(workspaceVerify).toContain('resolve_package_coverage_vitest_max_workers_default()')
-    expect(workspaceVerify).toContain(
-      'resolve_package_coverage_cli_active_concurrency_default()',
-    )
-    expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
-    expect(workspaceVerify).toContain('current_package_coverage_concurrency()')
-    expect(workspaceVerify).toContain('can_launch_next_package_coverage()')
-    expect(
-      webVerify.indexOf(
-        'start_owned_background_job build_pid run_timed_step "next build" run_next_build',
-      ),
-    ).toBeLessThan(
-      webVerify.indexOf(
-        'start_owned_background_job smoke_pid run_timed_step "dev smoke" run_dev_smoke',
-      ),
-    )
-    expect(workspaceVerify).toContain(
-      'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
-    )
-    expect(
-      workspaceVerify.indexOf(
-        'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
-      ),
-    ).toBeLessThan(
-      workspaceVerify.indexOf(
-        'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
-      ),
-    )
-    expect(
-      workspaceVerify.indexOf(
-        'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
-      ),
-    ).toBeLessThan(
-      workspaceVerify.indexOf(
-        'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
-      ),
-    )
-  })
-
-  it('keeps long CLI smoke groups in independent coverage buckets', () => {
-    const cliWorkspace = readFileSync(
-      path.join(repoRoot, 'packages', 'cli', 'vitest.workspace.ts'),
-      'utf8',
-    )
-
-    expect(cliWorkspace).toContain('name: "cli-device-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["device-cli.test.ts"]')
-    expect(cliWorkspace).toContain('name: "cli-release-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
-    expect(cliWorkspace).toContain('name: "cli-incur-smoke"')
-    expect(cliWorkspace).toContain(
-      'patterns: ["incur-smoke.test.ts", "incur-skill-hash.test.ts"]',
-    )
-    expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
-      cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
-    )
-    expect(cliWorkspace.indexOf('name: "cli-incur-smoke"')).toBeLessThan(
-      cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
-    )
-  })
-
   it('prepares the hosted web Prisma client before Cloudflare app verification typecheck', () => {
     const cloudflareVerify = readFileSync(
       path.join(repoRoot, 'apps', 'cloudflare', 'scripts', 'verify-fast.sh'),
@@ -4914,562 +4577,7 @@ printf 'ZIP: %s (%s bytes)\n' \
     )
   })
 
-  it('runs release checks directly instead of through an env-overridable shell command', () => {
-    const releaseScript = readFileSync(path.join(repoRoot, 'scripts', 'release.sh'), 'utf8')
-
-    expect(releaseScript).toContain("echo 'Running release checks...'")
-    expect(releaseScript).toContain('corepack pnpm release:check')
-    expect(releaseScript).not.toContain('RELEASE_CHECK_CMD')
-    expect(releaseScript).not.toContain('CHECK_CMD=')
-    expect(releaseScript).not.toContain('sh -lc "$CHECK_CMD"')
-  })
-
-  it('propagates CLI package coverage failures instead of forcing the release lane green', () => {
-    const workspaceVerify = readFileSync(
-      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
-      'utf8',
-    )
-    const runTimedStep = workspaceVerify.match(
-      /run_timed_step\(\) \{[\s\S]*?^\}/m,
-    )?.[0]
-    const cliCoverageBranch = workspaceVerify.match(
-      /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
-    )?.[0]
-    const packageCoverageDirs = packageCoverageDirsForShard('all', repoRoot)
-
-    expect(runTimedStep).toBeTruthy()
-    expect(cliCoverageBranch).toBeTruthy()
-    expect(packageCoverageDirs).toEqual(PACKAGE_COVERAGE_PLAN.map(({ dir }) => dir))
-    expect(() => packageCoverageDirsForShard('missing-release-shard', repoRoot)).toThrow(
-      "Package coverage shard 'missing-release-shard' matched zero packages.",
-    )
-    expect(workspaceVerify).toContain(
-      'node scripts/release-verification-plan.mjs --package-dirs "$package_coverage_shard"',
-    )
-    expect(workspaceVerify).toContain(
-      'MURPH_PACKAGE_COVERAGE_SHARD is only valid with test:packages:coverage',
-    )
-    expect(workspaceVerify).not.toContain('local package_coverage_labels=(')
-    expect(workspaceVerify).toContain(
-      'local package_label="Package coverage for ${package_dir}"',
-    )
-    expect(cliCoverageBranch).toContain(
-      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
-    )
-    expect(cliCoverageBranch).toContain(
-      'pnpm --dir packages/contracts test:coverage:prepared',
-    )
-    expect(workspaceVerify).toContain('verify:package-boundary:prepared')
-    expect(workspaceVerify).toContain('trap write_package_coverage_status EXIT')
-    expect(workspaceVerify).toContain('package_coverage_pid_finished_without_status()')
-    expect(workspaceVerify).toContain('failure_labels_dir="$failure_dir/failures"')
-    expect(workspaceVerify).toContain('status_dir="$failure_dir/status"')
-    expect(workspaceVerify).toContain('reap_finished_package_coverage()')
-    expect(packageCoverageDirs.indexOf('packages/cli')).toBeLessThan(
-      packageCoverageDirs.indexOf('packages/contracts'),
-    )
-    expect(packageCoverageDirs.indexOf('packages/contracts')).toBeLessThan(
-      packageCoverageDirs.indexOf('packages/device-syncd'),
-    )
-    expect(cliCoverageBranch).toContain('return $?')
-    const harnessDir = mkdtempSync(
-      path.join(os.tmpdir(), 'murph-workspace-verify-harness-'),
-    )
-
-    try {
-      const harnessPath = path.join(harnessDir, 'workspace-verify-harness.sh')
-      writeFileSync(
-        harnessPath,
-        `#!/usr/bin/env bash
-set -euo pipefail
-verify_log() { :; }
-${runTimedStep!}
-run_workspace_package_coverage() {
-  if [[ "$1" == "packages/cli" ]]; then
-    run_timed_step "$2" false
-    return $?
-  fi
-}
-if ! run_workspace_package_coverage packages/cli "CLI package coverage"; then
-  printf 'captured\\n'
-  exit 0
-fi
-printf 'missed\\n'
-exit 1
-`,
-        'utf8',
-      )
-
-      const result = spawnSync('bash', [harnessPath], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      })
-
-      expect(result.status).toBe(0)
-      expect(result.stdout).toContain('captured')
-      expect(result.stdout).not.toContain('missed')
-    } finally {
-      rmSync(harnessDir, { recursive: true, force: true })
-    }
-  })
-
-  it('keeps live agent-builder routing independent of the retired Fable implementation lane', () => {
-    const liveAgentBuilderDocs = [
-      'AGENTS.md',
-      'CLAUDE.md',
-      path.join('agent-docs', 'FRONTEND.md'),
-      path.join('agent-docs', 'operations', 'agent-workflow-routing.md'),
-    ].map((relativePath) => readFileSync(path.join(repoRoot, relativePath), 'utf8'))
-
-    for (const workflowDoc of liveAgentBuilderDocs) {
-      expect(workflowDoc).not.toMatch(/\bFable\b|Claude Code/iu)
-    }
-  })
-
-  it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
-    const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
-    const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
-    const baselineArchitecture = readFileSync(
-      path.join(repoRoot, 'docs', 'architecture.md'),
-      'utf8',
-    )
-    const invariants = readFileSync(
-      path.join(repoRoot, 'docs', 'contracts', '00-invariants.md'),
-      'utf8',
-    )
-    const commandSurface = readFileSync(
-      path.join(repoRoot, 'docs', 'contracts', '03-command-surface.md'),
-      'utf8',
-    )
-    const safeExtensionGuide = readFileSync(
-      path.join(repoRoot, 'docs', 'safe-extension-guide.md'),
-      'utf8',
-    )
-    const security = readFileSync(path.join(repoRoot, 'agent-docs', 'SECURITY.md'), 'utf8')
-    const runtimeStateReadme = readFileSync(
-      path.join(repoRoot, 'packages', 'runtime-state', 'README.md'),
-      'utf8',
-    )
-
-    expect(architecture).toContain('Storage-policy hard line:')
-    expect(architecture).toContain('execution residue, replay/continuity artifacts, and operator diagnostics only')
-    expect(readme).toContain('it does not belong in assistant runtime first')
-    expect(baselineArchitecture).toContain('do not use assistant runtime as a first stop for user-facing or queryable product state')
-    expect(invariants).toContain('never assistant runtime state')
-    expect(commandSurface).toContain('runtime inspection/control only')
-    expect(commandSurface).toContain('not an `assistant` runtime CRUD surface')
-    expect(safeExtensionGuide).toContain('do not prototype it in assistant runtime first')
-    expect(security).toContain('not a product-state staging area')
-    expect(runtimeStateReadme).toContain('intentionally not a product-state incubator')
-    expect(runtimeStateReadme).toContain('execution residue only')
-  })
-
-  it('verifies the live release manifest and publish set', () => {
-    const summary = JSON.parse(
-      execFileSync(
-        'node',
-        [
-          'scripts/verify-release-target.mjs',
-          '--expect-version',
-          cliPackageJson.version ?? 'UNCONFIRMED',
-          '--json',
-        ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(),
-        },
-      ),
-    ) as {
-      packages: Array<{
-        bundledExternalDependencies?: string[]
-        bundledWorkspaceDependencies?: string[]
-        name: string
-      }>
-      primaryPackage: { name: string } | null
-      version: string
-    }
-
-    expect(summary.version).toBe(cliPackageJson.version)
-    expect(summary.primaryPackage?.name).toBe('@murphai/murph')
-    expect([...summary.packages.map((entry) => entry.name)].sort()).toEqual([
-      '@murphai/contracts',
-      '@murphai/hosted-execution',
-      '@murphai/gateway-core',
-      '@murphai/murph',
-      '@murphai/openclaw-plugin',
-    ].sort())
-
-    expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledWorkspaceDependencies: [
-        '@murphai/clinical-records',
-        '@murphai/core',
-        '@murphai/device-syncd',
-        '@murphai/health-metrics',
-        '@murphai/importers',
-        '@murphai/runtime-state',
-      ],
-      name: '@murphai/hosted-execution',
-    }))
-    expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledExternalDependencies: ['incur', 'ink'],
-      bundledWorkspaceDependencies: expect.arrayContaining([
-        '@murphai/assistant-cli',
-        '@murphai/assistant-engine',
-        '@murphai/clinical-records',
-        '@murphai/core',
-        '@murphai/device-syncd',
-        '@murphai/importers',
-        '@murphai/inbox-services',
-        '@murphai/inboxd',
-        '@murphai/messaging-ingress',
-        '@murphai/operator-config',
-        '@murphai/parsers',
-        '@murphai/query',
-        '@murphai/runtime-state',
-        '@murphai/setup-cli',
-        '@murphai/vault-usecases',
-      ]),
-      name: '@murphai/murph',
-    }))
-  })
-
-  it('keeps release script help usage stable for both --help and -h', () => {
-    const cases = [
-      {
-        args: ['scripts/verify-release-target.mjs'],
-        expected:
-          'Usage: node scripts/verify-release-target.mjs [--expect-version <version>] [--json]',
-      },
-      {
-        args: ['scripts/pack-publishables.mjs'],
-        expected:
-          'Usage: node scripts/pack-publishables.mjs [--expect-version <version>] [--out-dir <dir>] [--pack-output <file>] [--clean]',
-      },
-      {
-        args: ['scripts/publish-publishables.mjs'],
-        expected:
-          'Usage: node scripts/publish-publishables.mjs [--pack-output <file>] [--npm-tag <tag>] [--provenance|--no-provenance]',
-      },
-    ] as const
-
-    for (const helpFlag of ['--help', '-h']) {
-      for (const testCase of cases) {
-        const result = runNodeScript(...testCase.args, helpFlag)
-
-        expect(result.status).toBe(0)
-        expect(result.stderr).toBe('')
-        expect(result.stdout.trim()).toBe(testCase.expected)
-      }
-    }
-  })
-
-  it('rejects unknown release-script arguments with the stable error text', () => {
-    for (const scriptPath of [
-      'scripts/verify-release-target.mjs',
-      'scripts/pack-publishables.mjs',
-      'scripts/publish-publishables.mjs',
-    ]) {
-      const result = runNodeScript(scriptPath, '--wat')
-
-      expect(result.status).not.toBe(0)
-      expect(result.stdout).toBe('')
-      expect(result.stderr).toContain('Unknown argument: --wat')
-    }
-  })
-
-  it('preserves current value-token consumption and missing-value validation branches', () => {
-    const verifyResult = runNodeScript(
-      'scripts/verify-release-target.mjs',
-      '--expect-version',
-      '--json',
-    )
-    expect(verifyResult.status).not.toBe(0)
-    expect(verifyResult.stdout).toBe('')
-    expect(verifyResult.stderr).toContain(
-      'Expected release version must match',
-    )
-    expect(verifyResult.stderr).toContain('Received: --json')
-
-    const packMissingValue = runNodeScript(
-      'scripts/pack-publishables.mjs',
-      '--pack-output',
-      '--expect-version',
-    )
-    expect(packMissingValue.status).not.toBe(0)
-    expect(packMissingValue.stdout).toBe('')
-    expect(packMissingValue.stderr).toContain(
-      'Missing value for --expect-version.',
-    )
-
-    const packEmptyString = runNodeScript(
-      'scripts/pack-publishables.mjs',
-      '--out-dir',
-      '',
-    )
-    expect(packEmptyString.status).not.toBe(0)
-    expect(packEmptyString.stdout).toBe('')
-    expect(packEmptyString.stderr).toContain('Missing value for --out-dir.')
-
-    const publishMissingValue = runNodeScript(
-      'scripts/publish-publishables.mjs',
-      '--pack-output',
-      '--npm-tag',
-    )
-    expect(publishMissingValue.status).not.toBe(0)
-    expect(publishMissingValue.stdout).toBe('')
-    expect(publishMissingValue.stderr).toContain('Missing value for --npm-tag.')
-
-    const publishEmptyString = runNodeScript(
-      'scripts/publish-publishables.mjs',
-      '--npm-tag',
-      '',
-    )
-    expect(publishEmptyString.status).not.toBe(0)
-    expect(publishEmptyString.stdout).toBe('')
-    expect(publishEmptyString.stderr).toContain('Missing value for --npm-tag.')
-  })
-
-  it('keeps packages/cli publish-ready as @murphai/murph without package-local release scripts', () => {
-    const packPublishables = readFileSync(
-      path.join(repoRoot, 'scripts', 'pack-publishables.mjs'),
-      'utf8',
-    )
-
-    expect(cliPackageJson.name).toBe('@murphai/murph')
-    expect(cliPackageJson.files).toContain('CHANGELOG.md')
-    expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
-    expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
-    expect(cliPackageJson.dependencies?.['@murphai/device-syncd']).toBe('workspace:*')
-    expect(cliPackageJson.dependencies?.['@murphai/messaging-ingress']).toBe('workspace:*')
-    expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
-    expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
-    expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
-    expect(cliPackageJson.dependencies?.incur).toBe('0.5.1')
-    expect(assistantCliPackageJson.dependencies?.incur).toBe('0.5.1')
-    expect(setupCliPackageJson.dependencies?.incur).toBe('0.5.1')
-    expect(cliPackageJson.dependencies?.['@cfworker/json-schema']).toBe('^4.1.1')
-    expect(cliPackageJson.dependencies?.['@modelcontextprotocol/server']).toBe('2.0.0-alpha.4')
-    expect(cliPackageJson.dependencies?.['@scalar/openapi-types']).toBe('^0.8.0')
-    expect(cliPackageJson.dependencies?.['@toon-format/toon']).toBe('^2.1.0')
-    expect(cliPackageJson.dependencies?.tokenx).toBe('^1.3.0')
-    expect(cliPackageJson.dependencies?.yaml).toBe('^2.8.2')
-    expect(cliPackageJson.bundleDependencies).toContain('incur')
-    expect(cliPackageJson.bundleDependencies).toContain('ink')
-    expect(packPublishables).toContain('resolveBundledExternalDependencies')
-    expect(packPublishables).toContain('copyExternalBundledDependency')
-    expect(packPublishables).toContain('stripBundledDependencyMetadata')
-    expect(packPublishables).toContain("path.join(targetDir, 'package.json')")
-    expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
-    expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
-    expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
-    expect(packPublishables).toContain("relativePath === 'docs'")
-    expect(packPublishables).toContain("relativePath.startsWith('docs/')")
-    expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test(?:-d)?\\.[cm]?[jt]sx?$/u')
-    expect(packPublishables).toContain('assistantCliSurfaceAssemblyPath')
-    expect(packPublishables).toContain("'assemble-assistant-cli-surface.mjs'")
-    expect(packPublishables).toContain('[assistantCliSurfaceAssemblyPath]')
-    expect(packPublishables).not.toContain("'--manifest-timeout-ms'")
-    expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
-    expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
-    expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
-    expect(existsSync(path.join(packageDir, 'scripts', 'update-changelog.sh'))).toBe(false)
-    expect(existsSync(path.join(packageDir, 'scripts', 'generate-release-notes.sh'))).toBe(false)
-    expect(existsSync(path.join(packageDir, 'scripts', 'verify-release-target.ts'))).toBe(false)
-  })
-
   // Prepared artifacts are also trusted by reverse-dependent test:diff fanout.
-  // Keep real release packaging exclusive to explicit CLI acceptance/coverage.
-  it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')(
-    'regenerates and verifies the assistant CLI surface contract in the real release tarball',
-    () => {
-      const openClawBuild = spawnSync(
-        'pnpm',
-        ['--dir', 'packages/openclaw-plugin', 'build'],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(),
-        },
-      )
-      expect(openClawBuild.status, openClawBuild.stderr || openClawBuild.stdout).toBe(0)
-
-      const outDir = mkdtempSync(path.join(os.tmpdir(), 'murph-release-cli-surface-'))
-      const packOutputPath = path.join(outDir, 'pack-output.json')
-      const assistantDistDirectory = path.join(
-        repoRoot,
-        'packages',
-        'assistant-engine',
-        'dist',
-        'assistant',
-      )
-      const artifactPath = path.join(
-        assistantDistDirectory,
-        'cli-surface-contract.generated.json',
-      )
-      const generatorPath = path.join(
-        assistantDistDirectory,
-        'generate-cli-surface-contract.js',
-      )
-      const cliEntryPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
-      const assemblyPath = path.join(
-        repoRoot,
-        'scripts',
-        'assemble-assistant-cli-surface.mjs',
-      )
-
-      try {
-        rmSync(artifactPath, { force: true })
-        const packResult = runNodeScript(
-          'scripts/pack-publishables.mjs',
-          '--out-dir',
-          outDir,
-          '--pack-output',
-          packOutputPath,
-          '--clean',
-        )
-        expect(packResult.status, packResult.stderr || packResult.stdout).toBe(0)
-
-        const packOutput = JSON.parse(readFileSync(packOutputPath, 'utf8')) as {
-          packages: Array<{
-            name: string
-            tarball: string
-          }>
-        }
-        const murphPackage = packOutput.packages.find(
-          (entry) => entry.name === '@murphai/murph',
-        )
-        if (!murphPackage) {
-          throw new Error('Release pack output is missing @murphai/murph.')
-        }
-
-        const installRoot = path.join(outDir, 'installed')
-        mkdirSync(installRoot, { recursive: true })
-        const tarballPath = path.resolve(repoRoot, murphPackage.tarball)
-        execFileSync('tar', ['-xzf', tarballPath, '-C', installRoot], {
-          cwd: repoRoot,
-          env: withoutNodeV8Coverage(),
-        })
-
-        const installedAssistantDirectory = path.join(
-          installRoot,
-          'package',
-          'node_modules',
-          '@murphai',
-          'assistant-engine',
-          'dist',
-          'assistant',
-        )
-        const installedArtifactPath = path.join(
-          installedAssistantDirectory,
-          'cli-surface-contract.generated.json',
-        )
-        expect(existsSync(installedArtifactPath)).toBe(true)
-
-        const installedIncurDirectory = path.join(
-          installRoot,
-          'package',
-          'node_modules',
-          'incur',
-        )
-        const installedIncurPackageJson = JSON.parse(
-          readFileSync(path.join(installedIncurDirectory, 'package.json'), 'utf8'),
-        ) as {
-          bin?: Record<string, string>
-          version?: string
-        }
-        expect(installedIncurPackageJson.version).toBe('0.5.1')
-        expect(installedIncurPackageJson.bin?.incur).toBe('./dist/cli/index.js')
-        expect(existsSync(path.join(installedIncurDirectory, 'dist', 'index.js'))).toBe(true)
-        expect(existsSync(path.join(installedIncurDirectory, 'src', 'index.ts'))).toBe(true)
-        expect(existsSync(path.join(installedIncurDirectory, 'docs'))).toBe(false)
-        for (const testSource of [
-          'Cli.test-d.ts',
-          'Cli.test.ts',
-          'Fetch.test.ts',
-          'Mcp.test.ts',
-          'Parser.test-d.ts',
-          'Skill.test.ts',
-          'e2e.test.ts',
-        ]) {
-          expect(existsSync(path.join(installedIncurDirectory, 'src', testSource))).toBe(false)
-        }
-
-        const installedInkRuntime = readFileSync(
-          path.join(
-            installRoot,
-            'package',
-            'node_modules',
-            'ink',
-            'build',
-            'ink.js',
-          ),
-          'utf8',
-        )
-        expect(installedInkRuntime).toContain(
-          "import throttle from 'es-toolkit/compat/throttle';",
-        )
-        expect(installedInkRuntime).not.toContain(
-          "import { throttle } from 'es-toolkit/compat';",
-        )
-
-        const installedArtifact = JSON.parse(
-          readFileSync(installedArtifactPath, 'utf8'),
-        ) as {
-          contract?: string
-          schemaVersion?: string
-        }
-        expect(installedArtifact.schemaVersion).toBe(
-          'murph.assistant-cli-surface-prebuilt.v3',
-        )
-        const index = installedArtifact.contract?.split('\nCommand index:\n')[1]
-        if (!index) {
-          throw new Error('Packed assistant CLI surface contract is missing its command index.')
-        }
-        const reconstructedCommandNames = index.split('\n').flatMap((line) => {
-          const match = /^- `(?<family>[^`]+)`: (?<leaves>.+)\.$/u.exec(line)
-          if (!match?.groups) {
-            throw new Error(`Invalid compact command-index line: ${line}`)
-          }
-          const family = match.groups.family
-          return [...match.groups.leaves.matchAll(/`(?<leaf>[^`]+)`/gu)].map(
-            ({ groups }) => {
-              if (!groups) {
-                throw new Error(`Invalid compact command leaf in line: ${line}`)
-              }
-              return family === 'root' ? groups.leaf : `${family} ${groups.leaf}`
-            },
-          )
-        })
-        expect(reconstructedCommandNames).toContain('device account reconcile')
-      } finally {
-        if (
-          !existsSync(artifactPath) &&
-          existsSync(cliEntryPath) &&
-          existsSync(generatorPath) &&
-          existsSync(assemblyPath)
-        ) {
-          execFileSync(process.execPath, [assemblyPath], {
-            cwd: repoRoot,
-            env: withoutNodeV8Coverage(),
-          })
-        }
-        rmSync(outDir, { force: true, recursive: true })
-      }
-    },
-    240_000,
-  )
-
-  it('keeps release-only docs drift allowances tied to the manifest package set', () => {
-    const rootDocsDrift = readFileSync(
-      path.join(repoRoot, 'scripts', 'check-agent-docs-drift.sh'),
-      'utf8',
-    )
-
-    expect(rootDocsDrift).toContain('scripts/release-manifest.json')
-    expect(rootDocsDrift).toContain('packages/cli/CHANGELOG.md')
-    expect(rootDocsDrift).toContain('package_jsons_version_only')
-  })
 
   it('wires the workspace package cycle guard into repo verification and keeps the live graph acyclic', () => {
     const workspaceVerify = readFileSync(
@@ -5959,14 +5067,4 @@ exec "\${MURPH_TEST_REAL_WC:?}" "$@"
     }
   })
 
-  it('keeps diff-aware CLI escalation on the targeted verification lane', () => {
-    const workspaceVerifyScript = readFileSync(
-      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
-      'utf8',
-    )
-
-    expect(workspaceVerifyScript).toContain(
-      'run_timed_step "CLI targeted verification" run_verify_cli',
-    )
-  })
 })

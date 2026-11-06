@@ -1,3 +1,4 @@
+import { controlHostedContainerVoice, type HostedContainerActiveInvocation } from "./container-voice-control.ts";
 import {
   createServer,
   type IncomingMessage,
@@ -9,6 +10,8 @@ import { pathToFileURL } from "node:url";
 
 import {
   buildHostedExecutionSafeErrorDetails,
+  parseHostedVoiceCallId,
+  parseHostedVoiceControlRequest,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -22,6 +25,9 @@ import {
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+  mergeHostedMailboxWakeHighWater,
+  readHostedMailboxWakeHighWater,
+  type HostedMailboxWakeHighWater,
   readHostedRuntimeFailurePhaseCode,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -44,6 +50,10 @@ import type {
 import type {
   HostedWorkspaceRestorePreparation,
 } from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
+import {
+  createHostedRuntimeFetchTransportDiagnostics,
+  type HostedRuntimeFetchTransportDiagnostics,
+} from "./runtime-platform/fetch-transport-collector.ts";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
@@ -82,6 +92,98 @@ const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
+const HOSTED_CONTAINER_REQUEST_KINDS = new Map([
+  ["GET /health", "health" as const],
+  ["POST /internal/voice-control", "voice-control" as const],
+  [`POST ${HOSTED_CONTAINER_RUNTIME_WAKE_PATH}`, "runtime-wake" as const],
+  [`POST ${HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH}`, "codex-shell-smoke" as const],
+  [`POST ${HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH}`, "live-model-smoke" as const],
+  [`POST ${HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH}`, "direct-r2-smoke" as const],
+  ["POST /internal/workspace-invocation", "workspace-invocation" as const],
+  [`POST ${HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH}`, "workspace-invocation-abort" as const],
+]);
+
+interface HostedContainerRequestDiagnostics {
+  requestKind: NonNullable<ReturnType<typeof HOSTED_CONTAINER_REQUEST_KINDS.get>> | "unknown";
+  workspaceAttemptId: string | null;
+}
+
+function writeHostedRuntimeWakeResponse(
+  response: ServerResponse,
+  { accepted, absent, mismatch, pending, identityPresent }: {
+    accepted: boolean;
+    absent: boolean;
+    mismatch: boolean;
+    pending: boolean;
+    identityPresent: boolean;
+  },
+): void {
+  if (accepted) {
+    response.setHeader("x-runtime-wake-accepted-at-ms", String(Date.now()));
+    response.setHeader("x-runtime-wake-accepted", "1");
+  } else {
+    response.setHeader("x-runtime-wake-accepted", "0");
+  }
+  if (identityPresent && accepted && !mismatch) {
+    response.setHeader("x-runtime-wake-identity-checked", "1");
+  }
+  if (pending) {
+    response.setHeader("x-runtime-wake-pending", "1");
+  }
+  if (absent) {
+    response.setHeader("x-runtime-wake-absent", "1");
+  }
+  if (mismatch) {
+    response.setHeader("x-runtime-wake-mismatch", "1");
+  }
+  response.statusCode = 204;
+  response.end();
+}
+
+async function runHostedLiveModelSmokeRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  signal: AbortSignal,
+  hydrateHeavyRuntime: () => Promise<HostedContainerHeavyRuntime>,
+): Promise<void> {
+  discardUnreadRequestBody(request);
+  let heavyRuntime: HostedContainerHeavyRuntime | null = null;
+  try {
+    heavyRuntime = await hydrateHeavyRuntime();
+    const result = await heavyRuntime.runLiveModelTurnSmoke({
+      model: heavyRuntime.deployLiveModelTurnSmokeModel,
+      signal: signal,
+    });
+    writeJsonResponse(response, 200, {
+      liveModelTurn: result,
+      ok: true,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message: "Hosted container entrypoint failed the live model turn smoke.",
+      phase: "failed",
+      userId: null,
+    });
+    if (signal.aborted || response.destroyed) {
+      return;
+    }
+    // Live-turn smoke diagnostics carry locally constructed labels plus
+    // capped, redacted Codex stdout/stderr excerpts so CI can show the
+    // provider-side reason without dumping raw JSONL or credentials.
+    writeJsonResponse(response, 500, {
+      error: "Hosted live model turn smoke failed.",
+      ok: false,
+      smokeErrorMessage: heavyRuntime
+        ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
+            error instanceof Error ? error.message : String(error),
+          )
+        : "Hosted live model turn smoke failed before runtime hydration.",
+    });
+  }
+}
 
 interface HostedContainerProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
@@ -128,6 +230,7 @@ interface HostedContainerRuntimeOptions {
   loadHeavyRuntime?: () => Promise<HostedContainerHeavyRuntimeCore>;
   parseRunnerJobInput?: typeof parseHostedExecutionRunnerJobInput;
   prepareWorkspaceRestore?: (input: {
+    fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
     job: HostedExecutionRunnerJobInput;
     signal: AbortSignal;
   }) => Promise<HostedWorkspaceRestorePreparation>;
@@ -207,6 +310,8 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
 }
 
 interface HostedContainerRuntimeWakeRequest {
+  voiceCallId?: string;
+  mailboxWakeHighWater?: HostedMailboxWakeHighWater | null;
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -215,10 +320,51 @@ interface HostedContainerRuntimeWakeRequest {
 }
 
 type HostedContainerRuntimeWakeNotification = {
+  voiceCallId?: string;
+  mailboxWakeHighWater?: HostedMailboxWakeHighWater | null;
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 };
+
+type HostedContainerRuntimeWakeSender =
+  (notification?: HostedContainerRuntimeWakeNotification) => boolean;
+
+// One record per admitted invocation: identity, abort, voice, the installed wake
+// sender, and one coalesced wake held until that sender exists. A request
+// detaches only its own record, before the completion callback, so a successor
+// can enter while the predecessor's callback settles.
+interface HostedContainerAdmittedJob extends HostedContainerActiveInvocation {
+  pendingWake: HostedContainerRuntimeWakeNotification | null;
+  sendWake: HostedContainerRuntimeWakeSender | null;
+}
+
+function createHostedContainerRuntimeWakeNotification(
+  input: HostedContainerRuntimeWakeNotification,
+): HostedContainerRuntimeWakeNotification {
+  return {
+    notifiedAtEpochMs: input.notifiedAtEpochMs,
+    ...(input.voiceCallId ? { voiceCallId: input.voiceCallId } : {}),
+    ...(input.mailboxWakeHighWater ? { mailboxWakeHighWater: input.mailboxWakeHighWater } : {}),
+    ...(input.orchestration ? { orchestration: input.orchestration } : {}),
+    ...(input.requestedProcessingMode ? { requestedProcessingMode: input.requestedProcessingMode } : {}),
+  };
+}
+
+function coalesceHostedContainerRuntimeWake(
+  pending: HostedContainerRuntimeWakeNotification | null,
+  next: HostedContainerRuntimeWakeNotification,
+): HostedContainerRuntimeWakeNotification {
+  if (!pending) return next;
+  return createHostedContainerRuntimeWakeNotification({
+    mailboxWakeHighWater: mergeHostedMailboxWakeHighWater(
+      pending.mailboxWakeHighWater, next.mailboxWakeHighWater,
+    ),
+    notifiedAtEpochMs: pending.notifiedAtEpochMs,
+    orchestration: pending.orchestration ?? next.orchestration,
+    requestedProcessingMode: next.requestedProcessingMode ?? pending.requestedProcessingMode,
+  });
+}
 
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
@@ -286,26 +432,12 @@ export async function startHostedContainerEntrypoint(input: {
     });
   };
   let activeHostedRunnerJobCount = 0;
+  // Finished jobs still awaiting their recovery completion callback. They keep
+  // the process alive (activeHostedRunnerJobCount) but do not block admission.
+  let settlingCompletionCallbackCount = 0;
   let workspaceInvocationAcceptedCount = 0;
-  let conversationWarmActivityCompletedAtEpochMs: number | null = null;
-  let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
-  let activeRuntimeWakeAttemptId: string | null = null;
-  let activeRuntimeWakeLeaseGeneration: string | null = null;
-  let activeRuntimeWakeUserId: string | null = null;
-  let activeRuntimeWakePending = false;
-  let activeRuntimeWakePendingAttemptId: string | null = null;
-  let activeRuntimeWakePendingLeaseGeneration: string | null = null;
-  let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
-  let activeRuntimeWakePendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
-  let activeRuntimeWakePendingRequestedProcessingMode:
-    HostedWorkspaceInvocationProcessingMode | null = null;
-  let activeRuntimeWakePendingUserId: string | null = null;
-  let activeWorkspaceInvocationAbort: {
-    abort: (reason: Error) => void;
-    attemptId: string | null;
-    leaseGeneration: string | null;
-    userId: string;
-  } | null = null;
+  let conversationActivityReceivedAtEpochMs: number | null = null;
+  let activeAdmittedJob: HostedContainerAdmittedJob | null = null;
   let pendingWorkspaceInvocationAbort: HostedContainerWorkspaceInvocationAbortRequest | null = null;
   // Node startup span (process start -> ready to accept). Computed once after the
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
@@ -320,53 +452,186 @@ export async function startHostedContainerEntrypoint(input: {
   // exit fails over to a replacement container through the platform's normal
   // container-stopped retry path.
   const containerShutdownController = new AbortController();
+  async function handleRuntimeWakeRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const wakeReceivedAtEpochMs = Date.now();
+    response.setHeader("x-runtime-wake-received-at-ms", String(wakeReceivedAtEpochMs));
+    const rejectRuntimeWakeAfterShutdown = (): boolean => {
+      if (!containerShutdownController.signal.aborted) {
+        return false;
+      }
+
+      const advertiseAbsent = activeHostedRunnerJobCount === 0;
+      discardUnreadRequestBody(request);
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          activeHostedRunnerJobCount,
+          runtimeWakeAbsent: advertiseAbsent,
+          workspaceAttemptId: activeAdmittedJob?.sendWake ? activeAdmittedJob.attemptId : null,
+          workspacePendingAttemptId: activeAdmittedJob?.attemptId ?? null,
+        },
+        level: "warn",
+        message: "Hosted container entrypoint rejected a runtime wake after shutdown started.",
+        phase: "failed",
+      });
+      response.setHeader("x-runtime-wake-accepted", "0");
+      if (advertiseAbsent) {
+        response.setHeader("x-runtime-wake-absent", "1");
+      }
+      response.statusCode = 204;
+      response.end();
+      return true;
+    };
+
+    if (rejectRuntimeWakeAfterShutdown()) {
+      return;
+    }
+
+    let wakeRequest: HostedContainerRuntimeWakeRequest | null;
+    try {
+      wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted container entrypoint rejected the runtime wake request body.",
+        phase: "failed",
+      });
+      const classified = classifyRequestDecodeError(error);
+      writeJsonResponse(response, classified.statusCode, classified.payload);
+      return;
+    }
+    if (rejectRuntimeWakeAfterShutdown()) {
+      return;
+    }
+    const job = activeAdmittedJob;
+    const wake = job?.sendWake ?? null;
+    const notifiedAtEpochMs = Date.now();
+    let absent = false;
+    let mismatch = false;
+    let pending = false;
+    let accepted = false;
+    const acceptedWakeOrchestration = wakeRequest?.orchestration
+      ? {
+          ...wakeRequest.orchestration,
+          activeWakeAccepted: true,
+          activeWakeFinishedAtEpochMs: notifiedAtEpochMs,
+        }
+      : null;
+    const wakeNotification = createHostedContainerRuntimeWakeNotification({
+      ...wakeRequest,
+      notifiedAtEpochMs,
+      orchestration: acceptedWakeOrchestration,
+    });
+    const identityMismatch = wakeRequest !== null && job !== null
+      && !hostedContainerInvocationIdentityMatches(job, wakeRequest);
+    if (wake) {
+      mismatch = identityMismatch;
+      accepted = !mismatch && wake(wakeNotification) === true;
+    } else if (job && wakeRequest?.voiceCallId === undefined) {
+      // A call reservation needs its live owner; only ordinary wakes coalesce before readiness.
+      mismatch = identityMismatch;
+      if (!mismatch) {
+        job.pendingWake = coalesceHostedContainerRuntimeWake(job.pendingWake, wakeNotification);
+        pending = true;
+        accepted = true;
+      }
+    } else if (wakeRequest) {
+      absent = job === null;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        activeHostedRunnerJobCount,
+        activeRuntimeWakePending: job?.pendingWake != null,
+        activeRuntimeWakePresent: wake !== null,
+        runtimeWakeAccepted: accepted,
+        runtimeWakeAbsent: absent,
+        runtimeWakeMismatch: mismatch,
+        runtimeWakePending: pending,
+        runtimeWakeReceivedAtEpochMs: wakeReceivedAtEpochMs,
+        runtimeWakeHandledAtEpochMs: Date.now(),
+        workspaceAttemptId: wake ? job?.attemptId ?? null : null,
+        workspacePendingAttemptId: job?.attemptId ?? null,
+      },
+      message: "Hosted container entrypoint handled runtime wake request.",
+      phase: "wake.running",
+      userId: null,
+    });
+    writeHostedRuntimeWakeResponse(response, {
+      accepted,
+      absent,
+      mismatch,
+      pending,
+      identityPresent: wakeRequest !== null,
+    });
+    return;
+  }
+
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
-    const requestAbort = createRequestAbortController(request, response);
+    const requestDiagnostics: HostedContainerRequestDiagnostics = {
+      requestKind: "unknown",
+      workspaceAttemptId: null,
+    };
+    const requestAbort = createRequestAbortController(request, response, requestDiagnostics);
     // Once a workspace job is accepted, HTTP transport state is no longer the
     // owner of invocation lifetime. A closed caller connection means the caller
     // may miss the result; explicit aborts arrive through the internal abort
     // endpoint below.
     const invocationAbort = new AbortController();
     let claimedRunnerSlot = false;
-    let conversationActivityObservedForInvocation = false;
-    let conversationActivitySettled = false;
     let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
-    let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let completedInvocation: {
       job: HostedExecutionRunnerJobInput;
       result: HostedExecutionRunnerJobResult;
     } | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
-    let activeAbortRecord: {
-      abort: (reason: Error) => void;
-      attemptId: string | null;
-      leaseGeneration: string | null;
-      userId: string;
-    } | null = null;
-    const settleConversationActivity = () => {
-      if (conversationActivitySettled) {
-        return;
-      }
-      conversationActivitySettled = true;
-      if (conversationActivityObservedForInvocation) {
-        conversationWarmActivityCompletedAtEpochMs = Date.now();
-      }
-    };
-
+    let admittedJob: HostedContainerAdmittedJob | null = null;
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const requestKind = HOSTED_CONTAINER_REQUEST_KINDS.get(`${request.method} ${requestUrl.pathname}`);
+      requestDiagnostics.requestKind = requestKind ?? "unknown";
+
+      if (request.method === "POST" && requestUrl.pathname === "/internal/voice-control") {
+        let command;
+        try {
+          const body: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request, 72 * 1024));
+          if (typeof body !== "object" || body === null || !("userId" in body) || typeof body.userId !== "string") {
+            throw new TypeError("Voice control requires a bound member.");
+          }
+          const { userId, ...payload } = body;
+          command = { ...parseHostedVoiceControlRequest(payload), userId };
+        } catch (error) {
+          // JSON parser messages can quote private SDP bytes.
+          const classified = classifyRequestDecodeError(error instanceof SyntaxError
+            ? new TypeError("Voice request must contain valid JSON.") : error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+        const result = await controlHostedContainerVoice({
+          command, readCurrent: () => activeAdmittedJob,
+          shutdownSignal: containerShutdownController.signal,
+        });
+        writeJsonResponse(response, 200, result);
+        return;
+      }
 
       if (request.method === "GET" && requestUrl.pathname === "/health") {
         response.statusCode = 200;
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
           activeJobCount: activeHostedRunnerJobCount,
+          settlingCompletionCallbackCount,
           codexShellPreflightCompletedAtEpochMs,
           codexShellPreflightStatus,
           cloudflareRegion,
-          conversationWarmActivityCompletedAtEpochMs,
+          conversationActivityReceivedAtEpochMs,
+          // Rollout-only wire alias for the preceding Worker. Never a second
+          // clock: even old consumers see receipt time, not completion time.
+          conversationWarmActivityCompletedAtEpochMs: conversationActivityReceivedAtEpochMs,
           heavyRuntimeHydrationCompletedAtEpochMs,
           heavyRuntimeHydrationStatus,
           hostedRuntimeArchitectureVersion:
@@ -400,187 +665,16 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
-        const wakeReceivedAtEpochMs = Date.now();
-        response.setHeader("x-runtime-wake-received-at-ms", String(wakeReceivedAtEpochMs));
-        const rejectRuntimeWakeAfterShutdown = (): boolean => {
-          if (!containerShutdownController.signal.aborted) {
-            return false;
-          }
-
-          const advertiseAbsent =
-            activeHostedRunnerJobCount === 0
-            && activeRuntimeWake === null
-            && !activeRuntimeWakePending
-            && activeRuntimeWakePendingAttemptId === null
-            && activeWorkspaceInvocationAbort === null;
-          discardUnreadRequestBody(request);
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            details: {
-              activeHostedRunnerJobCount,
-              runtimeWakeAbsent: advertiseAbsent,
-              workspaceAttemptId: activeRuntimeWakeAttemptId,
-              workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
-            },
-            level: "warn",
-            message: "Hosted container entrypoint rejected a runtime wake after shutdown started.",
-            phase: "failed",
-          });
-          response.setHeader("x-runtime-wake-accepted", "0");
-          if (advertiseAbsent) {
-            response.setHeader("x-runtime-wake-absent", "1");
-          }
-          response.statusCode = 204;
-          response.end();
-          return true;
-        };
-
-        if (rejectRuntimeWakeAfterShutdown()) {
-          return;
-        }
-
-        let wakeRequest: HostedContainerRuntimeWakeRequest | null;
-        try {
-          wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "warn",
-            message: "Hosted container entrypoint rejected the runtime wake request body.",
-            phase: "failed",
-          });
-          const classified = classifyRequestDecodeError(error);
-          writeJsonResponse(response, classified.statusCode, classified.payload);
-          return;
-        }
-        if (rejectRuntimeWakeAfterShutdown()) {
-          return;
-        }
-        const wake = activeRuntimeWake;
-        const notifiedAtEpochMs = Date.now();
-        let absent = false;
-        let mismatch = false;
-        let pending = false;
-        let accepted = false;
-        const acceptedWakeOrchestration = wakeRequest?.orchestration
-          ? {
-              ...wakeRequest.orchestration,
-              activeWakeAccepted: true,
-              activeWakeFinishedAtEpochMs: notifiedAtEpochMs,
-            }
-          : null;
-        if (wakeRequest && wake !== null) {
-          mismatch = !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
-            attemptId: activeRuntimeWakeAttemptId,
-            leaseGeneration: activeRuntimeWakeLeaseGeneration,
-            userId: activeRuntimeWakeUserId,
-          });
-          accepted = !mismatch && wake({
-            ...(acceptedWakeOrchestration ? { orchestration: acceptedWakeOrchestration } : {}),
-            notifiedAtEpochMs,
-            ...(wakeRequest.requestedProcessingMode
-              ? { requestedProcessingMode: wakeRequest.requestedProcessingMode }
-              : {}),
-          }) === true;
-        } else if (!wakeRequest) {
-          accepted = wake?.({ notifiedAtEpochMs }) === true;
-        }
-        if (
-          !accepted
-          && !mismatch
-          && wake === null
-          && activeRuntimeWakePendingAttemptId !== null
-        ) {
-          if (
-            wakeRequest
-            && !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
-              attemptId: activeRuntimeWakePendingAttemptId,
-              leaseGeneration: activeRuntimeWakePendingLeaseGeneration,
-              userId: activeRuntimeWakePendingUserId,
-            })
-          ) {
-            mismatch = true;
-          } else {
-            if (!activeRuntimeWakePending) {
-              activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
-              activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-            } else if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
-              activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-            }
-            activeRuntimeWakePendingRequestedProcessingMode =
-              wakeRequest?.requestedProcessingMode
-              ?? activeRuntimeWakePendingRequestedProcessingMode;
-            activeRuntimeWakePending = true;
-            pending = true;
-            accepted = true;
-          }
-        } else if (!accepted && !mismatch && wakeRequest && wake === null) {
-          absent = activeRuntimeWakePendingAttemptId === null;
-        }
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            activeHostedRunnerJobCount,
-            activeRuntimeWakePending,
-            activeRuntimeWakePresent: wake !== null,
-            runtimeWakeAccepted: accepted,
-            runtimeWakeAbsent: absent,
-            runtimeWakeMismatch: mismatch,
-            runtimeWakePending: pending,
-            runtimeWakeReceivedAtEpochMs: wakeReceivedAtEpochMs,
-            runtimeWakeHandledAtEpochMs: Date.now(),
-            workspaceAttemptId: activeRuntimeWakeAttemptId,
-            workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
-          },
-          message: "Hosted container entrypoint handled runtime wake request.",
-          phase: "wake.running",
-          userId: null,
-        });
-        if (accepted) {
-          response.setHeader("x-runtime-wake-accepted-at-ms", String(Date.now()));
-          response.setHeader("x-runtime-wake-accepted", "1");
-        } else {
-          response.setHeader("x-runtime-wake-accepted", "0");
-        }
-        if (wakeRequest && accepted && !mismatch) {
-          response.setHeader("x-runtime-wake-identity-checked", "1");
-        }
-        if (pending) {
-          response.setHeader("x-runtime-wake-pending", "1");
-        }
-        if (absent) {
-          response.setHeader("x-runtime-wake-absent", "1");
-        }
-        if (mismatch) {
-          response.setHeader("x-runtime-wake-mismatch", "1");
-        }
-        response.statusCode = 204;
-        response.end();
+        await handleRuntimeWakeRequest(request, response);
         return;
       }
 
-      const isCodexShellSmokeRequest =
-        request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH;
-      const isLiveModelTurnSmokeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH;
-      const isDirectR2PresignedPutSmokeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
-      const isWorkspaceInvocationRequest =
-        request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
-      const isWorkspaceInvocationAbortRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH;
+      const isCodexShellSmokeRequest = requestKind === "codex-shell-smoke";
+      const isLiveModelTurnSmokeRequest = requestKind === "live-model-smoke";
+      const isDirectR2PresignedPutSmokeRequest = requestKind === "direct-r2-smoke";
+      const isWorkspaceInvocationAbortRequest = requestKind === "workspace-invocation-abort";
 
-      if (
-        !isWorkspaceInvocationRequest
-        && !isWorkspaceInvocationAbortRequest
-        && !isCodexShellSmokeRequest
-        && !isLiveModelTurnSmokeRequest
-        && !isDirectR2PresignedPutSmokeRequest
-      ) {
+      if (requestKind === undefined) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
@@ -606,11 +700,9 @@ export async function startHostedContainerEntrypoint(input: {
           return;
         }
 
-        const activeAbort = activeWorkspaceInvocationAbort;
+        const activeAbort = activeAdmittedJob;
         const accepted = activeAbort !== null
-          && activeAbort.attemptId === abortRequest.attemptId
-          && activeAbort.leaseGeneration === abortRequest.leaseGeneration
-          && activeAbort.userId === abortRequest.userId;
+          && hostedContainerInvocationIdentityMatches(activeAbort, abortRequest);
         if (accepted) {
           activeAbort.abort(new Error("workspace invocation preempted"));
         } else if (activeAbort === null) {
@@ -659,7 +751,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isCodexShellSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -713,7 +805,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isLiveModelTurnSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -722,48 +814,17 @@ export async function startHostedContainerEntrypoint(input: {
         }
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
-        discardUnreadRequestBody(request);
-        let heavyRuntime: HostedContainerHeavyRuntime | null = null;
-        try {
-          heavyRuntime = await hydrateHeavyRuntime();
-          const result = await heavyRuntime.runLiveModelTurnSmoke({
-            model: heavyRuntime.deployLiveModelTurnSmokeModel,
-            signal: requestAbort.signal,
-          });
-          writeJsonResponse(response, 200, {
-            liveModelTurn: result,
-            ok: true,
-          });
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "error",
-            message: "Hosted container entrypoint failed the live model turn smoke.",
-            phase: "failed",
-            userId: null,
-          });
-          if (requestAbort.signal.aborted || response.destroyed) {
-            return;
-          }
-          // Live-turn smoke diagnostics carry locally constructed labels plus
-          // capped, redacted Codex stdout/stderr excerpts so CI can show the
-          // provider-side reason without dumping raw JSONL or credentials.
-          writeJsonResponse(response, 500, {
-            error: "Hosted live model turn smoke failed.",
-            ok: false,
-            smokeErrorMessage: heavyRuntime
-              ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
-                  error instanceof Error ? error.message : String(error),
-                )
-              : "Hosted live model turn smoke failed before runtime hydration.",
-          });
-        }
+        await runHostedLiveModelSmokeRequest(
+          request,
+          response,
+          requestAbort.signal,
+          hydrateHeavyRuntime,
+        );
         return;
       }
 
       if (isDirectR2PresignedPutSmokeRequest) {
-        if (activeHostedRunnerJobCount > 0) {
+        if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
           discardUnreadRequestBody(request);
           writeJsonResponse(response, 409, {
             error: "Hosted runner is busy.",
@@ -801,7 +862,7 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (activeHostedRunnerJobCount > 0) {
+      if (activeHostedRunnerJobCount - settlingCompletionCallbackCount > 0) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -821,6 +882,7 @@ export async function startHostedContainerEntrypoint(input: {
         const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
         const requestEnvelope = parseHostedExecutionContainerInvocationEnvelope(requestBody);
         job = runtime.parseRunnerJobInput(requestEnvelope.job);
+        requestDiagnostics.workspaceAttemptId = job.request.attemptId;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -851,28 +913,27 @@ export async function startHostedContainerEntrypoint(input: {
         phase: "wake.running",
         userId: readHostedExecutionRunnerJobUserId(job),
       });
-      activeRuntimeWakePendingAttemptId = readHostedContainerWorkspaceAttemptId(job);
-      activeRuntimeWakePendingLeaseGeneration = readHostedContainerWorkspaceLeaseGeneration(job);
-      activeRuntimeWakePendingUserId = readHostedExecutionRunnerJobUserId(job);
-      activeAbortRecord = {
+      const invocation: HostedContainerAdmittedJob = {
+        signal: invocationAbort.signal,
         abort(reason: Error) {
           if (!containerShutdownController.signal.aborted && !invocationAbort.signal.aborted) {
             invocationAbort.abort(reason);
           }
         },
-        attemptId: readHostedContainerWorkspaceAttemptId(job),
-        leaseGeneration: readHostedContainerWorkspaceLeaseGeneration(job),
+        attemptId: job.request.attemptId,
+        leaseGeneration: job.request.leaseGeneration,
         userId: readHostedExecutionRunnerJobUserId(job),
+        pendingWake: null,
+        sendWake: null,
       };
-      activeWorkspaceInvocationAbort = activeAbortRecord;
+      admittedJob = invocation;
+      activeAdmittedJob = invocation;
       if (
         pendingWorkspaceInvocationAbort
-        && activeAbortRecord.attemptId === pendingWorkspaceInvocationAbort.attemptId
-        && activeAbortRecord.leaseGeneration === pendingWorkspaceInvocationAbort.leaseGeneration
-        && activeAbortRecord.userId === pendingWorkspaceInvocationAbort.userId
+        && hostedContainerInvocationIdentityMatches(invocation, pendingWorkspaceInvocationAbort)
       ) {
         pendingWorkspaceInvocationAbort = null;
-        activeAbortRecord.abort(new Error("workspace invocation preempted"));
+        invocation.abort(new Error("workspace invocation preempted"));
       }
       stopActiveJobDiagnostics = startHostedContainerActiveJobDiagnostics({
         job,
@@ -884,7 +945,10 @@ export async function startHostedContainerEntrypoint(input: {
       await stopWarmCodexWithLifecycleLog(runtime.stopWarmCodex, {
         reason: "hosted-workspace-restore",
       });
+      // One diagnostic collector spans restore preparation and the invocation.
+      const fetchTransportDiagnostics = createHostedRuntimeFetchTransportDiagnostics();
       workspaceRestorePreparation = runtime.prepareWorkspaceRestore({
+        fetchTransportDiagnostics,
         job,
         signal: invocationAbort.signal,
       });
@@ -896,47 +960,29 @@ export async function startHostedContainerEntrypoint(input: {
       );
 
       const result = await heavyRuntime.runWorkspaceInvocation(job, {
-        onConversationActivityObserved() {
-          conversationActivityObservedForInvocation = true;
+        onConversationActivityObserved(receivedAtEpochMs) {
+          if (Number.isSafeInteger(receivedAtEpochMs)
+            && receivedAtEpochMs >= 0 && receivedAtEpochMs <= Date.now()) {
+            conversationActivityReceivedAtEpochMs = Math.max(
+              conversationActivityReceivedAtEpochMs ?? receivedAtEpochMs,
+              receivedAtEpochMs,
+            );
+          }
+        },
+        onVoiceReady(voice) {
+          invocation.voice = voice;
         },
         onRuntimeWakeReady(sendWake) {
-          activeRuntimeWake = sendWake;
-          activeRuntimeWakeAttemptId = job
-            ? readHostedContainerWorkspaceAttemptId(job)
-            : null;
-          activeRuntimeWakeLeaseGeneration = job
-            ? readHostedContainerWorkspaceLeaseGeneration(job)
-            : null;
-          activeRuntimeWakeUserId = job
-            ? readHostedExecutionRunnerJobUserId(job)
-            : null;
-          runtimeWakeForRequest = sendWake;
-          const pendingWake = activeRuntimeWakePending;
-          const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
-          const pendingWakeOrchestration = activeRuntimeWakePendingOrchestration;
-          const pendingWakeRequestedProcessingMode =
-            activeRuntimeWakePendingRequestedProcessingMode;
-          activeRuntimeWakePending = false;
-          activeRuntimeWakePendingNotifiedAtEpochMs = null;
-          activeRuntimeWakePendingOrchestration = null;
-          activeRuntimeWakePendingRequestedProcessingMode = null;
+          invocation.sendWake = sendWake;
+          const pendingWake = invocation.pendingWake;
+          invocation.pendingWake = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
-              pendingRuntimeWakeDelivered: pendingWake
-                ? sendWake({
-                    ...(pendingWakeOrchestration
-                      ? { orchestration: pendingWakeOrchestration }
-                      : {}),
-                    notifiedAtEpochMs: pendingWakeNotifiedAtEpochMs ?? undefined,
-                    ...(pendingWakeRequestedProcessingMode
-                      ? { requestedProcessingMode: pendingWakeRequestedProcessingMode }
-                      : {}),
-                  })
-                : false,
-              workspaceAttemptId: activeRuntimeWakeAttemptId,
+              pendingRuntimeWakeDelivered: pendingWake ? sendWake(pendingWake) : false,
+              workspaceAttemptId: invocation.attemptId,
             },
             message: "Hosted container invocation reported runtime wake readiness.",
             phase: "wake.running",
@@ -946,6 +992,7 @@ export async function startHostedContainerEntrypoint(input: {
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         ...(orchestrationMilestones ? { orchestration: orchestrationMilestones } : {}),
+        fetchTransportDiagnostics,
         preparedWorkspaceRestore,
         runnerJobAcceptedAt,
         releaseSha: runnerBundle?.releaseSha ?? null,
@@ -957,11 +1004,8 @@ export async function startHostedContainerEntrypoint(input: {
       completedInvocation = { job, result };
 
       if (requestAbort.signal.aborted || response.destroyed) {
-        settleConversationActivity();
         return;
       }
-
-      settleConversationActivity();
 
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -977,9 +1021,6 @@ export async function startHostedContainerEntrypoint(input: {
       response.end(JSON.stringify(result));
     } catch (caughtError) {
       let error = caughtError;
-      if (job) {
-        settleConversationActivity();
-      }
       const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
 
       if (
@@ -1019,41 +1060,15 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
-      if (job) {
-        settleConversationActivity();
-      }
       stopActiveJobDiagnostics?.();
-      if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
-        activeRuntimeWake = null;
-        activeRuntimeWakeAttemptId = null;
-        activeRuntimeWakeLeaseGeneration = null;
-        activeRuntimeWakeUserId = null;
-      }
-      if (
-        job
-        && activeRuntimeWakePendingAttemptId === readHostedContainerWorkspaceAttemptId(job)
-      ) {
-        activeRuntimeWakePending = false;
-        activeRuntimeWakePendingAttemptId = null;
-        activeRuntimeWakePendingLeaseGeneration = null;
-        activeRuntimeWakePendingNotifiedAtEpochMs = null;
-        activeRuntimeWakePendingOrchestration = null;
-        activeRuntimeWakePendingRequestedProcessingMode = null;
-        activeRuntimeWakePendingUserId = null;
-      }
-      if (
-        activeAbortRecord
-        && activeWorkspaceInvocationAbort === activeAbortRecord
-      ) {
-        activeWorkspaceInvocationAbort = null;
-      }
+      if (activeAdmittedJob === admittedJob) activeAdmittedJob = null;
+      requestAbort.cleanup();
+      await recordSettlingCompletionCallback(completedInvocation);
+      // A checkpoint control response must not let shutdown exit while the
+      // completed invocation's durable completion callback is still settling.
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
-      requestAbort.cleanup();
-      await recordHostedContainerRuntimeCompletionIfPresent(
-        completedInvocation,
-      );
       maybeExitAfterContainerShutdownDrain();
     }
   });
@@ -1075,6 +1090,19 @@ export async function startHostedContainerEntrypoint(input: {
   });
 
   let containerShutdownExitStarted = false;
+  // The job and its response are finished; only the recovery callback remains.
+  const recordSettlingCompletionCallback = async (
+    completedInvocation: Parameters<typeof recordHostedContainerRuntimeCompletionIfPresent>[0],
+  ): Promise<void> => {
+    if (!completedInvocation) return;
+    settlingCompletionCallbackCount += 1;
+    try {
+      await recordHostedContainerRuntimeCompletionIfPresent(completedInvocation);
+    } finally {
+      settlingCompletionCallbackCount -= 1;
+    }
+  };
+
   const maybeExitAfterContainerShutdownDrain = () => {
     if (
       !containerShutdownController.signal.aborted
@@ -1164,7 +1192,16 @@ export async function startHostedContainerEntrypoint(input: {
       serverListeningAtEpochMs = Date.now();
       pendingColdNodeStartupMs =
         serverListeningAtEpochMs - HOSTED_CONTAINER_PROCESS_START_MS;
-      hydrateHeavyRuntime();
+      // After hydration, one throwaway Codex start pays the binary's
+      // first-launch reads while the workspace restores. Hydration failure
+      // stays owned by hydrateHeavyRuntime's poison handler.
+      void hydrateHeavyRuntime()
+        .then(async (heavyRuntime) => {
+          await heavyRuntime.warmCodexBinary?.({
+            signal: containerShutdownController.signal,
+          });
+        })
+        .catch(() => undefined);
       hostedContainerFatalRuntimeDrain = fatalRuntimeDrainOwner;
       resolve();
     });
@@ -1300,11 +1337,30 @@ async function startHostedContainerEntrypointCli(): Promise<void> {
     processApi: defaultHostedContainerProcessApi,
   });
 
+  // Keep V8 profiling outside the static boot closure.
+  const stopCpuProfiler = await import("./container-cpu-profiler.ts")
+    .then(({ startHostedContainerCpuProfiler }) => startHostedContainerCpuProfiler({
+      emit: emitHostedExecutionStructuredLog,
+    }))
+    .catch(() => {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: { lifecycleStage: "entrypoint-cpu-profiler-unavailable" },
+        message: "Hosted container CPU profiler unavailable.",
+        phase: "wake.running",
+        userId: null,
+      });
+      return () => {};
+    });
   try {
     const server = await startHostedContainerEntrypoint({ port });
-    server.once("close", stopCpuWatchdog);
+    server.once("close", () => {
+      stopCpuWatchdog();
+      stopCpuProfiler();
+    });
   } catch (error) {
     stopCpuWatchdog();
+    stopCpuProfiler();
     throw error;
   }
 }
@@ -1529,6 +1585,8 @@ function parseHostedContainerRuntimeWakeRequest(
     attemptId,
     leaseGeneration,
     orchestration: readHostedContainerRuntimeWakeOrchestration(record.orchestration),
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
+    mailboxWakeHighWater: readHostedMailboxWakeHighWater(record.mailboxWakeHighWater),
     ...(requestedProcessingMode ? { requestedProcessingMode } : {}),
     userId,
   };
@@ -1568,17 +1626,13 @@ async function recordHostedContainerRuntimeCompletionIfPresent(
   await recordHostedContainerRuntimeCompletionBestEffort(input);
 }
 
-function hostedContainerRuntimeWakeIdentityMatches(
-  expected: HostedContainerRuntimeWakeRequest,
-  actual: {
-    attemptId: string | null;
-    leaseGeneration: string | null;
-    userId: string | null;
-  },
+function hostedContainerInvocationIdentityMatches(
+  job: HostedContainerAdmittedJob,
+  identity: HostedContainerWorkspaceInvocationAbortRequest,
 ): boolean {
-  return actual.attemptId === expected.attemptId
-    && actual.leaseGeneration === expected.leaseGeneration
-    && actual.userId === expected.userId;
+  return job.attemptId === identity.attemptId
+    && job.leaseGeneration === identity.leaseGeneration
+    && job.userId === identity.userId;
 }
 
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
@@ -1592,18 +1646,6 @@ function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
 
 function readHostedExecutionRunnerJobUserId(job: HostedExecutionRunnerJobInput): string {
   return job.request.userId;
-}
-
-function readHostedContainerWorkspaceAttemptId(
-  job: HostedExecutionRunnerJobInput,
-): string | null {
-  return job.kind === "workspace-invocation" ? job.request.attemptId : null;
-}
-
-function readHostedContainerWorkspaceLeaseGeneration(
-  job: HostedExecutionRunnerJobInput,
-): string | null {
-  return job.kind === "workspace-invocation" ? job.request.leaseGeneration : null;
 }
 
 function assertHostedContainerArchitectureVersion(value: unknown): void {
@@ -1673,6 +1715,7 @@ async function loadHostedContainerHeavyRuntime(): Promise<HostedContainerHeavyRu
 }
 
 async function prepareHostedContainerWorkspaceRestore(input: {
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   job: HostedExecutionRunnerJobInput;
   signal: AbortSignal;
 }): Promise<HostedWorkspaceRestorePreparation> {
@@ -1718,6 +1761,7 @@ function raceHostedContainerInvocationAbort<T>(
 export function createRequestAbortController(
   request: HostedAbortRequestLike,
   response: HostedAbortResponseLike,
+  diagnostics?: Readonly<HostedContainerRequestDiagnostics>,
 ): {
   cleanup: () => void;
   requestSignal: AbortSignal;
@@ -1739,6 +1783,8 @@ export function createRequestAbortController(
       component: "container",
       details: {
         exitReason,
+        requestKind: diagnostics?.requestKind ?? "unknown",
+        workspaceAttemptId: diagnostics?.workspaceAttemptId ?? false,
       },
       level: "warn",
       message:

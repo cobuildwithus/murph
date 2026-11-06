@@ -1,4 +1,5 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { createAssistantOutboxIntent, listAssistantOutboxIntents } from "@murphai/assistant-engine/assistant-outbox";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +11,7 @@ import {
   HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import {
   findNextHostedSystemMailboxQueueItem,
@@ -19,7 +21,7 @@ import {
   resolveHostedSystemMailboxProgress,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
-  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+  setHostedDeviceSyncMaintenanceMailboxWakeAt,
   updateHostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
@@ -40,6 +42,104 @@ import {
 } from "../src/hosted-runtime/mailbox-state.ts";
 
 const DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY = "device-sync.wake:dense-raw-retention";
+
+describe("retired system work in saved snapshots", () => {
+  it.each(["pending", "sending", "recording"])("discards retired %s work without blocking active successors", async (status) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retired-system-state-"));
+    try {
+      const active = buildPendingRuntimeControlMailboxItem({
+        itemId: "active", mailboxLaneSeq: "4",
+        mailboxDedupeKey: "runtime-control:refresh", wakeKind: "runtime.browser-vault-refresh-requested",
+      });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [active] }));
+      const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+      const envelope = JSON.parse(await readFile(statePath, "utf8"));
+      const retired = ["environment-interview.completed", "environment-voice.captured", "runtime.codex-auth-requested"].map((kind, index) => ({
+        ...active,
+        itemId: `retired_${index}`, mailboxLaneSeq: String(index + 1),
+        mailboxDedupeKey: `${kind}:retired`,
+        routeAction: index === 0 ? "run-environment-interview"
+          : index === 1 ? "run-environment-voice" : "apply-runtime-control-request",
+        wake: { kind, ...(index === 2 ? { action: "connect", attemptId: "hca_retired_synthetic" } : {}) },
+        status,
+        postCheckpointRecord: index === 1 && status === "recording"
+          ? { kind: "environment-voice.audio-delete", audioId: "expired-audio" }
+          : index === 2 && status === "recording"
+            ? { kind: "codex-auth.updated", phase: "connected", attemptId: "hca_retired_synthetic" } : null,
+      }));
+      // Restore obsolete wire shapes directly; active writers cannot produce them.
+      envelope.value.pending = [...retired, ...envelope.value.pending];
+      await writeFile(statePath, JSON.stringify(envelope));
+      const restored = await readHostedSystemMailboxState(vaultRoot);
+      expect(restored.pending.map((item) => item.itemId)).toEqual(["active"]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "4", state: restored })).toBe("3");
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item: restored.pending[0]!, vaultRoot });
+      expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({ pending: [] });
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "4", state: await readHostedSystemMailboxState(vaultRoot) })).toBe("4");
+      expect(await readFile(statePath, "utf8")).not.toMatch(/environment-|codex-auth/);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["creative-response", "pending"],
+    ["creative-response", "sending"],
+    ["creative-response", "recording"],
+    ["creative-response-text", "pending"],
+    ["creative-response-text", "sending"],
+    ["creative-response-text", "recording"],
+  ])("discards restored %s in %s before active-state parsing and advances past it", async (notificationPromptProfile, status) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retired-notification-state-"));
+    try {
+      await createAssistantOutboxIntent({
+        channel: "telegram", identityId: "synthetic-group", message: "Previously committed synthetic response.",
+        deliveryIdempotencyKey: "synthetic-committed-creative", sessionId: "synthetic-session",
+        threadId: "synthetic-group", threadIsDirect: false, turnId: "synthetic-turn", vault: vaultRoot,
+      });
+      const committedOutbox = await listAssistantOutboxIntents(vaultRoot);
+      const active = buildPendingAssistantNotificationMailboxItem({ itemId: "private-recovery", mailboxLaneSeq: "2" });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [active] }));
+      const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+      const envelope = JSON.parse(await readFile(statePath, "utf8"));
+      envelope.value.pending.unshift({
+        ...active,
+        itemId: "retired-creative",
+        mailboxLaneSeq: "1",
+        status,
+        // These removed fields must never enter strict active-state parsing.
+        routeAction: "retired-creative-action",
+        postCheckpointRecord: { kind: "retired-creative-record" },
+        wake: { ...active.wake, notification: { notificationPromptProfile } },
+      });
+      await writeFile(statePath, JSON.stringify(envelope));
+      const restored = await readHostedSystemMailboxState(vaultRoot);
+      expect(restored.pending).toEqual([active]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "2", state: restored })).toBe("1");
+      expect(findNextHostedSystemMailboxQueueItem({ allowedRouteActions: null, now: "2026-04-27T00:00:00.000Z", state: restored })?.itemId).toBe(active.itemId);
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item: active, vaultRoot });
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "2", state: await readHostedSystemMailboxState(vaultRoot) })).toBe("2");
+      expect(await readFile(statePath, "utf8")).not.toContain("creative-response");
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual(committedOutbox);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([null, { kind: "unknown.event" }, { kind: "runtime.browser-vault-refresh-requested" }, { kind: "assistant.notification.requested", notification: { notificationPromptProfile: "unknown-profile" } }])("still rejects malformed or unknown active wakes: %j", async (wake) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-invalid-system-state-"));
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));
+      const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+      const envelope = JSON.parse(await readFile(statePath, "utf8"));
+      envelope.value.pending = [{ wake }];
+      await writeFile(statePath, JSON.stringify(envelope));
+      await expect(readHostedSystemMailboxState(vaultRoot)).rejects.toThrow();
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 function listDenseRawRetentionMailboxItems(
   state: HostedSystemMailboxState,
@@ -597,7 +697,7 @@ describe("hosted runtime system mailbox state", () => {
 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:30.000Z",
         userId: "member_123",
         vaultRoot,
@@ -641,11 +741,11 @@ describe("hosted runtime system mailbox state", () => {
       mailboxLaneSeq: "2",
       wakeKind: "runtime.maintenance-requested",
     });
-    const codexDisconnect = buildPendingRuntimeControlMailboxItem({
-      itemId: "pending_codex_disconnect",
-      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+    const manualRequest = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_manual_request",
+      mailboxDedupeKey: "runtime-control:manual:disconnect",
       mailboxLaneSeq: "3",
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
     const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_browser_vault_refresh",
@@ -657,13 +757,13 @@ describe("hosted runtime system mailbox state", () => {
     expect(findNextHostedSystemMailboxQueueItem({
       allowedRouteActions: ["apply-runtime-control-request"],
       now: "2026-04-27T00:00:00.000Z",
-      state: { pending: [projectionRetry, laterProjection, codexDisconnect] },
-    })).toEqual(codexDisconnect);
+      state: { pending: [projectionRetry, laterProjection, manualRequest] },
+    })).toEqual(manualRequest);
 
     expect(findNextHostedSystemMailboxQueueItem({
       allowedRouteActions: ["apply-runtime-control-request"],
       now: "2026-04-27T00:01:00.000Z",
-      state: { pending: [projectionRetry, laterProjection, codexDisconnect] },
+      state: { pending: [projectionRetry, laterProjection, manualRequest] },
     })).toEqual(projectionRetry);
 
     expect(findNextHostedSystemMailboxQueueItem({
@@ -681,7 +781,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     try {
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [projectionRetry, laterProjection, codexDisconnect],
+        pending: [projectionRetry, laterProjection, manualRequest],
       }));
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         allowedRouteActions: ["apply-runtime-control-request"],
@@ -694,7 +794,7 @@ describe("hosted runtime system mailbox state", () => {
       });
 
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [maintenanceRetry, codexDisconnect],
+        pending: [maintenanceRetry, manualRequest],
       }));
       await expect(resolveHostedSystemMailboxWakeCandidates({
         allowedRouteActions: ["apply-runtime-control-request"],
@@ -717,17 +817,12 @@ describe("hosted runtime system mailbox state", () => {
   });
 
   it("uses the ready approved continuation as the default item and wake authority", async () => {
-    const codexRetry = buildPendingRuntimeControlMailboxItem({
-      itemId: "pending_codex_retry",
-      mailboxDedupeKey: "runtime-control:codex-auth:retry",
+    const manualRetry = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_manual_retry",
+      mailboxDedupeKey: "runtime-control:manual:retry",
       mailboxLaneSeq: "1",
       nextAttemptAt: "2026-04-27T00:01:00.000Z",
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
     const deviceWake = buildPendingDeviceSyncMailboxItem({
       itemId: "pending_device_sync",
@@ -745,7 +840,7 @@ describe("hosted runtime system mailbox state", () => {
     });
     const state = {
       pending: [
-        codexRetry,
+        manualRetry,
         deviceWake,
         approvedContinuationA,
         approvedContinuationB,
@@ -827,7 +922,7 @@ describe("hosted runtime system mailbox state", () => {
       });
 
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [codexRetry, deviceWake],
+        pending: [manualRetry, deviceWake],
       }));
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => "2026-04-27T00:00:00.000Z",
@@ -918,9 +1013,9 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     const earlierDefaultOwned = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_earlier_default_owned",
-      mailboxDedupeKey: "runtime-control:codex-auth:connect",
+      mailboxDedupeKey: "runtime-control:manual:connect",
       mailboxLaneSeq: "1",
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
     const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_browser_vault_refresh",
@@ -930,9 +1025,9 @@ describe("hosted runtime system mailbox state", () => {
     });
     const laterDefaultOwned = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_default_owned",
-      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+      mailboxDedupeKey: "runtime-control:manual:disconnect",
       mailboxLaneSeq: "3",
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
 
     try {
@@ -1014,7 +1109,7 @@ describe("hosted runtime system mailbox state", () => {
     const foreground = approved
       ? buildPendingApprovalContinuationMailboxItem({ effectId: "synthetic_effect", itemId: "foreground", mailboxLaneSeq: "3" })
       : buildPendingRuntimeControlMailboxItem({ itemId: "foreground", mailboxLaneSeq: "3",
-        mailboxDedupeKey: "runtime-control:synthetic-auth", wakeKind: "runtime.codex-auth-requested" });
+        mailboxDedupeKey: "runtime-control:synthetic-manual", wakeKind: "runtime.manual-requested" });
     try {
       await writeHostedMailboxImportState({ vaultRoot, state: {
         ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "3" },
@@ -1027,7 +1122,7 @@ describe("hosted runtime system mailbox state", () => {
         now: () => now, vaultRoot,
       })).resolves.toEqual({
         defaultOwned: { at: now, reason: "assistant" },
-        next: { at: now, executionClass: "model_free", reason: "device-sync.reconcile" },
+        next: { at: retryAt, executionClass: null, reason: "device-sync.reconcile" },
       });
       // An already-running default pass keeps its ordinary foreground choice.
       await expect(resolveHostedSystemMailboxWakeCandidates({ now: () => now, vaultRoot }))
@@ -1071,8 +1166,8 @@ describe("hosted runtime system mailbox state", () => {
         } });
         await updateHostedSystemMailboxState(vaultRoot, () => state);
         await expect(resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
-          .resolves.toEqual({ at: boundary === "same-connection" ? retryAt : now,
-            executionClass: boundary === "same-connection" ? null : "model_free",
+          .resolves.toEqual({ at: now,
+            executionClass: "model_free",
             reason: "device-sync.reconcile" });
         const restored = await readHostedSystemMailboxState(vaultRoot);
         expect(restored.pending).toEqual(state.pending);
@@ -1452,7 +1547,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         now: () => "2026-04-07T23:59:30.000Z",
         userId: "member_123",
@@ -1473,7 +1568,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       });
 
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:30.000Z",
         now: () => "2026-04-08T00:00:00.000Z",
         userId: "member_123",
@@ -1542,7 +1637,7 @@ describe("hosted runtime system mailbox state", () => {
     const dueAt = "2026-04-08T00:00:00.000Z";
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: dueAt,
         now: () => "2026-04-07T23:59:30.000Z",
         userId: "member_123",
@@ -1671,7 +1766,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         now: () => "2026-04-07T23:59:30.000Z",
         userId: "member_123",
@@ -1692,7 +1787,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       });
 
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: null,
         now: () => "2026-04-08T00:00:00.000Z",
         userId: "member_123",
@@ -1742,7 +1837,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:30.000Z",
         now: () => "2026-04-08T00:00:00.000Z",
         userId: "member_123",
@@ -1751,7 +1846,7 @@ describe("hosted runtime system mailbox state", () => {
       const [firstSuccessor] = await readDenseRawRetentionMailboxItems(vaultRoot);
       expect(firstSuccessor).toBeDefined();
 
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:01:00.000Z",
         now: () => "2026-04-08T00:00:30.000Z",
         userId: "member_123",
@@ -1813,24 +1908,15 @@ function buildPendingRuntimeControlMailboxItem(input: {
   postCheckpointRecord?: HostedSystemMailboxPendingItem["postCheckpointRecord"];
   wakeKind:
     | "runtime.browser-vault-refresh-requested"
-    | "runtime.codex-auth-requested"
+    | "runtime.manual-requested"
     | "runtime.maintenance-requested";
 }): HostedSystemMailboxPendingItem {
-  const wake = input.wakeKind === "runtime.codex-auth-requested"
-    ? {
-        action: "disconnect" as const,
-        attemptId: "hca_abcdefghijklmnop",
-        eventId: input.mailboxDedupeKey,
-        kind: input.wakeKind,
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_123",
-      }
-    : {
-        eventId: input.mailboxDedupeKey,
-        kind: input.wakeKind,
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_123",
-      };
+  const wake = {
+    eventId: input.mailboxDedupeKey,
+    kind: input.wakeKind,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    userId: "member_123",
+  };
   return {
     attemptCount: 1,
     itemId: input.itemId,

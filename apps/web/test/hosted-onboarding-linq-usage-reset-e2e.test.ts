@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
@@ -303,10 +304,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
-  handleHostedStripeWebhook: vi.fn(),
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => {
     throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-usage-reset-e2e.test.ts");
@@ -425,10 +422,10 @@ describe("hosted Linq usage reset e2e", () => {
     vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
     vi.clearAllMocks();
 
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
 
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -438,15 +435,13 @@ describe("hosted Linq usage reset e2e", () => {
         memberId: MEMBER_ID,
         phoneNumber: SENDER_PHONE,
         phoneNumberVerifiedAt: new Date("2026-01-01T00:00:00.000Z"),
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
-        walletAddress: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+
+
       },
       matchedBy: "phoneNumber",
     });
@@ -727,7 +722,7 @@ function createUsageResetPrismaFixture(input: {
       const strings = taggedTemplate
         ? query as readonly string[]
         : (query as { strings?: readonly string[] }).strings ?? [];
-      return strings.join(" ").toLowerCase().includes("for update skip locked")
+      return /select "id"\s+from "hosted_member"[\s\S]*for no key update/i.test(strings.join(" "))
         ? [{ id: values[0] }]
         : [];
     }),
@@ -1059,6 +1054,7 @@ function makeHostedLinqDailyState(input: {
     lastSeenAt: new Date("2026-04-30T12:00:00.000Z"),
     memberId: MEMBER_ID,
     onboardingLinkSentAt: input.onboardingLinkSentAt ?? null,
+    signupLinkReminderSentAt: null,
     outboundCount: input.outboundCount ?? 0,
     quotaReplySentAt: input.quotaReplySentAt ?? null,
     updatedAt: new Date("2026-04-30T12:00:00.000Z"),

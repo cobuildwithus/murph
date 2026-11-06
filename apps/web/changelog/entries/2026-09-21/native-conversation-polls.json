@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "native-conversation-polls",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Create polls with Murph",
+    "summary": "Ask Murph to create a native poll in your current iMessage or Telegram conversation, then ask it for the results.",
+    "details": "Murph can find polls it created in that conversation. iMessage polls show voter handles and allow multiple choices. Telegram supports anonymous or named voting, uses one choice, and can be closed on request. Ask who voted on a named poll; Telegram totals and voter details reflect the updates Murph has received.",
+    "relevanceTags": ["conversations", "polls"],
+    "sourcePullRequests": [3643],
+    "tryIt": {
+      "label": "Create a poll",
+      "prompt": "Create a poll here: Which day for our walk? Options: Saturday and Sunday."
+    }
+  }
+}

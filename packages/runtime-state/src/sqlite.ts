@@ -22,6 +22,8 @@ export interface OpenSqliteRuntimeDatabaseOptions {
   foreignKeys?: boolean;
   journalMode?: "DELETE" | "TRUNCATE" | "PERSIST" | "MEMORY" | "WAL" | "OFF";
   synchronous?: "OFF" | "NORMAL" | "FULL" | "EXTRA";
+  /** Initial page size, applied before WAL. Existing databases are not repacked. */
+  pageSize?: 512 | 1024 | 2048 | 4096 | 8192 | 16384 | 32768 | 65536;
 }
 
 export interface SqliteRuntimeMigration {
@@ -56,6 +58,9 @@ export function openSqliteRuntimeDatabase(
     }
 
     if (!readOnly) {
+      if (options.pageSize !== undefined) {
+        database.exec(`PRAGMA page_size = ${options.pageSize};`);
+      }
       database.exec(
         `PRAGMA journal_mode = ${options.journalMode ?? "WAL"}; PRAGMA synchronous = ${
           options.synchronous ?? "NORMAL"

@@ -17,10 +17,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { validatePrChangelog } from "./check-pr-changelog.mjs";
-import { validatePrComplexitySummary } from "./check-pr-complexity-summary.mjs";
 import { validatePrDeploymentConcerns } from "./check-pr-deployment-concerns.mjs";
 import {
   normalizeFrogPullRequestBody,
+  renderFrogChangeShape,
   selectFrogPullRequest,
 } from "./frog-pr-context.ts";
 
@@ -52,20 +52,60 @@ function renderPlainFooterDeclaration(
 }
 
 describe("Frog workflow guards", () => {
+  const shapeFiles = [
+    { path: ".agents/friction-log/example/friction.md", changeType: "MODIFIED", additions: 1, deletions: 2 },
+    { path: ".agents/friction-log/closed/friction.md", changeType: "DELETED", additions: 0, deletions: 20 },
+    { path: ".agents/friction-log/.sync.json", changeType: "MODIFIED", additions: 3, deletions: 1 },
+  ];
+  const shapeSnapshot = { changedFiles: 3, additions: 4, deletions: 23, files: shapeFiles };
+
+  it("derives complete change-shape evidence and replaces stale owned totals", () => {
+    const shape = renderFrogChangeShape(shapeSnapshot);
+    expect(shape).toContain("| Docs | 1 | 22 |");
+    expect(shape).toContain("| Generated / other | 3 | 1 |");
+    expect(shape).toContain("| **Total** | **4** | **23** |");
+    const body = normalizeFrogPullRequestBody("Generated report.", "Owner context.", shape);
+    expect(normalizeFrogPullRequestBody(body, "Owner context.", shape)).toBe(body);
+    const replacement = renderFrogChangeShape({ changedFiles: 0, additions: 0, deletions: 0, files: [] });
+    const updated = normalizeFrogPullRequestBody(`${body}\nHuman note.`, "Owner context.", replacement);
+    expect(updated).not.toContain("| **Total** | **4** | **23** |");
+    expect(updated).toContain("| **Total** | **0** | **0** |");
+    expect(updated).toContain("Human note.");
+    expect(updated.match(/^## Change-shape breakdown$/gmu)).toHaveLength(1);
+  });
+
+  it.each([
+    { changedFiles: 4 },
+    { files: [shapeFiles[0], shapeFiles[0], shapeFiles[2]] },
+    { additions: 5 },
+    { deletions: -1 },
+    { files: [{ ...shapeFiles[0], path: "scripts/tool.ts" }, ...shapeFiles.slice(1)] },
+    { files: [{ ...shapeFiles[0], changeType: "RENAMED" }, ...shapeFiles.slice(1)] },
+    { files: [{ ...shapeFiles[0], additions: 0.5 }, ...shapeFiles.slice(1)] },
+    { files: [{ ...shapeFiles[0], additions: 0, deletions: 0 }, ...shapeFiles.slice(1)] },
+  ])("rejects incomplete or unsupported change-shape evidence (%j)", (override) => {
+    expect(() => renderFrogChangeShape({ ...shapeSnapshot, ...override })).toThrow();
+  });
+
+  it("normalizes the workflow's single PR response through the CLI", () => {
+    const result = spawnSync(process.execPath, [
+      "--import", "tsx", path.join(repoRoot, "scripts/frog-pr-context.ts"), "normalize",
+    ], {
+      input: JSON.stringify({ ...shapeSnapshot, body: "Generated report." }),
+      encoding: "utf8",
+      env: { ...process.env, FROG_PR_BODY_FOOTER: "Owner context." },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Generated report.");
+    expect(result.stdout).toContain("| **Total** | **4** | **23** |");
+    expect(result.stdout).not.toContain('"changedFiles"');
+    expect(readRepoFile(".github/workflows/friction-log.yml"))
+      .toContain("--json body,files,changedFiles,additions,deletions");
+  });
+
   it("keeps local commands file-backed and workflow-owned", () => {
     expect(statSync(frogScriptPath).mode & 0o111).not.toBe(0);
     expect(spawnSync("bash", ["-n", frogScriptPath]).status).toBe(0);
-
-    const frogScript = readRepoFile("scripts", "frog");
-    expect(frogScript).toContain(
-      "unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA",
-    );
-    expect(frogScript).toContain('cd "$repo_root"');
-    expect(frogScript).toContain(
-      'frog_bin="$repo_root/node_modules/.bin/frog"',
-    );
-    expect(frogScript).toContain('exec "$frog_bin" "$@"');
-    expect(frogScript).not.toContain("pnpm dlx");
 
     const publish = spawnSync(frogScriptPath, ["publish"], {
       encoding: "utf8",
@@ -404,8 +444,10 @@ fi
     const normalizedBody = normalizeFrogPullRequestBody(
       generatedBody,
       footer,
+      renderFrogChangeShape({ changedFiles: 0, additions: 0, deletions: 0, files: [] }),
     );
-    expect(normalizeFrogPullRequestBody(normalizedBody, footer)).toBe(
+    expect(normalizeFrogPullRequestBody(normalizedBody, footer,
+      renderFrogChangeShape({ changedFiles: 0, additions: 0, deletions: 0, files: [] }))).toBe(
       normalizedBody,
     );
     expect(normalizedBody.match(/^## Why and outcome$/gmu)).toHaveLength(1);
@@ -413,28 +455,6 @@ fi
     expect(
       normalizedBody.match(/^## Non-obvious affected surfaces$/gmu),
     ).toHaveLength(1);
-    expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
-      1,
-    );
-    expect(normalizedBody.match(/^## Complexity impact$/gmu)).toHaveLength(1);
-    const complexityItems = /^## Complexity impact\n\n(?<items>(?:- .+\n?)+)/mu
-      .exec(normalizedBody)?.groups?.items
-      .trim()
-      .split("\n");
-    expect(complexityItems).toHaveLength(3);
-    expect(
-      validatePrComplexitySummary({
-        changedPaths: [".agents/friction-log/example.md"],
-        prBodyHtml: [
-          "<h2>Complexity impact</h2>",
-          "<ul>",
-          ...(complexityItems ?? []).map((item) =>
-            `<li>${item.replace(/^- /u, "")}</li>`
-          ),
-          "</ul>",
-        ].join("\n"),
-      }),
-    ).toEqual([]);
     expect(normalizedBody.match(/^## Hot reply path impact$/gmu)).toHaveLength(
       1,
     );
@@ -443,6 +463,7 @@ fi
     ).toHaveLength(1);
     expect(normalizedBody.match(/^## Deployment concerns$/gmu)).toHaveLength(1);
     expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
+    expect(normalizedBody.match(/^## Change-shape breakdown$/gmu)).toHaveLength(1);
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:start -->/gu),
     ).toHaveLength(1);

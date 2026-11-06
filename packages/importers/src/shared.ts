@@ -172,26 +172,8 @@ export function normalizeOptionalString(value: unknown, label: string): string |
   return parseValue(optionalTrimmedStringSchema(label), value);
 }
 
-export function normalizeOptionalStringList(value: unknown, label: string): string[] {
-  return parseValue(optionalStringListSchema(label), value);
-}
-
 export function normalizeTimestamp(value: unknown, label: string): string | undefined {
   return parseValue(optionalTimestampSchema(label), value);
-}
-
-export function normalizeNumber(value: unknown, label: string): number {
-  if (value === undefined || value === null || value === "") {
-    throw new TypeError(`${label} must be a number`);
-  }
-
-  const numeric = Number(value);
-
-  if (!Number.isFinite(numeric)) {
-    throw new TypeError(`${label} must be a finite number`);
-  }
-
-  return numeric;
 }
 
 export function inferMediaType(fileName: string): string {

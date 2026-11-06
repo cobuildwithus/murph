@@ -88,20 +88,10 @@ export function assistantModelTargetToProviderConfigInput(
   }
 }
 
-export function assistantModelTargetsEqual(
-  left: AssistantModelTarget | null | undefined,
-  right: AssistantModelTarget | null | undefined,
-): boolean {
-  return JSON.stringify(normalizeAssistantModelTarget(left)) === JSON.stringify(
-    normalizeAssistantModelTarget(right),
-  )
-}
-
 export const createAssistantBackendTarget = createAssistantModelTarget
 export const normalizeAssistantBackendTarget = normalizeAssistantModelTarget
 export const assistantBackendTargetToProviderConfigInput =
   assistantModelTargetToProviderConfigInput
-export const assistantBackendTargetsEqual = assistantModelTargetsEqual
 
 export function sanitizeAssistantModelTargetForPersistence(
   target: AssistantModelTarget | null | undefined,

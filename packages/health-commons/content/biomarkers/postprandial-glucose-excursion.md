@@ -19,24 +19,17 @@ categories:
 - cgm
 - self-experiment
 relations:
--
-  type: related_protocol
-  target: protocol_variant:post-meal-walking/walking-after-every-meal
--
-  type: cites
-  target: source_artifact:pmid-27747394
--
-  type: cites
-  target: source_artifact:pmid-23761134
--
-  type: cites
-  target: source_artifact:pmid-33088646
--
-  type: cites
-  target: source_artifact:pmid-32173259
--
-  type: cites
-  target: source_artifact:pmid-24038928
+  - type: cites
+    target: source_artifact:pmid-27747394
+  - type: cites
+    target: source_artifact:pmid-23761134
+  - type: cites
+    target: source_artifact:pmid-33088646
+  - type: cites
+    target: source_artifact:pmid-32173259
+  - type: cites
+    target: source_artifact:pmid-24038928
+
 measurementContexts:
 - continuous_glucose_monitor
 - structured_fingerstick_meal_test

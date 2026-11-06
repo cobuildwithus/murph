@@ -359,6 +359,83 @@ describe("assistant phone calls", () => {
     })).not.toBe(first);
   });
 
+  it("pins the canonical scheduled call key byte for byte", () => {
+    expect(createScheduledPhoneCallRequestKey({
+      scope: {
+        automationId: "automation-scheduled-call",
+        occurrenceAt: "2026-08-05T18:00:00.000Z",
+        originSessionId: "session-scheduled-call",
+      },
+    })).toBe(
+      "phone_call_scheduled_ba4f04d9009ea429bd584bc7abda19d5dfbe4c05f798f2a42a01ad5944e66af5",
+    );
+  });
+
+  it("keys a device-activity call on the wearable event, not the retry clock", () => {
+    const scope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-sync-listener",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      occurrenceKey: "a".repeat(40),
+      originSessionId: "session-sync-run",
+    };
+    const first = createScheduledPhoneCallRequestKey({ scope });
+
+    expect(first).toMatch(/^phone_call_scheduled_[a-f0-9]{64}$/u);
+    expect(createScheduledPhoneCallRequestKey({
+      scope: {
+        ...scope,
+        occurrenceAt: "2026-08-05T18:07:00.000Z",
+        originSessionId: "session-sync-run-retry",
+      },
+    })).toBe(first);
+    expect(createScheduledPhoneCallRequestKey({
+      scope: { ...scope, occurrenceKey: "b".repeat(40) },
+    })).not.toBe(first);
+    expect(createScheduledPhoneCallRequestKey({
+      scope: { ...scope, automationId: "automation-other-listener" },
+    })).not.toBe(first);
+  });
+
+  it.each([
+    ["direct Linq sync run", "linq", "direct", "automation-cron", true, true],
+    ["direct Telegram sync run", "telegram", "direct", "automation-cron", true, true],
+    ["direct email sync run", "email", "direct", "automation-cron", true, false],
+    ["group sync run", "linq", "group", "automation-cron", true, false],
+    ["manual run", "linq", "direct", "manual-ask", true, false],
+    ["run without a wearable event", "linq", "direct", "automation-cron", false, false],
+  ] as const)("grants device-activity phone authority only for a %s", (
+    _case,
+    channel,
+    conversationScope,
+    turnTrigger,
+    hasOccurrence,
+    expectedAuthorized,
+  ) => {
+    const scope = resolveAssistantHostedScheduledPhoneCallScope({
+      channel,
+      conversationScope,
+      messageInput: {
+        deviceActivityOccurrence: hasOccurrence
+          ? { occurrenceKey: "a".repeat(40), parentAutomationId: "automation-sync-listener" }
+          : null,
+        scheduledInvocationAuthority: null,
+        scheduledOccurrenceAt: "2026-08-05T18:00:00.000Z",
+        turnTrigger,
+      },
+      originSessionId: "session-sync-run",
+    });
+
+    expect(scope).toEqual(expectedAuthorized
+      ? {
+          automationId: "automation-sync-listener",
+          occurrenceAt: "2026-08-05T18:00:00.000Z",
+          occurrenceKey: "a".repeat(40),
+          originSessionId: "session-sync-run",
+          resultNotificationChannel: channel,
+        }
+      : null);
+  });
+
   it("fails closed when a hidden phone-call request has transport but no execution authority", async () => {
     const start = vi.fn();
     const request = readMurphDynamicToolRequest(dynamicToolCall({

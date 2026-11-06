@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-21",
+  "order": 100,
+  "item": {
+    "id": "challenge-check-in-requirements",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "See what a challenge asks you to share",
+    "summary": "Weekly challenge invites now show the required daily check-in before you accept.",
+    "details": "Photo challenges ask for a photo. Heart-rate challenges ask for a workout graph and require a compatible wearable and an updated Murph app. Both players follow the same requirement.",
+    "relevanceTags": [
+      "challenges",
+      "invites"
+    ],
+    "sourcePullRequests": [
+      4284
+    ]
+  }
+}

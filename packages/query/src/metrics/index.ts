@@ -1,3 +1,4 @@
+import { isRetiredDeviceFeature } from "../retired-device-features.ts";
 import { HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
@@ -245,6 +246,8 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
 }
 
 function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[] {
+  if (isRetiredDeviceFeature(entity)) return [];
+
   if (entity.family === "sample" && entity.kind === "metric_sample") {
     return metricSampleMetricPoints(entity);
   }
@@ -458,11 +461,16 @@ function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSour
     const value = readNumber(record?.value);
     const unit = readString(record?.unit);
     if (!metric || value === null) return [];
+    // Reported VO2 estimates are dated readings consumed by daily shares and Numbers.
+    const reportedDaily = resolveMetricDefinition(metric)?.key === "estimated-vo2-max";
 
     return [scalarMetricPoint({
       confidence: eventConfidence(entity),
       context: { qualifiers: readQualifiers(record?.qualifiers) },
+      // The canonical day, not the UTC slice: an evening reading stays on today.
+      effectiveDate: reportedDaily ? readString(entity.attributes.dayKey) : undefined,
       entity,
+      grain: reportedDaily ? "day" : undefined,
       index,
       metric,
       sourceKind,

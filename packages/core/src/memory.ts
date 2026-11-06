@@ -6,6 +6,11 @@ import {
   parseMemoryDocument,
   renderMemoryDocument,
   setMemoryDisplayName as setMemoryDocumentDisplayName,
+  setMemoryDemographics as setMemoryDocumentDemographics,
+  resolveMemoryDemographics,
+  memoryDemographicsPatchSchema,
+  type MemoryDemographics,
+  type SetMemoryDemographicsInput,
   type ForgetMemoryRecordInput,
   type MemoryDocument,
   type MemoryDisplayNameResolution,
@@ -32,6 +37,7 @@ import {
 } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { commitAuditedCanonicalWrite } from "./audited-write.ts";
+import { createHash } from "node:crypto";
 
 export type {
   ForgetMemoryRecordInput,
@@ -143,6 +149,7 @@ export async function setMemoryDisplayName(
   vaultRoot: string,
   input: SetMemoryDisplayNameInput,
 ): Promise<{
+  changed: boolean;
   created: boolean;
   document: MemoryDocumentSnapshot;
   record: MemoryRecord;
@@ -152,6 +159,7 @@ export async function setMemoryDisplayName(
     const next = setMemoryDocumentDisplayName(snapshot, input);
     if (next.document === snapshot) {
       return {
+        changed: false,
         created: false,
         document: snapshot,
         record: next.record,
@@ -182,10 +190,80 @@ export async function setMemoryDisplayName(
     );
 
     return {
+      changed: true,
       created: next.created,
       document: persisted.document,
       record: persisted.record,
     };
+  });
+}
+
+export async function readMemoryDemographics(vaultRoot: string): Promise<MemoryDemographics> {
+  // Absent memory resolves to known empty. Unreadable or structurally invalid
+  // memory throws, so a failed read can never publish a false empty projection.
+  return resolveMemoryDemographics(await readMemoryDocument(vaultRoot));
+}
+
+export async function setMemoryDemographics(
+  vaultRoot: string,
+  input: SetMemoryDemographicsInput & {
+    memberAction?: { actionId: string; requestedAt: string };
+  },
+): Promise<{
+  status: "applied" | "unchanged" | "rejected";
+  reason: "demographics_unresolved" | null;
+  demographics: MemoryDemographics;
+}> {
+  return withLockedMemoryDocument(vaultRoot, async () => {
+    const { memberAction, ...patch } = input;
+    const snapshot = await readMemoryDocument(vaultRoot);
+    const payloadHash = memberAction ? createHash("sha256").update(JSON.stringify({
+      patch: memoryDemographicsPatchSchema.parse({
+        birthYear: patch.birthYear, age: patch.age, biologicalSex: patch.biologicalSex,
+      }),
+      requestedAt: memberAction.requestedAt,
+    })).digest("hex") : null;
+    const previous = snapshot.frontmatter.lastDemographicsAction;
+    if (memberAction && previous?.actionId === memberAction.actionId) {
+      if (previous.payloadHash !== payloadHash) throw new MemoryRecordConflictError();
+      return {
+        status: previous.status,
+        reason: previous.status === "rejected" ? "demographics_unresolved" : null,
+        demographics: await resolveMemoryDemographics(snapshot),
+      };
+    }
+    const patched = setMemoryDocumentDemographics(snapshot, {
+      ...patch,
+      ...(memberAction ? { asOf: memberAction.requestedAt.slice(0, 10) } : {}),
+    });
+    const patchedDemographics = await resolveMemoryDemographics(patched);
+    // A statement that would leave birth facts in conflict (a year against a
+    // saved full DOB) changes nothing: the receipt says rejected and memory
+    // keeps its last consistent state.
+    const status = patchedDemographics.status === "unresolved" ? "rejected"
+      : patched === snapshot ? "unchanged" : "applied";
+    let next: MemoryDocument = status === "rejected" ? snapshot : patched;
+    const demographics = status === "rejected" ? await resolveMemoryDemographics(snapshot) : patchedDemographics;
+    if (memberAction && payloadHash) {
+      next = { records: next.records, frontmatter: { ...next.frontmatter,
+        lastDemographicsAction: { actionId: memberAction.actionId, payloadHash, status },
+      } };
+    }
+    if (next !== snapshot) {
+      const markdown = renderMemoryDocument({ document: next });
+      await writeCanonicalMarkdownDocument({
+        vaultRoot, operationType: "memory_upsert", summary: "Set memory demographics",
+        occurredAt: input.now,
+        target: resolveSingletonMarkdownDocumentTarget({
+          relativePath: memoryDocumentRelativePath, created: !snapshot.exists,
+        }),
+        markdown,
+        audit: { action: "memory_upsert", commandName: "core.setMemoryDemographics",
+          summary: "Set memory demographics.", targetIds: [] },
+      });
+      await readPersistedMemoryDocument(vaultRoot, markdown);
+    }
+    return { status, reason: status === "rejected" ? "demographics_unresolved" : null, demographics };
   });
 }
 

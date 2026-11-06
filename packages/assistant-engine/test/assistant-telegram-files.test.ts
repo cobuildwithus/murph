@@ -22,17 +22,23 @@ const env = { TELEGRAM_BOT_TOKEN: 'synthetic-token', TELEGRAM_API_BASE_URL: 'htt
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
-it('delivers a verified PDF through the Telegram adapter as exactly one document', async () => {
+it.each([
+  { filename: 'report.pdf', contentType: 'application/pdf' },
+  { filename: 'picture.jpg', contentType: 'image/jpeg' },
+  { filename: 'recording.mp3', contentType: 'audio/mpeg' },
+  { filename: 'clip.mp4', contentType: 'video/mp4' },
+])('delivers verified $filename through the Telegram adapter as exactly one document', async ({ filename, contentType }) => {
+  const mediaFile = { ...file, filename, contentType, ref: `documents/${filename}` }
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'telegram-file-'))
   roots.push(vaultRoot)
   await mkdir(path.join(vaultRoot, 'documents'))
-  await writeFile(path.join(vaultRoot, file.ref), bytes)
+  await writeFile(path.join(vaultRoot, mediaFile.ref), bytes)
   const fetchImplementation = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }))
   const sendTelegram = vi.fn()
   const result = await getAssistantChannelAdapter('telegram')!.send({
     actorId: null, identityId: null, explicitTarget: null,
     bindingDelivery: { kind: 'thread', target: '123' },
-    media: [file],
+    media: [mediaFile],
     message: 'Attached.',
     replyToMessageId: '4',
     threadIsDirect: true,
@@ -54,11 +60,11 @@ it('delivers a verified PDF through the Telegram adapter as exactly one document
   expect(form.get('reply_to_message_id')).toBe('4')
   expect(form.has('caption')).toBe(false)
   const document = form.get('document') as File
-  expect(document.name).toBe('report.pdf')
-  expect(document.type).toBe('application/pdf')
+  expect(document.name).toBe(filename)
+  expect(document.type).toBe(contentType)
   expect(Buffer.from(await document.arrayBuffer())).toEqual(bytes)
-  await writeFile(path.join(vaultRoot, file.ref), Buffer.alloc(bytes.length, 'x'))
-  await expect(sendTelegramFileMessage({ file, target: '123' }, {
+  await writeFile(path.join(vaultRoot, mediaFile.ref), Buffer.alloc(bytes.length, 'x'))
+  await expect(sendTelegramFileMessage({ file: mediaFile, target: '123' }, {
     env, fetchImplementation,
     loadVaultFile: file => readVerifiedAssistantVaultFileBytes({ file, vaultRoot }),
   })).rejects.toThrow()

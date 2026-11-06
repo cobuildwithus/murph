@@ -65,6 +65,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         processedRevision: dirtyRevision,
         resourceCategoryCountsJson: {},
         sourceProviderCountsJson: {},
+        wakeDeferredUntil: null,
         windowEnd: null,
         windowStart: null,
       },
@@ -2464,6 +2465,10 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       stillDirty: true,
       userId: "member_123",
     });
+    // A fully processed batch cannot leave a routine wake deadline behind.
+    expect(prisma.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ processedRevision: 3n, wakeDeferredUntil: null }),
+    }));
     expect(prisma.deviceSyncDirtyPayload.findMany).not.toHaveBeenCalled();
   });
 

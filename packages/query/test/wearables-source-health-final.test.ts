@@ -30,7 +30,6 @@ function makeResolvedMetric(
       conflictingProviders,
       exactDuplicateCount: 0,
       level: provider ? "high" : "none",
-      reasons: [],
     },
     metric,
     selection: {

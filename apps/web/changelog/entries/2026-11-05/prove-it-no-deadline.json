@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "prove-it-no-deadline",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Prove it has no deadline",
+    "summary": "Asking a friend to prove it no longer sets a due time. Murph asks once in your game chat, and nothing sits over their photo.",
+    "details": "It doesn't change anyone's score, streak or missed days. The post stands unless your friend marks the day as not counting.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4607]
+  }
+}

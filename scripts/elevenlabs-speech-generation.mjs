@@ -57,19 +57,22 @@ export async function generateElevenLabsSpeechMp3(input) {
   });
   const startedAtMs = Date.now();
   try {
-    const stream = await client.textToSpeech.convert(
-      voiceId,
-      {
+    const requestOptions = {
+      abortSignal: timeout.signal,
+      maxRetries: ELEVENLABS_MAX_RETRIES,
+      timeoutInSeconds: ELEVENLABS_SCRIPT_TTS_TIMEOUT_MS / 1_000,
+    };
+    const stream = modelId === "eleven_v4"
+      ? await client.textToDialogue.convert({
+        inputs: [{ text, voiceId }],
+        modelId,
+        outputFormat: ELEVENLABS_SCRIPT_TTS_OUTPUT_FORMAT,
+      }, requestOptions)
+      : await client.textToSpeech.convert(voiceId, {
         modelId,
         outputFormat: ELEVENLABS_SCRIPT_TTS_OUTPUT_FORMAT,
         text,
-      },
-      {
-        abortSignal: timeout.signal,
-        maxRetries: ELEVENLABS_MAX_RETRIES,
-        timeoutInSeconds: ELEVENLABS_SCRIPT_TTS_TIMEOUT_MS / 1_000,
-      },
-    );
+      }, requestOptions);
     return await readAudioStream(stream);
   } catch (error) {
     if (input.signal?.aborted) {

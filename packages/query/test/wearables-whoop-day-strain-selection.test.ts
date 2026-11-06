@@ -74,14 +74,4 @@ test("WHOOP day strain prefers the highest same-day cycle over a newer lower fra
   assert.equal(resolved.selection.value, 16.944273);
   assert.equal(resolved.selection.recordedAt, "2026-05-04T08:00:00.000Z");
   assert.equal(resolved.candidates[0]?.candidateId, "whoop:cycle:synthetic-representative-highest:day-strain");
-  assert.equal(
-    resolved.confidence.reasons.some((reason) => reason.includes("WHOOP day-strain cycle policy")),
-    true,
-  );
-  const policyReason = resolved.confidence.reasons.find((reason) =>
-    reason.includes("WHOOP day-strain cycle policy")
-  ) ?? "";
-  assert.equal(policyReason.includes("3 cycle candidates"), true);
-  assert.equal(policyReason.includes("14.489366"), false);
-  assert.equal(policyReason.includes("4.133967"), false);
 });

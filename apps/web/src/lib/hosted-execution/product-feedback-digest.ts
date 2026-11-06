@@ -5,9 +5,9 @@ import {
   formatTimeZoneDateTimeParts,
 } from "@murphai/contracts";
 import {
-  HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
   type HostedProductFeedbackKind,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -19,6 +19,10 @@ import { getPrisma } from "../prisma";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE = "America/New_York";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_SEND_HOUR = 18;
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
+// Per-member usage optimizers run on staggered 14-day cycles, so their
+// reports are collected into one email on this fixed 14-day cadence.
+export const HOSTED_USAGE_REPORT_DIGEST_ANCHOR_DAY = "2026-11-07";
+export const HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS = 14;
 
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
@@ -52,6 +56,7 @@ export async function runHostedProductFeedbackDigest(input: {
   env?: Readonly<Record<string, string | undefined>>;
   now?: Date;
   readFeedback?: typeof readHostedProductFeedbackDigestBatch;
+  readUsageReports?: typeof readHostedProductFeedbackDigestBatch;
   sendEmail?: typeof sendHostedResendPlainTextEmail;
   signal?: AbortSignal;
 } = {}): Promise<HostedProductFeedbackDigestResult> {
@@ -101,6 +106,35 @@ export async function runHostedProductFeedbackDigest(input: {
     to: emailConfig.recipients,
   });
 
+  const usageWindow = resolveHostedUsageReportDigestWindow(window.dayKey);
+  const usageReports = usageWindow
+    ? await (input.readUsageReports ?? readHostedProductFeedbackDigestBatch)({
+        endAt: usageWindow.endAt,
+        startAt: usageWindow.startAt,
+        usageReportsOnly: true,
+      })
+    : null;
+  const usageReportCount = usageReports
+    ? countHostedProductFeedbackDigestBatch(usageReports)
+    : 0;
+  if (usageReports && usageReportCount > 0) {
+    const omittedCount = usageReportCount - usageReports.rows.length;
+    await (input.sendEmail ?? sendHostedResendPlainTextEmail)({
+      config: emailConfig.resend,
+      idempotencyKey: `hosted-usage-report-digest/${window.dayKey}`,
+      ...(input.signal ? { signal: input.signal } : {}),
+      subject: `Biweekly usage reports — ${window.dayKey}`,
+      text: [
+        `Usage optimization reports (${usageReportCount})`,
+        ...usageReports.rows.map((row) => `- ${row.summary}`),
+        ...(omittedCount > 0
+          ? [`Not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit: ${omittedCount}`]
+          : []),
+      ].join("\n\n"),
+      to: emailConfig.recipients,
+    });
+  }
+
   return {
     dayKey: window.dayKey,
     feedbackCount: countHostedProductFeedbackDigestBatch(batch),
@@ -130,9 +164,30 @@ export function resolveHostedProductFeedbackDigestWindow(now: Date): {
   };
 }
 
+export function resolveHostedUsageReportDigestWindow(dayKey: string): {
+  endAt: Date;
+  startAt: Date;
+} | null {
+  const daysFromAnchor = Math.round(
+    (Date.parse(dayKey) - Date.parse(HOSTED_USAGE_REPORT_DIGEST_ANCHOR_DAY)) /
+      86_400_000,
+  );
+  if (daysFromAnchor % HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS !== 0) {
+    return null;
+  }
+
+  return {
+    endAt: resolveHostedProductFeedbackDigestBoundary(dayKey),
+    startAt: resolveHostedProductFeedbackDigestBoundary(
+      addDaysToIsoDate(dayKey, -HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS),
+    ),
+  };
+}
+
 export async function readHostedProductFeedbackDigestBatch(input: {
   endAt: Date;
   startAt: Date;
+  usageReportsOnly?: boolean;
 }): Promise<HostedProductFeedbackDigestBatch> {
   const digestRowFilter = {
     createdAt: {
@@ -142,21 +197,22 @@ export async function readHostedProductFeedbackDigestBatch(input: {
     kind: {
       in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
     },
-    // Internal pattern audits and support details have their own review paths.
+    // Support details and usage audits have their own review paths.
     NOT: [
       {
         summary: {
           startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
         },
       },
-      {
-        summary: {
-          startsWith: HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
-        },
-      },
+      ...(!input.usageReportsOnly
+        ? [{ summary: { startsWith: HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX } }]
+        : []),
     ],
     summary: {
       not: null,
+      ...(input.usageReportsOnly
+        ? { startsWith: HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX }
+        : {}),
     },
   };
   const groupedCounts = await getPrisma().hostedProductFeedback.groupBy({

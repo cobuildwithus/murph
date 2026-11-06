@@ -38,9 +38,10 @@ afterEach(() => {
 
 describe('Codex thread instructions', () => {
   it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    // Includes native result-reading guidance; complete provider input grows by
-    // 41 tokens in both the individual and group capture fixtures.
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_600)
+    // Includes result-reading and scheduled JSON delivery guidance. The complete
+    // native first request was measured at +0.460% individual / +0.605% group
+    // against the Terra release base; this cap still bounds kernel growth.
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_800)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Complete the user's in-scope request end to end",
     )
@@ -171,41 +172,6 @@ describe('Codex thread instructions', () => {
       ].join('\n\n'),
     )
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
-  })
-
-  it('forwards trusted generated-song policy to the app-server turn', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
-      finalMessage: 'done',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'done',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'thread-song-policy',
-      stderr: '',
-      stdout: '',
-      threadId: 'thread-song-policy',
-      turnId: 'turn-song-policy',
-    })
-    const generateSongPolicy = {
-      maxAttempts: 1,
-      requiredDurationSeconds: 15,
-    } as const
-
-    await executeCodexAssistantTurnAttemptUnchecked({
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-      }),
-      dynamicTools: [],
-      env: {},
-      generateSongPolicy,
-      userPrompt: 'Create the bounded song.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
-      .toMatchObject({ generateSongPolicy })
   })
 
   it('keeps constrained profile inputs at the app-server seam', async () => {

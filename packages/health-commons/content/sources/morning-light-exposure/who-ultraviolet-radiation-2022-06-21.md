@@ -11,14 +11,8 @@ aliases:
   - "World Health Organization 2022 Ultraviolet radiation"
 categories:
   - "morning-light-exposure"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-  -
-    type: "parent_family"
-    target: "experiment_family:morning-light-exposure"
 source:
   kind: "web_page"
   title: "Ultraviolet radiation"

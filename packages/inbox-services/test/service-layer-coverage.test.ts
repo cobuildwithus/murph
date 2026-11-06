@@ -1,29 +1,24 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import {
-  resolveRuntimePaths,
-  tryKillProcess,
-  type RuntimePaths,
-} from '@murphai/runtime-state/node'
 import type {
   InboxConnectorConfig,
   InboxRuntimeConfig,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  resolveRuntimePaths,
+  type RuntimePaths,
+} from '@murphai/runtime-state/node'
 import { afterEach, test, vi } from 'vitest'
 
-import { createIntegratedInboxServices } from '../src/index.ts'
 import {
-  buildDaemonState,
-  createProcessSignalBridge,
-  idleState,
-  normalizeDaemonState,
-  writeDaemonState,
-} from '../src/inbox-services/daemon.ts'
-import { instantiateConnector } from '../src/inbox-services/connectors.ts'
+  normalizeAssistantCaptureId,
+  resolveAssistantInboxArtifactPath,
+  resolveAssistantVaultPath,
+} from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   buildCaptureCursor,
   detailCapture,
@@ -38,50 +33,29 @@ import {
   toCliAttachment,
 } from '../src/inbox-services/query.ts'
 import {
-  connectorNamespaceKey,
-  countRuntimeCaptures,
-  failCheck,
   fileExists,
-  listAllCaptures,
-  normalizeBackfillLimit,
-  normalizeConnectorAccountId,
   normalizeLimit,
-  normalizeOptionalCommandLimit,
-  normalizeVaultPathOutput,
   occurredDayFromCapture,
-  passCheck,
-  redactSensitivePath,
   relativeToVault,
   resolveAttachmentParseState,
   runtimeNamespaceAccountId,
-  warnCheck,
-  writeJsonFile,
 } from '../src/inbox-services/shared.ts'
 import {
   ensureConfigFile,
-  ensureConnectorNamespaceAvailable,
   ensureDirectory,
   findConnector,
   readConfig,
   rebuildRuntime,
   requireConnector,
-  sortConnectors,
-  writeConfig,
 } from '../src/inbox-services/state.ts'
-import {
-  normalizeAssistantCaptureId,
-  resolveAssistantInboxArtifactPath,
-  resolveAssistantVaultPath,
-} from '@murphai/vault-usecases/assistant-vault-paths'
 import type {
   InboxPaths,
   InboxRuntimeModule,
-  PollConnector,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
-  TelegramDriver,
 } from '../src/index.ts'
+import { createIntegratedInboxServices } from '../src/index.ts'
 
 const tempRoots: string[] = []
 
@@ -111,27 +85,6 @@ function createConnector(
     enabled: true,
     options: {},
     ...overrides,
-  }
-}
-
-function createPollConnector(
-  source: InboxConnectorConfig['source'],
-  id: string,
-): PollConnector {
-  return {
-    async backfill() {
-      return null
-    },
-    id,
-    source,
-    kind: 'poll',
-    capabilities: {
-      attachments: true,
-      backfill: true,
-      watch: true,
-      webhooks: source === 'linq',
-    },
-    async watch() {},
   }
 }
 
@@ -265,37 +218,8 @@ function createRuntimeStore(
   }
 }
 
-test('service-layer helpers cover connector, query, state, daemon, and vault path branches', async () => {
+test('service-layer helpers cover query, state, and vault path branches', async () => {
   assert.equal(typeof createIntegratedInboxServices, 'function')
-
-  let killed = false
-  tryKillProcess(
-    () => {
-      killed = true
-    },
-    123,
-    'SIGTERM',
-  )
-  assert.equal(killed, true)
-  tryKillProcess(
-    () => {
-      const error = Object.assign(new Error('missing'), { code: 'ESRCH' })
-      throw error
-    },
-    123,
-    'SIGTERM',
-  )
-  assert.throws(
-    () =>
-      tryKillProcess(
-        () => {
-          throw new Error('boom')
-        },
-        123,
-        'SIGTERM',
-      ),
-    /boom/,
-  )
 
   const paths = await createTempVault()
   const absoluteNested = await resolveAssistantVaultPath(paths.absoluteVaultRoot, 'derived/inbox')
@@ -326,89 +250,14 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     options: { backfillLimit: 10 },
   })
   assert.equal(runtimeNamespaceAccountId(connector), 'bot')
-  assert.equal(connectorNamespaceKey(connector), 'telegram::bot')
-  assert.throws(
-    () => normalizeConnectorAccountId('unsupported' as never, undefined),
-    (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_UNSUPPORTED',
-  )
-  assert.equal(normalizeConnectorAccountId('telegram', undefined), 'bot')
-  assert.equal(normalizeConnectorAccountId('linq', undefined), 'default')
-  assert.equal(normalizeBackfillLimit(undefined), undefined)
-  assert.equal(normalizeBackfillLimit(50), 50)
-  assert.throws(() => normalizeBackfillLimit(0), /Backfill limit must be an integer/)
   assert.equal(normalizeLimit(undefined, 20, 50), 20)
   assert.equal(normalizeLimit(25, 20, 50), 25)
   assert.throws(() => normalizeLimit(100, 20, 50), /Limit must be an integer/)
-  assert.equal(normalizeOptionalCommandLimit(undefined, 10), undefined)
-  assert.equal(normalizeOptionalCommandLimit(5, 10), 5)
-  assert.throws(() => normalizeOptionalCommandLimit(11, 10), /Limit must be an integer/)
   assert.equal(relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath), '.runtime/projections/inboxd.sqlite')
-  assert.equal(normalizeVaultPathOutput(paths.absoluteVaultRoot, paths.inboxDbPath), '.runtime/projections/inboxd.sqlite')
-  assert.equal(normalizeVaultPathOutput(paths.absoluteVaultRoot, 'relative/file.txt'), 'relative/file.txt')
-  assert.equal(redactSensitivePath('/Users/tester/private'), '<REDACTED_PATH>')
-  assert.equal(redactSensitivePath('/home/tester/private'), '<REDACTED_PATH>')
-  assert.equal(redactSensitivePath('C:\\Users\\tester\\private'), '<REDACTED_PATH>')
-  assert.equal(redactSensitivePath(' /tmp/file '), '/tmp/file')
-  assert.equal(redactSensitivePath('   '), null)
-  assert.equal(
-    passCheck('ok', 'done').status,
-    'pass',
-  )
-  assert.equal(warnCheck('warn', 'heads up').status, 'warn')
-  assert.equal(failCheck('fail', 'broken').status, 'fail')
 
-  const tempJson = path.join(paths.absoluteVaultRoot, 'tmp', 'sample.json')
-  await writeJsonFile(tempJson, { ok: true })
+  const tempJson = path.join(paths.absoluteVaultRoot, 'sample.json')
+  await writeFile(tempJson, '{}')
   assert.equal(await fileExists(tempJson), true)
-
-  const telegramConnector = await instantiateConnector({
-    connector,
-    inputLimit: 25,
-    loadInbox: async () => ({
-      async createInboxPipeline() {
-        throw new Error('unused')
-      },
-      createTelegramBotApiPollDriver() {
-        throw new Error('unused')
-      },
-      createTelegramPollConnector(input) {
-        assert.equal(input.accountId, 'bot')
-        assert.equal(input.backfillLimit, 25)
-        assert.equal(input.transportMode, 'take-over-webhook')
-        return createPollConnector('telegram', 'telegram:bot')
-      },
-      async ensureInboxVault() {},
-      async openInboxRuntime() {
-        return createRuntimeStore([])
-      },
-      async createParsedInboxPipeline() {
-        throw new Error('unused')
-      },
-      async rebuildRuntimeFromVault() {},
-      runInboxEnvelopeMigration,
-      async runInboxDaemon() {},
-      async runPollConnectorBackfill() {
-        throw new Error('unused')
-      },
-      async runInboxDaemonWithParsers() {},
-    } satisfies InboxRuntimeModule),
-    loadTelegramDriver: async () => ({}) as TelegramDriver,
-  })
-  assert.equal(telegramConnector.id, 'telegram:bot')
-
-  await assert.rejects(
-    () =>
-      instantiateConnector({
-        connector: createConnector({
-          id: 'linq:default',
-          source: 'linq',
-        }),
-        loadInbox: async () => ({}) as InboxRuntimeModule,
-        loadTelegramDriver: async () => ({}) as TelegramDriver,
-      }),
-    /Unsupported inbox connector source: linq/,
-  )
-
 
   const attachment: RuntimeAttachmentRecord = {
     attachmentId: 'attachment-1',
@@ -478,41 +327,16 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     occurredDayFromCapture(detailedCapture),
     '2025-01-01',
   )
-  assert.equal(countRuntimeCaptures(runtime), 1)
-  assert.equal(listAllCaptures(runtime).length, 1)
 
   const configPaths = await createTempVault()
   await ensureDirectory(path.dirname(configPaths.inboxConfigPath), [], configPaths.absoluteVaultRoot)
   await ensureConfigFile(configPaths as InboxPaths, [])
   assert.deepEqual(await readConfig(configPaths as InboxPaths), { connectors: [] })
-  await writeConfig(configPaths as InboxPaths, config)
-  const persistedConfig = await readConfig(configPaths as InboxPaths)
+  const persistedConfig = { connectors: [{ ...connector, accountId: 'bot' }] }
   assert.equal(findConnector(persistedConfig, 'telegram:bot')?.accountId, 'bot')
   assert.equal(findConnector(persistedConfig, 'telegram:bot')?.id, 'telegram:bot')
   assert.equal(requireConnector(persistedConfig, 'telegram:bot').id, 'telegram:bot')
   assert.throws(() => requireConnector(persistedConfig, 'missing'), /is not configured/)
-  const sortableConfig: InboxRuntimeConfig = {
-    connectors: [
-      createConnector({ id: 'b', source: 'telegram' }),
-      createConnector({ id: 'a', source: 'telegram' }),
-    ],
-  }
-  sortConnectors(sortableConfig)
-  assert.deepEqual(sortableConfig.connectors.map((entry) => entry.id), ['a', 'b'])
-  assert.throws(
-    () =>
-      ensureConnectorNamespaceAvailable(persistedConfig, createConnector({
-        id: 'telegram:duplicate',
-        source: 'telegram',
-        accountId: 'bot',
-      })),
-    /aliases the same runtime namespace/,
-  )
-  ensureConnectorNamespaceAvailable(
-    persistedConfig,
-    createConnector({ id: 'linq:primary', source: 'linq', accountId: 'line-1' }),
-  )
-
   const rebuildRuntimeFromVaultMock = vi.fn(
     async (input: Parameters<InboxRuntimeModule['rebuildRuntimeFromVault']>[0]) => {
       assert.equal(input.enqueueParserJobs, true)
@@ -582,61 +406,13 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
           setCursor() {},
         }
       },
-      async createInboxPipeline() {
-        throw new Error('unused')
-      },
-      async createParsedInboxPipeline() {
-        throw new Error('unused')
-      },
-      createTelegramPollConnector() {
-        throw new Error('unused')
-      },
-      createTelegramBotApiPollDriver() {
-        throw new Error('unused')
-      },
       async rebuildRuntimeFromVault(input) {
         await rebuildRuntimeFromVaultMock(input)
       },
       runInboxEnvelopeMigration,
-      async runInboxDaemon() {},
-      async runPollConnectorBackfill() {
-        throw new Error('unused')
-      },
-      async runInboxDaemonWithParsers() {},
     } as InboxRuntimeModule,
   )
   assert.equal(rebuildCount, 400)
   assert.equal(rebuildRuntimeFromVaultMock.mock.calls.length, 1)
 
-  const idleDaemonState = idleState(configPaths as InboxPaths)
-  assert.equal(idleDaemonState.status, 'idle')
-  const runningState = buildDaemonState(configPaths as InboxPaths, {
-    status: 'running',
-    running: true,
-    pid: 111,
-  })
-  await writeDaemonState(configPaths as InboxPaths, runningState)
-  const staleState = await normalizeDaemonState(configPaths as InboxPaths, {
-    clock: () => new Date('2025-02-01T00:00:00.000Z'),
-    getPid: () => 222,
-    killProcess() {
-      const error = Object.assign(new Error('missing'), { code: 'ESRCH' })
-      throw error
-    },
-  })
-  assert.equal(staleState.status, 'stale')
-  assert.equal(staleState.stale, true)
-  const currentState = await normalizeDaemonState(configPaths as InboxPaths, {
-    clock: () => new Date('2025-02-01T00:00:00.000Z'),
-    getPid: () => staleState.pid ?? 222,
-  })
-  assert.equal(currentState.status, 'stale')
-
-  const onSpy = vi.spyOn(process, 'on')
-  const offSpy = vi.spyOn(process, 'off')
-  const bridge = createProcessSignalBridge()
-  assert.equal(onSpy.mock.calls.length >= 2, true)
-  bridge.cleanup()
-  assert.equal(offSpy.mock.calls.length >= 2, true)
-  assert.equal(bridge.signal.aborted, false)
 })

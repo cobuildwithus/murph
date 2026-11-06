@@ -25,7 +25,7 @@ afterEach(async () => {
 describe('member-memory maintenance boundary', () => {
   it('states the exact-once read and guarded mutation receipt contract', () => {
     expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
-      'Call show exactly once per maintenance turn and use that one result for deduplication and mutation targeting.',
+      'Call show exactly once per maintenance turn and use that one result for deduplication, faithful wording-only compaction, and mutation targeting.',
     )
     expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
       "pass that record's exact updatedAt as expectedUpdatedAt",

@@ -10,8 +10,11 @@ const providerMocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
   ensureHostedMemberStripeCustomer: vi.fn(),
   getHostedLinqChatSummary: vi.fn().mockResolvedValue({
+    handleCount: 0,
     handles: [],
+    handlesComplete: true,
     isGroup: false,
+    observedAt: new Date(),
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
@@ -129,8 +132,8 @@ const accountDeletionMocks = vi.hoisted(() => ({
       kmsKeyName: "test-key",
       nextAttemptAt: input.now,
       payloadCiphertext: "encrypted",
-      privyCompletedAt: input.now,
-      privyUserLookupKey: null,
+
+
       runtimeMemberIds: [...input.runtimeMemberIds],
       stripeCustomerIds: [...input.stripeCustomerIds],
       stripeCompletedAt: input.now,
@@ -573,7 +576,7 @@ describe.skipIf(!runPostgresProof)(
               memberId: participantMemberId,
               phoneNumber: participantPhone,
               prisma,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -3216,9 +3219,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.replyPrisma.hostedGroupSponsorshipAuthorization.count({
           where: { payerMemberId },
         })).resolves.toBe(0);
-        await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
-          where: { creatorMemberId: payerMemberId },
-        })).resolves.toBe(0);
+
         await expectDeletionReplyRaceConverged(fixture);
       } finally {
         deletionGroupLockBarrier.release();
@@ -3356,9 +3357,7 @@ describe.skipIf(!runPostgresProof)(
               where: { payerMemberId: { in: payerMemberIds } },
             }),
           ).resolves.toBe(0);
-          await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
-            where: { creatorMemberId: { in: payerMemberIds } },
-          })).resolves.toBe(2);
+
         } finally {
           fundingGroupLockBarrier.release();
           await Promise.allSettled(checkoutPromises);
@@ -4063,7 +4062,7 @@ describe.skipIf(!runPostgresProof)(
               memberId: fixture.participantMemberId,
               phoneNumber: fixture.participantPhone,
               prisma: fixture.deletionPrisma,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -4889,7 +4888,7 @@ async function createGroupLineRecoveryFixture():
         memberId,
         phoneNumber: participantPhone,
         prisma,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -5120,7 +5119,7 @@ async function createPhoneBoundMemberIdentityTx(input: {
         memberId,
         phoneNumber: input.phoneNumber,
         prisma: input.tx,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -5438,8 +5437,8 @@ function makePreparedDeletionCleanup(input: {
     kmsKeyName: "test-key",
     nextAttemptAt: input.now,
     payloadCiphertext: "encrypted",
-    privyCompletedAt: input.now,
-    privyUserLookupKey: null,
+
+
     runtimeMemberIds: [...input.runtimeMemberIds],
     stripeCustomerIds: [...input.stripeCustomerIds],
     stripeCompletedAt: input.now,
@@ -5583,9 +5582,6 @@ async function cleanupGroupFundingPayer(input: {
   payerMemberId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  await input.prisma.hostedGroupSponsorshipMoment.deleteMany({
-    where: { creatorMemberId: input.payerMemberId },
-  });
   await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: { payerMemberId: input.payerMemberId },
   });

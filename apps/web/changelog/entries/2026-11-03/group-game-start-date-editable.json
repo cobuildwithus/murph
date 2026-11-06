@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 90,
+  "item": {
+    "id": "group-game-start-date-editable",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Anyone in a group game can ask for a change",
+    "summary": "Any player can ask Murph in the group chat to change a group game, and it goes through once more than half of the group says yes.",
+    "details": "Before anyone joins, the starter's edits apply right away. After that, the same limits as one-on-one games apply: tasks stay fixed once Day 1 begins, the start date can move until someone checks in, and the prize, length and schedule can change for the days ahead.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4538, 4552]
+  }
+}

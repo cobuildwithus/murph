@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-28",
+  "order": 100,
+  "item": {
+    "id": "game-check-in-and-history-reliability",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable game check-ins and rematches",
+    "summary": "Older live games and shared photos stay available, and simultaneous rematch requests lead to one game.",
+    "details": "The late-post grace period accepts photos captured during the day that just ended, with the existing clock allowance.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [4397]
+  }
+}

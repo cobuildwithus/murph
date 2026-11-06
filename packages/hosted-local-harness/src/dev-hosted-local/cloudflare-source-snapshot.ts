@@ -46,6 +46,10 @@ export async function prepareHostedLocalCloudflareSourceSnapshot(input: {
     path.join(cloudflareDir, ".dockerignore"),
     path.join(cloudflareAppDir, ".dockerignore"),
   );
+  await copyFile(
+    path.join(cloudflareDir, "codex-model-catalog.terra.json"),
+    path.join(cloudflareAppDir, "codex-model-catalog.terra.json"),
+  );
   await cp(
     path.join(cloudflareDir, "src"),
     path.join(cloudflareAppDir, "src"),

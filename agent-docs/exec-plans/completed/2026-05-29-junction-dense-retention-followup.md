@@ -36,7 +36,7 @@ symmetric device-sync success fencing.
   identifiers.
 - Keep the architecture narrow: no new cron, queue, table, generic maintenance
   framework, or broad refactor.
-- Preserve unrelated active work in hosted dirty-ack and Murph Age lanes.
+- Preserve unrelated active work in hosted dirty-ack lanes.
 
 ## Plan
 

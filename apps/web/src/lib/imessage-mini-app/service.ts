@@ -115,6 +115,20 @@ export class IMessageMiniAppService {
     );
   }
 
+  async assertCredentialCurrentTx(
+    credential: HostedAgentSessionRecord,
+    tx: Pick<Prisma.TransactionClient, "deviceAgentSession">,
+  ): Promise<void> {
+    const now = new Date();
+    const updated = await tx.deviceAgentSession.updateMany({
+      where: { id: credential.id, userId: credential.userId,
+        tokenHash: hashIMessageMiniAppBearerToken(this.requireBearerToken()),
+        revokedAt: null, expiresAt: { gt: now } },
+      data: { lastSeenAt: now },
+    });
+    if (updated.count !== 1) throw invalidIMessageMiniAppAuthorization();
+  }
+
   private requireBearerToken(): string {
     const token = this.readBearerToken();
 
@@ -477,6 +491,10 @@ export function validateIMessageMiniAppMemberAction(
   });
   if (!parsed.success) {
     throw miniAppRequestInvalid("Member action request is invalid.");
+  }
+  // A Messages extension credential remains workout-only.
+  if (parsed.data.action.kind !== "workout.live.apply" && parsed.data.action.kind !== "workout.live.snapshot") {
+    throw miniAppRequestInvalid("Member action is not supported by this client.");
   }
 
   const requestedAt = Date.parse(parsed.data.requestedAt);

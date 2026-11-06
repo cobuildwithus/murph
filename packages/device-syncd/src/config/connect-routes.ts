@@ -1,6 +1,4 @@
-import type { ConfiguredDeviceSyncProviderKey } from "./provider-types.ts";
 
-export type DirectDeviceConnectProvider = Exclude<ConfiguredDeviceSyncProviderKey, "junction">;
 
 export const JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG = "fitbit";
 export const JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG = "google_health";
@@ -25,13 +23,6 @@ export interface DeviceConnectJunctionSdkRoute {
   readonly sourceProviderSlugAliases?: readonly string[];
 }
 
-export interface DeviceConnectDirectRoute {
-  readonly kind: "direct";
-  readonly connectTarget: string;
-  readonly provider: DirectDeviceConnectProvider;
-  readonly defaultEnabled: boolean;
-}
-
 export interface DeviceConnectUnavailableRoute {
   readonly kind: "unavailable";
   readonly reason?: string;
@@ -40,7 +31,6 @@ export interface DeviceConnectUnavailableRoute {
 export type DeviceConnectRoute =
   | DeviceConnectJunctionLinkRoute
   | DeviceConnectJunctionSdkRoute
-  | DeviceConnectDirectRoute
   | DeviceConnectUnavailableRoute;
 
 export interface DeviceConnectRouteEntry<TRoute extends DeviceConnectRoute = DeviceConnectRoute> {
@@ -52,7 +42,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "whoop",
     label: "WHOOP",
-    routes: [directRoute("whoop"), junctionLinkRoute("whoop_v2", { connectTarget: "whoop" })],
+    routes: [junctionLinkRoute("whoop_v2", { connectTarget: "whoop" })],
   },
   {
     connectSourceId: "mapmyfitness",
@@ -97,7 +87,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "strava",
     label: "Strava",
-    routes: [directRoute("strava"), junctionLinkRoute("strava")],
+    routes: [junctionLinkRoute("strava")],
   },
   {
     connectSourceId: "freestyle-libre-ble",
@@ -157,7 +147,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "oura",
     label: "Oura",
-    routes: [directRoute("oura"), junctionLinkRoute("oura")],
+    routes: [junctionLinkRoute("oura")],
   },
   {
     connectSourceId: "peloton",
@@ -289,10 +279,6 @@ export const DEVICE_CONNECT_SOURCE_BY_ID: ReadonlyMap<string, DeviceConnectSourc
   DEVICE_CONNECT_SOURCES.map((source) => [source.connectSourceId, source] as const),
 );
 
-const DIRECT_ROUTE_ENTRY_BY_PROVIDER = new Map(
-  listDirectDeviceConnectRouteEntries().map((entry) => [entry.route.provider, entry] as const),
-);
-
 const JUNCTION_ROUTE_ENTRY_BY_PROVIDER_SLUG = buildJunctionDeviceConnectRouteEntryMap();
 
 const JUNCTION_LINK_ROUTE_ENTRY_BY_PROVIDER_SLUG = new Map(
@@ -336,18 +322,6 @@ export function canonicalizeJunctionProviderSlug(value: unknown): string | null 
 export function resolveDeviceConnectSourceById(sourceId: string): DeviceConnectSource | null {
   const normalized = normalizeDeviceConnectSourceId(sourceId);
   return normalized ? DEVICE_CONNECT_SOURCE_BY_ID.get(normalized) ?? null : null;
-}
-
-export function listDirectDeviceConnectRouteEntries(): DeviceConnectRouteEntry<DeviceConnectDirectRoute>[] {
-  const entries: DeviceConnectRouteEntry<DeviceConnectDirectRoute>[] = [];
-  for (const source of DEVICE_CONNECT_SOURCES) {
-    for (const route of source.routes) {
-      if (route.kind === "direct") {
-        entries.push({ source, route });
-      }
-    }
-  }
-  return entries;
 }
 
 export function listJunctionDeviceConnectRouteEntries(): Array<
@@ -421,12 +395,6 @@ export function normalizeJunctionLinkProviderFilter(value: readonly string[] | u
   return [...new Set(normalizedProviderSlugs)];
 }
 
-export function resolveDirectDeviceConnectRouteByProvider(
-  provider: DirectDeviceConnectProvider,
-): DeviceConnectRouteEntry<DeviceConnectDirectRoute> | null {
-  return DIRECT_ROUTE_ENTRY_BY_PROVIDER.get(provider) ?? null;
-}
-
 export function resolveJunctionDeviceConnectRouteByProviderSlug(
   providerSlug: string,
 ): DeviceConnectRouteEntry<DeviceConnectJunctionLinkRoute | DeviceConnectJunctionSdkRoute> | null {
@@ -494,23 +462,6 @@ function junctionSdkRoute(
     kind: "junction_sdk",
     sourceProviderSlug: normalizedProviderSlug,
     ...normalizeJunctionProviderSlugAliases(options.aliases),
-  };
-}
-
-function directRoute(
-  provider: DirectDeviceConnectProvider,
-  options: { connectTarget?: string; defaultEnabled?: boolean } = {},
-): DeviceConnectDirectRoute {
-  const normalizedConnectTarget = normalizeJunctionProviderSlug(options.connectTarget ?? provider);
-  if (!normalizedConnectTarget) {
-    throw new TypeError("Direct device connect routes require normalized connect targets.");
-  }
-
-  return {
-    kind: "direct",
-    connectTarget: normalizedConnectTarget,
-    provider,
-    defaultEnabled: options.defaultEnabled ?? true,
   };
 }
 

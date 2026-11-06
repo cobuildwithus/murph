@@ -98,11 +98,6 @@ export async function removeDirectoryIfExists(directoryPath: string): Promise<vo
   await fs.rm(directoryPath, { recursive: true, force: true });
 }
 
-export async function resetDirectory(directoryPath: string): Promise<void> {
-  await removeDirectoryIfExists(directoryPath);
-  await ensureDirectory(directoryPath);
-}
-
 export async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);

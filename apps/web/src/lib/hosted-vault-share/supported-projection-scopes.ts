@@ -1,5 +1,7 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -19,6 +21,14 @@ export function supportsHostedVaultShareDeferredProjectionWork(
   return new URL(request.url).searchParams.get(
     HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   ) === HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION;
+}
+
+export function supportsHostedVaultShareProjectionContentDigests(
+  request: Request,
+): boolean {
+  return new URL(request.url).searchParams.get(
+    HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  ) === HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION;
 }
 
 export function readHostedVaultShareProjectionModeFromRequest(
@@ -113,12 +123,8 @@ export function readHostedVaultShareSupportedProjectionScopeKeysFromRequest(
   const supported = new Set<string>();
   for (const value of values) {
     try {
-      supported.add(buildHostedVaultShareProjectionScopeKey(
-        parseHostedVaultShareProjectionScopeKey(
-          value,
-          "Vault share supported projection scope",
-        ),
-      ));
+      const scope = parseHostedVaultShareProjectionScopeKey(value, "Vault share supported projection scope");
+      supported.add(buildHostedVaultShareProjectionScopeKey(scope));
     } catch {
       // Unknown future scopes are not a reason to fall back to legacy support.
     }

@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -19,9 +20,7 @@ import {
   deleteRecipe,
   initializeVault,
   inspectCanonicalWriteLock,
-  listWriteOperationMetadataPaths,
   readRecoverableStoredWriteOperation,
-  readStoredWriteOperation,
   readStoredWriteOperationJsonlAppendPayload,
   repairVault,
   resolveRawAssetDirectory,
@@ -151,6 +150,8 @@ afterEach(async () => {
     ),
   );
 });
+
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
 
 test("atomic writes preserve existing modes while replacing content", async () => {
   const tempDirectory = await makeTempDirectory("murph-core-operations-thresholds-atomic");
@@ -684,7 +685,7 @@ test("staged JSONL payload recovery is bound to the stored content receipt", asy
   });
   await batch.stageJsonlAppend(targetRelativePath, payload);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(
     await readStoredWriteOperationJsonlAppendPayload({
       operation,
@@ -922,7 +923,7 @@ test("WriteBatch reserves unique stage artifacts under concurrent raw staging", 
   );
 
   assert.equal(new Set(staged.map((entry) => entry.stagedAbsolutePath)).size, staged.length);
-  const storedOperation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const storedOperation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(storedOperation.actions.length, staged.length);
   assert.equal(
     new Set(storedOperation.actions.map((action) =>
@@ -980,6 +981,68 @@ test("hosted JSONL replay rejects matching-size base content drift", async () =>
     /base content does not match/u,
   );
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "other\n");
+});
+
+test("hosted inbox replay tolerates an omitted backup and remains idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-inbox-backup-gap");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/inbox-captures/2026/2026-04.jsonl";
+  const buildCapture = (captureId: string, text = "Synthetic attachment") => ({
+    schemaVersion: "murph.inbox-capture.v2",
+    captureId,
+    identityKey: `telegram:self:${captureId}`,
+    eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V4",
+    source: "telegram",
+    accountId: "self",
+    externalId: captureId,
+    thread: { id: "synthetic_thread", title: null, isDirect: true },
+    actor: { id: null, displayName: null, isSelf: false },
+    occurredAt: FIXED_TIME,
+    recordedAt: FIXED_TIME,
+    receivedAt: FIXED_TIME,
+    text,
+    raw: {},
+    sourceDirectory: `raw/inbox/${captureId}`,
+    rawRefs: [],
+    attachments: [],
+  });
+  const lost = `${JSON.stringify(buildCapture("cap_lost_backup"))}\n`;
+  const saved = `${JSON.stringify(buildCapture("cap_saved_backup"))}\n`;
+  const receipt = buildHostedJsonlAppendReceipt({
+    appendContent: saved,
+    baseContent: lost,
+    operationId: "op_inbox_backup_gap",
+    targetRelativePath,
+  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      receipt,
+      readPayload: async () => Buffer.from(saved),
+    });
+  }
+  const target = path.join(vaultRoot, targetRelativePath);
+  assert.equal(await fs.readFile(target, "utf8"), saved);
+
+  const conflicting = `${JSON.stringify(buildCapture("cap_saved_backup", "Conflicting contents"))}\n`;
+  await assert.rejects(applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    receipt: buildHostedJsonlAppendReceipt({
+      appendContent: conflicting,
+      baseContent: lost,
+      operationId: "op_inbox_backup_conflict",
+      targetRelativePath,
+    }),
+    readPayload: async () => Buffer.from(conflicting),
+  }), /conflicting content/);
+  assert.equal(await fs.readFile(target, "utf8"), saved);
+
+  await fs.writeFile(target, `${saved}${saved}`);
+  await assert.rejects(applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    receipt,
+    readPayload: async () => Buffer.from(saved),
+  }), /duplicate existing/);
 });
 
 test("hosted audit replay converges two ordered receipts after a later physical append", async () => {
@@ -1401,7 +1464,7 @@ test("write batches fail closed and roll back when hosted receipt persistence fa
   await assert.rejects(fs.readFile(resolveVaultPath(vaultRoot, targetPath).absolutePath, "utf8"));
   await assert.rejects(fs.readFile(path.join(receiptRoot, `${batch.operationId}.json`), "utf8"));
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
   assert.equal(operation.actions[0]?.state, "rolled_back");
 });
@@ -1570,7 +1633,7 @@ test("stored write operations reject committed payloads without receipts and rem
   );
 
   await assert.rejects(
-    () => readStoredWriteOperation(vaultRoot, operationPath),
+    () => readObservedWriteOperation(vaultRoot, operationPath),
     (error: unknown) => error instanceof VaultError && error.code === "OPERATION_INVALID",
   );
 });
@@ -1633,9 +1696,9 @@ test("applyCanonicalWriteBatch rejects empty batches and rolls back applied writ
 
   const rollbackOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "rollback_test");
@@ -1649,8 +1712,7 @@ test("applyCanonicalWriteBatch rejects empty batches and rolls back applied writ
     vaultRoot,
     rollbackOperation?.relativePath ?? "",
   );
-  assert.equal(recoverable?.operationId, rollbackOperation?.operation.operationId);
-  assert.equal(recoverable?.status, "rolled_back");
+  assert.equal(recoverable, null);
 });
 
 test("applyCanonicalWriteBatch records rollback failures and validateVault reports them", async () => {
@@ -1700,9 +1762,9 @@ test("applyCanonicalWriteBatch records rollback failures and validateVault repor
 
   const rollbackOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "rollback_failure");
@@ -1762,9 +1824,9 @@ test("applyCanonicalWriteBatch rolls back deletes through their backups", async 
 
   const rollbackOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "delete_rollback");
@@ -1798,9 +1860,9 @@ test("applyCanonicalWriteBatch treats deletes of missing files as no-ops without
 
   const missingDeleteOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "delete_missing");
@@ -1862,9 +1924,9 @@ test("applyCanonicalWriteBatch reports resume conflicts when overwrite targets d
 
   const resumeConflictOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "resume_conflict");
@@ -1909,9 +1971,9 @@ test("applyCanonicalWriteBatch resumes same-content non-overwrite writes as reus
 
   const resumeReuseOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "resume_reuse");
@@ -1963,9 +2025,9 @@ test("applyCanonicalWriteBatch reports resume conflicts when delete backups are 
 
   const deleteBackupMissingOperation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+      (await listObservedWriteOperationPaths(vaultRoot)).map(async (relativePath) => ({
         relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+        operation: await readObservedWriteOperation(vaultRoot, relativePath),
       })),
     )
   ).find(({ operation }) => operation.operationType === "delete_backup_missing");
@@ -2074,7 +2136,7 @@ test("receipt-guarded raw copies reject changed source and staged bytes before c
     sourcePath,
     targetRelativePath,
   });
-  const stored = await readStoredWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath);
+  const stored = await readObservedWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath);
   const storedAction = stored.actions[0];
   assert.equal(storedAction?.kind, "raw_copy");
   if (storedAction?.kind !== "raw_copy") {
@@ -2089,7 +2151,7 @@ test("receipt-guarded raw copies reject changed source and staged bytes before c
   );
   assert.equal(await pathExists(targetAbsolutePath), false);
   assert.equal(
-    (await readStoredWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath)).status,
+    (await readObservedWriteOperation(vaultRoot, changedStageBatch.metadataRelativePath)).status,
     "rolled_back",
   );
 
@@ -2415,4 +2477,86 @@ test("repairVault recreates missing required directories", async () => {
   assert.ok(repaired.createdDirectories.includes(VAULT_LAYOUT.providersDirectory));
   assert.equal(await fs.stat(missingDirectory).then((stats) => stats.isDirectory()), true);
   assert.equal(typeof repaired.auditPath, "string");
+});
+
+
+test.each([false, true])("rolls back a partially written JSONL append (existing shard: %s)", async (existing) => {
+  const vaultRoot = await makeTempDirectory("murph-core-partial-append");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const target = path.join(vaultRoot, targetRelativePath);
+  const before = existing ? '{"id":"existing"}\n' : "";
+  if (existing) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, before);
+  }
+  const batch = await WriteBatch.create({ vaultRoot, operationType: "partial_append_proof", summary: "Recover an interrupted append" });
+  await batch.stageJsonlAppend(targetRelativePath, '{"id":"new"}\n');
+  const append = fs.appendFile.bind(fs);
+  vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+    if (file === target) {
+      await append(file, String(data).slice(0, 6), options);
+      throw Object.assign(new Error("Synthetic disk-full failure"), { code: "ENOSPC" });
+    }
+    return append(file, data, options);
+  });
+  await assert.rejects(batch.commit(), { code: "ENOSPC" });
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
+  if (existing) assert.equal(await fs.readFile(target, "utf8"), before);
+  else assert.equal(await pathExists(target), false);
+  vi.restoreAllMocks();
+  const following = await WriteBatch.create({ vaultRoot, operationType: "following_append", summary: "Append after successful recovery" });
+  await following.stageJsonlAppend(targetRelativePath, '{"id":"following"}\n');
+  await following.commit();
+  assert.equal(await fs.readFile(target, "utf8"), before + '{"id":"following"}\n');
+});
+
+test("preserves recovery evidence instead of truncating an unrelated append after a partial failure", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-partial-append-conflict");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const target = path.join(vaultRoot, targetRelativePath);
+  const batch = await WriteBatch.create({ vaultRoot, operationType: "partial_append_conflict", summary: "Preserve unexpected append content" });
+  await batch.stageJsonlAppend(targetRelativePath, '{"id":"new"}\n');
+  const append = fs.appendFile.bind(fs);
+  vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+    if (file === target) {
+      await append(file, "unexpected content", options);
+      throw Object.assign(new Error("Synthetic interrupted write"), { code: "ENOSPC" });
+    }
+    return append(file, data, options);
+  });
+  await assert.rejects(batch.commit());
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.notEqual(operation.status, "rolled_back");
+  assert.equal(await fs.readFile(target, "utf8"), "unexpected content");
+  assert.equal(await readStoredWriteOperationJsonlAppendPayload({ operation, targetRelativePath, vaultRoot }), '{"id":"new"}\n');
+});
+
+
+test("keeps the staged append when restoring its preimage also fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-append-rollback-failure");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026/2026-07.jsonl";
+  const target = path.join(vaultRoot, targetRelativePath);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, '{"id":"existing"}\n');
+  const batch = await WriteBatch.create({ vaultRoot, operationType: "rollback_failure", summary: "Preserve interrupted append recovery" });
+  await batch.stageJsonlAppend(targetRelativePath, '{"id":"new"}\n');
+  const append = fs.appendFile.bind(fs);
+  vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+    if (file === target) {
+      await append(file, String(data).slice(0, 6), options);
+      throw Object.assign(new Error("Synthetic disk-full failure"), { code: "ENOSPC" });
+    }
+    return append(file, data, options);
+  });
+  vi.spyOn(fs, "truncate").mockRejectedValue(Object.assign(new Error("Synthetic restore failure"), { code: "EACCES" }));
+  await assert.rejects(batch.commit(), { code: "ENOSPC" });
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error?.message, "Synthetic restore failure");
+  assert.equal(await readStoredWriteOperationJsonlAppendPayload({ operation, targetRelativePath, vaultRoot }), '{"id":"new"}\n');
 });

@@ -1,9 +1,10 @@
 import { Buffer } from "node:buffer";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import {
+  buildWorkoutSessionAppCardEnvelopeV6,
   parseWorkoutSessionAppCardEnvelopeV4,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutLiveSnapshotMemberActionV1,
@@ -25,6 +26,7 @@ import {
   hasLoggedWorkoutSet,
   logLiveWorkoutSet,
   readLiveWorkoutCardSnapshot,
+  readLiveWorkoutCardEditor,
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
 } from "../src/usecases/workout-live.js";
@@ -542,13 +544,12 @@ test("a closed preference-only action preserves the completed duration", async (
       action,
       vault: fixture.vault,
     })).resolves.toEqual({
-      reason: "workout_changed",
-      status: "rejected",
+      status: "unchanged",
     });
 
     const stored = await showWorkoutRecord(fixture.vault, fixture.workoutId);
     expect(stored.entity.data.durationMinutes).toBe(durationMinutes);
-    expect(parseShownWorkout(stored).lastMemberActionId).toBeUndefined();
+    expect(parseShownWorkout(stored).lastMemberActionId).toBe(ACTION_ID);
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }
@@ -894,6 +895,43 @@ test("a stale snapshot cannot re-arm a card after a hidden same-name reorder", a
   }
 });
 
+test.each(["absent", "unavailable"])("workout refresh, save, and replay leave an %s shared query projection untouched", async (projectionState) => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  const projectionPath = path.join(fixture.vault, ".runtime/projections/query.sqlite");
+  try {
+    if (projectionState === "unavailable") {
+      await mkdir(projectionPath, { recursive: true });
+    }
+    const expectProjectionUntouched = async () => {
+      if (projectionState === "unavailable") {
+        expect((await stat(projectionPath)).isDirectory()).toBe(true);
+      } else {
+        await expect(stat(projectionPath)).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    };
+    await expectProjectionUntouched();
+    const snapshot = snapshotAction(fixture);
+    await expect(readLiveWorkoutCardSnapshot({
+      action: snapshot,
+      vault: fixture.vault,
+    })).resolves.toMatchObject({ status: "unchanged" });
+    await expectProjectionUntouched();
+
+    const request = {
+      acceptedAt: ACCEPTED_AT,
+      action: putFirstSetAction({ actionBinding: snapshot.workoutBinding, reps: 12 }),
+      vault: fixture.vault,
+    };
+    await expect(applyLiveWorkoutMemberAction(request)).resolves.toEqual({ status: "applied" });
+    await expectStoredReps(fixture.vault, fixture.workoutId, [12, 10]);
+    await expectProjectionUntouched();
+    await expect(applyLiveWorkoutMemberAction(request)).resolves.toEqual({ status: "unchanged" });
+    await expectProjectionUntouched();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
 test("a direct result save returns its canonical card without a second action", async () => {
   const fixture = await createLoggedWorkout([10, 10]);
   try {
@@ -914,11 +952,7 @@ test("a direct result save returns its canonical card without a second action", 
     if (applied.status !== "applied" || applied.result === undefined) {
       throw new TypeError("Expected the direct-save card result.");
     }
-    const encoded = new URL(applied.result.cardUrl).hash
-      .replace(/^#murph-card=/u, "");
-    const envelope = JSON.parse(
-      Buffer.from(encoded, "base64url").toString("utf8"),
-    );
+    const envelope = applied.result.card;
     expect(envelope).toMatchObject({ schemaVersion: 6 });
     expect(
       parseWorkoutSessionAppCardEnvelopeV4(envelope)
@@ -1237,6 +1271,103 @@ test("the generic workout editor still rejects an accidental saved-set deletion"
       vault: fixture.vault,
     })).rejects.toThrow(/would remove saved set 2/iu);
     await expectStoredReps(fixture.vault, fixture.workoutId, [8, 10]);
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+
+test("completed workout cards remain editable and corrections preserve their end boundary", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    await finishLiveWorkout({ vault: fixture.vault, workoutId: fixture.workoutId, endedAt: ACCEPTED_AT });
+    const before = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    const workout = parseShownWorkout(before);
+    const snapshot = snapshotAction({ workout, workoutId: fixture.workoutId });
+    snapshot.presentation.workout.state = "completed";
+    const editor = await readLiveWorkoutCardEditor({
+      vault: fixture.vault, workoutId: fixture.workoutId, presentation: snapshot.presentation.workout,
+    });
+    expect(editor?.editor.actionBinding).toMatch(/^[a-f0-9]{64}$/u);
+    const action = {
+      ...putFirstSetAction({ actionBinding: snapshot.workoutBinding, reps: 12 }),
+      presentation: snapshot.presentation,
+    };
+    const request = { action, acceptedAt: "2026-08-14T15:00:00.000Z", vault: fixture.vault };
+    const result = await applyLiveWorkoutMemberAction(request);
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied" || !result.result) throw new Error("Expected an editable save result.");
+    const envelope = result.result.card;
+    expect(envelope).toMatchObject({ schemaVersion: 6, card: { s: "c", b: expect.stringMatching(/^[a-f0-9]{64}$/u) } });
+    const after = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    expect(parseShownWorkout(after).endedAt).toBe(workout.endedAt);
+    expect(after.entity.data.durationMinutes).toBe(before.entity.data.durationMinutes);
+    expect(parseShownWorkout(after).exercises[0]?.sets[0]?.reps).toBe(12);
+    expect((await applyLiveWorkoutMemberAction(request)).status).toBe("unchanged");
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("completed corrections survive crossing the message URL limit and allow another save", async () => {
+  const vault = await mkdtemp(path.join(os.tmpdir(), "murph-completed-card-size-"));
+  await initializeVault({ vaultRoot: vault, createdAt: STARTED_AT, timezone: "UTC" });
+  const started = await startLiveWorkout({ vault, name: "Workout", startedAt: STARTED_AT });
+  const fixture = { vault, workoutId: started.eventId };
+  try {
+    const exercises = Array.from({ length: 8 }, (_, exerciseIndex) => ({
+      name: `Exercise ${exerciseIndex + 1}`,
+      order: exerciseIndex + 1,
+      mode: "weight_reps" as const,
+      unitOverride: "lb" as const,
+      sets: Array.from({ length: 8 }, (_, setIndex) => ({
+        order: setIndex + 1,
+        ...(exerciseIndex === 0 && setIndex < 7 ? { reps: 12, weight: 135, weightUnit: "lb" as const } : {}),
+      })),
+    }));
+    await editWorkoutRecord({ vault: fixture.vault, lookup: fixture.workoutId,
+      set: [`workout.exercises=${JSON.stringify(exercises)}`] });
+    await finishLiveWorkout({ vault: fixture.vault, workoutId: fixture.workoutId, endedAt: ACCEPTED_AT });
+    const before = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+    let workout = parseShownWorkout(before);
+    const presentation = snapshotAction({ workout, workoutId: fixture.workoutId }).presentation;
+    presentation.workout.state = "completed";
+    presentation.workout.exercises = exercises.map((exercise, exerciseIndex) => ({
+      name: exercise.name,
+      sets: exercise.sets.map((_, setIndex) => ({ target: null,
+        status: exerciseIndex === 0 && setIndex < 7 ? "completed" : "skipped",
+        actual: exerciseIndex === 0 && setIndex < 7 ? "135 lb × 12" : null,
+      })),
+    }));
+    const editor = await readLiveWorkoutCardEditor({ vault: fixture.vault,
+      workoutId: fixture.workoutId, presentation: presentation.workout });
+    if (!editor) throw new Error("Expected completed editor.");
+    const initial = buildWorkoutSessionAppCardEnvelopeV6({ ...presentation, editor: editor.editor });
+    const urlLength = (card: unknown) => "https://www.withmurph.ai/#murph-card=".length
+      + Buffer.from(JSON.stringify(card)).toString("base64url").length;
+    expect(urlLength(initial)).toBeLessThan(2_048);
+    let binding = editor.editor.actionBinding;
+    for (const [index, reps] of [12, 15].entries()) {
+      const action: WorkoutLiveApplyMemberActionV1 = {
+        ...preferenceOnlyAction({ workout, workoutId: fixture.workoutId }),
+        presentation,
+        mutations: [{ kind: "set.put", exerciseName: "Exercise 1", exercisePosition: 1, setPosition: 8,
+          expectedResult: index === 0 ? null : { kind: "weight_reps", reps: 12, weight: 135, weightUnit: "lb" },
+          result: { kind: "weight_reps", reps, weight: 135, weightUnit: "lb" } }],
+      };
+      action.expectedWorkout.actionBinding = binding;
+      const result = await applyLiveWorkoutMemberAction({ vault: fixture.vault, action,
+        acceptedAt: "2026-08-14T15:00:00.000Z", actionId: index === 0 ? ACTION_ID : SECOND_ACTION_ID });
+      if (result.status !== "applied" || !result.result?.card) throw new Error("Expected editable correction result.");
+      expect(urlLength(result.result.card)).toBeGreaterThanOrEqual(2_048);
+      expect(result.result.card.card.s).toBe("c");
+      binding = result.result.card.card.b;
+      const current = await showWorkoutRecord(fixture.vault, fixture.workoutId);
+      workout = parseShownWorkout(current);
+      expect(workout.exercises[0]?.sets[7]?.reps).toBe(reps);
+      expect(workout.endedAt).toBe(ACCEPTED_AT);
+      expect(current.entity.data.durationMinutes).toBe(before.entity.data.durationMinutes);
+    }
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }

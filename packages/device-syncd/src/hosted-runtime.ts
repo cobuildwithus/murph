@@ -1,6 +1,12 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
+import type { JunctionRequestTimeoutDiagnosticDetails } from "./types.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 
-import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+export { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
+
+export { encodeJunctionReconcileProof, readJunctionReconcileProof } from "./junction-reconcile-proof.ts";
+
+import { JUNCTION_RECONCILE_PROOF_METADATA_KEY, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -19,6 +25,8 @@ import type {
   DeviceConnectionSourceStatus,
 } from "./client.ts";
 export {
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
@@ -243,11 +251,21 @@ export function mergeHostedDeviceSyncConnectionMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown> | null | undefined;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  return mergeHostedJunctionHistoricalBackfillMetadata({
+  const merged = mergeHostedJunctionHistoricalBackfillMetadata({
     hostedMetadata: input.hostedMetadata,
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
   });
+  // Local SQLite owns unpublished scheduling/import progress. Keep the actual
+  // Web baseline until a checkpointed continuation authorizes publication.
+  for (const key of [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY]) {
+    const localValue = input.localMetadata?.[key];
+    if (typeof localValue === "string") {
+      merged.metadata[key] = localValue;
+      merged.preservedLocalProgress ||= localValue !== input.hostedMetadata[key];
+    }
+  }
+  return merged;
 }
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
@@ -480,7 +498,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   lastDataAt?: string | null;
 }
 
-export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
+export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails extends JunctionRequestTimeoutDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;
@@ -576,6 +594,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
+  providerDedupeKey?: string;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
@@ -721,12 +740,6 @@ export function findHostedExecutionDeviceSyncRuntimeApplyEntry(
   return response.updates.find((entry) => entry.connectionId === connectionId) ?? null;
 }
 
-export function didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(
-  entry: Pick<HostedExecutionDeviceSyncRuntimeApplyEntry, "writeUpdate"> | null,
-): boolean {
-  return entry?.writeUpdate === "applied";
-}
-
 export interface HostedExecutionDeviceSyncJobHint {
   availableAt?: string;
   dedupeKey?: string | null;
@@ -737,6 +750,8 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
+  junctionReconcileProof?: string;
+  junctionTemporalSweepKey?: string;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
   nextReconcileAt?: string | null;
@@ -776,6 +791,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   historicalProofFirstSeenAt: "isoTimestamp",
   historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
+  historicalPullPending: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
   historicalUnresolvedProviderRecordCount: "number",
@@ -784,6 +800,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   includeProfile: "boolean",
   objectId: "string",
   occurredAt: "isoTimestamp",
+  reconcileProof: "string",
   resource: "string",
   resourceCategory: "string",
   sourceLifecycleEpoch: "number",
@@ -1531,6 +1548,23 @@ export function parseHostedExecutionDeviceSyncWakeHint(
     ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
   }
 
+  if (record.junctionReconcileProof !== undefined) {
+    if (typeof record.junctionReconcileProof !== "string"
+      || record.junctionReconcileProof.trim().length === 0
+      || record.junctionReconcileProof.length > 256) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionReconcileProof must be a nonempty string of at most 256 characters.");
+    }
+    next.junctionReconcileProof = record.junctionReconcileProof;
+  }
+
+  if (record.junctionTemporalSweepKey !== undefined) {
+    if (typeof record.junctionTemporalSweepKey !== "string"
+      || !/^[a-f0-9]{64}$/u.test(record.junctionTemporalSweepKey)) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionTemporalSweepKey must be a SHA-256 hash.");
+    }
+    next.junctionTemporalSweepKey = record.junctionTemporalSweepKey;
+  }
+
   if (record.nextReconcileAt !== undefined) {
     next.nextReconcileAt = readNullableIsoTimestamp(
       record.nextReconcileAt,
@@ -1821,6 +1855,14 @@ function parseHostedExecutionDeviceSyncDirtyResource(
       : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
+    ...(record.providerDedupeKey === undefined || record.providerDedupeKey === null
+      ? {}
+      : {
+          providerDedupeKey: requireString(
+            record.providerDedupeKey,
+            `${label}.providerDedupeKey`,
+          ),
+        }),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
@@ -2285,6 +2327,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
     details: parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
       record.details,
       `${label}.details`,
+      code,
     ),
     retryable: requireBoolean(record.retryable, `${label}.retryable`),
   };
@@ -2293,6 +2336,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
 function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   value: unknown,
   label: string,
+  code: string,
 ): HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
   if (value === undefined || value === null) {
     return {};
@@ -2300,6 +2344,11 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
 
   const record = requireObject(value, label);
   assertSupportedFields(record, label, [
+    "providerRequestTimeoutMs",
+    "providerRequestElapsedMs",
+    "providerRequestAttempt",
+    "providerRequestStage",
+    "providerResponseHeadersPresent",
     "failureCauseCode",
     "failureCauseName",
     "failureErrorCause",
@@ -2440,7 +2489,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     }
   }
 
-  return details;
+  return { ...details, ...readSafeJunctionRequestTimeoutDiagnostics(code, record) };
 }
 
 function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {

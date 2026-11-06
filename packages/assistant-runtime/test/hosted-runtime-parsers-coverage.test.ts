@@ -18,13 +18,7 @@ describe("hosted runtime parser coverage", () => {
             telegramBotConfigured: false,
           },
           deviceSync: {
-            providerConfigs: {
-              whoop: {
-                clientId: "whoop-client",
-                clientSecret: "whoop-secret",
-                scopes: ["offline", "read:profile"],
-              },
-            },
+            providerConfigs: { junction: { environment: "sandbox", region: "us" } },
             publicBaseUrl: "https://device-sync.example.test",
             secret: "secret_123",
           },
@@ -44,17 +38,12 @@ describe("hosted runtime parser coverage", () => {
           telegramBotConfigured: false,
         },
         deviceSync: {
-          providerConfigs: {
-            whoop: {
-              clientId: "whoop-client",
-              clientSecret: "whoop-secret",
-              scopes: ["offline", "read:profile"],
-            },
-          },
+          providerConfigs: { junction: { environment: "sandbox", region: "us" } },
           publicBaseUrl: "https://device-sync.example.test",
           secret: "secret_123",
         },
         managedAutoReplyChannels: [
+          { capabilityReady: true, channel: "voice" },
           {
             capabilityReady: true,
             channel: "email",
@@ -115,13 +104,7 @@ describe("hosted runtime parser coverage", () => {
           telegramBotConfigured: false,
         },
         deviceSync: {
-          providerConfigs: {
-            oura: {
-              clientId: "oura-client",
-              clientSecret: "oura-secret",
-              fetchImpl: () => Promise.resolve(new Response()),
-            },
-          },
+          providerConfigs: { junction: { environment: "sandbox", region: "us", fetchImpl: () => {} } },
           publicBaseUrl: "https://device-sync.example.test",
           secret: "secret_123",
         },
@@ -135,18 +118,12 @@ describe("hosted runtime parser coverage", () => {
           telegramBotConfigured: false,
         },
         deviceSync: {
-          providerConfigs: {
-            oura: {
-              clientId: "oura-client",
-              clientSecret: "oura-secret",
-              webhookVerificationToken: "control-plane-only",
-            },
-          },
+          providerConfigs: { junction: { environment: "sandbox", region: "us", webhookSecret: "synthetic-secret" } },
           publicBaseUrl: "https://device-sync.example.test",
           secret: "secret_123",
         },
       },
-    })).toThrow(/webhookVerificationToken is a provider-owned admin secret/u);
+    })).toThrow(/webhookSecret is a provider-owned webhook secret/u);
   });
 
   it("parses explicit managed auto-reply channel config", () => {

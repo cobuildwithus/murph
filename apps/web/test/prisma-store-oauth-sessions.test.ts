@@ -362,6 +362,24 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     });
   });
 
+  it("distinguishes an in-flight replay from a retired admission before expiry", async () => {
+    const record = buildOAuthSessionRow({ consumedAt: new Date("2026-04-13T12:01:00.000Z") });
+    const tx = createTransaction({ record });
+    tx.deviceOauthSession.deleteMany.mockImplementation(async () => {
+      tx.$outerFindUnique.mockResolvedValue(null);
+      return { count: 1 };
+    });
+    const store = createStore(tx);
+    await expect(store.consumeOAuthState(record.state, "2026-04-13T12:02:00.000Z", record.provider, record.userId!))
+      .resolves.toMatchObject({ status: "replayed" });
+    await expect(store.resolveOAuthStateWithoutProviderAuthority({
+      state: record.state, consumedAt: record.consumedAt!.toISOString(),
+    })).resolves.toBe(true);
+    await expect(store.consumeOAuthState(record.state, "2026-04-13T12:03:00.000Z", record.provider, record.userId!))
+      .resolves.toEqual({ status: "missing" });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+  });
+
   it("retains a replacement callback claim when finalization has an old epoch", async () => {
     const tx = createTransaction({ deleteManyCount: 0, record: null });
     const store = createStore(tx);

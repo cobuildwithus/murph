@@ -8,7 +8,7 @@ import {
 } from "../hosted-crypto/secure-box";
 
 type ClinicalSecretPrismaClient = Parameters<typeof sealHostedUserSecureBoxString>[0]["prisma"];
-type ClinicalConnectionSecretField = "accessToken" | "patientId" | "patientBinding";
+type ClinicalConnectionSecretField = "accessToken" | "patientId" | "patientBinding" | "refreshToken";
 type ClinicalPageCursorIdentity = {
   queryFingerprint: string;
   queryScopeId: string;

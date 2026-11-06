@@ -29,7 +29,7 @@ export interface HostedContactPrivacyKeyring {
 
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
-const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-luna";
+const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-6-luna";
 const DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES = [
   // North America. This is intentionally the full NANP, not US/Canada-only.
   "+1",
@@ -99,6 +99,8 @@ export interface HostedOnboardingEnvironment {
   inviteTtlHours: number;
   isProduction: boolean;
   linqApiBaseUrl: string;
+  /** Decisions API key for the "on it" tapback; null unless HOSTED_LINQ_ACK_REACTIONS=on. */
+  linqAckReactionOpenAiApiKey?: string | null;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
   linqFirstContactAdmissionMode: HostedLinqFirstContactAdmissionMode;
@@ -109,9 +111,6 @@ export interface HostedOnboardingEnvironment {
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
-  privyAppId: string | null;
-  privyAppSecret: string | null;
-  privyVerificationKey: string | null;
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeFamilyPriceIdsByPlan: Readonly<
@@ -146,6 +145,13 @@ export function readHostedOnboardingEnvironment(
     ),
     isProduction,
     linqApiBaseUrl: linq.apiBaseUrl,
+    // Off unless explicitly "on": the runner that skips clashing progress
+    // updates must be live before Web starts reacting.
+    linqAckReactionOpenAiApiKey:
+      readEnv(source, "HOSTED_LINQ_ACK_REACTIONS") === "on"
+        ? readEnv(source, "HOSTED_LINQ_ACK_REACTION_OPENAI_API_KEY")
+          ?? readEnv(source, "OPENAI_API_KEY")
+        : null,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
     linqFirstContactAdmissionMode: readHostedLinqFirstContactAdmissionMode(source),
@@ -162,9 +168,6 @@ export function readHostedOnboardingEnvironment(
       readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
     linqWebhookSecret: linq.webhookSecret,
     linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
-    privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),
-    privyAppSecret: readEnv(source, "PRIVY_APP_SECRET"),
-    privyVerificationKey: readEnv(source, "PRIVY_VERIFICATION_KEY"),
     publicBaseUrl,
     stripeFamilyPriceIdsByPlan: readHostedStripeFamilyPriceIdsByPlan(source),
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),

@@ -22,6 +22,7 @@ export type {
 export * from './assistant/group-challenge-scorecard.js'
 export * from './assistant/group-challenge-scorecard-schema.js'
 export * from './assistant/provider-start-critical-path.js'
+export { ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE } from './assistant/progress-constants.js'
 export * from './assistant/private-completion-continuity.js'
 export {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -35,7 +36,12 @@ export type {
   AssistantGroupRoomModelInitializeResult,
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
+export { AssistantWorkspaceArtifactMaterializationError, scopeAssistantAutomationToolToRoute } from './assistant/execution-context.js'
 export type {
+  AssistantWorkspaceArtifactUnavailableReason,
+  AssistantWorkspaceArtifactMaterializationResult,
+  AssistantWorkspaceArtifactMaterializationOptions,
+  AssistantWorkspaceArtifactMaterializer,
   AssistantAutomationOccurrenceProjection,
   AssistantAutomationOccurrenceProjectionIssue,
   AssistantGroupParticipantDisplayName,
@@ -67,16 +73,15 @@ export type {
 } from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'
+export * from './assistant/manual-meal-estimation.js'
 export * from './assistant/reminder-availability-maintenance.js'
 export * from './assistant/onboarding-followup-automation.js'
-export * from './assistant/onboarding-followup-seed.js'
 export * from './assistant/onboarding-first-personal-read-automation.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'
 export * from './assistant-runtime.js'
 export * from './assistant-service.js'
 export * from './assistant-state.js'
-export * from './assistant-status.js'
 export * from './assistant-store.js'
 export * from './child-process-env.js'
 export * from './outbound-channel.js'

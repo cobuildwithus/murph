@@ -13,6 +13,7 @@ import {
 import {
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   type StringEnvSource,
 } from "./string-env.ts";
@@ -61,7 +62,6 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
   RUNNER_SECRET_PROCESS_CONTROL_KEYS,
 );
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
-const HOSTED_RUNNER_VENICE_ASSISTANT_PROVIDER = "venice";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 const HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
 const HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS =
@@ -83,6 +83,8 @@ export const HOSTED_RUNNER_DEPRECATED_CODEX_APP_SERVER_PROXY_ENV_KEYS = [
 ] as const;
 
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
+  MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV,
+  "MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS",
   ...HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS,
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
@@ -317,10 +319,6 @@ export function isHostedRunnerSupportedAssistantProvider(
 
 export function isHostedRunnerOpenAiProvider(value: unknown): boolean {
   return isHostedRunnerSupportedAssistantProvider(value);
-}
-
-export function isHostedRunnerVeniceProvider(value: unknown): boolean {
-  return normalizeStringEnvValue(value) === HOSTED_RUNNER_VENICE_ASSISTANT_PROVIDER;
 }
 
 export function hasHostedRunnerModelCredential(input: {

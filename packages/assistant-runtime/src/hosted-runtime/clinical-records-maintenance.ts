@@ -232,12 +232,13 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       sourceSystem,
       vaultRoot: input.vaultRoot,
     });
-    if (checkpoint.documentAttachments.some((attachment) => attachment.status === "downloaded")) {
+    if (checkpoint.documentAttachments.some((attachment) => attachment.status === "downloaded") || result.structuredEnrichmentSources?.length) {
       const { enqueueClinicalEnrichment } = await import("@murphai/vault-usecases/clinical-enrichment");
       const { jobId } = await enqueueClinicalEnrichment({
         vaultRoot: input.vaultRoot,
         manifestPath: result.manifestPath,
         manifestSha256: result.manifestSha256,
+        structuredSources: result.structuredEnrichmentSources,
       });
       // Publish durable work before advancing the retrieval cursor. Replaying a
       // saved batch therefore repairs a crash between evidence and admission.
@@ -389,7 +390,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         });
       }
       if (
-        clinicalFhirPageHasIncompleteSearchOutcome(response.body) &&
+        clinicalFhirPageHasIncompleteSearchOutcome(response.body, { ignorePatientAccessNotices: true }) &&
         !checkpoint.errors.some(
           (error) =>
             error.code === "provider-search-incomplete" &&

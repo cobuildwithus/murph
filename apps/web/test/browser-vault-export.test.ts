@@ -507,7 +507,8 @@ function createCipherEnvelope(ciphertext: string) {
 
 function createAuthorization() {
   return {
-    signature: `0x${"11".repeat(65)}` as `0x${string}`,
+    method: "passkey" as const,
+    assertion: { id: "synthetic-passkey", rawId: "synthetic-passkey", type: "public-key" as const, clientExtensionResults: {}, response: { authenticatorData: "synthetic", clientDataJSON: "synthetic", signature: "synthetic" } },
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
   };
 }
@@ -527,7 +528,6 @@ function createReplica(): BrowserVaultReplica {
     },
     entities: [],
     experimentOutcomes: [createExportOutcome()],
-    experimentRunCards: [],
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: false,

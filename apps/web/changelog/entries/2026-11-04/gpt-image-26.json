@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-04",
+  "order": 100,
+  "item": {
+    "id": "gpt-image-26",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "GPT Image 2.6 in chat",
+    "summary": "Murph now uses GPT Image 2.6 Flare when you ask it to create or edit an image.",
+    "details": "You can keep replying to images Murph made before the upgrade.",
+    "relevanceTags": ["images", "chat"],
+    "sourcePullRequests": []
+  }
+}

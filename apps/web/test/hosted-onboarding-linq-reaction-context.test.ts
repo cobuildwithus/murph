@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   parseHostedExecutionGroupReactionEventText,
@@ -148,13 +149,13 @@ beforeEach(() => {
       ? state.activeRootKeyIds.shift()
       : "root_ingress_1";
   });
-  mocks.getHostedLinqChatSummary.mockResolvedValue({
+  mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
     handles: [
       { handle: "+15550000000", isMe: true, status: "active" },
       { handle: "+15551234567", isMe: false, status: "active" },
     ],
     isGroup: true,
-  });
+  }));
   mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mockImplementation(
     async (input: {
       envelope: { userId: string };
@@ -636,6 +637,9 @@ describe("appendHostedLinqGroupReactionMailboxTx", () => {
 describe("buildHostedLinqAffirmativeReactionMessageEvent", () => {
   it.each([
     ["like", undefined, "Reacted with a like reaction."],
+    ["question", undefined, "Reacted with a question reaction."],
+    ["dislike", undefined, "Reacted with a dislike reaction."],
+    ["laugh", undefined, "Reacted with a laugh reaction."],
     ["heart", undefined, "Reacted with a heart reaction."],
     ["custom", "👍", "Reacted with 👍."],
     ["custom", "❤", "Reacted with ❤."],
@@ -658,10 +662,7 @@ describe("buildHostedLinqAffirmativeReactionMessageEvent", () => {
     },
   );
 
-  it("leaves laughs and removals on the consumed context-only path", async () => {
-    await expect(buildHostedLinqAffirmativeReactionMessageEvent({
-      event: buildReactionEvent({ reactionType: "laugh" }),
-    })).resolves.toBeNull();
+  it("leaves removals on the consumed context-only path", async () => {
     await expect(buildHostedLinqAffirmativeReactionMessageEvent({
       event: buildReactionEvent({
         eventType: "reaction.removed",

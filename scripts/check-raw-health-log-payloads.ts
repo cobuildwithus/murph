@@ -4,9 +4,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parse, type ParserPlugin } from "@babel/parser";
 import {
+  isBinaryExpression,
   isCallExpression,
   isIdentifier,
   isMemberExpression,
+  isNullLiteral,
   isObjectProperty,
   isOptionalCallExpression,
   isOptionalMemberExpression,
@@ -275,6 +277,16 @@ function readUnsafePropertyAccessReference(
 }
 
 function isSafeExpression(node: Node, sourceText: string): boolean {
+  if (
+    isBinaryExpression(node) &&
+    (node.operator === "===" || node.operator === "!==") &&
+    [node.left, node.right].some((operand) =>
+      isNullLiteral(operand) || isIdentifier(operand, { name: "undefined" }),
+    )
+  ) {
+    return true;
+  }
+
   if (isCallExpression(node) || isOptionalCallExpression(node)) {
     return isSafeHelperCallee(node.callee, sourceText);
   }

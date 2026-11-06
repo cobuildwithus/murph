@@ -10,9 +10,7 @@ export {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
 } from './automation/shared.js'
 export {
-  runAssistantAutomation,
   runAssistantAutomationPass,
-  type RunAssistantAutomationInput,
   type RunAssistantAutomationPassInput,
 } from './automation/run-loop.js'
 export {
@@ -67,6 +65,7 @@ export {
   type HostedMailboxAssistantInputItem,
 } from './hosted-mailbox-input-items.js'
 export {
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
@@ -76,6 +75,9 @@ export {
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEvent,
+  type AssistantInputExactLookupExclusionReason,
+  type AssistantInputExactLookupExclusionReasonCounts,
+  type AssistantInputExactLookupObservation,
   type AssistantInputProjection,
   type AssistantInputProjectionStatus,
   type AssistantInputSource,

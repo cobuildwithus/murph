@@ -32,7 +32,7 @@ Success criteria:
 - Changing query selection policy beyond making correctly emitted aggregates
   visible through the existing metric catalog.
 - Retaining dense stress samples in canonical samples or default query output.
-- Touching unrelated assistant-engine, assistant-runtime, or Murph Age worktree
+- Touching unrelated assistant-engine, assistant-runtime worktree
   changes.
 
 ## Verification Plan

@@ -16,14 +16,13 @@ categories:
 - walking
 - wearable-metric
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:doi-10.7326-annals-25-01547
-- type: cites
-  target: source_artifact:pmid-28459099
-- type: cites
-  target: source_artifact:pmid-33168018
+  - type: cites
+    target: source_artifact:doi-10.7326-annals-25-01547
+  - type: cites
+    target: source_artifact:pmid-28459099
+  - type: cites
+    target: source_artifact:pmid-33168018
+
 measurementContexts:
 - wearable_activity_summary
 - manual_log

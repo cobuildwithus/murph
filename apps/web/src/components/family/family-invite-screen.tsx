@@ -1,28 +1,27 @@
-import { Check as CheckIcon } from "lucide-react";
+import { Check as CheckIcon, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import {
   FamilyInviteSignInButton,
-  FamilyInviteWebAcceptButton,
+  FamilyInviteWebAcceptScreen,
   type FamilyInviteWebAcceptInitialState,
 } from "@/src/components/family/family-invite-accept-client";
 import {
-  JoinInviteEyebrow,
-  type JoinInviteEyebrowTone,
-} from "@/src/components/hosted-onboarding/join-invite-eyebrow";
-import { Button } from "@/src/components/ui/button";
-import { Card, CardContent } from "@/src/components/ui/card";
-import { PageHeader } from "@/src/components/ui/page-header";
+  LINK_PAGE_LINK_CLASS,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageScreen,
+  LinkPageTicket,
+} from "@/src/components/link-page/link-page-shell";
 import type { HostedFamilyInviteAcceptanceView } from "@/src/lib/hosted-onboarding/family-plan";
 
 export type FamilyInviteView = HostedFamilyInviteAcceptanceView | null;
 
 /**
- * The right-hand invite content shared by the live `/family/accept/[inviteCode]`
- * page and the design study. It is a pure presentation of an acceptance view, so
- * both callers render identical copy and CTA branching. The caller supplies the
- * shell, whether the visitor is authenticated, and the resolved Messages accept
+ * The invite content shared by the live `/family/accept/[inviteCode]` page and
+ * the design study. It is a pure presentation of an acceptance view, so both
+ * callers render identical copy and CTA branching. The caller supplies the
+ * frame, whether the visitor is authenticated, and the resolved Messages accept
  * link (both computed from server-only inputs on the live page).
  */
 export function FamilyInviteScreen(input: {
@@ -31,231 +30,170 @@ export function FamilyInviteScreen(input: {
   view: FamilyInviteView;
   webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
 }): ReactNode {
-  return (
-    <div className="flex w-full flex-col gap-6">{renderInvite(input)}</div>
-  );
-}
-
-function renderInvite(input: {
-  authenticated: boolean;
-  messagesAcceptHref: string | null;
-  view: FamilyInviteView;
-  webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
-}): ReactNode {
   const { view } = input;
+  const closed = readClosedInvite(view);
 
-  if (!view) {
+  if (closed || !view) {
     return (
-      <InviteMessage
-        eyebrow="Link no longer works"
-        tone="danger"
-        title="This invite isn't valid"
-        body="This family invite is no longer available. Ask the person who invited you to send a new one."
-      />
-    );
-  }
-
-  if (view.status === "expired") {
-    return (
-      <InviteMessage
-        eyebrow="Link no longer works"
-        tone="danger"
-        title="This invite has expired"
-        body="Ask the plan owner to send you a fresh family invite."
-      />
-    );
-  }
-
-  if (view.status === "revoked") {
-    return (
-      <InviteMessage
-        eyebrow="Link no longer works"
-        tone="danger"
-        title="This invite was canceled"
-        body="Ask the plan owner for a new invite."
-      />
-    );
-  }
-
-  if (view.status === "accepted") {
-    return (
-      <InviteMessage
-        eyebrow="Murph Family"
-        title="This invite was already used"
-        body="If that was you, open Murph to continue."
-        action={
-          <Button
-            render={<Link href="/home" prefetch={false} />}
-            nativeButton={false}
-            size="xl"
-          >
+      <LinkPageScreen
+        actions={view?.status === "accepted" ? (
+          <Link className={LINK_PAGE_PILL_CLASS} href="/home" prefetch={false}>
             Open Murph
-          </Button>
-        }
+          </Link>
+        ) : undefined}
+        detail={closed?.detail}
+        title={closed?.title ?? ""}
       />
     );
   }
 
-  if (!view.groupActive) {
-    return (
-      <InviteMessage
-        eyebrow="Almost ready"
-        title="This family plan isn't active yet"
-        body="Ask the plan owner to finish setting up billing, then open this invite again."
-      />
-    );
-  }
-
-  if (!view.seatAvailable) {
-    return (
-      <InviteMessage
-        eyebrow="Family is full"
-        title="This family plan is full"
-        body="The plan has no open paid seats. Ask the owner to add a Family seat."
-      />
-    );
-  }
-
-  const inviter = view.groupDisplayName ?? "Your family plan owner";
-  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
-  const webBindingLabel =
-    isFullyUnbound
-      ? "your phone number or email address"
-      : view.isEmailBound && view.isPhoneBound
-        ? "phone number or email address"
-        : view.isEmailBound
-          ? "email address"
-          : "phone number";
-
-  return (
-    <>
-      <PageHeader
-        eyebrow={<JoinInviteEyebrow label="Murph Family" tone="default" />}
-        title={`${inviter} invited you to Murph Family`}
-        description="Join to get your own private Murph account, paid for by your family plan."
-      />
-
-      <Card size="sm">
-        <CardContent>
-          <ul className="flex flex-col gap-2.5 text-sm text-muted-foreground">
-            <FeatureRow>They pay for your Murph access.</FeatureRow>
-            <FeatureRow>You get your own private Murph account.</FeatureRow>
-            <FeatureRow>
-              {"They can't see your messages, health data, or vault."}
-            </FeatureRow>
-          </ul>
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-col gap-2">
-        {renderAcceptCta({
-          authenticated: input.authenticated,
-          messagesAcceptHref: input.messagesAcceptHref,
-          view,
-          webBindingLabel,
-          webSignInDescription: isFullyUnbound
-            ? "Sign in with your own phone number or email address. We'll bring you back here."
-            : undefined,
-          ...(input.webAcceptInitialState
-            ? { webAcceptInitialState: input.webAcceptInitialState }
-            : {}),
-        })}
-      </div>
-    </>
-  );
+  return <FamilyInviteOpenScreen {...input} view={view} />;
 }
 
-function renderAcceptCta(input: {
+/** Why this invite can't be accepted, in the order those reasons apply. */
+function readClosedInvite(view: FamilyInviteView): { detail: string; title: string } | null {
+  if (!view) {
+    return {
+      detail: "This family invite is no longer available. Ask the person who invited you to send a new one.",
+      title: "This invite isn't valid.",
+    };
+  }
+  if (view.status === "expired") {
+    return {
+      detail: "Ask the plan owner to send you a fresh family invite.",
+      title: "This invite has expired.",
+    };
+  }
+  if (view.status === "revoked") {
+    return { detail: "Ask the plan owner for a new invite.", title: "This invite was canceled." };
+  }
+  if (view.status === "accepted") {
+    return {
+      detail: "If that was you, open Murph to continue.",
+      title: "This invite was already used.",
+    };
+  }
+  if (!view.groupActive) {
+    return {
+      detail: "Ask the plan owner to finish setting up billing, then open this invite again.",
+      title: "This family plan isn't active yet.",
+    };
+  }
+  if (!view.seatAvailable) {
+    return {
+      detail: "The plan has no open paid seats. Ask the owner to add a Family seat.",
+      title: "This family plan is full.",
+    };
+  }
+  return null;
+}
+
+/** Which identity the invite was sent to, for the web sign-in path. */
+function readWebBinding(view: NonNullable<FamilyInviteView>) {
+  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
+  if (isFullyUnbound) {
+    return {
+      description: "Sign in with your own phone number or email address. We'll bring you back here.",
+      isFullyUnbound,
+      label: "your phone number or email address",
+    };
+  }
+  const label = view.isEmailBound && view.isPhoneBound
+    ? "phone number or email address"
+    : view.isEmailBound
+      ? "email address"
+      : "phone number";
+  return { description: undefined, isFullyUnbound, label };
+}
+
+function FamilyInviteOpenScreen(input: {
   authenticated: boolean;
   messagesAcceptHref: string | null;
   view: NonNullable<FamilyInviteView>;
   webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
-  webBindingLabel: string;
-  webSignInDescription?: string;
 }): ReactNode {
   const { view } = input;
-  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
-  const webSignInDescriptionProps = input.webSignInDescription
-    ? { description: input.webSignInDescription }
-    : {};
-  const webAcceptInitialStateProps = input.webAcceptInitialState
-    ? { initialState: input.webAcceptInitialState }
+  const inviter = view.groupDisplayName ?? "Your family plan owner";
+  const title = `${inviter} invited you to Murph Family.`;
+  const {
+    description: webSignInDescription,
+    isFullyUnbound,
+    label: webBindingLabel,
+  } = readWebBinding(view);
+  const webSignInDescriptionProps = webSignInDescription
+    ? { description: webSignInDescription }
     : {};
   const unboundTelegramInviteLink = isFullyUnbound && view.telegramInviteUrl ? (
-    <Button
-      render={<a href={view.telegramInviteUrl} />}
-      nativeButton={false}
-      size="sm"
-      variant="link"
-      className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
-    >
+    <a className={LINK_PAGE_LINK_CLASS} href={view.telegramInviteUrl}>
       Continue in Telegram
-    </Button>
+    </a>
   ) : null;
+  const invite = (
+    <>
+      <LinkPageTicket
+        className="mt-0"
+        kicker="Murph Family"
+        title="Your seat is paid for"
+      />
+      <FamilyInvitePromises />
+    </>
+  );
 
   // Already signed in with an acceptable identity: one tap, no re-verification.
   if (input.authenticated && view.webAcceptable) {
-    if (input.messagesAcceptHref) {
-      return (
-        <>
-          <FamilyInviteWebAcceptButton
-            inviteCode={view.inviteCode}
-            {...webAcceptInitialStateProps}
-          />
-          <Button
-            render={<a href={input.messagesAcceptHref} />}
-            nativeButton={false}
-            size="xl"
-            variant="secondary"
-          >
-            Continue in Messages
-          </Button>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {isFullyUnbound
-              ? "Joining by text works from the phone you use to send the message."
-              : "Joining by text works from the phone this invite was sent to."}
-          </p>
-          {unboundTelegramInviteLink}
-        </>
-      );
-    }
-
-    return unboundTelegramInviteLink ? (
-      <>
-        <FamilyInviteWebAcceptButton
-          inviteCode={view.inviteCode}
-          {...webAcceptInitialStateProps}
-        />
-        {unboundTelegramInviteLink}
-      </>
-    ) : (
-      <FamilyInviteWebAcceptButton
+    return (
+      <FamilyInviteWebAcceptScreen
         inviteCode={view.inviteCode}
-        {...webAcceptInitialStateProps}
-      />
+        secondaryActions={
+          <>
+            {input.messagesAcceptHref ? (
+              <a className={LINK_PAGE_LINK_CLASS} href={input.messagesAcceptHref}>
+                Continue in Messages
+              </a>
+            ) : null}
+            {unboundTelegramInviteLink}
+          </>
+        }
+        title={title}
+        {...(input.webAcceptInitialState
+          ? { initialState: input.webAcceptInitialState }
+          : {})}
+      >
+        {invite}
+      </FamilyInviteWebAcceptScreen>
     );
   }
 
   // Phone-bound or unbound-by-text: accept in Messages by sending the token.
   if (input.messagesAcceptHref) {
     return (
-      <>
-        <Button
-          render={<a href={input.messagesAcceptHref} />}
-          nativeButton={false}
-          size="xl"
-        >
-          Continue in Messages
-        </Button>
-        {view.webAcceptable ? (
-          <FamilyInviteSignInButton
-            bindingLabel={input.webBindingLabel}
-            variant="link"
-            {...webSignInDescriptionProps}
-          />
-        ) : null}
-        {unboundTelegramInviteLink}
-      </>
+      <LinkPageScreen
+        actions={
+          <>
+            <a className={LINK_PAGE_PILL_CLASS} href={input.messagesAcceptHref}>
+              <MessageCircle aria-hidden="true" className="size-5" />
+              Continue in Messages
+            </a>
+            {view.webAcceptable ? (
+              <FamilyInviteSignInButton
+                bindingLabel={webBindingLabel}
+                variant="link"
+                {...webSignInDescriptionProps}
+              />
+            ) : null}
+            {unboundTelegramInviteLink}
+          </>
+        }
+        announceDetail={false}
+        detail={
+          isFullyUnbound
+            ? "Joining by text works from the phone you use to send the message."
+            : "Joining by text works from the phone this invite was sent to."
+        }
+        title={title}
+      >
+        {invite}
+      </LinkPageScreen>
     );
   }
 
@@ -263,65 +201,75 @@ function renderAcceptCta(input: {
   // web with the identity the invite was sent to.
   if (view.webAcceptable) {
     return (
-      <>
-        <FamilyInviteSignInButton
-          bindingLabel={input.webBindingLabel}
-          {...webSignInDescriptionProps}
-        />
-        <p className="text-xs leading-5 text-muted-foreground">
-          {input.webSignInDescription ??
-            `Use the ${input.webBindingLabel} this invite was sent to.`}
-        </p>
-        {unboundTelegramInviteLink}
-      </>
+      <LinkPageScreen
+        actions={
+          <>
+            <FamilyInviteSignInButton
+              bindingLabel={webBindingLabel}
+              {...webSignInDescriptionProps}
+            />
+            {unboundTelegramInviteLink}
+          </>
+        }
+        announceDetail={false}
+        detail={webSignInDescription ?? `Use the ${webBindingLabel} this invite was sent to.`}
+        title={title}
+      >
+        {invite}
+      </LinkPageScreen>
     );
   }
 
   // Telegram-bound invites only: continue in Telegram.
   if (view.telegramInviteUrl) {
     return (
-      <>
-        <Button render={<a href={view.telegramInviteUrl} />} nativeButton={false} size="xl">
-          Continue in Telegram
-        </Button>
-        <p className="text-xs leading-5 text-muted-foreground">
-          Open this in Telegram to join, so Murph can confirm it&apos;s you.
-        </p>
-      </>
+      <LinkPageScreen
+        actions={
+          <a className={LINK_PAGE_PILL_CLASS} href={view.telegramInviteUrl}>
+            Continue in Telegram
+          </a>
+        }
+        announceDetail={false}
+        detail="Open this in Telegram to join, so Murph can confirm it's you."
+        title={title}
+      >
+        {invite}
+      </LinkPageScreen>
     );
   }
 
   return (
-    <p className="text-sm text-pretty text-muted-foreground">
-      Open this invite from the chat where you received it to join.
-    </p>
+    <LinkPageScreen
+      announceDetail={false}
+      detail="Open this invite from the chat where you received it to join."
+      title={title}
+    >
+      {invite}
+    </LinkPageScreen>
   );
 }
 
-function FeatureRow({ children }: { children: ReactNode }) {
+function FamilyInvitePromises() {
   return (
-    <li className="flex items-start gap-2.5">
-      <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+    <ul className="mt-[22px] flex flex-col gap-2">
+      <FamilyInvitePromise>They pay for your Murph access.</FamilyInvitePromise>
+      <FamilyInvitePromise>You get your own private Murph account.</FamilyInvitePromise>
+      <FamilyInvitePromise>
+        {"They can't see your messages, health data, or vault."}
+      </FamilyInvitePromise>
+    </ul>
+  );
+}
+
+function FamilyInvitePromise({ children }: { children: ReactNode }) {
+  return (
+    <li className="flex items-start gap-2.5 text-base font-medium leading-[22px] text-[#FFFCF6]/85">
+      <CheckIcon
+        aria-hidden="true"
+        className="mt-[3px] size-4 shrink-0 text-[#D9B969]"
+        strokeWidth={2.5}
+      />
       <span>{children}</span>
     </li>
-  );
-}
-
-function InviteMessage(props: {
-  action?: ReactNode;
-  body: string;
-  eyebrow: string;
-  title: string;
-  tone?: JoinInviteEyebrowTone;
-}) {
-  return (
-    <>
-      <PageHeader
-        eyebrow={<JoinInviteEyebrow label={props.eyebrow} tone={props.tone ?? "default"} />}
-        title={props.title}
-        description={props.body}
-      />
-      {props.action ? <div className="flex flex-col gap-2">{props.action}</div> : null}
-    </>
   );
 }

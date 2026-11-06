@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 200,
+  "item": {
+    "id": "challenge-change-cancellation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Cancelled challenge changes are clear in chat",
+    "summary": "Cancel a change you proposed in the app and Murph lets both players know that request is off.",
+    "details": "Applies once the request is queued or sent to your shared chat, including while you are still agreeing on the challenge. Cancelling the request leaves the agreed challenge unchanged.",
+    "relevanceTags": [
+      "challenges",
+      "groups"
+    ],
+    "sourcePullRequests": [
+      4326
+    ]
+  }
+}

@@ -26,7 +26,7 @@ docker run --rm --platform linux/amd64 --network none \
   --mount "type=bind,src=$PWD/scripts/container-resource-probe.mjs,dst=/probe.mjs,readonly" \
   -e MURPH_QUERY_BENCH_EVENTS=8000 \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.158.0-live1 \
   --expose-gc --import /probe.mjs /bench/query-projection.mjs
 ```
 
@@ -87,10 +87,94 @@ docker run --rm --platform linux/amd64 --network none \
   --mount "type=bind,src=$PWD/scripts/container-resource-probe.mjs,dst=/probe.mjs,readonly" \
   -e MURPH_AUTOMATION_BENCH_COUNT=2000 \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.158.0-live1 \
   --import /probe.mjs /bench/automation.mjs
 ```
 
 Use the same scoped typecheck and sequential comparison controls above. This
 benchmark measures reading and validating automation history; it does not measure
 scheduler execution, provider inference, or message delivery.
+
+## Wearable metric CPU
+
+`wearable-cpu.ts` isolates exact-candidate deduplication and composes the ordinary
+metric projection over synthetic canonical read models. It covers 8,000 unique
+candidates, repeated groups, a concentrated duplicate burst, 90 days of repeated
+observations, and 365 days of unique history. Each case warms once and records
+five wall/CPU samples; every sample must equal its complete initial result. Metric
+evidence must also equal the ordinary source-health-enabled bundle. Compare hashes
+across revisions, and run both revision orders to expose warmup/host noise.
+The final case projects the 365-day bundle to public summaries and pairs it with
+the text round-trip control in one process: two warm pairs, then seven measured
+pairs in alternating order. Each result must equal the control.
+
+```sh
+node scripts/run-typescript.mjs package --project packages/query/bench/tsconfig.json --pretty false
+apps/cloudflare/node_modules/.bin/esbuild packages/query/bench/wearable-cpu.ts \
+  --bundle --platform=node --format=esm --target=node24 \
+  --tsconfig=tsconfig.base.json --outfile=.tmp/wearable-cpu.mjs \
+  --banner:js='import { createRequire } from "node:module"; const require = createRequire(import.meta.url);'
+node scripts/run-with-host-verification-slot.mjs 'wearable CPU benchmark' -- \
+  node --expose-gc .tmp/wearable-cpu.mjs
+```
+
+Use the same fixture and command on each revision. Output contains synthetic
+hashes and timings only. Deduplication stress cases establish scaling behavior;
+these in-memory measurements do not establish production duplicate frequency,
+container wakeups, canonical I/O cost, end-to-end CPU, or billing savings.
+
+## Dense metric projection instrumentation
+
+`metric-projection-dense.ts` measures the cost of the metric-projection subphase
+seam, not projection speed. It runs `buildMetricProjection()` over an in-memory
+synthetic read model with three providers, a sleep session plus twelve
+daily-summary observations per provider-day, and display-grade intraday
+heart-rate samples. With the default 365 days and 96 samples per provider-day,
+that is 119,355 entities and 110,960 metric points. Each round, in rotated
+order after one warmup round, it times three variants: the default call, the
+rebuild's `startCliPhase` observer outside a timing scope (the production no-op),
+and enabled in-memory CLI timing. Each sample must equal the complete default
+result. It prints raw wall/process-CPU samples, medians, and the last enabled
+sample's nested `query-metric-*` spans. No timing threshold is asserted.
+
+```sh
+node scripts/run-typescript.mjs package --project packages/query/bench/tsconfig.json --pretty false
+apps/cloudflare/node_modules/.bin/esbuild packages/query/bench/metric-projection-dense.ts \
+  --bundle --platform=node --format=esm --target=node24 \
+  --tsconfig=tsconfig.base.json --outfile=.tmp/metric-projection-dense.mjs \
+  --banner:js='import { createRequire } from "node:module"; const require = createRequire(import.meta.url);'
+env -u MURPH_CLI_TIMING_ENDPOINT node --expose-gc .tmp/metric-projection-dense.mjs
+```
+
+`MURPH_METRIC_DENSE_BENCH_DAYS` (7–1,095, default 365),
+`MURPH_METRIC_DENSE_BENCH_SAMPLES_PER_DAY` (0–1,440, default 96) and
+`MURPH_METRIC_DENSE_BENCH_ROUNDS` (1–20, default 5) size the run. The fixture
+does not contain production cardinality, provider-specific shapes, hosted CPU
+contention or canonical I/O. Its local subphase split is not evidence of where
+production time goes.
+
+## Sleep-list row selection
+
+`sleep-list-runtime.ts` seeds 365 days of synthetic Oura, WHOOP and Garmin
+sleep, recovery-resource HRV/SpO2/score, steps and weight records. For bounded
+and unbounded filters it compares the public `summarizeWearableSleepRuntime()`
+with the original providers-only full-row read and composition (the oracle) and
+the rejected `sleep`/`source_health` kind selection. Each case computes its
+oracle before any variant runs; stale oracles come from an identical reference
+vault that receives the same canonical sleep revision first. Two warmups precede
+rotated-order warm samples. Any public/oracle difference fails the run; rejected
+kind-selection differences are reported as diagnostics. Untimed, each case also
+reports stored rows and decoded summary bytes from the existing store reader for
+providers-only versus day-bounded selection, documenting materialization the
+dated read avoids; result bytes are unchanged. Output also lists result bytes,
+SHA-256 and the timing distribution per variant.
+
+```sh
+node packages/query/bench/sleep-list-runtime.ts
+```
+
+`MURPH_SLEEP_LIST_BENCH_DAYS` (integer 14–3,650, default 365) and
+`MURPH_SLEEP_LIST_BENCH_WARM` (integer 1–50, default 7) size the fixture and warm
+samples; other values fail before seeding. Stale timings are dominated by
+the wearable rebuild, which row selection does not change. These in-process
+timings do not establish production latency or the share of dated calls.

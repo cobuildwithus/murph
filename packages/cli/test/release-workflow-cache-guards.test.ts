@@ -100,6 +100,7 @@ describe('GitHub Actions cache trust-boundary guards', () => {
             isAllowedHostSupportTypeScriptCache(file, workflow, description)
             || isAllowedPrHeadDraftResetHandoff(file, workflow, description)
             || isAllowedTemporalCompatibilityHandoff(file, workflow, description)
+            || isAllowedWebAdmissionCancellation(file, workflow, description)
           ) {
             continue
           }
@@ -109,6 +110,27 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     }
 
     expect(findings).toEqual([])
+  })
+
+  it('allows only the failure-only Web admission cancellation handoff', () => {
+    const file = 'temporal-web-admission-cancellation.yml'
+    const workflow = readFileSync(path.join(workflowsDir, file), 'utf8')
+    const description = 'workflow_run handoff trigger'
+    expect(isAllowedWebAdmissionCancellation(file, workflow, description)).toBe(true)
+    expect(isAllowedWebAdmissionCancellation('other.yml', workflow, description)).toBe(false)
+    expect(isAllowedWebAdmissionCancellation(file, workflow, 'actions/cache')).toBe(false)
+    for (const [before, after] of [
+      ['types: [completed]', 'types: [requested]'],
+      ['workflows: ["Temporal Web Deployment Admission"]', 'workflows: ["Other"]'],
+      ['permissions: {}', 'permissions: {contents: write}'],
+      ['      actions: read', '      actions: write'],
+      ['      statuses: write', '      statuses: write\n      contents: write'],
+      ["conclusion == 'cancelled'", "conclusion == 'success'"],
+      ['-f state=failure', '-f state=success'],
+      ['GH_TOKEN: ${{ github.token }}', 'GH_TOKEN: ${{ secrets.OTHER_TOKEN }}'],
+    ]) {
+      expect(isAllowedWebAdmissionCancellation(file, workflow.replace(before, after), description)).toBe(false)
+    }
   })
 
   it('allows only the exact-head trusted pull-request draft-reset handoff', () => {
@@ -257,8 +279,25 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
         workflow.replace(
-          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}\n",
+          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' && steps.select.outputs.current == 'true' }}\n",
           '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(" && needs.select-pr.outputs.current == 'true' && needs.select-pr.outputs.selected", ' && needs.select-pr.outputs.selected'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          'EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}',
+          'EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}',
         ),
         'workflow_run handoff trigger',
       ),
@@ -399,6 +438,31 @@ function isAllowedHostSupportTypeScriptCache(
   return false
 }
 
+
+function isAllowedWebAdmissionCancellation(file: string, workflow: string, description: string): boolean {
+  if (file !== 'temporal-web-admission-cancellation.yml' || description !== 'workflow_run handoff trigger') return false
+  const parsed: unknown = parse(workflow)
+  if (!isRecord(parsed) || !isRecord(parsed.on) || !isRecord(parsed.permissions) || !isRecord(parsed.jobs)) return false
+  const trigger = parsed.on.workflow_run
+  const job = parsed.jobs['publish-cancellation']
+  if (!isRecord(trigger) || !isRecord(job) || !isRecord(job.permissions) || !Array.isArray(job.steps)) return false
+  const step = job.steps[0]
+  if (!isRecord(step) || typeof step.run !== 'string') return false
+  return Object.keys(parsed.on).join(',') === 'workflow_run'
+    && isStringArray(trigger.workflows, ['Temporal Web Deployment Admission'])
+    && isStringArray(trigger.types, ['completed'])
+    && Object.keys(parsed.permissions).length === 0
+    && Object.keys(parsed.jobs).join(',') === 'publish-cancellation'
+    && Object.keys(job.permissions).sort().join(',') === 'actions,statuses'
+    && job.permissions.actions === 'read'
+    && job.permissions.statuses === 'write'
+    && job.if === "${{ github.event.workflow_run.conclusion == 'cancelled' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository }}"
+    && job.steps.length === 1
+    && step.uses === undefined
+    && !workflow.includes('secrets.')
+    && !step.run.includes('state=success')
+    && step.run.includes('-f state=failure')
+}
 
 function isAllowedPrHeadDraftResetHandoff(
   file: string,
@@ -573,12 +637,14 @@ function isAllowedTemporalCompatibilityHandoff(
     && permissions.statuses === 'write'
     && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
     && selectOutputs.targets_default_branch === '${{ steps.select.outputs.targets_default_branch }}'
+    && selectOutputs.current === '${{ steps.select.outputs.current }}'
     && selectStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
-    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' }}"
-    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+    && selectStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'
+    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' && steps.select.outputs.current == 'true' }}"
+    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.current == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
     && compatibility.environment === 'temporal-compatibility'
     && dispatchStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
-    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}"
+    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.current == 'true' }}"
     && hasTemporalCompatibilityPermissions(compatibility.permissions)
     && hasEarlyExactPrHeadRevalidation(
       compatibility.steps,

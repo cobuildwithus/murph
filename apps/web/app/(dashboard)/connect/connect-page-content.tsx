@@ -347,6 +347,7 @@ export default async function ConnectPage({
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [
     recoveryContactAction,
+    chatContactAction,
     voiceMemoSources,
     whoopSyncContactAction,
     zeppSyncContactAction,
@@ -355,6 +356,7 @@ export default async function ConnectPage({
     resolveDeviceConnectRecoveryContactAction(
       Boolean(auth.authenticatedMember),
     ),
+    resolveDeviceConnectChatContactAction(Boolean(auth.authenticatedMember)),
     resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
     resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
     resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),
@@ -460,6 +462,7 @@ export default async function ConnectPage({
 
       <ConnectSourcesGrid
         authenticated={Boolean(auth.authenticatedMember)}
+        deviceConnectChatContactAction={chatContactAction}
         deviceConnectRecoveryContactAction={recoveryContactAction}
         garminHistoricalDataVoiceMemoSrc={voiceMemoSources.garminHistoricalData}
         initialCallback={resolveVerifiedInitialConnectCallback(
@@ -475,15 +478,6 @@ export default async function ConnectPage({
       />
     </div>
   );
-}
-
-export function listVisibleConnectSources(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): ConnectSource[] {
-  return [
-    ...listVisibleDeviceConnectSources(),
-    ...listHealthConnectRelayConnectSources(env),
-  ];
 }
 
 function listVisibleDeviceConnectSources(): ConnectSource[] {
@@ -532,6 +526,18 @@ async function resolveDeviceConnectRecoveryContactAction(
         body: "Can you send me a fresh device connection link?",
       },
     });
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDeviceConnectChatContactAction(authenticated: boolean) {
+  if (!authenticated) {
+    return null;
+  }
+
+  try {
+    return await resolveHostedMurphContactOption();
   } catch {
     return null;
   }
@@ -622,7 +628,7 @@ function isVisibleConnectSource(
   return (
     DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(source.connectSourceId) ||
     source.routes.some(
-      (route) => route.kind === "direct" || route.kind === "junction_link",
+      (route) => route.kind === "junction_link",
     )
   );
 }
@@ -793,20 +799,6 @@ export function resolveHistoricalResetIncompleteConnectSourceIds(
   }
 
   return resetIncompleteSourceIds;
-}
-
-export function resolveConnectedConnectSourceIds(
-  sources: readonly Pick<ConnectSource, "id">[],
-  settingsSources: readonly Pick<
-    HostedDeviceSyncSettingsSource,
-    "provider" | "state" | "upstreamSources"
-  >[],
-): Set<string> {
-  return new Set(
-    resolveConnectedConnectSourceConnections(sources, settingsSources).map(
-      (connection) => connection.sourceId,
-    ),
-  );
 }
 
 export function resolveConnectedConnectSourceConnections(

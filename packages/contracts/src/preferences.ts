@@ -8,18 +8,8 @@ export const assistantPreferenceMutationStateRelativePath =
   "bank/assistant-preference-mutations.json";
 export const assistantPreferenceMutationStateSchemaVersion = 1;
 
-export const assistantBasePersonaIdValues = [
-  "classic",
-  "navy-seal",
-  "stoic-philosopher",
-  "scientist",
-  "hype-coach",
-  "straight-talking-friend",
-] as const;
-export const assistantBasePersonaIdSchema = z.enum(assistantBasePersonaIdValues);
-export type AssistantBasePersonaId = z.infer<typeof assistantBasePersonaIdSchema>;
-
-export const assistantPersonaIdValues = [
+export const assistantPersonaIdValues = ["classic"] as const;
+const retiredAssistantPersonaIdValues = [
   "classic",
   "classic-with-navy-seal",
   "classic-with-stoic-philosopher",
@@ -57,9 +47,6 @@ export const assistantPersonaIdValues = [
   "straight-talking-friend-with-scientist",
   "straight-talking-friend-with-hype-coach",
 ] as const;
-export const assistantPersonaIdSchema = z.enum(assistantPersonaIdValues);
-export type AssistantPersonaId = z.infer<typeof assistantPersonaIdSchema>;
-
 const legacyAssistantPersonaIdValues = [
   "wise-elder",
   "medical-detective",
@@ -73,56 +60,35 @@ const legacyAssistantPersonaIdValues = [
   "biohacker",
   "drill-sergeant",
 ] as const;
-type LegacyAssistantPersonaId = (typeof legacyAssistantPersonaIdValues)[number];
+// Stored vaults and in-flight payloads may still contain retired IDs.
+export const assistantPersonaIdSchema = z.enum([
+  ...retiredAssistantPersonaIdValues,
+  ...legacyAssistantPersonaIdValues,
+]);
+export type AssistantPersonaId = z.infer<typeof assistantPersonaIdSchema>;
+export const assistantBasePersonaIdValues = assistantPersonaIdValues;
+export const assistantBasePersonaIdSchema = z.enum(assistantBasePersonaIdValues);
+export type AssistantBasePersonaId = z.infer<typeof assistantBasePersonaIdSchema>;
 
-const legacyAssistantPersonaMainIdById = {
-  "wise-elder": "stoic-philosopher",
-  "medical-detective": "scientist",
-  "longevity-scientist": "scientist",
-  "zen-monk": "stoic-philosopher",
-  "best-friend": "straight-talking-friend",
-  "championship-coach": "navy-seal",
-  "science-professor": "scientist",
-  "mountain-guide": "stoic-philosopher",
-  grandma: "classic",
-  biohacker: "scientist",
-  "drill-sergeant": "navy-seal",
-} as const satisfies Readonly<Record<LegacyAssistantPersonaId, AssistantBasePersonaId>>;
-
-const assistantBasePersonaIdSet: ReadonlySet<string> = new Set(
-  assistantBasePersonaIdValues,
-);
-const assistantPersonaIdSet: ReadonlySet<string> = new Set(assistantPersonaIdValues);
-const legacyAssistantPersonaIdSet: ReadonlySet<string> = new Set(
-  legacyAssistantPersonaIdValues,
-);
-
-export function isAssistantBasePersonaId(
-  value: unknown,
-): value is AssistantBasePersonaId {
-  return typeof value === "string" && assistantBasePersonaIdSet.has(value);
-}
+const storedAssistantPersonaIds: ReadonlySet<string> = new Set([
+  ...retiredAssistantPersonaIdValues,
+  ...legacyAssistantPersonaIdValues,
+]);
 
 export function isAssistantPersonaId(value: unknown): value is AssistantPersonaId {
-  return typeof value === "string" && assistantPersonaIdSet.has(value);
+  return value === "classic";
 }
 
-function isLegacyAssistantPersonaId(
-  value: unknown,
-): value is LegacyAssistantPersonaId {
-  return typeof value === "string" && legacyAssistantPersonaIdSet.has(value);
+export function isAssistantBasePersonaId(value: unknown): value is AssistantBasePersonaId {
+  return value === "classic";
 }
 
 export function normalizeStoredAssistantPersonaId(
   value: unknown,
-): AssistantPersonaId | null {
-  if (isAssistantPersonaId(value)) {
-    return value;
-  }
-  if (isLegacyAssistantPersonaId(value)) {
-    return legacyAssistantPersonaMainIdById[value];
-  }
-  return null;
+): "classic" | null {
+  return typeof value === "string" && storedAssistantPersonaIds.has(value)
+    ? "classic"
+    : null;
 }
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;

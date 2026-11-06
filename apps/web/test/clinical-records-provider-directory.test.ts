@@ -82,7 +82,7 @@ describe("Clinical Records provider directory", () => {
         "patient/Media.r",
       ],
     });
-    expect(buildEpicBetaRetrievalPlan({
+    expect(buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
       frozenAt: new Date("2026-07-21T12:00:00.000Z"),
       pageCount: "100",
       resourceTypes: entry.resourceTypes,

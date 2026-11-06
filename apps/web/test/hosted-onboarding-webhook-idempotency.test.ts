@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus } from "@prisma/client";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
@@ -9,7 +10,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   buildHostedLinqAffirmativeReactionMessageEvent: vi.fn(),
-  claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -51,6 +51,18 @@ const mocks = vi.hoisted(() => ({
   unwrapHostedDomainRootForWeb: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
+
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -144,6 +156,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  hostedAiUsageMemberSelect: {},
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
 }));
 
@@ -209,7 +222,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
 
   return {
     ...actual,
-    claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
     claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
     markHostedLinqOnboardingLinkNoticeSent: mocks.markHostedLinqOnboardingLinkNoticeSent,
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
@@ -286,10 +298,10 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     const linq = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
       "@/src/lib/hosted-onboarding/linq",
     );
@@ -298,7 +310,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
@@ -457,7 +468,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("records message.sent without treating it as delivery or inbound work", async () => {
@@ -496,7 +506,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("coalesces routed participant additions without scheduling, sending, or waking", async () => {
@@ -1770,7 +1779,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 
@@ -2027,7 +2035,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not count or wake duplicate active-member Linq event ids", async () => {
+  it("repairs duplicate active-member Linq wakes without recounting or appending input", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -2072,7 +2080,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
   });
 
   it("dedupes active-member Linq replays after preflight and before route mutation", async () => {

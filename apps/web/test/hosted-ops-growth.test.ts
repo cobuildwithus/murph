@@ -960,6 +960,72 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("excludes configured canary traffic from the public message-volume response", async () => {
+    const liveStart = new Date("2026-07-23T00:00:00.000Z");
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_canary");
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      linqChatLookupKey: "v1:canary-chat",
+      pendingLinqChatLookupKey: "v1:canary-chat-pending",
+    });
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: { snapshotDate: liveStart },
+      _sum: { inboundMessagesPriorDay: 400, outboundMessagesPriorDay: 300 },
+    });
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(12);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(8);
+    mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValueOnce(5);
+
+    const { GET } = await import("../app/api/message-volume/route");
+    const response = await GET();
+
+    await expect(response.json()).resolves.toEqual({
+      total: HOSTED_MESSAGE_VOLUME_BASE + 725,
+    });
+    expect(mocks.hostedMailboxItem.count).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        kind: "conversation.message",
+        member: { id: { not: "member_canary" } },
+        occurredAt: { gte: liveStart },
+      },
+    });
+    expect(mocks.hostedLinqDelivery.count).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        OR: [
+          { linqChatLookupKey: null },
+          {
+            linqChatLookupKey: {
+              notIn: ["v1:canary-chat", "v1:canary-chat-pending"],
+            },
+          },
+        ],
+        attemptedAt: { gte: liveStart },
+        status: { in: ["accepted", "delivered", "sent_no_receipt_expected"] },
+      },
+    });
+    expect(mocks.readHostedLinqProductionCanaryMemberId)
+      .toHaveBeenCalledExactlyOnceWith({ prisma });
+    expect(mocks.readHostedMemberRoutingRecord).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_canary",
+      prisma,
+    });
+    expect(mocks.hostedOutboundMessageVolumeReceipt.count).toHaveBeenCalledExactlyOnceWith({
+      where: { recordedAt: { gte: liveStart } },
+    });
+  });
+
+  it("falls back to the base if canary attribution cannot be read", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: { snapshotDate: null },
+      _sum: { inboundMessagesPriorDay: 400, outboundMessagesPriorDay: 300 },
+    });
+    mocks.readHostedLinqProductionCanaryMemberId.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(readHostedMessageVolumeTotal(new Date("2026-07-23T18:00:00.000Z")))
+      .resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE);
+    expect(mocks.hostedMailboxItem.count).not.toHaveBeenCalled();
+    expect(mocks.hostedLinqDelivery.count).not.toHaveBeenCalled();
+  });
+
   it("counts live messages from the start of today when no snapshot exists", async () => {
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
       _max: {
@@ -2739,31 +2805,31 @@ describe("hosted ops growth metrics", () => {
       {
         cashAmountMinor: 1_500,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
         paidAt: new Date("2026-07-27T09:00:00.000Z"),
       },
       {
         cashAmountMinor: 7_500,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: null,
+        checkoutSuccessUrl: "https://www.withmurph.ai/settings?usageCheckout=success&usagePurchase=hucp_example#subscription",
         paidAt: new Date("2026-07-04T10:00:00.000Z"),
       },
       {
         cashAmountMinor: 2_000,
         groupSponsorshipAuthorizationId: "auth_recurring",
-        groupSponsorshipMoment: null,
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
         paidAt: new Date("2026-08-01T00:00:00.000Z"),
       },
       {
         cashAmountMinor: 3_000,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: null,
+        checkoutSuccessUrl: "https://www.withmurph.ai/settings?usageCheckout=success&usagePurchase=hucp_example#subscription",
         paidAt: new Date("2026-08-05T15:00:00.000Z"),
       },
       {
         cashAmountMinor: 9_900,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: null,
+        checkoutSuccessUrl: "https://www.withmurph.ai/settings?usageCheckout=success&usagePurchase=hucp_example#subscription",
         paidAt: null,
       },
     ]);
@@ -2799,11 +2865,7 @@ describe("hosted ops growth metrics", () => {
       select: {
         cashAmountMinor: true,
         groupSponsorshipAuthorizationId: true,
-        groupSponsorshipMoment: {
-          select: {
-            purchaseId: true,
-          },
-        },
+        checkoutSuccessUrl: true,
         paidAt: true,
       },
       where: {
@@ -2828,11 +2890,7 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("moves a one-time group gift to usage top-ups when payer deletion removes its sponsorship moment", async () => {
-    // Payer-only account deletion retains the fulfilled cross-owner purchase
-    // but cascades away its HostedGroupSponsorshipMoment, so the same cash is
-    // classified as a plain top-up on the next read. The card copy discloses
-    // this; the total must not change.
+  it("keeps a historical one-time group gift classified after payer deletion with no moment row", async () => {
     const now = new Date("2026-08-07T12:00:00.000Z");
     const giftRow = {
       cashAmountMinor: 2_000,
@@ -2848,7 +2906,7 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         ...giftRow,
-        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
       },
     ]);
     mocks.hostedMemberBillingRef.count
@@ -2866,7 +2924,8 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         ...giftRow,
-        groupSponsorshipMoment: null,
+        checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_example",
+        payerMemberId: null,
       },
     ]);
     mocks.hostedMemberBillingRef.count
@@ -2882,8 +2941,8 @@ describe("hosted ops growth metrics", () => {
       usageTopUpsUsdCents: 0,
     });
     expect(afterPoint).toMatchObject({
-      groupSponsorshipUsdCents: 0,
-      usageTopUpsUsdCents: 2_000,
+      groupSponsorshipUsdCents: 2_000,
+      usageTopUpsUsdCents: 0,
     });
     expect(afterPoint?.totalUsdCents).toEqual(beforePoint?.totalUsdCents);
   });

@@ -6,24 +6,17 @@ import path from 'node:path'
 import { afterEach, test } from 'vitest'
 
 import {
-  buildAssistantProviderDefaultsPatch,
   applyAssistantSelfDeliveryTargetDefaults,
-  clearAssistantSelfDeliveryTargets,
   expandConfiguredVaultPath,
   listAssistantSelfDeliveryTargets,
-  normalizeVaultForConfig,
   readOperatorConfig,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   resolveAssistantSelfDeliveryTarget,
-  resolveConfiguredDefaultVault,
   resolveDefaultVault,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
   resolveOperatorHomeDirectory,
-  saveAssistantOperatorDefaultsPatch,
-  saveAssistantSelfDeliveryTarget,
-  saveDefaultVaultConfig,
   saveHostedAssistantConfig,
 } from '../src/operator-config.ts'
 import {
@@ -63,61 +56,28 @@ function assertMalformedConfigError(error: unknown): true {
   return true
 }
 
-test('operator config persists defaults, hosted config, and invalid hosted payload flags', async () => {
+test('operator config reads defaults, persists hosted config, and flags invalid hosted payloads', async () => {
   const homeDirectory = await createTempHome('operator-config-home-')
   const nestedVault = path.join(homeDirectory, 'vaults', 'primary')
   await mkdir(nestedVault, { recursive: true })
 
   assert.equal(resolveOperatorHomeDirectory({ HOME: ` ${homeDirectory} ` }), homeDirectory)
   assert.equal(resolveOperatorHomeDirectory({ HOME: '   ' }), path.resolve(os.homedir()))
-  assert.equal(normalizeVaultForConfig(nestedVault, homeDirectory), '~/vaults/primary')
+
   assert.equal(expandConfiguredVaultPath('~/vaults/primary', homeDirectory), nestedVault)
 
-  const savedVaultConfig = await saveDefaultVaultConfig(nestedVault, homeDirectory)
-  assert.equal(savedVaultConfig.defaultVault, '~/vaults/primary')
-
-  const providerPatch = buildAssistantProviderDefaultsPatch({
-    defaults: null,
-    providerConfig: {
-      approvalPolicy: 'never',
-      codexHome: ' /tmp/codex-home ',
-      model: ' gpt-5.6-terra ',
-      modelProvider: ' vercel-ai-gateway ',
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-    },
-  })
-
-  const savedDefaultsConfig = await saveAssistantOperatorDefaultsPatch(
-    {
-      ...providerPatch,
-      account: {
-        kind: 'account',
-        planCode: 'pro',
-        planName: 'Pro',
-        quota: null,
-        source: 'billing',
+  await writeConfigFixture(homeDirectory, {
+    defaultVault: '~/vaults/primary',
+    assistant: {
+      backend: {
+        adapter: 'codex-cli', approvalPolicy: 'never', codexHome: '/tmp/codex-home',
+        model: 'gpt-6.1-sol', modelProvider: 'openai', reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
       },
       identityId: ' user-123 ',
     },
-    homeDirectory,
-  )
-
-  assert.equal(savedDefaultsConfig.assistant?.identityId, ' user-123 ')
-  assert.deepEqual(
-    resolveAssistantProviderDefaults(savedDefaultsConfig.assistant),
-    {
-      approvalPolicy: 'never',
-      codexCommand: null,
-      codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
-      oss: false,
-      profile: null,
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-    },
-  )
+  })
+  assert.equal(resolveAssistantProviderDefaults((await readOperatorConfig(homeDirectory))?.assistant)?.model, 'gpt-6.1-sol')
 
   const hostedConfig = createHostedAssistantConfig({
     activeProfileId: 'platform-default',
@@ -126,8 +86,8 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
         id: 'platform-default',
         managedBy: 'platform',
         providerConfig: {
-          model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          model: 'gpt-6.1-sol',
+          modelProvider: 'openai',
           provider: 'codex-cli',
         },
       }),
@@ -180,118 +140,6 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
   assert.equal(await readOperatorConfig(homeDirectory), null)
 })
 
-test('malformed operator config fails model and self-target mutations without overwrite', async () => {
-  const homeDirectory = await createTempHome('operator-config-malformed-mutation-')
-  const configPath = resolveOperatorConfigPath(homeDirectory)
-  const malformed = '{"private-marker":"must-remain",'
-  await mkdir(path.dirname(configPath), { recursive: true })
-  await writeFile(configPath, malformed, 'utf8')
-
-  await assert.rejects(
-    () => saveAssistantOperatorDefaultsPatch({ identityId: 'new-identity' }, homeDirectory),
-    assertMalformedConfigError,
-  )
-  assert.equal(await readFile(configPath, 'utf8'), malformed)
-
-  await assert.rejects(
-    () => saveAssistantSelfDeliveryTarget({
-      channel: 'telegram',
-      deliverySource: null,
-      deliveryTarget: 'new-target',
-      identityId: null,
-      participantId: null,
-      threadId: null,
-    }, homeDirectory),
-    assertMalformedConfigError,
-  )
-  assert.equal(await readFile(configPath, 'utf8'), malformed)
-
-  await assert.rejects(
-    () => listAssistantSelfDeliveryTargets(homeDirectory),
-    assertMalformedConfigError,
-  )
-  assert.equal(await readFile(configPath, 'utf8'), malformed)
-
-  const malformedNestedConfigs = [
-    {
-      assistant: {
-        account: null,
-        backend: null,
-        identityId: 42,
-        selfDeliveryTargets: null,
-      },
-      defaultVault: null,
-      hostedAssistant: null,
-      schema: 'murph.operator-config.v1',
-      updatedAt: '2026-08-25T12:00:00.000Z',
-    },
-    {
-      assistant: null,
-      defaultVault: null,
-      hostedAssistant: {
-        profiles: 'invalid',
-      },
-      schema: 'murph.operator-config.v1',
-      updatedAt: '2026-08-25T12:00:00.000Z',
-    },
-  ]
-
-  for (const malformedNestedConfig of malformedNestedConfigs) {
-    const rawNestedConfig = JSON.stringify(malformedNestedConfig)
-    await writeFile(configPath, rawNestedConfig, 'utf8')
-
-    await assert.rejects(
-      () => saveAssistantOperatorDefaultsPatch({ identityId: 'new-identity' }, homeDirectory),
-      assertMalformedConfigError,
-    )
-    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
-
-    await assert.rejects(
-      () => saveAssistantSelfDeliveryTarget({
-        channel: 'telegram',
-        deliverySource: null,
-        deliveryTarget: 'new-target',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      }, homeDirectory),
-      assertMalformedConfigError,
-    )
-    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
-
-    await assert.rejects(
-      () => saveDefaultVaultConfig(path.join(homeDirectory, 'replacement-vault'), homeDirectory),
-      assertMalformedConfigError,
-    )
-    assert.equal(await readFile(configPath, 'utf8'), rawNestedConfig)
-  }
-
-  await writeFile(
-    configPath,
-    JSON.stringify({
-      assistant: {
-        account: null,
-        backend: {
-          adapter: 'unsupported-provider',
-        },
-        identityId: null,
-        selfDeliveryTargets: null,
-      },
-      defaultVault: null,
-      hostedAssistant: null,
-      schema: 'murph.operator-config.v1',
-      updatedAt: '2026-08-25T12:00:00.000Z',
-    }),
-    'utf8',
-  )
-  const migrated = await saveAssistantOperatorDefaultsPatch(
-    { identityId: 'new-identity' },
-    homeDirectory,
-  )
-  assert.equal(migrated.assistant?.backend, null)
-  assert.equal(migrated.assistant?.identityId, 'new-identity')
-})
-
 test('default vault reads validate the root without coupling to unrelated nested config', async () => {
   const homeDirectory = await createTempHome('operator-config-vault-read-')
   const configPath = resolveOperatorConfigPath(homeDirectory)
@@ -330,7 +178,6 @@ test('default vault reads validate the root without coupling to unrelated nested
     )
 
     assert.equal(await resolveDefaultVault(homeDirectory, {}), configuredVault)
-    assert.equal(await resolveConfiguredDefaultVault(homeDirectory), configuredVault)
   }
 
   const malformedRoot = JSON.stringify({
@@ -346,10 +193,7 @@ test('default vault reads validate the root without coupling to unrelated nested
     () => resolveDefaultVault(homeDirectory, {}),
     assertMalformedConfigError,
   )
-  await assert.rejects(
-    () => resolveConfiguredDefaultVault(homeDirectory),
-    assertMalformedConfigError,
-  )
+
   assert.equal(await readFile(configPath, 'utf8'), malformedRoot)
 })
 
@@ -439,47 +283,27 @@ test('operator config resolves default vaults without owning command argv mutati
     envVault,
   )
 
-  await saveDefaultVaultConfig(configuredVault, homeDirectory)
+  await writeConfigFixture(homeDirectory, { defaultVault: configuredVault })
   assert.equal(await resolveDefaultVault(homeDirectory, {}), configuredVault)
-  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), configuredVault)
 
   await rm(configuredVault, { force: true, recursive: true })
   assert.equal(
     await realpath((await resolveDefaultVault(homeDirectory, {})) ?? ''),
     await realpath(cwdVault),
   )
-  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
 
   await rm(cwdVault, { force: true, recursive: true })
   assert.equal(await resolveDefaultVault(homeDirectory, {}), null)
-  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
 })
 
-test('operator config saves, sorts, resolves, and clears assistant self-delivery targets', async () => {
+test('operator config reads, sorts, and resolves assistant self-delivery targets', async () => {
   const homeDirectory = await createTempHome('operator-config-self-target-')
 
-  await saveAssistantSelfDeliveryTarget(
-    {
-      channel: ' Telegram ',
-      deliverySource: null,
-      deliveryTarget: ' chat-123 ',
-      identityId: ' identity-1 ',
-      participantId: ' person-1 ',
-      threadId: ' source-1 ',
-    },
-    homeDirectory,
-  )
-  await saveAssistantSelfDeliveryTarget(
-    {
-      channel: 'email',
-      deliverySource: null,
-      deliveryTarget: 'person@example.test',
-      identityId: null,
-      participantId: null,
-      threadId: null,
-    },
-    homeDirectory,
-  )
+  const email = { channel: 'email', deliverySource: null, deliveryTarget: 'person@example.test', identityId: null, participantId: null, threadId: null }
+  await writeConfigFixture(homeDirectory, { assistant: { selfDeliveryTargets: {
+    telegram: { channel: ' Telegram ', deliverySource: null, deliveryTarget: ' chat-123 ', identityId: ' identity-1 ', participantId: ' person-1 ', threadId: ' source-1 ' },
+    email,
+  } } })
 
   const targets = await listAssistantSelfDeliveryTargets(homeDirectory)
   assert.deepEqual(
@@ -517,14 +341,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
     },
   )
 
-  assert.deepEqual(
-    await clearAssistantSelfDeliveryTargets('missing', homeDirectory),
-    [],
-  )
-  assert.deepEqual(
-    await clearAssistantSelfDeliveryTargets('telegram', homeDirectory),
-    ['telegram'],
-  )
+  await writeConfigFixture(homeDirectory, { assistant: { selfDeliveryTargets: { email } } })
   assert.deepEqual(
     await applyAssistantSelfDeliveryTargetDefaults(
       {
@@ -547,8 +364,6 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
       threadId: null,
     },
   )
-  assert.deepEqual(await clearAssistantSelfDeliveryTargets(undefined, homeDirectory), ['email'])
-  assert.equal(await resolveAssistantOperatorDefaults(homeDirectory), null)
 })
 
 test('operator config trims explicit self-target defaults and normalizes legacy assistant records', async () => {
@@ -576,40 +391,14 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
       threadId: 'source-2',
     },
   )
-  assert.deepEqual(await clearAssistantSelfDeliveryTargets(undefined, homeDirectory), [])
-
-  await assert.rejects(
-    () =>
-      saveAssistantSelfDeliveryTarget(
-          {
-            channel: '   ',
-            deliverySource: null,
-            deliveryTarget: 'chat-123',
-            identityId: null,
-          participantId: null,
-          threadId: null,
-        },
-        homeDirectory,
-    ),
-    /channel/u,
-  )
-
 })
 
 test('assistant self delivery targets treat iMessage as the linq route alias', async () => {
   const homeDirectory = await createTempHome('operator-config-home-')
 
-  await saveAssistantSelfDeliveryTarget(
-    {
-      channel: ' iMessage ',
-      deliverySource: null,
-      deliveryTarget: ' chat-123 ',
-      identityId: ' identity-1 ',
-      participantId: null,
-      threadId: ' chat-123 ',
-    },
-    homeDirectory,
-  )
+  await writeConfigFixture(homeDirectory, { assistant: { selfDeliveryTargets: {
+    imessage: { channel: ' iMessage ', deliverySource: null, deliveryTarget: ' chat-123 ', identityId: ' identity-1 ', participantId: null, threadId: ' chat-123 ' },
+  } } })
 
   assert.deepEqual(await listAssistantSelfDeliveryTargets(homeDirectory), [
     {
@@ -649,7 +438,6 @@ test('assistant self delivery targets treat iMessage as the linq route alias', a
   )
 })
 
-
 for (const threadIsDirect of [true, false]) {
   test(`self-target defaults preserve explicit audience ${threadIsDirect} only on unchanged routes`, async () => {
     const homeDirectory = await createTempHome('operator-config-route-audience-')
@@ -665,7 +453,7 @@ for (const threadIsDirect of [true, false]) {
 
     assert.equal((await resolve({ channel: ' Telegram ', threadId: ' synthetic-thread ', threadIsDirect })).threadIsDirect, threadIsDirect)
     assert.equal((await resolve({ channel: 'telegram', threadIsDirect })).threadIsDirect, undefined)
-    await saveAssistantSelfDeliveryTarget({ ...route, deliverySource: null }, homeDirectory)
+    await writeConfigFixture(homeDirectory, { assistant: { selfDeliveryTargets: { telegram: { ...route, deliverySource: null } } } })
     assert.deepEqual(await resolve({ ...route, threadIsDirect }), { ...route, threadIsDirect })
     for (const field of ['channel', 'identityId', 'participantId', 'threadId', 'deliveryTarget'] as const) {
       assert.equal((await resolve({ ...route, [field]: ' ', threadIsDirect })).threadIsDirect, undefined, `defaulted ${field} must not inherit audience`)
@@ -674,4 +462,13 @@ for (const threadIsDirect of [true, false]) {
     assert.equal((await resolve(route)).threadIsDirect, undefined)
     assert.equal((await resolve({ ...route, threadIsDirect: null })).threadIsDirect, undefined)
   })
+}
+
+async function writeConfigFixture(homeDirectory: string, fields: Record<string, unknown>) {
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, JSON.stringify({
+    schema: 'murph.operator-config.v1', defaultVault: null, assistant: null,
+    hostedAssistant: null, updatedAt: '2026-11-02T12:00:00.000Z', ...fields,
+  }))
 }

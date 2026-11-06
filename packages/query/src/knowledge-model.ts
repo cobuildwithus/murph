@@ -92,18 +92,6 @@ export function summarizeKnowledgeBody(body: string): string | null {
   return truncateSummaryText(normalized, KNOWLEDGE_SUMMARY_MAX_CHARS)
 }
 
-export function sameKnowledgeStringSet(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  if (left.length !== right.length) {
-    return false
-  }
-
-  const rightValues = new Set(right)
-  return left.every((value) => rightValues.has(value))
-}
-
 export function humanizeKnowledgeTag(value: string): string {
   return value
     .split('-')

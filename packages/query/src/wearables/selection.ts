@@ -3,8 +3,6 @@ import { canonicalizeWearableProviderSlug } from "@murphai/health-metrics";
 import { dedupeExactMetricCandidates } from "./dedupe.ts";
 import {
   compareWearableProviders,
-  formatMetricLabel,
-  formatProviderName,
   hasDirectWearableProviderForSource,
   resolveMetricTolerance,
   resourceTypeScore,
@@ -12,7 +10,6 @@ import {
 } from "./provider-policy.ts";
 import { normalizeWearableOriginSourceSlug } from "./origin.ts";
 import {
-  buildMetricPolicySelectionReason,
   scoreMetricPolicy,
 } from "./metric-policies.ts";
 import { compareIsoDesc, normalizeLowercaseString } from "./shared.ts";
@@ -56,50 +53,6 @@ export function resolveMetric(
           .map((candidate) => candidate.provider),
       )]
     : [];
-  const agreeingProviders = selectionCandidate
-    ? [...new Set(
-        sortedCandidates
-          .filter((candidate) => isWithinMetricTolerance(metric, selectionCandidate.value, candidate.value))
-          .map((candidate) => candidate.provider),
-      )]
-    : [];
-  const reasons: string[] = [];
-
-  if (deduped.exactDuplicateCount > 0) {
-    reasons.push(
-      `Suppressed ${deduped.exactDuplicateCount} exact duplicate candidate${deduped.exactDuplicateCount === 1 ? "" : "s"}.`,
-    );
-  }
-
-  if (selectionCandidate && selectionScorecard) {
-    reasons.push(
-      buildMetricSelectionReason(
-        metric,
-        selectionCandidate,
-        selectionScorecard,
-        sortedCandidates[1] ?? null,
-        runnerUpScorecard,
-      ),
-    );
-
-    const metricPolicyReason = buildMetricPolicySelectionReason(
-      metric,
-      selectionCandidate,
-      sortedCandidates,
-    );
-    if (metricPolicyReason) {
-      reasons.push(metricPolicyReason);
-    }
-  }
-
-  if (agreeingProviders.length > 1) {
-    reasons.push(`Providers agreed within tolerance: ${agreeingProviders.map(formatProviderName).join(", ")}.`);
-  }
-
-  if (conflictingProviders.length > 0) {
-    reasons.push(`Conflicting values remained from ${conflictingProviders.map(formatProviderName).join(", ")}.`);
-  }
-
   const confidenceLevel = inferMetricConfidenceLevel({
     candidateCount: sortedCandidates.length,
     conflictingProviders,
@@ -117,7 +70,6 @@ export function resolveMetric(
       conflictingProviders,
       exactDuplicateCount: deduped.exactDuplicateCount,
       level: confidenceLevel,
-      reasons,
     },
     metric,
     selection: selectionCandidate
@@ -151,10 +103,7 @@ export function withMetricFallback(
 
   return {
     candidates: [...fallback.candidates],
-    confidence: {
-      ...fallback.confidence,
-      reasons: [reason, ...fallback.confidence.reasons],
-    },
+    confidence: { ...fallback.confidence },
     metric: metric.metric,
     selection: {
       ...fallback.selection,
@@ -188,23 +137,6 @@ export function resolveSleepWindowSelection(
           .map((candidate) => candidate.provider),
       )]
     : [];
-  const reasons: string[] = [];
-
-  if (selection && selectionScorecard) {
-    reasons.push(
-      buildSleepWindowSelectionReason(
-        selection,
-        selectionScorecard,
-        sorted[1] ?? null,
-        runnerUpScorecard,
-      ),
-    );
-  }
-
-  if (conflictingProviders.length > 0) {
-    reasons.push(`Sleep windows differed across ${conflictingProviders.map(formatProviderName).join(", ")}.`);
-  }
-
   return {
     confidence: {
       candidateCount: sorted.length,
@@ -236,7 +168,6 @@ export function resolveSleepWindowSelection(
             }
           : null,
       }),
-      reasons,
     },
     selection,
   };
@@ -511,66 +442,6 @@ function scoreSleepWindowAgreement(
         .map((other) => other.provider),
     )].length,
   );
-}
-
-function formatSignedScore(score: number): string {
-  return score >= 0 ? `+${score}` : `${score}`;
-}
-
-function buildMetricSelectionReason(
-  metric: WearableMetricKey,
-  candidate: WearableMetricCandidate,
-  scorecard: WearableMetricScorecard,
-  runnerUp: WearableMetricCandidate | null,
-  runnerUpScorecard: WearableMetricScorecard | null,
-): string {
-  const parts = [
-    `provider +${scorecard.providerScore}`,
-    `specificity +${scorecard.resourceScore}`,
-    `source family +${scorecard.sourceFamilyScore}`,
-    `recency +${scorecard.recencyScore}`,
-    `agreement +${scorecard.agreementScore}`,
-    ...(scorecard.metricPolicyScore === 0
-      ? []
-      : [`metric policy ${formatSignedScore(scorecard.metricPolicyScore)}`]),
-  ];
-
-  if (!runnerUp || !runnerUpScorecard) {
-    return `Selected ${describeMetricEvidence(candidate)} for ${formatMetricLabel(metric)} because it scored highest (${parts.join(", ")}; total ${scorecard.total}).`;
-  }
-
-  return `Selected ${describeMetricEvidence(candidate)} for ${formatMetricLabel(metric)} because it scored highest (${parts.join(", ")}; total ${scorecard.total}) ahead of ${describeMetricEvidence(runnerUp)} (total ${runnerUpScorecard.total}).`;
-}
-
-function buildSleepWindowSelectionReason(
-  candidate: WearableSleepWindowCandidate,
-  scorecard: WearableSleepWindowScorecard,
-  runnerUp: WearableSleepWindowCandidate | null,
-  runnerUpScorecard: WearableSleepWindowScorecard | null,
-): string {
-  const parts = [
-    `provider +${scorecard.providerScore}`,
-    `duration +${scorecard.durationScore}`,
-    `recency +${scorecard.recencyScore}`,
-    `agreement +${scorecard.agreementScore}`,
-    scorecard.napPenalty === 0 ? "nap penalty +0" : `nap penalty ${scorecard.napPenalty}`,
-  ];
-
-  if (!runnerUp || !runnerUpScorecard) {
-    return `Selected ${describeSleepWindowEvidence(candidate)} because it scored highest (${parts.join(", ")}; total ${scorecard.total}).`;
-  }
-
-  return `Selected ${describeSleepWindowEvidence(candidate)} because it scored highest (${parts.join(", ")}; total ${scorecard.total}) ahead of ${describeSleepWindowEvidence(runnerUp)} (total ${runnerUpScorecard.total}).`;
-}
-
-function describeMetricEvidence(candidate: WearableMetricCandidate): string {
-  const timestamp = candidate.recordedAt ?? candidate.occurredAt ?? "unknown time";
-  return `${formatProviderName(candidate.provider)} ${candidate.sourceKind} recorded ${timestamp}`;
-}
-
-function describeSleepWindowEvidence(candidate: WearableSleepWindowCandidate): string {
-  const timestamp = candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "unknown time";
-  return `${formatProviderName(candidate.provider)} ${candidate.sleepType === "nap" || candidate.nap ? "nap" : "sleep"} window recorded ${timestamp}`;
 }
 
 export function compareSleepWindowByDateDesc(

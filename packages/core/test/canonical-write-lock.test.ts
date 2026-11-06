@@ -4,6 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 
 import { afterEach, test, vi } from "vitest";
+import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
 
 const tempRoots: string[] = [];
 
@@ -173,6 +174,7 @@ test("canonical write lock rejects concurrent acquisition with an active VaultEr
       const lockError = error as {
         code?: string;
         details: {
+          lockState?: unknown;
           metadata?: {
             command?: string;
             host?: string;
@@ -184,6 +186,7 @@ test("canonical write lock rejects concurrent acquisition with an active VaultEr
         message: string;
       };
       assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      assert.equal(lockError.details.lockState, "active");
       assert.match(lockError.message, /already in progress/u);
       assert.equal(lockError.details.relativePath, CANONICAL_WRITE_LOCK_DIRECTORY);
       assert.equal(lockError.details.metadata?.pid, 4242);
@@ -334,6 +337,7 @@ test("canonical write lock rejects stale held locks with a rich VaultError", asy
       const lockError = error as {
         code?: string;
         details: {
+          lockState?: unknown;
           metadata?: {
             command?: string;
             host?: string;
@@ -345,6 +349,7 @@ test("canonical write lock rejects stale held locks with a rich VaultError", asy
         message: string;
       };
       assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      assert.equal(lockError.details.lockState, "stale");
       assert.match(lockError.message, /blocked by a stale lock/u);
       assert.match(lockError.message, /Process 1234 is no longer running\./u);
       assert.match(lockError.message, /stale-lock-holder/u);
@@ -405,6 +410,7 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
       const lockError = error as {
         code?: string;
         details: {
+          lockState?: unknown;
           metadata?: {
             command?: string;
             host?: string;
@@ -416,6 +422,7 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
         message: string;
       };
       assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      assert.equal(lockError.details.lockState, "stale");
       assert.match(lockError.message, /blocked by a stale lock/u);
       assert.match(lockError.message, /stale-eexist-holder/u);
       assert.equal(lockError.details.relativePath, CANONICAL_WRITE_LOCK_DIRECTORY);
@@ -438,4 +445,158 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
       return true;
     },
   );
+});
+
+test("canonical write lock exports active contention classification for a real independent owner", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const {
+    acquireCanonicalWriteLock,
+    inspectCanonicalWriteLock,
+    isActiveCanonicalWriteLockError,
+    VaultError,
+    withCanonicalWriteLockScope,
+  } = await loadCoreIndex();
+  const owner = await acquireCanonicalWriteLock(vaultRoot);
+  try {
+    await assert.rejects(
+      () => withCanonicalWriteLockScope(vaultRoot, async () => {
+        const unexpected = await acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 });
+        await unexpected.release();
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof VaultError);
+        assert.equal(error.code, "CANONICAL_WRITE_LOCKED");
+        assert.equal(error.details.lockState, "active");
+        assert.equal(isActiveCanonicalWriteLockError(error), true);
+        return true;
+      },
+    );
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+  } finally {
+    await owner.release();
+  }
+  assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
+});
+
+test("canonical write lock classification rejects unknown states, prose, pids and non-VaultError lookalikes", async () => {
+  const { isActiveCanonicalWriteLockError, VaultError } = await loadCoreIndex();
+  for (const lockState of [undefined, null, "stale", "unknown", "ACTIVE", true, ["active"], { active: true }]) {
+    const error = new VaultError("CANONICAL_WRITE_LOCKED", "Canonical vault writes are already in progress.", {
+      metadata: { pid: process.pid },
+    });
+    if (lockState !== undefined) error.details.lockState = lockState;
+    assert.equal(isActiveCanonicalWriteLockError(error), false);
+  }
+  assert.equal(isActiveCanonicalWriteLockError(
+    new VaultError("CANONICAL_WRITE_LOCK_REQUIRED", "Synthetic failure.", { lockState: "active" }),
+  ), false);
+  const lookalike = { code: "CANONICAL_WRITE_LOCKED", details: { lockState: "active" } };
+  for (const error of [null, undefined, "CANONICAL_WRITE_LOCKED", lookalike, Object.assign(new Error("Synthetic lock."), lookalike)]) {
+    assert.equal(isActiveCanonicalWriteLockError(error), false);
+  }
+});
+
+async function withSyntheticClock(run: (advanceMs: (ms: number) => void) => Promise<void>): Promise<void> {
+  const original = process.hrtime.bigint;
+  let clock = 0n;
+  process.hrtime.bigint = () => clock;
+  try {
+    await run((ms) => { clock += BigInt(ms) * 1_000_000n; });
+  } finally {
+    process.hrtime.bigint = original;
+  }
+}
+
+function lockTiming(report: CliTiming | undefined) {
+  assert.ok(report);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  return Object.fromEntries(report.commands[0]!.phases
+    .filter((phase) => phase.phase === "canonical-write-wait" || phase.phase === "dispatch")
+    .map((phase) => [phase.phase, [phase.count, phase.sumUs]]));
+}
+
+test("canonical-write-wait spans queued and cross-owner acquisition, never the hold", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const { acquireCanonicalWriteLock, withCanonicalWriteLockScope } = await loadCanonicalWriteLockModule();
+  // Same post-reset module instance (and AsyncLocalStorage) as the lock owner.
+  const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+
+  for (const waiter of ["in-process queue", "independent owner"] as const) {
+    // Acquired outside any CLI scope, so the holder contributes no sample.
+    let holder: Awaited<ReturnType<typeof acquireCanonicalWriteLock>> | null = await acquireCanonicalWriteLock(vaultRoot);
+    let report: CliTiming | undefined;
+    try {
+      await withSyntheticClock(async (advanceMs) => {
+        const acquire = () => acquireCanonicalWriteLock(vaultRoot);
+        const run = withCliTiming(() => timeCliDispatch("meal add", async () => {
+          // The queue waiter shares this process's slot; the scoped owner skips
+          // the queue and polls the held directory lock like another process.
+          const lock = waiter === "independent owner"
+            ? await withCanonicalWriteLockScope(vaultRoot, acquire)
+            : await acquire();
+          advanceMs(3_000); // Hold time belongs to dispatch, not the wait.
+          await lock.release();
+        }), (value) => { report = value; });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        advanceMs(7_000);
+        const releasing = holder!;
+        holder = null;
+        await releasing.release();
+        await run;
+      });
+    } finally {
+      await holder?.release();
+    }
+    assert.deepEqual(lockTiming(report), {
+      "canonical-write-wait": [1, 7_000_000],
+      dispatch: [1, 10_000_000],
+    }, waiter);
+  }
+});
+
+test("canonical-write-wait keeps timeout errors and counts each re-entrant acquisition call", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const { acquireCanonicalWriteLock, inspectCanonicalWriteLock, withCanonicalWriteLockScope } =
+    await loadCanonicalWriteLockModule();
+  const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+
+  const holder = await acquireCanonicalWriteLock(vaultRoot);
+  let thrown: unknown;
+  let failed: CliTiming | undefined;
+  try {
+    await withSyntheticClock(async () => {
+      await assert.rejects(
+        withCliTiming(() => timeCliDispatch("meal add", () => withCanonicalWriteLockScope(vaultRoot, async () => {
+          try {
+            await acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 });
+          } catch (error) {
+            thrown = error;
+            throw error;
+          }
+        })), (value) => { failed = value; }),
+        (error: unknown) => error === thrown,
+      );
+    });
+  } finally {
+    await holder.release();
+  }
+  assert.equal((thrown as { code?: string }).code, "CANONICAL_WRITE_LOCKED");
+  assert.equal(failed?.commands[0]?.outcome, "error");
+  // A failed acquisition is still one measured wait (zero on this clock).
+  assert.deepEqual(lockTiming(failed), { "canonical-write-wait": [1, 0], dispatch: [1, 0] });
+
+  let reentrant: CliTiming | undefined;
+  await withSyntheticClock(async () => {
+    await withCliTiming(() => timeCliDispatch("meal add", () => withCanonicalWriteLockScope(vaultRoot, async () => {
+      const outer = await acquireCanonicalWriteLock(vaultRoot);
+      try {
+        await (await acquireCanonicalWriteLock(vaultRoot)).release();
+      } finally {
+        await outer.release();
+      }
+    })), (value) => { reentrant = value; });
+  });
+  // Count is acquisition calls, including same-owner re-entry, not distinct holds.
+  assert.deepEqual(lockTiming(reentrant), { "canonical-write-wait": [2, 0], dispatch: [1, 0] });
+  assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
 });

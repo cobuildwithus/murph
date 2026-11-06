@@ -71,6 +71,7 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_CODES,
@@ -194,7 +195,7 @@ export { HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE } from "./app-routes";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
-export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
+export { HOSTED_FAMILY_BILLING_PLAN_CODE } from "./billing-plans";
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
@@ -488,6 +489,7 @@ export type HostedFamilyStripeSubscriptionResult = {
   accessRestoredMemberIds?: string[];
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
+  terminalOwnerMemberId?: string;
   groupId: string | null;
   runtimeRecheckMemberIds?: string[];
 };
@@ -1861,7 +1863,6 @@ export async function lookupHostedAccountGroupStripeBillingRefByStripeSubscripti
 }
 
 export async function writeHostedAccountGroupStripeBillingTx(input: {
-  billedSeatCount?: number | null;
   billingStatus: HostedBillingStatus;
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
@@ -1931,7 +1932,6 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   const stripeCustomerId = normalizeNullableString(input.stripeCustomerId);
   const stripeSubscriptionId = normalizeNullableString(input.stripeSubscriptionId);
   const stripeSubscriptionItemId = normalizeNullableString(input.stripeSubscriptionItemId);
-  const billedSeatCount = normalizeHostedFamilyOptionalBilledSeatCount(input.billedSeatCount);
   await assertHostedAccountGroupStripeBillingIdentifiersAvailableTx({
     groupId: input.groupId,
     stripeCustomerId,
@@ -1956,7 +1956,6 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   const billingRef = await input.tx.hostedAccountGroupBillingRef.upsert({
     create: {
       ...privateColumns,
-      billedSeatCount,
       checkoutAttemptId: null,
       checkoutCreatedAt: null,
       checkoutSeatCount: null,
@@ -1996,7 +1995,6 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
           currentBillingPlanCode: input.currentBillingPlanCode ?? HOSTED_FAMILY_BILLING_PLAN_CODE,
           currentPeriodEnd: input.currentPeriodEnd ?? null,
           currentPeriodStart: input.currentPeriodStart ?? null,
-          billedSeatCount,
           stripeCheckoutSessionIdEncrypted: null,
           stripeCheckoutSessionLookupKey: null,
           ...(input.preserveLastStripeEventCreatedAt
@@ -2306,7 +2304,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     || input.subscription.status === "incomplete_expired"
   ) {
     await writeHostedAccountGroupStripeBillingTx({
-      billedSeatCount: null,
       billingStatus: HostedBillingStatus.canceled,
       currentBillingPhase: null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
@@ -2329,6 +2326,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     });
     return {
       activations: [],
+      terminalOwnerMemberId: group.ownerMemberId,
       billingModeChangedMemberIds: billingModeChanged
         ? [group.ownerMemberId]
         : [],
@@ -2356,7 +2354,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       currentBillingPhase: null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
       ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
-      billedSeatCount: null,
       groupId: group.id,
       stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
       stripeEventCreatedAt: eventCreatedAt,
@@ -2475,7 +2472,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   const activeMembersFitPaidSeats = HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => activeCounts[planCode] <= familyPlanState.capacities[planCode],
   );
-  const billedSeatCount = sumHostedFamilyPlanCapacities(familyPlanState.capacities);
   const legacyPulseItem = familyPlanState.itemsByPlan.pulse;
   const billingStatus = stripeBillingStatus === HostedBillingStatus.active &&
       !activeMembersFitPaidSeats
@@ -2495,7 +2491,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       input.subscription,
       legacyPulseItem ?? input.subscription.items.data[0] ?? null,
     ),
-    billedSeatCount,
     groupId: group.id,
     stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
     stripeEventCreatedAt: eventCreatedAt,
@@ -5324,12 +5319,6 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         memberId: generateHostedMemberId(),
         prisma: input.tx,
       });
-  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-    domain: "control",
-    prisma: input.tx,
-    reason: "hosted-family.telegram-routing",
-    userId: member.id,
-  });
   let telegramBindingAttempted = false;
   let telegramBindingWritten = false;
   const writeTelegramBinding = async (): Promise<void> => {
@@ -5357,6 +5346,13 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         });
       }
     }
+    // Every caller holds the member row by now: member before root.
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: input.tx,
+      reason: "hosted-family.telegram-routing",
+      userId: member.id,
+    });
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: member.id,
       prisma: input.tx,
@@ -8042,12 +8038,6 @@ function normalizeHostedFamilySeatCount(value: unknown): number {
     httpStatus: 400,
     message: "Family supports 2 to 6 people.",
   });
-}
-
-function normalizeHostedFamilyOptionalBilledSeatCount(value: unknown): number | null {
-  return value === null || value === undefined
-    ? null
-    : normalizeHostedFamilySeatCount(value);
 }
 
 function buildHostedFamilyStripeMetadata(

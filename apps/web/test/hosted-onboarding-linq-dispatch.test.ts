@@ -1,3 +1,5 @@
+import type { HostedLinqChatSummary } from "@/src/lib/hosted-onboarding/linq-client";
+import { linqRoster } from "./support/linq-roster";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   type HostedCryptoDomain,
@@ -77,17 +79,19 @@ function buildPreparedDomainRootCandidate(input: {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
+    after: vi.fn(),
+    getPrisma: vi.fn(),
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
-    claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
     classifyHostedLinqFirstContactAdmission: vi.fn(),
     claimHostedLinqInstantFirstTurn: vi.fn(),
     completeHostedLinqInstantFirstTurn: vi.fn(),
     abandonHostedLinqInstantFirstTurn: vi.fn(),
-    hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
+    releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx: vi.fn(),
     ensureHostedLinqInstantStartStarterUsageEnrollment: vi.fn(),
     runHostedLinqInstantStartDeferredActivationWakeBestEffort: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -146,10 +150,7 @@ const mocks = vi.hoisted(() => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     })),
-    getHostedLinqChatSummary: vi.fn(async (): Promise<{
-      handles: string[];
-      isGroup: boolean | null;
-    }> => ({
+    getHostedLinqChatSummary: vi.fn(async (): Promise<HostedLinqChatSummary> => linqRoster({
       handles: [],
       isGroup: false,
     })),
@@ -216,7 +217,9 @@ const mocks = vi.hoisted(() => {
     resolveHostedFamilyPhoneInvitePreparation: vi.fn(),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
-      vi.fn<() => Promise<string | null>>(async () => null),
+      vi.fn<
+        typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq").resolveHostedLinqDirectPreparationMemberId
+      >(async () => null),
     lockAndReadActiveHostedDomainRootKeyIdTx:
       vi.fn<(input: {
         domain: "control" | "ingress";
@@ -259,6 +262,17 @@ function expectHostedLinqReadReceiptSent(chatId = "chat_123"): void {
     signal: undefined,
   });
 }
+
+vi.mock("@/src/lib/hosted-runtime-latency/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-runtime-latency/store")>(),
+  recordHostedIngressTemporalSignalAccepted: mocks.recordHostedIngressTemporalSignalAccepted,
+}));
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  // Keep deferred latency writes outside the route's transaction-count proof.
+  return { ...actual, after: mocks.after };
+});
 
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
@@ -319,7 +333,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
 
   return {
     ...actual,
-    claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
     claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
     markHostedLinqOnboardingLinkNoticeSent: mocks.markHostedLinqOnboardingLinkNoticeSent,
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
@@ -338,6 +351,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
 
   return {
     ...actual,
+    // These dispatch fixtures return state rows rather than executing Prisma
+    // relation filters. The PostgreSQL access proof covers the boolean query.
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
     readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
   };
 });
@@ -349,8 +367,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
-    hasConflictingHostedLinqInstantFirstTurnForChatTx:
-      mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+    releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx:
+      mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
     readHostedLinqDeliveryProviderDispatchIntentTx:
       mocks.readHostedLinqDeliveryProviderDispatchIntentTx,
   };
@@ -644,14 +662,8 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
-  handleHostedStripeWebhook: vi.fn(),
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: vi.fn(() => {
-    throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-dispatch.test.ts");
-  }),
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
@@ -972,7 +984,7 @@ async function createDirectRootPreparationFailureFixture(input: {
 
 async function createDirectPreparationTransitionFixture(input: {
   billingStatus?: HostedBillingStatus;
-  privyUserId?: string;
+  existingPhone?: boolean;
 } = {}) {
   mocks.enforceDirectMailboxPreparation = true;
   const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
@@ -1067,12 +1079,7 @@ async function createDirectPreparationTransitionFixture(input: {
     hostedMemberRouting,
     hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
   });
-  if (input.privyUserId) {
-    const privyUserIdEncrypted = await encryptHostedWebNullableString({
-      field: "hosted-member-identity.privy-user-id",
-      memberId: "member_123",
-      value: input.privyUserId,
-    });
+  if (input.existingPhone) {
     const findUnique = vi.mocked(prisma.hostedMemberIdentity!.findUnique!);
     const readIdentity = findUnique.getMockImplementation()!;
     findUnique.mockImplementation(async (...args) => {
@@ -1083,7 +1090,7 @@ async function createDirectPreparationTransitionFixture(input: {
       return {
         ...identity,
         phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
-        privyUserIdEncrypted,
+
       };
     });
   }
@@ -1127,6 +1134,13 @@ async function createDirectPreparationTransitionFixture(input: {
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getPrisma.mockReset().mockImplementation(() => {
+      throw new Error("Unexpected getPrisma call in Linq dispatch test.");
+    });
+    mocks.getHostedLinqChatSummary.mockReset().mockResolvedValue(linqRoster({
+      handles: [],
+      isGroup: false,
+    }));
     mocks.enforceDirectMailboxPreparation = false;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockReset();
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
@@ -1159,7 +1173,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       id: "hld_claimed",
     });
     mocks.readHostedLinqDeliveryProviderDispatchIntentTx.mockResolvedValue(null);
-    mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValue({
@@ -1171,7 +1184,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "unavailable",
     });
     mocks.abandonHostedLinqInstantFirstTurn.mockResolvedValue(undefined);
-    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx.mockResolvedValue(
+    mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx.mockResolvedValue(
       false,
     );
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValue({
@@ -1431,6 +1444,30 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { template: "instant_first_turn_v1" as const, path: "instant iMessage signup" },
+    { template: null, path: "app or website signup welcome" },
+    { template: null, path: "ordinary direct reply" },
+  ])("shares the home contact card after delivered $path", async ({ template }) => {
+    const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+      sourceRef: "synthetic-opening", template, homeMemberId: "member_123",
+    });
+    const tasks: Array<() => Promise<void>> = [];
+    const event = buildHostedLinqProviderReceiptEvent({
+      eventId: "evt_home_delivered", eventType: "message.delivered",
+      messageId: "message_home", chatId: "chat_home",
+    });
+    await handleHostedOnboardingLinqWebhook({
+      prisma, rawBody: JSON.stringify(event), signature: null, timestamp: null,
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+    });
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).not.toHaveBeenCalled();
+    for (const task of tasks) await task();
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledExactlyOnceWith({
+      chatId: "chat_home", memberId: "member_123", prisma,
+    });
   });
 
   it.each([
@@ -1763,7 +1800,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       createdAt: "2026-03-26T11:59:00.000Z",
       eventId: "evt_stale_signup",
       eventType: "message.delivered" as const,
-      expectedScheduledTaskCount: 0,
+      expectedScheduledTaskCount: 1,
       label: "stale",
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [0],
@@ -1772,7 +1809,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       createdAt: "2026-03-26T12:00:02.000Z",
       eventId: "evt_non_advancing_signup",
       eventType: "message.delivered" as const,
-      expectedScheduledTaskCount: 0,
+      expectedScheduledTaskCount: 1,
       label: "non-advancing",
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [0],
@@ -1780,14 +1817,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     {
       eventId: "evt_delivered_non_invite",
       eventType: "message.delivered" as const,
-      expectedScheduledTaskCount: 0,
+      expectedScheduledTaskCount: 1,
       label: "non-invite template",
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [1],
       template: "ai_usage_quota" as const,
     },
   ])(
-    "does not share for a $label delivery event",
+    "does not share for a $label event without a home route",
     async ({
       createdAt,
       eventId,
@@ -1923,10 +1960,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it.each(["sms", "RCS"] as const)(
     "canonically classifies route-less inbound Linq %s direct chats despite conflicting preferred-service metadata",
     async (service) => {
-      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
         handles: [],
         isGroup: false,
-      });
+      }));
       const prisma = asPrismaTransactionClient({
         hostedWebhookReceipt: {
           create: vi.fn().mockResolvedValue({}),
@@ -1952,6 +1989,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
 
       const response = await handleHostedOnboardingLinqWebhook({
+        webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
         prisma,
         rawBody: buildHostedLinqWebhookBody({
           data: {
@@ -1987,6 +2025,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           }),
         }),
       );
+      expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationIsGroup: false, source: "linq", webhookReceivedAt: expect.any(Date) }),
+      );
       expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
         chatId: "chat_123",
         timeoutMs: 1_500,
@@ -2010,14 +2051,39 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
-  it.each([false, true])("keeps active-member iMessage ingress direct with opening continuation %s", async (continuation) => {
+  it("rethrows a losing first-turn claim without abandoning another request", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValueOnce("member_123");
+    const error = hostedOnboardingError({ code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+      details: { reason: "delivery-in-flight" }, httpStatus: 503, message: "Synthetic overlapping claim", retryable: true });
+    mocks.claimHostedLinqInstantFirstTurn.mockRejectedValueOnce(error);
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: { create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({ payloadJson: { eventType: "message.received", receiptAttemptCount: 1, receiptStatus: "processing" } }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      hostedMember: { findUnique: vi.fn().mockResolvedValue({ accountGroupMemberships: [], billingStatus: HostedBillingStatus.active,
+        id: "member_123", invites: [], linqChatId: "chat_123", phoneLookupKey: "+15550000001" }) },
+    });
+    await expect(handleHostedOnboardingLinqWebhook({ prisma,
+      rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false, data: { parts: [{ type: "text", value: "Hello" }] }, service: "iMessage" }),
+      signature: null, timestamp: null,
+    })).rejects.toBe(error);
+    expect(mocks.abandonHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { continuation: false, service: "iMessage" },
+    { continuation: true, service: "iMessage" },
+    { continuation: false, service: "sms" },
+    { continuation: false, service: "RCS" },
+  ])("admits signed-direct $service without chat HTTP (opening continuation $continuation)", async ({ continuation, service }) => {
     const supportedLongText = continuation ? "Yes, ready." : `${"Context ".repeat(290)}Final question?`;
     if (continuation) {
       mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValueOnce("member_123");
       mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
         expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-        return { kind: "generate", openingTone: "formal" };
+        return { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate", opening: { tone: "formal", question: "identity" } };
       });
       mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
         kind: "reply",
@@ -2033,10 +2099,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         },
       }));
     }
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [],
-      isGroup: false,
-    });
+    mocks.getHostedLinqChatSummary.mockRejectedValue(
+      new Error("Chat HTTP must not be an ordinary direct-message dependency"),
+    );
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -2068,7 +2133,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         data: {
           parts: [{ type: "text", value: supportedLongText }],
         },
-        service: "iMessage",
+        service,
       }),
       signature: null,
       timestamp: null,
@@ -2078,13 +2143,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_123",
-      timeoutMs: 1_500,
-    });
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.chat-classification",
-      { outcome: "canonical-direct" },
+      { outcome: "webhook-direct" },
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2092,7 +2154,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           message: expect.objectContaining({
             linqMessage: expect.objectContaining({
               parts: [{ type: "text", value: supportedLongText }],
-              service: "iMessage",
+              service,
               threadIsDirect: true,
             }),
           }),
@@ -2129,12 +2191,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
     {
       lookupError: null,
-      summary: {
+      summary: linqRoster({
         handles: [],
         isGroup: null,
-      },
+      }),
     },
-  ])("fails before planning when canonical classification is unavailable", async ({
+  ])("fails closed when an unknown audience cannot be classified", async ({
     lookupError,
     summary,
   }) => {
@@ -2157,7 +2219,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        chatIsGroup: false,
         service: "iMessage",
       }),
       signature: null,
@@ -2180,7 +2241,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it.each(["sms", "RCS"] as const)(
-    "fails before planning when canonical %s classification is unavailable",
+    "fails closed when an unknown %s audience cannot be classified",
     async (service) => {
       const lookupError = new TypeError("Linq chat read unavailable");
       mocks.getHostedLinqChatSummary.mockRejectedValueOnce(lookupError);
@@ -2199,7 +2260,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       await expect(handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildHostedLinqWebhookBody({
-          chatIsGroup: false,
           service,
         }),
         signature: null,
@@ -2357,10 +2417,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     part,
     privateSentinels,
   }) => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -2466,7 +2526,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -2525,7 +2584,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqOutboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -2552,7 +2610,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("keeps an unknown direct app card without fallback contentless when admission is off", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
@@ -2600,7 +2658,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
@@ -2807,7 +2864,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
@@ -2871,7 +2927,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
@@ -2940,7 +2995,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("preserves all active-member Linq text parts when the inbound part count exceeds the old cap", async () => {
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -3006,7 +3061,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("routes an active Linq member's unknown token-shaped text as a normal message", async () => {
     mocks.resolveHostedFamilyInviteTokenForInbound.mockResolvedValueOnce(null);
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -3078,7 +3133,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("prioritizes active-member Linq text when attachment descriptors arrive first", async () => {
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -4423,8 +4478,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("admits a clean established home with one live discovery and one member/chat lock", async () => {
-    const { prisma, hostedMemberRouting, hostedLinqDeliveryFindMany, restoreRootMock } =
+  it.each([false, true])("admits a clean established home with one preflight discovery and one live discovery (continuation candidate: %s)", async (continuationCandidate) => {
+    if (continuationCandidate) {
+      mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    }
+    const { resolveHostedLinqDirectPreparationMemberId } = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq")
+    >("@/src/lib/hosted-onboarding/webhook-provider-linq");
+    const { prisma, hostedMemberRouting, hostedLinqDeliveryFindMany, providerDomainsAfterTransactionStart, restoreRootMock } =
       await createDirectPreparationTransitionFixture();
     const record = await hostedMemberRouting.findUnique({ where: { memberId: "member_123" } });
     if (!record) throw new Error("Expected the existing routing fixture.");
@@ -4448,16 +4509,30 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     hostedMemberRouting.findUnique.mockClear();
     hostedMemberRouting.upsert.mockClear();
     hostedLinqDeliveryFindMany.mockResolvedValue([]);
-    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockImplementation(
+      resolveHostedLinqDirectPreparationMemberId,
+    );
     try {
       await expect(handleHostedOnboardingLinqWebhook({
         prisma,
-        rawBody: buildHostedLinqWebhookBody({ eventId: "evt_clean_home_count" }),
+        rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false, eventId: "evt_clean_home_count" }),
         signature: null, timestamp: null,
       })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
-      expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledOnce();
-      expect(hostedMemberRouting.findMany).toHaveBeenCalledOnce();
+      // Real discovery owners: one speculative pair, one locked live pair.
+      // Continuation eligibility must not add another speculative pair.
+      expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId).toHaveBeenCalledOnce();
+      expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledTimes(2);
+      expect(hostedMemberRouting.findMany).toHaveBeenCalledTimes(2);
       expect(hostedMemberRouting.findUnique).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+      if (continuationCandidate) {
+        expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ continuationMemberId: "member_123" }),
+        );
+      } else {
+        expect(mocks.claimHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+      }
       expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
       expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
       expect(prisma.$queryRaw.mock.calls.filter(([sql]) =>
@@ -4466,7 +4541,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(prisma.$executeRaw.mock.calls.filter((args) =>
         args.includes("hosted-linq-routing:chat"),
       )).toHaveLength(1);
-      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledOnce();
+      expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+      expect(prisma.hostedMemberIdentity!.findUnique).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
       expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
     } finally {
@@ -4474,7 +4550,40 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
+  it("does not reuse a missing continuation member when direct preparation can discover it", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const { prisma, hostedLinqDeliveryFindMany, providerDomainsAfterTransactionStart, restoreRootMock } =
+      await createDirectPreparationTransitionFixture();
+    hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("member_123");
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          chatIsGroup: false,
+          eventId: "evt_continuation_member_missing_then_found",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
+      expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ continuationMemberId: null }),
+      );
+      expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+    } finally {
+      restoreRootMock();
+    }
+  });
+
+  it.each([false, true])("re-prepares once when the direct mailbox ingress root changes under lock (continuation candidate: %s)", async (continuationCandidate) => {
+    if (continuationCandidate) {
+      mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    }
     mocks.enforceDirectMailboxPreparation = true;
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
@@ -4550,7 +4659,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (/select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -4614,12 +4723,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it.each([
     {
+      activeRootKeyIds: ["root-control-active", "root-control-active"],
+      expectedAppendCount: 1,
+      expectedAttemptCount: 1,
+      expectedRootLockCount: 2,
+      label: "keeps a prepared direct route successful without retry telemetry",
+      succeeds: true,
+    },
+    {
       activeRootKeyIds: [
         "root-control-stale",
         "root-control-active",
         "root-control-active",
       ],
       expectedAppendCount: 1,
+      expectedAttemptCount: 2,
       expectedRootLockCount: 3,
       label: "re-prepares once when the direct control root changes under lock",
       succeeds: true,
@@ -4630,6 +4748,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         "root-control-stale-2",
       ],
       expectedAppendCount: 0,
+      expectedAttemptCount: 2,
       expectedRootLockCount: 2,
       label: "fails closed after repeated direct control-root drift",
       succeeds: false,
@@ -4637,6 +4756,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   ])("$label", async ({
     activeRootKeyIds,
     expectedAppendCount,
+    expectedAttemptCount,
     expectedRootLockCount,
     succeeds,
   }) => {
@@ -4691,48 +4811,108 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       callback: (transaction: typeof prisma) => Promise<unknown>,
     ) => callback(prisma));
 
-    const outcome = handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: succeeds
-          ? "evt_direct_control_root_retry"
-          : "evt_direct_control_root_drift",
-      }),
-      signature: null,
-      timestamp: null,
-    });
-    if (succeeds) {
-      await expect(outcome).resolves.toMatchObject({
-        ignored: false,
-        ok: true,
-        reason: "wake-appended-active-member",
-      });
-    } else {
-      await expect(outcome).rejects.toMatchObject({
-        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-        details: {
-          preparationTarget: "direct_linq_mailbox",
-          reason: "control-root",
-        },
-        retryable: true,
-      });
-    }
+    // Keep the real planner, retry owner, service, route and log serializers composed.
+    const logging = await import("@/src/lib/hosted-onboarding/logging");
+    const actualLogging = await vi.importActual<typeof logging>(
+      "@/src/lib/hosted-onboarding/logging",
+    );
+    const errorName = vi.spyOn(logging, "deriveHostedOnboardingTimingErrorName")
+      .mockImplementation(actualLogging.deriveHostedOnboardingTimingErrorName);
+    const finishTiming = vi.spyOn(logging, "finishHostedOnboardingTiming")
+      .mockImplementation(actualLogging.finishHostedOnboardingTiming);
+    const diagnostic = vi.spyOn(logging, "logHostedOnboardingDiagnostic")
+      .mockImplementation(actualLogging.logHostedOnboardingDiagnostic);
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.getPrisma.mockReturnValue(prisma);
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
-      .toHaveBeenCalledTimes(expectedRootLockCount);
-    expect(mocks.appendHostedMailboxEnvelopeTx)
-      .toHaveBeenCalledTimes(expectedAppendCount);
+    try {
+      const { POST } = await import("../app/api/hosted-onboarding/linq/webhook/route");
+      const response = await POST(new Request(
+        "https://example.test/api/hosted-onboarding/linq/webhook",
+        { method: "POST", body: buildHostedLinqWebhookBody() },
+      ));
+      expect(response.status).toBe(succeeds ? 202 : 503);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      const planner = vi.mocked(planHostedOnboardingLinqWebhook);
+      expect(planner).toHaveBeenCalledTimes(expectedAttemptCount);
+      if (succeeds) {
+        await expect(response.json()).resolves.toEqual({
+          ignored: false,
+          ok: true,
+          reason: "wake-appended-active-member",
+        });
+        expect(errorName).not.toHaveBeenCalled();
+      } else {
+        const result = planner.mock.results.at(-1);
+        if (result?.type !== "return") {
+          throw new Error("Expected the real planner's rejected promise.");
+        }
+        const terminalError = await result.value.catch((error: unknown) => error);
+        expect(errorName).toHaveBeenCalledTimes(3);
+        for (const [error] of errorName.mock.calls) {
+          expect(error).toBe(terminalError);
+        }
+        await expect(response.json()).resolves.toEqual({
+          error: {
+            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+            details: { preparationTarget: "direct_linq_mailbox", reason: "control-root" },
+            message: "Hosted Linq direct mailbox preparation is stale.",
+            retryable: true,
+          },
+        });
+      }
+
+      const retryDiagnostic = "hosted-onboarding.webhook.thread-routing-preparation-retry";
+      const retries = consoleInfo.mock.calls.filter(([, details]) =>
+        details?.diagnostic === retryDiagnostic,
+      );
+      expect(retries).toEqual(expectedAttemptCount === 1 ? [] : [[
+        `Hosted onboarding diagnostic: ${retryDiagnostic}.`,
+        {
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          diagnostic: retryDiagnostic,
+          directLinqMailboxPreparationReason: "control-root",
+        },
+      ]]);
+      const failedTimings = consoleInfo.mock.calls.filter(([message, details]) =>
+        message === "Hosted onboarding timing." && details.outcome === "failed",
+      ).map(([, details]) => details);
+      expect(failedTimings).toEqual(succeeds ? [] : [
+        "hosted-onboarding.webhook.linq.plan",
+        "hosted-onboarding.webhook.linq",
+        "hosted-onboarding.route.linq-webhook",
+      ].map((step) => expect.objectContaining({
+        directLinqMailboxPreparationReason: "control-root",
+        errorName: "HostedOnboardingError",
+        outcome: "failed",
+        step,
+      })));
+      for (const [message, details] of consoleInfo.mock.calls) {
+        if (message === "Hosted onboarding timing." && details.outcome !== "failed") {
+          expect(details).not.toHaveProperty("directLinqMailboxPreparationReason");
+        }
+      }
+      expect(prisma.$transaction).toHaveBeenCalledTimes(expectedAttemptCount);
+      expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+        .toHaveBeenCalledTimes(expectedRootLockCount);
+      expect(mocks.appendHostedMailboxEnvelopeTx)
+        .toHaveBeenCalledTimes(expectedAppendCount);
+    } finally {
+      errorName.mockRestore();
+      finishTiming.mockRestore();
+      diagnostic.mockRestore();
+      consoleInfo.mockRestore();
+    }
   });
 
   it.each([
     {
-      label: "retries direct member contention once and appends after release",
+      label: "retries a missing direct member row once and appends after it appears",
       lockedRows: [[], [{ id: "member_123" }]],
       succeeds: true,
     },
     {
-      label: "fails closed after repeated direct member contention",
+      label: "fails closed when the direct member row stays missing",
       lockedRows: [[], []],
       succeeds: false,
     },
@@ -4789,7 +4969,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (/select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)) {
         const rows = lockedRows[memberLockAttempt];
         memberLockAttempt += 1;
         return rows ?? [];
@@ -4833,6 +5013,88 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelopeTx)
       .toHaveBeenCalledTimes(succeeds ? 1 : 0);
+  });
+
+  it.each(["stable", "routing-drift", "pending-conflict"])("skips control KMS for a clean home route and restores preparation when needed (%s)", async (scenario) => {
+    const needsRetry = scenario !== "stable";
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    const routingRecord = {
+      memberId: "member_123",
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id", memberId: "member_123", value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone", memberId: "member_123", value: "+15550000000",
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey("+15551234567"),
+      linqHomeLineAssignedAt: new Date("2026-03-26T00:00:00.000Z"),
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    };
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock(routingRecord);
+    if (scenario === "pending-conflict") {
+      const findFirst = hostedMemberRouting.findFirst.getMockImplementation()!;
+      let conflictObserved = false;
+      hostedMemberRouting.findFirst.mockImplementation(async (query) => {
+        if (!conflictObserved && query?.where?.NOT && query.where.pendingLinqChatLookupKey) {
+          conflictObserved = true;
+          return withHostedMemberRoutingMember({ memberId: "synthetic-pending-owner" });
+        }
+        return findFirst(query);
+      });
+    }
+    const prisma = asPrismaTransactionClient({
+      hostedMemberRouting,
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: { findUnique: vi.fn().mockResolvedValue({
+        id: "member_123", billingStatus: HostedBillingStatus.active, suspendedAt: null,
+        accountGroupMemberships: [], invites: [],
+        createdAt: new Date("2026-03-26T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+      }) },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    let transactionCount = 0;
+    let transactionOpen = false;
+    prisma.$transaction = vi.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) => {
+      transactionCount++;
+      if (scenario === "routing-drift" && transactionCount === 1) routingRecord.linqHomeLineAssignedAt = new Date("2026-03-26T01:00:00.000Z");
+      transactionOpen = true;
+      try { return await callback(prisma); } finally { transactionOpen = false; }
+    });
+    const unwrap = vi.mocked(unwrapHostedDomainRootForWeb);
+    const original = unwrap.getMockImplementation()!;
+    const domains: string[] = [];
+    unwrap.mockImplementation(async (...args) => {
+      expect(transactionOpen).toBe(false);
+      domains.push(args[0].domain);
+      if (!needsRetry && args[0].domain === "control") throw new Error("Control KMS must not be used");
+      return original(...args);
+    });
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma, rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false }),
+        signature: null, timestamp: null,
+      })).resolves.toMatchObject({ ok: true, reason: "wake-appended-active-member" });
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      expect(transactionCount).toBe(needsRetry ? 2 : 1);
+      expect(domains).toEqual(needsRetry ? ["ingress", "ingress", "control"] : ["ingress"]);
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    } finally {
+      unwrap.mockReset().mockImplementation(original);
+    }
   });
 
   it("re-prepares once when the direct routing ciphertext changes under its lock", async () => {
@@ -5442,7 +5704,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("admits ordinary conversation without unused identity preparation", async () => {
     const { prisma, hostedLinqDeliveryFindMany, restoreRootMock } =
-      await createDirectPreparationTransitionFixture({ privyUserId: "synthetic-login" });
+      await createDirectPreparationTransitionFixture({ existingPhone: true });
     hostedLinqDeliveryFindMany.mockResolvedValue([]);
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
     const projection = vi.spyOn(memberIdentityStore, "projectHostedMemberIdentityState");
@@ -5465,12 +5727,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it("uses control-only preparation and preserves login identity on an expired Family acceptance replay", async () => {
+  it("uses control-only preparation and preserves canonical phone identity on an expired Family acceptance replay", async () => {
     const {
       prisma,
       providerDomainsAfterTransactionStart,
       restoreRootMock,
-    } = await createDirectPreparationTransitionFixture({ privyUserId: "synthetic-login" });
+    } = await createDirectPreparationTransitionFixture({ existingPhone: true });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
@@ -5554,10 +5816,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       const identityWrite = vi.mocked(prisma.hostedMemberIdentity!.upsert!).mock.calls[0]?.[0];
       expect(identityWrite).toBeDefined();
       await expect(decryptHostedWebNullableString({
-        field: "hosted-member-identity.privy-user-id",
+        field: "hosted-member-identity.phone-number",
         memberId: "member_123",
-        value: identityWrite!.update.privyUserIdEncrypted as string,
-      })).resolves.toBe("synthetic-login");
+        value: identityWrite!.update.phoneNumberEncrypted as string,
+      })).resolves.toBe("+15551234567");
       expect(providerDomainsAfterTransactionStart).toEqual([]);
     } finally {
       prepareRootCandidates.mockReset();
@@ -5699,6 +5961,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           prisma,
           rawBody: buildHostedLinqWebhookBody({
             eventId: `evt_null_preflight_${authority}`,
+            service: authority === "duplicate" ? "iMessage" : undefined,
           }),
           signature: null,
           timestamp: null,
@@ -5731,7 +5994,72 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(
           authority === "consent" ? 1 : 0,
         );
+        if (authority === "duplicate") {
+          const { completeHostedLinqInstantFirstTurn } = await vi.importActual<
+            typeof import("@/src/lib/hosted-onboarding/linq-instant-first-turn")
+          >("@/src/lib/hosted-onboarding/linq-instant-first-turn");
+          const wakeHandoff: Parameters<typeof completeHostedLinqInstantFirstTurn>[0]["wakeHandoff"]
+            | undefined = mocks.maybeHandoffHostedExecutionWebhookWake.mock.calls.at(-1)?.[0]?.wakeHandoff;
+          const participantContact = createHostedLinqParticipantContact({
+            kind: "phone",
+            value: "+15551234567",
+          });
+          if (!wakeHandoff || !participantContact) {
+            throw new Error("Expected a duplicate wake and valid participant contact.");
+          }
+          expect(wakeHandoff).toMatchObject({
+            eventId: "evt_null_preflight_duplicate",
+            mailboxItemId: "mailbox_existing_null_preflight",
+            source: "linq",
+            userId: "member_123",
+          });
+          expect(wakeHandoff).not.toHaveProperty("wakeMailboxCheckpoint");
+          const acceptedMailboxItem = {
+            id: "mailbox_accepted_first_turn",
+            lane: "conversation" as const,
+            laneSeq: "7",
+          };
+          mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(acceptedMailboxItem);
+
+          // Feed the real duplicate planner's handoff to the real completion
+          // owner. An already-saved reply must reconcile without another send.
+          await expect(completeHostedLinqInstantFirstTurn({
+            generation: { kind: "completed" },
+            inboundMessageId: "msg_123",
+            participantContact,
+            // The completed branch uses the mocked mailbox port; this ingress
+            // fixture intentionally omits unrelated Prisma client methods.
+            // @ts-expect-error -- deliberate narrow fixture for this owner boundary.
+            prisma,
+            recipientPhoneNumber: "+15550000000",
+            service: "iMessage",
+            wakeHandoff,
+          })).resolves.toEqual({
+            kind: "accepted",
+            wakeHandoff: {
+              acceptedLinqDeliveryId: "hld_9198bd7323f52b51126f7632e9da6f47",
+              conversationIsGroup: false,
+              eventId: "evt_null_preflight_duplicate",
+              linqChatId: "chat_123",
+              mailboxItemId: acceptedMailboxItem.id,
+              originalInboundMailboxItemId: "mailbox_existing_null_preflight",
+              source: "linq",
+              userId: "member_123",
+              wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "7" },
+            },
+          });
+          expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenLastCalledWith({
+            dedupeKey: expect.stringMatching(/^linq\.instant-first-turn\./u),
+            prisma,
+            userId: "member_123",
+          });
+          expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+          expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+            .not.toHaveBeenCalled();
+          expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+        }
       } finally {
+        mocks.readHostedMailboxItemByDedupeKey.mockReset().mockResolvedValue(null);
         restoreRootMock();
       }
     },
@@ -6071,6 +6399,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
         eventId: "evt_home_chat_owner_mismatch",
       }),
       signature: null,
@@ -6082,6 +6411,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "home-chat-owner-mismatch",
     });
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -6097,8 +6427,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     "member_123",
     "member_other",
   ])(
-    "retries once then terminates when preparation targeted %s before authority conflicts",
+    "retries once then terminates when continuation preparation targeted %s before authority conflicts",
     async (preparedMemberId) => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
       .mockResolvedValueOnce(preparedMemberId)
@@ -6146,6 +6477,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
         eventId: "evt_prepared_home_chat_owner_mismatch",
       }),
       signature: null,
@@ -6159,6 +6491,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
       .toHaveBeenCalledTimes(2);
     expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledOnce();
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
@@ -6402,7 +6735,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }],
     });
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -6513,7 +6846,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
     });
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.buildHostedFamilyInviteAcceptedReplyText).toHaveBeenCalledWith({
       memberId: "member_family",
     });
@@ -6769,7 +7101,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const hostedLinqLine = buildUnassignableHostedLinqLineFixture();
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -6846,7 +7178,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       return null;
     });
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -6928,7 +7260,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           : []
     );
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -6994,7 +7326,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("does not send a generic signup link for unaccepted Family invite tokens", async () => {
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -7049,7 +7381,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -7074,7 +7405,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -7127,7 +7458,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(mocks.buildHostedFamilyInviteAcceptedReplyText).toHaveBeenLastCalledWith({
       memberId: "member_family",
@@ -7149,7 +7479,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -7204,7 +7534,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -7219,7 +7548,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: { create: vi.fn() },
       hostedMember: {
         create: vi.fn(),
@@ -7272,7 +7601,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     const memberId = "member_family_draft_recovery";
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
       },
@@ -7335,7 +7664,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
     });
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("sends the signup link on the first inbound Linq message", async () => {
@@ -7348,7 +7676,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -7476,7 +7804,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       retryAt: new Date("2026-03-26T12:15:00.000Z"),
     });
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -7530,7 +7858,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       outcome: "incompatible",
     });
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -7582,7 +7910,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     };
     const hostedMemberCreate = vi.fn();
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -7717,7 +8045,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     }));
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn(async () =>
@@ -7903,7 +8231,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const callOrder: string[] = [];
     let trialActive = false;
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -7951,6 +8279,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       userId: memberId,
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
+    mocks.getPrisma.mockReturnValue(prisma);
     const ensureRuntimeProcessing = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
@@ -7989,7 +8318,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         callOrder.push("activation-continuation");
       });
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -8076,7 +8405,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
     });
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
-      claim: { kind: "generate" },
+      claim: { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate" },
       request: expect.objectContaining({
         eventId,
         text: "Hey Murph",
@@ -8170,7 +8499,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -8310,7 +8639,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -8454,7 +8783,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     };
     let trialActive = false;
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -8511,7 +8840,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     );
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -8638,7 +8967,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...data,
     }));
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn(),
@@ -8875,7 +9204,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           : [];
     });
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedGroupJoinOutreach: {
         findFirst: vi.fn().mockResolvedValue({
           offer: {
@@ -9067,7 +9396,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("keeps a model-approved new contact on the signup-link path when routing selects another line", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9126,7 +9455,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       return createdInvite;
     });
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: hostedInviteCreate,
@@ -9206,6 +9535,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_instant_start_cross_line",
       linqChatId: "chat_instant_start_cross_line",
       prisma,
@@ -9265,7 +9595,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     configureEnrollment();
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9282,7 +9612,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     };
     let memberCreated = false;
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -9364,7 +9694,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       });
       expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
-        claim: { kind: "generate" },
+        claim: { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate" },
         request: expect.objectContaining({
           eventId: "evt_instant_start_fallback",
           text: "Hey Murph",
@@ -9377,6 +9707,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
         .not.toHaveBeenCalled();
       expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
         eventId: "evt_instant_start_fallback",
         linqChatId: "chat_123",
         prisma,
@@ -9417,6 +9748,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_instant_start_fallback",
       linqChatId: "chat_123",
       prisma,
@@ -9456,7 +9788,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -9530,7 +9862,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       source: "model",
     });
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9564,7 +9896,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       updatedAt: now,
     };
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockImplementation(async () => {
@@ -9632,6 +9964,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledOnce();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenLastCalledWith({
+      expectedAttemptedAt: null,
       eventId: "evt_model_block_replay",
       linqChatId: "chat_123",
       prisma,
@@ -9643,7 +9976,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("does not create a pending signup route when the inbound Linq line is not assignable", async () => {
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -9719,7 +10052,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     let createdMemberId: string | null = null;
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(async ({ data }: { data: { memberId: string } }) => ({
           channel: "linq",
@@ -9862,7 +10195,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -10006,7 +10339,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -10109,7 +10442,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("ignores non-phone SMS first contact before invite side effects", async () => {
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
@@ -10167,25 +10500,27 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("blocks classifier-denied unknown Linq first contacts before member or invite side effects", async () => {
+  it.each([
+    `Hello! ${"x".repeat(2_050)}`,
+    "Automatic response from OrbitBot: this inbox serves enrolled accounts only. Please register to use this assistant.",
+    "Auto-reply: our office is closed until Monday. Your message has not been read.",
+  ])("blocks classifier-denied unknown Linq first contacts before member or invite side effects (%#)", async (rejectedMessageText) => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
       confidence: 0.94,
       kind: "block",
       source: "model",
     });
-    const rejectedMessageText = `Hey Gail! ${"x".repeat(2_050)}`;
     const boundedRejectedMessageText = rejectedMessageText.slice(0, 2_000);
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -10253,7 +10588,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         partTypes: ["text"],
         service: "imessage",
         text: boundedRejectedMessageText,
-        textWasTruncated: true,
+        textWasTruncated: rejectedMessageText.length > 2_000,
       }),
       signal: undefined,
     });
@@ -10271,7 +10606,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       skipDuplicates: true,
     });
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -10286,7 +10620,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockImplementationOnce(async () => {
       expect(transactionOpen).toBe(false);
       admissionOrder.push("reply-claim");
-      return { kind: "generate" };
+      return { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate" };
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockImplementationOnce(
       () => {
@@ -10400,6 +10734,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       "record",
     ]);
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_transactional_first_contact_block",
       linqChatId: "chat_123",
       prisma,
@@ -10436,7 +10771,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -10513,7 +10848,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -10524,7 +10858,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -10612,7 +10946,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -10972,7 +11305,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11098,7 +11431,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const inviteCreate = vi.fn().mockResolvedValue(invite);
     const buildDirectAttemptPrisma = () => asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn(async () => budgetRows.length),
@@ -11211,7 +11544,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11282,7 +11615,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11359,7 +11692,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11417,7 +11750,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -11444,7 +11777,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11530,6 +11863,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_classifier_transport_retry",
       linqChatId: "chat_123",
       prisma,
@@ -11549,7 +11883,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11596,7 +11930,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -11626,7 +11959,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11724,7 +12057,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("bypasses first-contact admission for known active Linq members", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -11785,7 +12118,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         status: "pending",
       };
       const prismaMocks = {
-        $queryRaw: vi.fn().mockResolvedValue([]),
+        $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
         hostedWebhookReceipt: {
           create: vi.fn().mockResolvedValue({}),
           findUnique: vi.fn().mockResolvedValue({
@@ -12074,7 +12407,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   ])("ignores first-contact phone message with $label before invite side effects", async ({ parts, service }) => {
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -12121,7 +12454,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -12186,7 +12518,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -12271,7 +12603,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         : []
     );
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -12377,7 +12709,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     };
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -12470,6 +12802,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         proactiveConversationCount: { increment: 1 },
       },
       where: {
+        assignmentWeight: { gt: 0 },
         phoneNumberLookupKey: createHostedPhoneLookupKey(fallbackLinePhone),
         proactiveConversationCount: { lt: 10 },
         proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
@@ -12510,7 +12843,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       suspendedAt: null,
     };
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue(null),
@@ -12722,7 +13055,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     };
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -12820,7 +13153,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
     expect(mocks.createHostedLinqChat).toHaveBeenNthCalledWith(2, {
       from: fallbackLinePhone,
@@ -12870,7 +13202,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const effectId = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
@@ -13010,7 +13342,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("keeps all-unassignable first-contact line routing ignored", async () => {
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -13072,7 +13404,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const fallbackLinePhone = "+15550100001";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -13175,7 +13507,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -13247,7 +13579,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     };
     const prismaMocks = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -13769,7 +14101,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       new Error("webhook usage gate should not run"),
     );
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -13866,7 +14198,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       telegramUserLookupKey: null,
     };
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -14171,7 +14503,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (/select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -14605,11 +14937,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("suppresses repeat signup links after the first send that day", async () => {
-    mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+  it.each(["before-bind", "after-bind"] as const)("suppresses repeat signup links after the first send that day (%s)", async (stage) => {
+    const dailyState = makeHostedLinqDailyState({
       inboundCount: 1,
       onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
-    }));
+    });
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(stage === "before-bind" ? dailyState : null);
+    if (stage === "after-bind") {
+      mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(dailyState);
+    }
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -14653,8 +14989,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "signup-link-already-sent",
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(stage === "before-bind" ? 0 : 1);
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -14684,7 +15019,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     });
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: hostedInviteCreate,
         findFirst: vi.fn()
@@ -14780,7 +15115,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("does not let a stale pre-send signup notice claim suppress first reach-out", async () => {
-    mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValueOnce(false);
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState());
     const hostedInviteCreate = vi.fn().mockResolvedValue({
@@ -14792,7 +15126,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     });
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -14900,7 +15234,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: "pending",
     });
     const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: vi.fn(readLegacyCampaignOrEmptyRows),
       hostedInvite: {
         create: hostedInviteCreate,
         findFirst: vi.fn()
@@ -15441,6 +15775,13 @@ function startOfUtcDayForTest(value: Date): Date {
   ));
 }
 
+// These onboarding fixtures model the pre-campaign deployment. Real Postgres
+// migration tests own rolling-phase creation and lock behavior.
+async function readLegacyCampaignOrEmptyRows(query: TemplateStringsArray | Prisma.Sql) {
+  const strings = "strings" in query ? query.strings : query;
+  return strings.join("").includes("hosted_runtime_cutover") ? [{ phase: "legacy" }] : [];
+}
+
 function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   prisma: T,
 ): T & HostedOnboardingLinqWebhookPrismaFixture {
@@ -15473,7 +15814,8 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       ? taggedValues
       : (query as { values?: readonly unknown[] }).values ?? [];
     const sql = strings.join(" ").toLowerCase();
-    return sql.includes("for update skip locked")
+    if (sql.includes("hosted_runtime_cutover")) return [{ phase: "legacy" }];
+    return /select "id"\s+from "hosted_member"[\s\S]*for no key update/.test(sql)
       ? [{ id: values[0] }]
       : [];
   });
@@ -16087,9 +16429,9 @@ function withPrismaTransaction<
     callback(transactionClient)
   );
   prismaWithTransaction.$executeRaw = vi.fn(async () => 0);
-  prismaWithTransaction.$queryRaw = vi.fn(async () => []);
+  prismaWithTransaction.$queryRaw = vi.fn(readLegacyCampaignOrEmptyRows);
   transactionClient.$executeRaw ??= vi.fn(async () => 0);
-  transactionClient.$queryRaw ??= vi.fn(async () => []);
+  transactionClient.$queryRaw ??= vi.fn(readLegacyCampaignOrEmptyRows);
   prismaWithTransaction.$transaction = transaction;
   return prismaWithTransaction as T & HostedOnboardingLinqWebhookPrismaFixture & {
     $executeRaw: MockedFunction;
@@ -16188,11 +16530,8 @@ function readHostedMemberIdentityFromMockMember(
     phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
-    privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
-    walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
-    walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
-    walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
-    walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,
+
+
   };
 }
 
@@ -16381,7 +16720,8 @@ function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
   providerEventCreateCounts?: readonly number[];
   receiptUpdateCounts?: readonly number[];
   sourceRef: string;
-  template: "ai_usage_quota" | "invite_signup" | "invite_signup_fallback";
+  homeMemberId?: string;
+  template: "ai_usage_quota" | "invite_signup" | "invite_signup_fallback" | "instant_first_turn_v1" | null;
 }): HostedOnboardingLinqWebhookPrismaFixture {
   const providerEventCreateCounts = input.providerEventCreateCounts ?? [1];
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({
@@ -16400,6 +16740,11 @@ function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
   }
 
   const prisma = asPrismaTransactionClient({
+    hostedMemberRouting: {
+      upsert: vi.fn(),
+      findMany: vi.fn().mockResolvedValue(input.homeMemberId
+        ? [{ memberId: input.homeMemberId }] : []),
+    },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
@@ -16556,6 +16901,7 @@ function makeHostedLinqDailyState(input: {
     lastSeenAt: new Date("2026-03-26T12:00:00.000Z"),
     memberId: "member_123",
     onboardingLinkSentAt: input.onboardingLinkSentAt ?? null,
+    signupLinkReminderSentAt: null,
     outboundCount: input.outboundCount ?? 0,
     quotaReplySentAt: input.quotaReplySentAt ?? null,
     updatedAt: new Date("2026-03-26T12:00:00.000Z"),

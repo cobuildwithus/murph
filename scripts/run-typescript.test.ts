@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,7 +14,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-type Lane = "package" | "web" | "workspace-build" | "watch";
+type Lane = "check" | "package" | "web" | "workspace-build" | "watch";
 type Env = Record<string, string | undefined>;
 
 interface Invocation {
@@ -29,6 +30,8 @@ interface Invocation {
 }
 
 interface RunnerModule {
+  selectTypeScriptCompiler(lane: Lane, env?: Env, platform?: string, arch?: string): "tsrs" | "typescript";
+  resolveRootTsrsCompiler(repoRoot?: string): { compilerPath: string; version: string };
   buildTypeScriptInvocation(lane: Lane, args: string[], env?: Env): Invocation;
   containsBuildFlag(args: string[]): boolean;
   formatTypeScriptBudget(budget: Invocation["budget"]): string;
@@ -314,7 +317,7 @@ describe("root TypeScript compiler resolution", () => {
       [path.join(path.resolve(import.meta.dirname, ".."), "scripts", "run-typescript.mjs"), "package", "--version"],
       {
         encoding: "utf8",
-        env: { ...process.env, MURPH_VERIFY_SHARED_HOST: "0" },
+        env: { ...process.env, MURPH_VERIFY_SHARED_HOST: "0", MURPH_BUILD_COMPILER: "typescript" },
       },
     );
 
@@ -322,6 +325,115 @@ describe("root TypeScript compiler resolution", () => {
     expect(result.stdout).toMatch(/^Version 7\./mu);
     expect(result.stderr).toContain("lane=package profile=default");
   });
+});
+
+describe("tsrs compiler routing", () => {
+  it("uses tsrs on supported hosts with independent check and build fallback", () => {
+    for (const [platform, arch] of [["darwin", "arm64"], ["linux", "x64"], ["linux", "arm64"]]) {
+      for (const lane of ["check", "web", "watch"] as const) {
+        expect(runner.selectTypeScriptCompiler(lane, {}, platform, arch)).toBe("tsrs");
+      }
+      for (const lane of ["package", "workspace-build"] as const) {
+        expect(runner.selectTypeScriptCompiler(lane, { MURPH_TYPECHECK_COMPILER: "typescript" }, platform, arch)).toBe("tsrs");
+        expect(runner.selectTypeScriptCompiler(lane, { MURPH_BUILD_COMPILER: "typescript" }, platform, arch)).toBe("typescript");
+      }
+    }
+    for (const lane of ["check", "package", "workspace-build"] as const) {
+      expect(runner.selectTypeScriptCompiler(lane, {}, "darwin", "x64")).toBe("typescript");
+      expect(runner.selectTypeScriptCompiler(lane, {}, "win32", "x64")).toBe("typescript");
+    }
+    expect(() => runner.selectTypeScriptCompiler("package", { MURPH_BUILD_COMPILER: "tsrs" }, "win32", "x64")).toThrow("does not publish a binary");
+    expect(() => runner.selectTypeScriptCompiler("workspace-build", { MURPH_BUILD_COMPILER: "typo" })).toThrow("MURPH_BUILD_COMPILER must be tsrs or typescript");
+    expect(runner.selectTypeScriptCompiler("check", {}, "win32", "x64")).toBe("typescript");
+    expect(runner.selectTypeScriptCompiler("check", { MURPH_TYPECHECK_COMPILER: "typescript" }, "linux", "x64")).toBe("typescript");
+    expect(() => runner.selectTypeScriptCompiler("check", { MURPH_TYPECHECK_COMPILER: "tsrs" }, "darwin", "x64")).toThrow("does not publish a binary");
+    expect(() => runner.selectTypeScriptCompiler("check", { MURPH_TYPECHECK_COMPILER: "typo" })).toThrow("must be tsrs or typescript");
+  });
+
+  it("preserves package budgets and boundary reporting in the check lane", () => {
+    const result = runner.buildTypeScriptInvocation("check", ["-p", "tsconfig.typecheck.json"], { MURPH_VERIFY_SHARED_HOST: "1" });
+    expect(result.args).toEqual(["-p", "tsconfig.typecheck.json", "--checkers", "1"]);
+    expect(result.budget.packageBoundary).toBe("unchecked");
+  });
+
+  it("detects and repairs incremental errors across compiler switches without emitting", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "murph-compiler-check-"));
+    temporaryRoots.push(root);
+    const source = path.join(root, "index.ts");
+    const config = path.join(root, "tsconfig.json");
+    writeFileSync(config, JSON.stringify({ compilerOptions: { strict: true, incremental: true, types: [], target: "es2022", tsBuildInfoFile: "check.tsbuildinfo" }, files: ["index.ts"] }));
+    const check = (compiler: "typescript" | "tsrs") => spawnSync(process.execPath, [
+      path.resolve(import.meta.dirname, "run-typescript.mjs"), "check", "-p", config, "--pretty", "false",
+    ], { encoding: "utf8", env: { ...process.env, MURPH_TYPECHECK_COMPILER: compiler, MURPH_VERIFY_SHARED_HOST: "1" } });
+    writeFileSync(source, 'export const value: number = 1;\n');
+    const initial = check("typescript");
+    expect(initial.status, initial.stdout + initial.stderr).toBe(0);
+    const candidate = runner.selectTypeScriptCompiler("check");
+    writeFileSync(source, 'export const value: number = "invalid";\n');
+    for (const compiler of [candidate, "typescript"] as const) {
+      const invalid = check(compiler);
+      expect(invalid.status, invalid.stderr).not.toBe(0);
+      expect(invalid.stdout).toContain("TS2322");
+    }
+    writeFileSync(source, 'export const value: number = 2;\n');
+    const repaired = check(candidate);
+    expect(repaired.status, repaired.stdout + repaired.stderr).toBe(0);
+    expect(existsSync(path.join(root, "index.js"))).toBe(false);
+    expect(existsSync(path.join(root, "check.tsbuildinfo"))).toBe(true);
+  }, 30_000);
+
+  it("rebuilds referenced declarations and JavaScript after edits and compiler switches", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "murph-compiler-build-"));
+    temporaryRoots.push(root);
+    for (const name of ["library", "consumer"]) {
+      mkdirSync(path.join(root, name));
+      writeFileSync(path.join(root, name, "tsconfig.json"), JSON.stringify({
+        compilerOptions: {
+          strict: true, composite: true, declaration: true, noEmitOnError: true,
+          types: [], target: "es2022", module: "commonjs", outDir: "dist",
+        },
+        files: ["index.ts"],
+        ...(name === "consumer" ? { references: [{ path: "../library" }] } : {}),
+      }));
+    }
+    writeFileSync(path.join(root, "tsconfig.json"), JSON.stringify({
+      files: [], references: [{ path: "./consumer" }],
+    }));
+    const library = path.join(root, "library/index.ts");
+    const consumer = path.join(root, "consumer/index.ts");
+    const build = (compiler: "typescript" | "tsrs") => spawnSync(process.execPath, [
+      path.resolve(import.meta.dirname, "run-typescript.mjs"),
+      "workspace-build", "-b", path.join(root, "tsconfig.json"), "--pretty", "false",
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, MURPH_BUILD_COMPILER: compiler, MURPH_VERIFY_SHARED_HOST: "1" },
+    });
+    const assertPass = (compiler: "typescript" | "tsrs") => {
+      const result = build(compiler);
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+    };
+    writeFileSync(library, "export const { value } = { value: 1 };\n");
+    writeFileSync(consumer, 'import { value } from "../library"; export const result: number = value;\n');
+    assertPass("typescript");
+    const candidate = runner.selectTypeScriptCompiler("workspace-build");
+    assertPass(candidate);
+    writeFileSync(library, 'export const { value } = { value: "updated" };\n');
+    const invalid = build(candidate);
+    expect(invalid.status, invalid.stderr).not.toBe(0);
+    expect(invalid.stdout).toContain("TS2322");
+    writeFileSync(consumer, 'import { value } from "../library"; export const result: string = value;\n');
+    assertPass(candidate);
+    expect(readFileSync(path.join(root, "library/dist/index.js"), "utf8")).toContain('"updated"');
+    expect(readFileSync(path.join(root, "consumer/dist/index.d.ts"), "utf8")).toContain("result: string");
+    assertPass("typescript");
+    writeFileSync(library, "export const { value } = { value: 3 };\n");
+    const switchedInvalid = build("typescript");
+    expect(switchedInvalid.status, switchedInvalid.stderr).not.toBe(0);
+    expect(switchedInvalid.stdout).toContain("TS2322");
+    writeFileSync(consumer, 'import { value } from "../library"; export const result: number = value;\n');
+    assertPass(candidate);
+    expect(readFileSync(path.join(root, "consumer/dist/index.d.ts"), "utf8")).toContain("result: number");
+  }, 30_000);
 });
 
 describe("TypeScript script ownership", () => {
@@ -357,6 +469,10 @@ describe("TypeScript script ownership", () => {
         }
         if (command.includes("scripts/run-typescript.mjs")) {
           routedScriptCount += 1;
+          if (scriptName.startsWith("typecheck")) {
+            expect(command, `${path.relative(repoRoot, manifestPath)}#${scriptName}`)
+              .not.toContain("run-typescript.mjs package");
+          }
         }
       }
     }

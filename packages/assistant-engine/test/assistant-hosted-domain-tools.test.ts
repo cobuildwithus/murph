@@ -1,5 +1,6 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
+import type { AssistantHostedAutomationToolRequest } from '../src/assistant/execution-context.js'
 
 import {
   executeMurphDynamicToolRequest,
@@ -12,10 +13,44 @@ import type {
 } from '../src/assistant/hosted-tool-context.js'
 
 describe('hosted domain dynamic tools', () => {
+  it('takes automation accepted inputs only from the trusted current host scope', async () => {
+    const modelArguments = { action: 'save', title: 'Daily stretch', instructions: 'Stretch gently.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+      acceptedInputIds: ['ain_model_forged'] }
+    const request = readToolRequest('automation', modelArguments)
+    expect(request).toMatchObject({ kind: 'invalid-automation-arguments' })
+    const { acceptedInputIds: _forged, ...validArguments } = modelArguments
+    const parsed = readToolRequest('automation', validArguments)
+    if (!parsed || parsed.kind !== 'automation') throw new Error('Expected automation request.')
+    expect(parsed.request).not.toHaveProperty('acceptedInputIds')
+    const automationTool = { request: vi.fn(async () => ({
+      action: 'save' as const, automationId: 'automation_synthetic', created: true,
+      effectiveTimeZone: 'UTC', lookupId: 'synthetic', routeBinding: 'current_conversation' as const,
+      schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' }, status: 'active' as const,
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: null }, updatedAt: '2030-01-15T10:00:00.000Z',
+    })) }
+    const result = await executeMurphDynamicToolRequest({ env: {}, fetchImpl: fetch,
+      nextUsageOrdinal: () => 0, progressDelivery: null, request: parsed,
+      hostedToolContext: { ...createHostedToolContext({ automationTool }), currentUserActionScope: () => ({
+        acceptedInputIds: ['ain_host_owned'], conversationId: 'synthetic-conversation', conversationScope: 'direct',
+        inboundMailboxItemIds: ['synthetic-mailbox'], originSessionId: 'synthetic-session', recipientKey: null,
+      }) },
+    })
+    expect(result.rpcResult.success).toBe(true)
+    expect(automationTool.request).toHaveBeenCalledWith(parsed.request, { signal: null, acceptedInputIds: ['ain_host_owned'] })
+    expect(JSON.stringify(automationTool.request.mock.calls)).not.toContain('ain_model_forged')
+  })
+
   it('keeps device and automation default-off', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'During a voice call, save and explicit retarget use the member\'s connected messaging destination',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Confirm the returned deliveryChannel without calling it this conversation or promising delivery in the call',
+    )
 
     const enabled = resolveMurphDynamicTools({
       automationAvailable: true,
@@ -45,7 +80,7 @@ describe('hosted domain dynamic tools', () => {
       'occurrenceProjection.status=pending',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'briefly confirm the saved change and that the recurring reminder remains active',
+      'a wording-only edit needs only its saved wording',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Its exact next delivery time is not yet available; do not promise one',
@@ -147,10 +182,10 @@ describe('hosted domain dynamic tools', () => {
       'both camel-case keys are required on every entry',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass an object such as {"model":"gpt-5.6-luna"}',
+      'pass an object such as {"model":"gpt-6-luna"}',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never pass a bare string or Luna, Terra, or Sol.',
+      'Never pass a bare string or Luna or Sol.',
     )
   })
 
@@ -1032,6 +1067,7 @@ describe('hosted domain dynamic tools', () => {
       action: 'save' as const,
       automationId: 'automation-weekly-check-in',
       created: true,
+      deliveryChannel: 'telegram',
       contextReferences: [],
       effectiveTimeZone: 'America/New_York',
       lookupId: 'weekly-check-in',
@@ -1074,6 +1110,7 @@ describe('hosted domain dynamic tools', () => {
     expect(readResultPayload(result)).toMatchObject({
       action: 'save',
       effectiveTimeZone: 'America/New_York',
+      deliveryChannel: 'telegram',
       occurrenceProjection: {
         status: 'resolved',
       },
@@ -1700,6 +1737,79 @@ describe('hosted domain dynamic tools', () => {
       status: 'active',
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
+  })
+
+  it.each([false, true])('preserves complete model-review readbacks (managed=%s)', async managed => {
+    const response = {
+      action: 'inspect' as const, view: 'model_review' as const,
+      automationId: 'automation_synthetic', lookupId: 'synthetic', managed,
+      assistantTargetOverride: { model: 'gpt-6.1-sol' as const, reasoningEffort: 'medium' as const },
+      contextReferences: [], title: 'Synthetic review', routeBinding: 'preserved' as const,
+      schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
+      status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
+      ...(managed ? { instructionsOmitted: 'managed_model_preserved' as const }
+        : { instructions: 'Keep complete instructions. '.repeat(1500) }),
+    }
+    const automationTool = { request: vi.fn(async () => response) }
+    const request = readToolRequest('automation', {
+      action: 'inspect', lookup: 'automation_synthetic', view: 'model_review',
+    })
+    if (!request) throw new Error('Expected model-review request.')
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0, progressDelivery: null, request,
+    })
+    expect(automationTool.request).toHaveBeenCalledWith({
+      action: 'inspect', lookup: 'automation_synthetic', view: 'model_review',
+    }, { signal: null })
+    const { lookupId: _lookupId, ...expected } = response
+    expect(readResultPayload(result)).toEqual(expected)
+  })
+
+  it('batches model reviews once per id with whole-record byte bounds and explicit omissions', async () => {
+    const automationTool = { request: vi.fn(async (request: AssistantHostedAutomationToolRequest) => {
+      if (request.action !== 'inspect') throw new Error('Only inspection is allowed.')
+      if (request.lookup === 'missing') throw Object.assign(new Error('Missing'), { code: 'automation_not_found' })
+      return {
+        action: 'inspect' as const, view: 'model_review' as const,
+        automationId: request.lookup, lookupId: request.lookup, managed: false,
+        assistantTargetOverride: null, instructions: request.lookup === 'large' ? '漢'.repeat(20_000) : 'Keep this complete cue.',
+        contextReferences: [], title: 'Synthetic review', routeBinding: 'preserved' as const,
+        schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
+        status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
+      }
+    }) }
+    const request = readToolRequest('automation', {
+      action: 'inspect_models', lookups: ['small', 'large', 'missing', 'small'],
+    })
+    if (!request) throw new Error('Expected model-review batch.')
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0, progressDelivery: null, request,
+    })
+    expect(automationTool.request.mock.calls.map(([request]) => request)).toEqual([
+      { action: 'inspect', view: 'model_review', lookup: 'small' },
+      { action: 'inspect', view: 'model_review', lookup: 'large' },
+      { action: 'inspect', view: 'model_review', lookup: 'missing' },
+    ])
+    const payload = readResultPayload(result)
+    expect(payload).toMatchObject({ action: 'inspect_models', requiresIndividualInspection: ['large'],
+      results: [{ lookup: 'small', instructions: 'Keep this complete cue.' }, { lookup: 'missing', found: false }] })
+    expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThanOrEqual(24_000)
+    expect(JSON.stringify(payload)).not.toContain('漢')
+  })
+
+  it('does not present failed batch inspection as missing or complete', async () => {
+    const request = readToolRequest('automation', { action: 'inspect_models', lookups: ['unavailable'] })
+    if (!request) throw new Error('Expected model-review batch.')
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createHostedToolContext({
+        automationTool: { request: vi.fn(async () => { throw new Error('Synthetic read failure') }) },
+      }), nextUsageOrdinal: () => 0, progressDelivery: null, request,
+    })
+    expect(result.rpcResult.success).toBe(false)
+    expect(JSON.stringify(result.rpcResult)).not.toContain('found')
+    expect(result.failureDiagnostic).toMatchObject({ failureReason: 'handler_exception' })
   })
 
   it('treats only a missing automation inspection as a successful absent read', async () => {

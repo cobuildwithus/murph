@@ -75,14 +75,19 @@ it.each(["approval", "retry"] as const)(
       const collect = () => callbacks.collectHostedAssistantDeliverySideEffects({
         actionApprovalPort, includeBackgroundDueIntents: true, vaultRoot,
       });
-      const drain = (effects: Awaited<ReturnType<typeof collect>>) => callbacks.drainHostedPreparedAssistantDeliveries({
-        actionApprovalPort, assistantDeliveryEffects: effects,
-        effectsPort: createHostedRuntimeEffectsPortStub(), forwardedEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
-        platformEnv: {}, providerFetch, vaultRoot,
-        wake: buildHostedExecutionRuntimeTimerWake({
-          eventId: "evt_file", occurredAt: new Date().toISOString(), triggerKind: "runtime_timer", userId: "member_synthetic_phase",
-        }),
-      });
+      const drain = async (effects: Awaited<ReturnType<typeof collect>>) => {
+        // Production dispatch uses the exact prepared claim for fenced files and retries.
+        const preparation = await callbacks.prepareHostedAssistantDeliveryEffectsForDispatch({ assistantDeliveryEffects: effects, vaultRoot });
+        return callbacks.drainHostedPreparedAssistantDeliveries({
+          allowPreparedSending: true, preparedDispatches: preparation.preparedDispatches,
+          actionApprovalPort, assistantDeliveryEffects: effects,
+          effectsPort: createHostedRuntimeEffectsPortStub(), forwardedEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+          platformEnv: {}, providerFetch, vaultRoot,
+          wake: buildHostedExecutionRuntimeTimerWake({
+            eventId: "evt_file", occurredAt: new Date().toISOString(), triggerKind: "runtime_timer", userId: "member_synthetic_phase",
+          }),
+        });
+      };
       mocks.readAssistantOutboxIntent.mockImplementation(readAssistantOutboxIntent);
       // Three real definitive failures reach the 600-second outbox backoff,
       // beyond the 180-second idle checkpoint and within the approval window.

@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 
 import {
-  ConnectedAccountCard,
   SettingsContactLink,
   SettingsStatusLine,
 } from "@/src/components/settings/connected-account-card";
@@ -27,57 +26,7 @@ describe("formatMaskedPhoneNumber", () => {
   });
 });
 
-describe("ConnectedAccountCard", () => {
-  test("renders the label, value, optional meta, and action slot", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(ConnectedAccountCard, {
-        label: "Phone",
-        value: "•••• 0002",
-        meta: "Verified",
-        action: React.createElement("button", { type: "button" }, "Change"),
-      }),
-    );
-
-    expect(markup).toContain("Phone");
-    expect(markup).toContain("•••• 0002");
-    expect(markup).toContain("Verified");
-    expect(markup).toContain("Change");
-    expect(markup).toContain("bg-[rgba(255,252,246,0.9)]");
-    expect(markup).toContain("border-[rgba(196,168,130,0.25)]");
-    expect(markup).toContain("sm:justify-end");
-  });
-
-  test("omits the meta block when meta is not provided", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(ConnectedAccountCard, {
-        label: "Telegram",
-        value: "@member_example",
-      }),
-    );
-
-    expect(markup).toContain("Telegram");
-    expect(markup).toContain("@member_example");
-    expect(markup).not.toContain("undefined");
-  });
-
-  test("muted empty-state variant uses the shared card surface and muted value text", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(ConnectedAccountCard, {
-        label: "Email",
-        value: "Not connected",
-        variant: "empty",
-        action: React.createElement("button", { type: "button" }, "Link email"),
-      }),
-    );
-
-    expect(markup).toContain("Not connected");
-    expect(markup).toContain("Link email");
-    expect(markup).toContain("text-muted-foreground");
-    expect(markup).toContain("text-lg");
-    expect(markup).toContain("bg-[rgba(255,252,246,0.9)]");
-    expect(markup).toContain("sm:justify-end");
-  });
-
+describe("SettingsContactLink", () => {
   test("renders a quiet contact link", () => {
     const markup = renderToStaticMarkup(
       React.createElement(

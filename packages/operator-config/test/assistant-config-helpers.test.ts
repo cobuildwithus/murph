@@ -13,12 +13,9 @@ import {
   serializeHostedAssistantConfigForWrite,
 } from '../src/assistant/hosted-config.ts'
 import {
-  assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
   DEFAULT_MURPH_CODEX_REASONING_EFFORT,
   mergeAssistantProviderConfigs,
-  normalizeAssistantHeaders,
-  normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
@@ -30,17 +27,15 @@ import {
   mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
-test('assistant header helpers canonicalize, dedupe, sort, and redact persistence-unsafe values', () => {
-  const normalizedHeaders = normalizeAssistantHeaders({
-    authorization: 'Bearer kept-secret-value',
-    'x-api-key': 'opaque-api-key',
-    'x-custom-token': 'custom-token',
-    'x-empty': '   ',
-    'x-trace-id': ' trace-id ',
-    'x-zeta': 'z',
+test('assistant header helpers redact persistence-unsafe values', () => {
+  const normalizedHeaders = {
+    Authorization: 'Bearer kept-secret-value',
+    'X-Api-Key': 'opaque-api-key',
+    'X-Custom-Token': 'custom-token',
     'X-Trace-Id': 'replacement-trace-id',
-    ' x-user ': '  user-123  ',
-  })
+    'X-User': 'user-123',
+    'X-Zeta': 'z',
+  }
 
   assert.deepEqual(normalizedHeaders, {
     Authorization: 'Bearer kept-secret-value',
@@ -75,21 +70,16 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
     mergeAssistantHeaders(split.persistedHeaders, split.secretHeaders),
     normalizedHeaders,
   )
-  assert.deepEqual(normalizeAssistantPersistedHeaders(normalizedHeaders), {
-    'X-Trace-Id': 'replacement-trace-id',
-    'X-User': 'user-123',
-    'X-Zeta': 'z',
-  })
 })
 
 test('assistant provider config helpers merge, compact, and serialize Codex targets only', () => {
   assert.deepEqual(
     compactAssistantProviderConfigInput({
       provider: 'codex-cli',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     }),
     {
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     },
   )
   assert.equal(
@@ -100,14 +90,14 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     {
       approvalPolicy: 'never',
       codexCommand: ' codex ',
-      modelProvider: ' Vercel-AI-Gateway ',
+      modelProvider: ' OpenAI ',
       oss: false,
       reasoningEffort: ' low ',
     },
     {
       codexHome: ' /tmp/home ',
-      model: ' gpt-5.6-terra ',
-      oss: true,
+      model: ' gpt-6.1-sol ',
+      oss: false,
       profile: ' default ',
       sandbox: 'danger-full-access',
     },
@@ -122,9 +112,9 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     target: {
       codexCommand: 'codex',
       codexHome: '/tmp/home',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
-      oss: true,
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
+      oss: false,
       profile: 'default',
     },
   })
@@ -133,28 +123,16 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     normalizeAssistantProviderConfig({ provider: 'codex-cli' }).policy.reasoningEffort,
     DEFAULT_MURPH_CODEX_REASONING_EFFORT,
   )
-  assert.equal(
-    assistantProviderConfigsEqual(
-      {
-        provider: 'codex-cli',
-        modelProvider: ' Vercel-AI-Gateway ',
-      },
-      {
-        modelProvider: 'vercel-ai-gateway',
-      },
-    ),
-    true,
-  )
 
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedCodex), {
     approvalPolicy: 'never',
     codexHome: '/tmp/home',
     continuityFingerprint:
-      'sha256:2659438fad64495ab8f5401b4378500461339eba8faddc9c47ebc440aa7bbf15',
+      'sha256:a499b928a045b4adc6198efcfa2ece8541fcf224eaba84b7164509c480da26ac',
     executionDriver: 'codex-app-server',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
-    oss: true,
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
+    oss: false,
     profile: 'default',
     provider: 'codex-cli',
     reasoningEffort: 'low',
@@ -165,9 +143,9 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     approvalPolicy: 'never',
     codexCommand: 'codex',
     codexHome: '/tmp/home',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
-    oss: true,
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
+    oss: false,
     profile: 'default',
     reasoningEffort: 'low',
     sandbox: 'danger-full-access',
@@ -186,8 +164,8 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     id: ' member-codex ',
     providerConfig: {
       provider: 'codex-cli',
-      model: ' gpt-5.6-terra ',
-      modelProvider: ' vercel-ai-gateway ',
+      model: ' gpt-6.1-sol ',
+      modelProvider: ' openai ',
       reasoningEffort: ' medium ',
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
@@ -199,8 +177,8 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     managedBy: 'platform',
     providerConfig: {
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       reasoningEffort: 'medium',
     },
   })
@@ -210,8 +188,8 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     approvalPolicy: null,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -243,8 +221,8 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
         managedBy: 'platform',
         providerConfig: {
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          model: 'gpt-6.1-sol',
+          modelProvider: 'openai',
           reasoningEffort: 'medium',
         },
       }),

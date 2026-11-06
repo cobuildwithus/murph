@@ -1,10 +1,13 @@
 "use client";
 
+import { usePathname, useSelectedLayoutSegment } from "next/navigation";
 import {
   createContext,
   useCallback,
   useContext,
   useLayoutEffect,
+  useEffect,
+  useRef,
   useMemo,
   useState,
   type ReactNode,
@@ -25,7 +28,7 @@ import {
   parseHostedBillingPlanChangeReturnValue,
 } from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
 import {
   hasStagedClinicalRecordsConnectIntentForCurrentPath,
@@ -44,13 +47,15 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
-const ENVIRONMENT_PATH = "/environment";
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 interface AuthContextValue {
   authenticated: boolean;
   authenticationStatus: "ready" | "unavailable";
+  /** The same finish as the dialog, for a sign-in form that sits on the page. */
+  completeAuthentication: (payload: HostedAuthenticationCompletionPayload) => void;
   openAuthDialog: () => void;
+  reauthenticate?: () => Promise<void>;
   openDataPrivacyAuthDialog?: () => void;
   prepareAuth: () => void;
   shared: boolean;
@@ -59,6 +64,7 @@ interface AuthContextValue {
 export const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   authenticationStatus: "ready",
+  completeAuthentication: () => {},
   openAuthDialog: () => {},
   openDataPrivacyAuthDialog: () => {},
   prepareAuth: () => {},
@@ -78,27 +84,84 @@ export function AuthProvider({
   authenticationStatus?: "ready" | "unavailable";
   children?: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  const [authIntent, setAuthIntent] = useState<"default" | "data-privacy">(
+  const pathname = usePathname();
+  const dashboardRoute = useSelectedLayoutSegment() === "(dashboard)";
+  // A wearable link and Settings sign in on their own pages, so the dialog never
+  // opens over them.
+  const autoOpenPath = dashboardRoute
+    && !authenticated
+    && authenticationStatus === "ready"
+    && pathname !== SETTINGS_PATH
+    && !isCurrentDeviceConnectIntentUrl()
+    ? pathname
+    : null;
+  const [promptPath, setPromptPath] = useState(autoOpenPath);
+  const [open, setOpen] = useState(autoOpenPath !== null);
+  const [authIntent, setAuthIntent] = useState<"default" | "data-privacy" | "reauthenticate">(
     "default",
   );
 
-  const openAuthDialog = useCallback(() => {
-    setAuthIntent("default");
+  const continuation = useRef<{ promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null>(null);
+  const cancelReauthentication = useCallback(() => {
+    const current = continuation.current;
+    continuation.current = null;
+    current?.reject(new Error("Sign-in was canceled. Nothing was approved."));
+  }, []);
+  useEffect(() => cancelReauthentication, [cancelReauthentication]);
+  const continuationPath = useRef(pathname);
+  useEffect(() => {
+    if (continuationPath.current === pathname) return;
+    continuationPath.current = pathname;
+    if (continuation.current) {
+      cancelReauthentication();
+      setOpen(false);
+      setAuthIntent("default");
+    }
+  }, [pathname, cancelReauthentication]);
+  const reauthenticate = useCallback(() => {
+    if (continuation.current) return continuation.current.promise;
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    continuation.current = { promise, resolve, reject };
+    setAuthIntent("reauthenticate");
     setOpen(true);
+    return promise;
+  }, []);
+  const handleReauthenticated = useCallback(() => {
+    const current = continuation.current;
+    if (!current) return;
+    continuation.current = null;
+    setOpen(false);
+    setAuthIntent("default");
+    current.resolve();
   }, []);
 
+  if (promptPath !== autoOpenPath) {
+    setPromptPath(autoOpenPath);
+    setOpen(autoOpenPath !== null);
+    setAuthIntent("default");
+  }
+
+  const openAuthDialog = useCallback(() => {
+    cancelReauthentication();
+    setAuthIntent("default");
+    setOpen(true);
+  }, [cancelReauthentication]);
+
   const openDataPrivacyAuthDialog = useCallback(() => {
+    cancelReauthentication();
     setAuthIntent("data-privacy");
     setOpen(true);
-  }, []);
+  }, [cancelReauthentication]);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
+      cancelReauthentication();
       setAuthIntent("default");
     }
-  }, []);
+  }, [cancelReauthentication]);
 
   useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
     if (source === "cross-document" || source === "same-document-expired") {
@@ -106,7 +169,7 @@ export function AuthProvider({
     }
   }), []);
 
-  const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+  const handleAuthCompleted = useCallback((payload: HostedAuthenticationCompletionPayload) => {
     if (authIntent === "data-privacy") {
       navigateHostedAuthRedirect(SETTINGS_DATA_PRIVACY_PATH);
       return;
@@ -117,7 +180,10 @@ export function AuthProvider({
       return;
     }
 
-    if (shouldResumeCurrentAuthUrl(payload)) {
+    if (
+      (dashboardRoute && isHostedOnboardingAccessibleStage(payload.stage))
+      || shouldResumeCurrentAuthUrl(payload)
+    ) {
       navigateHostedAuthRedirect(readCurrentBrowserPath());
       return;
     }
@@ -128,18 +194,20 @@ export function AuthProvider({
     }
 
     navigateHostedAuthRedirect(payload.joinUrl);
-  }, [authIntent, authenticated]);
+  }, [authIntent, authenticated, dashboardRoute]);
 
   const value = useMemo(
     () => ({
       authenticated,
       authenticationStatus,
+      completeAuthentication: handleAuthCompleted,
       openAuthDialog,
+      reauthenticate,
       openDataPrivacyAuthDialog,
       prepareAuth: () => {},
       shared: false,
     }),
-    [authenticated, authenticationStatus, openAuthDialog, openDataPrivacyAuthDialog],
+    [authenticated, authenticationStatus, handleAuthCompleted, openAuthDialog, openDataPrivacyAuthDialog, reauthenticate],
   );
 
   return (
@@ -147,6 +215,8 @@ export function AuthProvider({
       {children}
       <AuthDialog
         open={open}
+        reauthenticate={authIntent === "reauthenticate"}
+        onReauthenticated={handleReauthenticated}
         title={authIntent === "data-privacy"
           ? "Log in to manage your data"
           : authenticated
@@ -154,30 +224,34 @@ export function AuthProvider({
             : undefined}
         description={authIntent === "data-privacy"
           ? "Use the email address or phone number already linked to your Murph account."
+          : authIntent === "reauthenticate"
+            ? "Use a sign-in method already linked to this account. Then add your Murph passkey and confirm the request."
           : authenticated
             ? "Verify this device to manage secure approvals."
             : undefined}
         onCompleted={handleAuthCompleted}
         onOpenChange={handleOpenChange}
         requireLaunchConsentOnCompletion={
-          !authenticated && authIntent !== "data-privacy"
+          !authenticated && authIntent !== "data-privacy" && pathname !== SETTINGS_PATH
         }
       />
     </AuthContext.Provider>
   );
 }
 
-function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
+function shouldResumeCurrentAuthUrl(payload: HostedAuthenticationCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
     || shouldResumeCurrentConnectIndexUrl(payload)
-    || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
     || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl()
+    // Native health-data links must also work before paid onboarding finishes.
+    || (typeof window !== "undefined" && window.location.pathname === SETTINGS_PATH && window.location.search === "")
+    || (typeof window !== "undefined" && window.location.pathname === "/settings/accounts")
     || shouldResumeCurrentSettingsFamilyInviteReturnUrl(payload)
     || shouldResumeCurrentSettingsFamilyRecoveryUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
@@ -188,7 +262,7 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
 }
 
 function shouldResumeCurrentSettingsFamilyRecoveryUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -205,7 +279,7 @@ function shouldResumeCurrentSettingsFamilyRecoveryUrl(
 }
 
 function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -223,7 +297,7 @@ function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
 }
 
 function shouldResumeCurrentSettingsUsageRecoveryUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -240,7 +314,7 @@ function shouldResumeCurrentSettingsUsageRecoveryUrl(
 }
 
 function shouldResumeCurrentSettingsUsageCreditReturnUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -262,7 +336,7 @@ function shouldResumeCurrentSettingsUsageCreditReturnUrl(
 }
 
 function shouldResumeCurrentConnectIndexUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
@@ -272,7 +346,7 @@ function shouldResumeCurrentConnectIndexUrl(
 }
 
 function shouldResumeCurrentSettingsPlanChangeUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -289,21 +363,11 @@ function shouldResumeCurrentSettingsPlanChangeUrl(
     && parseHostedBillingPlanChangeReturnValue(returnValues[0]) !== null;
 }
 
-function shouldResumeCurrentEnvironmentUrl(
-  payload: HostedPrivyCompletionPayload,
-): boolean {
-  return (
-    isHostedOnboardingAccessibleStage(payload.stage)
-    && typeof window !== "undefined"
-    && window.location.pathname === ENVIRONMENT_PATH
-  );
-}
-
 // Someone returning from Stripe's payment-method page lands on /settings with
 // the payment-return params. Sending them to /home instead would strand the
 // plan choice they just added a card to complete.
 function shouldResumeCurrentSettingsGroupPaymentUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -320,7 +384,7 @@ function shouldResumeCurrentSettingsGroupPaymentUrl(
 }
 
 function shouldResumeCurrentClinicalRecordsIndexUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
@@ -330,7 +394,7 @@ function shouldResumeCurrentClinicalRecordsIndexUrl(
 }
 
 function shouldResumeCurrentClinicalRecordsConnectUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
@@ -346,7 +410,7 @@ function readCurrentBrowserPath(): string {
 }
 
 function shouldResumeCurrentActionApprovalUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -360,12 +424,13 @@ function shouldResumeCurrentActionApprovalUrl(
 }
 
 function shouldResumeCurrentDeviceConnectIntentUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
-  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
-    return false;
-  }
+  return isHostedOnboardingAccessibleStage(payload.stage)
+    && isCurrentDeviceConnectIntentUrl();
+}
 
+function isCurrentDeviceConnectIntentUrl(): boolean {
   if (typeof window === "undefined" || window.location.pathname !== "/connect") {
     return false;
   }
@@ -379,7 +444,7 @@ function shouldResumeCurrentDeviceConnectIntentUrl(
 }
 
 function shouldResumeCurrentComputerHandoffUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;
@@ -393,7 +458,7 @@ function shouldResumeCurrentComputerHandoffUrl(
 }
 
 function shouldResumeCurrentIntegrationsConnectUrl(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ): boolean {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     return false;

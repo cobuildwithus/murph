@@ -1,7 +1,6 @@
 import type {
   AssistantOutboxIntent,
   AssistantSession,
-  AssistantStatusResult,
   AssistantTranscriptEntry,
   AssistantTurnReceipt,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -45,17 +44,12 @@ import {
   type DeliverAssistantOutboxMessageResult,
   type DispatchAssistantOutboxIntentResult,
 } from './outbox.js'
-import {
-  getAssistantStatus,
-  readAssistantStatusSnapshot,
-  refreshAssistantStatusSnapshot,
-} from './status.js'
+
 import {
   recordAssistantDiagnosticEvent,
   readAssistantDiagnosticsSnapshot,
 } from './diagnostics.js'
 
-type AssistantStatusInput = Exclude<Parameters<typeof getAssistantStatus>[0], string>
 type RecordAssistantDiagnosticEventInput = Omit<Parameters<
   typeof recordAssistantDiagnosticEvent
 >[0], 'vault'>
@@ -123,11 +117,6 @@ export interface AssistantRuntimeStateService {
     }) => Promise<AssistantSession>
     save: (session: AssistantSession) => Promise<AssistantSession>
   }
-  status: {
-    get: (input?: Omit<AssistantStatusInput, 'vault'>) => Promise<AssistantStatusResult>
-    readSnapshot: () => ReturnType<typeof readAssistantStatusSnapshot>
-    refreshSnapshot: () => ReturnType<typeof refreshAssistantStatusSnapshot>
-  }
   transcripts: {
     append: (sessionId: string, entries: readonly AssistantTranscriptEntryInput[]) => Promise<AssistantTranscriptEntry[]>
     list: (sessionId: string) => Promise<AssistantTranscriptEntry[]>
@@ -181,15 +170,6 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
           vault,
         }),
       save: (session) => saveAssistantSession(vault, session),
-    },
-    status: {
-      get: (input) =>
-        getAssistantStatus({
-          ...(input ?? {}),
-          vault,
-        }),
-      readSnapshot: () => readAssistantStatusSnapshot(vault),
-      refreshSnapshot: () => refreshAssistantStatusSnapshot(vault),
     },
     transcripts: {
       append: (sessionId, entries) => appendAssistantTranscriptEntries(vault, sessionId, entries),

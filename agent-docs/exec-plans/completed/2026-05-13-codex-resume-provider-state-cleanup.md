@@ -20,7 +20,7 @@ Success criteria:
 ## Constraints
 
 - Keep the change behavior-preserving for persisted assistant conversations.
-- Do not modify unrelated Murph Age worktree edits.
+- Do not modify unrelated worktree edits.
 - Work on top of the current Codex runtime naming/security follow-up diff
   without reverting it.
 - Preserve redaction and data-minimization behavior from the prior cleanup.

@@ -2,12 +2,14 @@ import { clinicalDocumentAttachmentsSchema } from "./attachments.ts";
 export * from "./attachments.ts";
 export * from "./document-eligibility.ts";
 export * from "./enrichment.ts";
+export * from "./enrichment-date.ts";
 import { createHash } from "node:crypto";
 
 import {
   clinicalEvidenceRefSchema,
   eventImportRetractionDecisionSchema,
   isStrictIsoDateTime,
+  isWritableIsoDateTime,
   publicEventImportJsonlRowPayloadSchemasByKind,
   versionedExternalRefSchema,
 } from "@murphai/contracts";
@@ -912,6 +914,32 @@ function normalizeClinicalFhirBaseUrl(value: string): string | null {
   return `${fhirBaseUrl.origin}${pathname}`;
 }
 
+export type ClinicalFhirSourceRevision =
+  | { source: "resource"; version: string }
+  | { source: "batch" }
+  | { source: "none" };
+
+/**
+ * `meta.lastUpdated` is optional in FHIR R4 and some servers omit it on every
+ * resource. An absent value defers to the retrieval batch (`manifest.fetchedAt`);
+ * a present but non-comparable value yields no revision so every owner fails
+ * closed. The importer and enrichment parent attestation share this rule so
+ * derived document facets bind to the revision the importer assigned.
+ */
+export function classifyClinicalFhirSourceRevision(lastUpdated: unknown): ClinicalFhirSourceRevision {
+  if (lastUpdated === undefined) return { source: "batch" };
+  return typeof lastUpdated === "string" && lastUpdated.length <= 200 && isWritableIsoDateTime(lastUpdated)
+    ? { source: "resource", version: lastUpdated }
+    : { source: "none" };
+}
+
+/** The comparable `externalRef.version` for a resource in its retrieval batch, or undefined when it cannot be ordered. */
+export function resolveClinicalFhirSourceRevision(input: { lastUpdated: unknown; fetchedAt: string }): string | undefined {
+  const revision = classifyClinicalFhirSourceRevision(input.lastUpdated);
+  if (revision.source === "resource") return revision.version;
+  return revision.source === "batch" ? input.fetchedAt : undefined;
+}
+
 export function externalRefForFhir(input: {
   fhirBaseUrlHash: string;
   patientIdHash: string;
@@ -1043,7 +1071,10 @@ export function clinicalFhirScopeAllowsOperation(
 }
 
 /** Search warnings must not establish complete coverage or clinical absence. */
-export function clinicalFhirPageHasIncompleteSearchOutcome(content: string): boolean {
+export function clinicalFhirPageHasIncompleteSearchOutcome(
+  content: string,
+  options: { ignorePatientAccessNotices?: boolean } = {},
+): boolean {
   const value: unknown = JSON.parse(content);
   if (!value || typeof value !== "object" || !("resourceType" in value) || value.resourceType !== "Bundle"
     || !("entry" in value) || !Array.isArray(value.entry)) return false;
@@ -1054,6 +1085,22 @@ export function clinicalFhirPageHasIncompleteSearchOutcome(content: string): boo
       || resource.resourceType !== "OperationOutcome") return false;
     if (!("issue" in resource) || !Array.isArray(resource.issue) || resource.issue.length === 0) return true;
     return resource.issue.some((issue: unknown) => !issue || typeof issue !== "object"
-      || !("severity" in issue) || issue.severity !== "information");
+      || !("severity" in issue) || (issue.severity !== "information"
+        && !(options.ignorePatientAccessNotices && isExpectedEpicPatientNotice(issue))));
   });
 }
+
+/** Retrieval can finish within patient access without proving whole-chart absence. */
+function isExpectedEpicPatientNotice(issue: object): boolean {
+  if (!("severity" in issue) || issue.severity !== "warning"
+    || !("code" in issue) || issue.code !== "processing"
+    || !("details" in issue) || !issue.details || typeof issue.details !== "object"
+    || !("coding" in issue.details) || !Array.isArray(issue.details.coding)
+    || issue.details.coding.length === 0) return false;
+  return issue.details.coding.every((coding: unknown) => !!coding && typeof coding === "object"
+    && "system" in coding && typeof coding.system === "string"
+    && /^urn:oid:1\.2\.840\.114350\.1\.13\.\d+\.\d+\.7\.2\.657369$/u.test(coding.system)
+    && "code" in coding && (coding.code === "4101" || coding.code === "4119"));
+}
+
+export { selectClinicalFhirResource, clinicalFhirResourceText, clinicalFhirResourceExtractionText, indexClinicalFhirResources } from "./enrichment.ts";

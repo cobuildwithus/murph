@@ -1,4 +1,6 @@
 import {
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -42,6 +44,33 @@ beforeEach(() => {
 });
 
 describe("createHostedWebVaultSharePort", () => {
+  it.each([undefined, "7"])(
+    "sends the optional source version %j through the existing GET route",
+    async (sourceWorkspaceVersion) => {
+      const fetchImpl = vi.fn(async () => Response.json({
+        projectionKinds: [],
+        projectionScopes: [],
+      }));
+      const port = createHostedWebVaultSharePort({
+        boundUserId: "member_projection_version",
+        fetchImpl,
+        timeoutMs: 1_000,
+        transport: { mode: "proxy" },
+      });
+
+      await expect(port.listActiveProjectionScopes({ sourceWorkspaceVersion }))
+        .resolves.toMatchObject({ projectionScopes: [] });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      const request = vi.mocked(fetchImpl as typeof fetch).mock.calls[0];
+      const url = new URL(String(request?.[0]));
+      expect(url.pathname).toBe("/api/internal/hosted-runtime/vault-share/active-kinds");
+      expect(url.searchParams.get("sourceWorkspaceVersion"))
+        .toBe(sourceWorkspaceVersion ?? null);
+      expect(url.searchParams.get(HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM))
+        .toBe(HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION);
+    },
+  );
+
   it("aborts an active projection-scope read and preserves the foreground wake reason", async () => {
     const scopeReadController = new AbortController();
     const wakeReason = new Error("Foreground runtime wake interrupted projection scope read.");

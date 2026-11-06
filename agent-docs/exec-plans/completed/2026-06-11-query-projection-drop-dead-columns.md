@@ -17,7 +17,7 @@ Updated: 2026-06-11
 
 ## Scope
 
-- In scope: `packages/query/src/projection/schema.ts`, `packages/query/src/projection/metric-store.ts`, test helpers in `packages/query/test/{query,murph-age-runtime}.test.ts` and `packages/cli/test/murph-age-command.test.ts` that hand-roll the same INSERT.
+- In scope: `packages/query/src/projection/schema.ts`, `packages/query/src/projection/metric-store.ts`, test helpers in `packages/query/test/query.test.ts` that hand-roll the same INSERT.
 - Out of scope: wearable summary JSON compaction (empty-envelope omission, reasons trimming), snapshot policy (projections are already excluded from hosted workspace snapshots), any canonical/ledger format change.
 
 ## Constraints

@@ -41,7 +41,7 @@ Do not show or start a proposed experiment unless all of these are true:
 3. **The result can plausibly change in the timeframe.** Otherwise lengthen
    the run, narrow the promise, or do not offer it.
 4. **The evidence can distinguish a worthwhile change from noise.** Define a
-   useful direction or magnitude when the protocol supports it.
+   useful direction or magnitude when the evidence supports it.
 5. **The answer changes a decision.** The result can support keeping,
    changing, extending, or stopping the intervention.
 6. **The expected value is worth the burden.** Logging, risk, cost, and
@@ -84,11 +84,11 @@ Prefer evidence that is direct and interpretable for the promised outcome:
   awakenings, or morning energy
 - symptoms or function: a repeated symptom or capability measure that matters
   to the member
-- biomarkers: a defined baseline and follow-up measurement when the protocol,
+- biomarkers: a defined baseline and follow-up measurement when the plan,
   timing, and collection plan support it
 
 Wearable signals may be primary outcomes when the member explicitly cares
-about them and the protocol and duration make the claim credible. Otherwise
+about them and the plan and duration make the claim credible. Otherwise
 they are supporting context.
 
 For wearable sleep evidence, use the provider-neutral sleep-pattern read model rather than interpreting a provider title or one nightly score. Keep these boundaries visible:
@@ -128,11 +128,10 @@ adapt dose, schedule, safety, support, or measurement details, but it must not
 silently replace the outcome with an easier adherence target or convenient
 proxy.
 
-If the selected Health Commons protocol cannot credibly measure the promised
-result, clarify the mismatch, choose a better same-family protocol, narrow the
-promise, or offer a different option before creating a run. Absence from the
-canonical metric catalog does not block a bounded experiment. Start fails
-closed only when the capture plan is incomplete or contradictory, a
+If the selected plan cannot credibly measure the promised result, clarify the
+mismatch, adapt the plan, narrow the promise, or offer a different option
+before creating a run. Absence from the canonical metric catalog does not block
+a bounded experiment. Start fails closed only when the capture plan is incomplete or contradictory, a
 session-captured field is undeclared or ambiguous, or a structured review
 lacks bounded baseline and follow-up evidence. Analysis support is progressive:
 canonical outcomes retain richer interpretation, custom numeric outcomes use

@@ -215,7 +215,7 @@ export function createConnectCallbackNotice(
     };
   }
 
-  if (input.errorCode === "CALLBACK_PROOF_INVALID") {
+  if (input.errorCode === "CALLBACK_PROOF_INVALID" || input.errorCode === "OAUTH_STATE_INVALID") {
     return {
       kind: "info",
       title: "Check your connections",
@@ -317,7 +317,7 @@ export function resolveInitialConnectIntentPresentation(
     return null;
   }
 
-  const source = findInitialConnectIntentSource(input, sources);
+  const source = resolveConnectIntentSource(input, sources);
   if (!source) {
     return {
       actionError: null,
@@ -359,7 +359,7 @@ export function resolveConnectIntentStartSource(
   intent: InitialDeviceConnectIntent,
   sources: readonly ConnectSource[],
 ): ConnectSource | null {
-  const source = findInitialConnectIntentSource(intent, sources);
+  const source = resolveConnectIntentSource(intent, sources);
   // A connection-reset source must not auto-start a plain connect: the existing
   // connection has to be disconnected first.
   if (
@@ -490,7 +490,7 @@ function readDeviceConnectIntentParams(params: URLSearchParams): InitialDeviceCo
   };
 }
 
-function findInitialConnectIntentSource(
+export function resolveConnectIntentSource(
   input: InitialDeviceConnectIntent,
   sources: readonly ConnectSource[],
 ): ConnectSource | null {

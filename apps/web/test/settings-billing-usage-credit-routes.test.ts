@@ -183,11 +183,6 @@ describe("usage-credit checkout route", () => {
       prisma: { label: "test-prisma" },
       recoveryOnly: true,
       sponsorshipKind: "one_time",
-      sponsorship: {
-        publicAlias: "The Group Historian",
-        runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-        sponsorMessage: "For whatever adventure comes next.",
-      },
     });
   });
 

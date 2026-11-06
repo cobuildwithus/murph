@@ -6,8 +6,8 @@ Canonical source: `feature-status.csv`. Detailed cause analysis for the missing/
 
 ## Current Result
 
-- Passed story rows: 189
-- Blocked story rows: 24
+- Passed story rows: 180
+- Blocked story rows: 21
 - Failed story rows: 0
 - Remaining not-started rows: 0
 
@@ -36,9 +36,6 @@ Canonical source: `feature-status.csv`. Detailed cause analysis for the missing/
 | overview-design-active-experiment-banner | overview | blocked_no_existing_test | Reachability gap: the overview component is imported only by the /design component gallery, not by overview or dashboard product routes; no product UI test covers it. |
 | overview-design-domain-card | overview | blocked_no_existing_test | Reachability gap: the overview component is imported only by the /design component gallery, not by overview or dashboard product routes; no product UI test covers it. |
 | overview-design-profile-stats | overview | blocked_no_existing_test | Reachability gap: the overview component is imported only by the /design component gallery, not by overview or dashboard product routes; no product UI test covers it. |
-| pitch-ask-live-link | pitch | blocked_no_existing_test | Missing coverage: pitch route test covers the deck shell and first slide only; ask slide CTA/link and trajectory cells are not asserted. |
-| pitch-product-step-panels | pitch | blocked_no_existing_test | Missing coverage: pitch route test covers the deck shell and first slide only; product slide panel toggles are not clicked or asserted. |
-| pitch-team-achievement-toggle | pitch | blocked_no_existing_test | Missing coverage: pitch route test covers the deck shell and first slide only; team card toggles and achievement panel state are not clicked or asserted. Personal identifiers remain omitted from audit artifacts. |
 | security-encryption-details | security | blocked_no_existing_test | Missing coverage: SecurityPage tests cover metadata, nav, and install command only; encryption detail cards/meta are not asserted. |
 | security-hosted-architecture-diagram | security | blocked_no_existing_test | Missing coverage: SecurityPage tests cover metadata, nav, and install command only; hosted architecture diagram and legend are not asserted. |
 | security-promises | security | blocked_no_existing_test | Missing coverage: SecurityPage tests cover metadata, nav, and install command only; promise cards are not asserted. |

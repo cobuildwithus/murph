@@ -35,8 +35,10 @@ const imageGenerationStartedReplyText =
   "I started generating it and can keep helping while it finishes.";
 const interveningConversationReplyText = "Breathe out slowly for six seconds.";
 const generatedImageReplyText = "Here is the generated setup image.";
-const productionLikeAssistantModel = "gpt-5.6-terra";
-const localRunnerIdleTtlMs = "300000";
+const productionLikeAssistantModel = "gpt-6.1-sol";
+// Completion includes the idle checkpoint; keep it inside the scenario's
+// completion deadline while the explicit image barrier owns detached work.
+const localRunnerIdleTtlMs = "1000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -133,7 +135,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(replySend)).toEqual([
       {
         type: "text",
-        value: `${assistantReplyText}\n\nExercise setup reference`,
+        value: assistantReplyText,
       },
       {
         type: "media",
@@ -253,7 +255,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(completedSend)).toEqual([
       {
         type: "text",
-        value: `${generatedImageReplyText}\n\nGenerated mobility setup`,
+        value: generatedImageReplyText,
       },
       expect.objectContaining({
         attachment_id: expect.stringMatching(/^attachment_local_/u),
@@ -353,7 +355,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(reuseCompletedSend)).toEqual([
       {
         type: "text",
-        value: `${reuseReplyText}\n\nReused mobility setup`,
+        value: reuseReplyText,
       },
       expect.objectContaining({
         attachment_id: expect.stringMatching(/^attachment_local_/u),
@@ -388,7 +390,7 @@ function expectPriceableImageUsage(
       expect.objectContaining({
         allowanceCostUsdMicros: "1080",
         allowanceCounted: true,
-        requestedModel: "gpt-image-2.5-flare",
+        requestedModel: "gpt-image-2.6-flare",
         totalTokens: 46,
       })
     ),

@@ -4,7 +4,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  acknowledgeHostedWorkspaceRuntimeRecheck,
   checkpointHostedWorkspace,
   checkpointHostedWorkspaceTx,
 } from "@/src/lib/hosted-workspace/store";
@@ -52,141 +51,6 @@ describe.skipIf(!runPostgresProof)(
         appendClient?.$disconnect(),
         blockerClient?.$disconnect(),
       ]);
-    });
-
-    it("skips repeated intermediate future checkpoints but retains shutdown recovery", async () => {
-      const client = requirePrisma(observer);
-      const userId = await createMember(client, memberIds);
-      await client.hostedWorkspace.create({ data: { userId } });
-      const nextWakeAt = new Date(Date.now() + 3_600_000);
-      const checkpoint = {
-        nextWakeAt,
-        nextWakeReason: "device-sync.reconcile",
-        nextDefaultProcessingWakeAt: null,
-        nextDefaultProcessingWakeReason: null,
-        systemMailboxProgressGeneration: "0",
-        redactedStatusJson: { hostedMailboxSystemHandledThroughSeq: "0" },
-        reason: "canonical_runtime_commit",
-        prisma: client,
-        userId,
-      };
-      const first = await checkpointHostedWorkspace({
-        ...checkpoint, expectedVersion: "0", snapshotRef: createBundleRef("schedule_first"),
-      });
-      expect(first.status).toBe("updated");
-      expect(first).not.toHaveProperty("canSkipRuntimeRecheck", true);
-      const unacknowledged = await checkpointHostedWorkspace({
-        ...checkpoint, expectedVersion: "1", snapshotRef: createBundleRef("schedule_unacknowledged"),
-      });
-      expect(unacknowledged).not.toHaveProperty("canSkipRuntimeRecheck", true);
-      // A late callback for the predecessor cannot acknowledge this successor.
-      await acknowledgeHostedWorkspaceRuntimeRecheck({ prisma: client, userId, version: "1" });
-      expect((await client.hostedWorkspace.findUniqueOrThrow({ where: { userId } }))
-        .runtimeRecheckSignaledVersion).toBeNull();
-      const beforeAck = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId } });
-      await acknowledgeHostedWorkspaceRuntimeRecheck({ prisma: client, userId, version: "2" });
-      const afterAck = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId } });
-      expect(afterAck.updatedAt).toEqual(beforeAck.updatedAt);
-      expect(afterAck.version).toBe(beforeAck.version);
-      for (let version = 2; version <= 4; version += 1) {
-        const repeated = await checkpointHostedWorkspace({
-          ...checkpoint, expectedVersion: version,
-          snapshotRef: createBundleRef(`schedule_repeat_${version}`),
-        });
-        expect(repeated).toMatchObject({ status: "updated", canSkipRuntimeRecheck: true });
-      }
-      const shutdown = await checkpointHostedWorkspace({
-        ...checkpoint, expectedVersion: "5", reason: "idle_shutdown",
-        snapshotRef: createBundleRef("schedule_shutdown"),
-      });
-      expect(shutdown.status).toBe("updated");
-      expect(shutdown).not.toHaveProperty("canSkipRuntimeRecheck", true);
-    });
-
-    it.each([
-      "earlier wake", "wake reason", "clear wake", "earlier default", "default reason",
-      "clear default", "earlier retention", "clear retention", "generation", "status",
-      "due wake", "due default", "due retention", "legacy", "rollback",
-    ])("retains rechecks for %s", async (scenario) => {
-      const client = requirePrisma(observer);
-      const userId = await createMember(client, memberIds);
-      await client.hostedWorkspace.create({ data: { userId } });
-      const future = new Date(Date.now() + 3_600_000);
-      const earlier = new Date(Date.now() + 60_000);
-      const due = new Date(Date.now() - 1_000);
-      type CheckpointInput = Parameters<typeof checkpointHostedWorkspace>[0];
-      const baseline: CheckpointInput = {
-        prisma: client, userId, expectedVersion: "0",
-        reason: "canonical_runtime_commit", snapshotRef: createBundleRef("facts_initial"),
-        nextWakeAt: scenario === "due wake" ? due : future,
-        nextWakeReason: "device-sync.reconcile",
-        nextDefaultProcessingWakeAt: scenario === "due default" ? due : future,
-        nextDefaultProcessingWakeReason: "assistant",
-        inboxMediaRetentionWakeAt: scenario === "due retention" ? due : future,
-        systemMailboxProgressGeneration: "0",
-        redactedStatusJson: { hostedMailboxSystemHandledThroughSeq: "0" },
-      };
-      if (scenario === "legacy") {
-        baseline.systemMailboxProgressGeneration = null;
-        baseline.nextDefaultProcessingWakeAt = null;
-        baseline.nextDefaultProcessingWakeReason = null;
-      }
-      await checkpointHostedWorkspace(baseline);
-      await acknowledgeHostedWorkspaceRuntimeRecheck({ prisma: client, userId, version: "1" });
-      const changes: Partial<CheckpointInput> = {};
-      switch (scenario) {
-        case "earlier wake": changes.nextWakeAt = earlier; break;
-        case "wake reason": changes.nextWakeReason = "mailbox"; break;
-        case "clear wake": changes.nextWakeAt = null; break;
-        case "earlier default": changes.nextDefaultProcessingWakeAt = earlier; break;
-        case "default reason": changes.nextDefaultProcessingWakeReason = "assistant_delivery"; break;
-        case "clear default": changes.nextDefaultProcessingWakeAt = null; break;
-        case "earlier retention": changes.inboxMediaRetentionWakeAt = earlier; break;
-        case "clear retention": changes.inboxMediaRetentionWakeAt = null; break;
-        case "generation": changes.systemMailboxProgressGeneration = "1"; break;
-        case "status": changes.redactedStatusJson = { hostedMailboxSystemHandledThroughSeq: "1" }; break;
-        case "rollback":
-          changes.systemMailboxProgressGeneration = null;
-          changes.nextDefaultProcessingWakeAt = null;
-          changes.nextDefaultProcessingWakeReason = null;
-          break;
-      }
-      const successor = await checkpointHostedWorkspace({
-        ...baseline, ...changes, expectedVersion: "1", snapshotRef: createBundleRef("facts_successor"),
-      });
-      expect(successor.status).toBe("updated");
-      expect(successor).not.toHaveProperty("canSkipRuntimeRecheck", true);
-      // If this signal fails, another identical checkpoint must still retry it.
-      const retry = await checkpointHostedWorkspace({
-        ...baseline, ...changes, expectedVersion: "2", snapshotRef: createBundleRef("facts_retry"),
-      });
-      expect(retry).not.toHaveProperty("canSkipRuntimeRecheck", true);
-    });
-
-    it("invalidates an acknowledged schedule when unchanged status advances a mailbox counter", async () => {
-      const client = requirePrisma(observer);
-      const userId = await createMember(client, memberIds);
-      await client.hostedWorkspace.create({ data: { userId } });
-      const checkpoint = {
-        prisma: client, userId, nextWakeAt: new Date(Date.now() + 3_600_000),
-        nextDefaultProcessingWakeAt: null, nextDefaultProcessingWakeReason: null,
-        systemMailboxProgressGeneration: "0",
-        reason: "canonical_runtime_commit", snapshotRef: createBundleRef("counter_facts"),
-        redactedStatusJson: { hostedMailboxSystemHandledThroughSeq: "1" },
-      };
-      await checkpointHostedWorkspace({ ...checkpoint, expectedVersion: "0" });
-      await acknowledgeHostedWorkspaceRuntimeRecheck({ prisma: client, userId, version: "1" });
-      await client.hostedMailboxLaneCounter.create({
-        data: { userId, lane: "system", consumedSeq: 0n, nextSeq: 2n },
-      });
-      const progress = await checkpointHostedWorkspace({ ...checkpoint, expectedVersion: "1" });
-      expect(progress).not.toHaveProperty("canSkipRuntimeRecheck", true);
-      expect(await readCounter(client, userId, "system")).toBe(1n);
-      const retry = await checkpointHostedWorkspace({ ...checkpoint, expectedVersion: "2" });
-      expect(retry).not.toHaveProperty("canSkipRuntimeRecheck", true);
-      await acknowledgeHostedWorkspaceRuntimeRecheck({ prisma: client, userId, version: "3" });
-      const settled = await checkpointHostedWorkspace({ ...checkpoint, expectedVersion: "3" });
-      expect(settled).toMatchObject({ canSkipRuntimeRecheck: true });
     });
 
     it("returns the successor and preserves exact stamping, contiguous bounds, retention, and monotonic counters", async () => {
@@ -395,6 +259,68 @@ describe.skipIf(!runPostgresProof)(
         userId,
       })).resolves.toMatchObject({ status: "updated" });
       await expect(readCounter(client, userId, "conversation")).resolves.toBe(10n);
+    });
+
+    it("accepts a receipt recovery snapshot with its genuine wake while conversation input is pending", async () => {
+      const client = requirePrisma(observer);
+      const userId = await createMember(client, memberIds);
+      const now = new Date();
+      const genuineWakeAt = new Date(now.getTime() + 60 * 60 * 1000);
+      const recoveredSnapshotRef = createBundleRef("checkpoint_pg_recovered");
+      const pendingItemId = createId("pending");
+
+      await client.hostedWorkspace.create({
+        data: {
+          nextWakeAt: genuineWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatusJson: {
+            hostedCanonicalWriteReceiptLogByteSize: 128,
+            hostedCanonicalWriteReceiptLogSha256: "a".repeat(64),
+            hostedMailboxConversationImportedSeq: "1",
+          },
+          snapshotRef: createBundleRef("checkpoint_pg_saturated"),
+          userId,
+          version: 4n,
+        },
+      });
+      await client.hostedMailboxLaneCounter.create({
+        data: { consumedSeq: 1n, lane: "conversation", nextSeq: 3n, userId },
+      });
+      await client.hostedMailboxItem.create({
+        data: mailboxItem({
+          createdAt: new Date(now.getTime() - 60_000),
+          id: pendingItemId,
+          laneSeq: 2n,
+          userId,
+        }),
+      });
+
+      const recovered = await checkpointHostedWorkspace({
+        checkpointedAt: now,
+        expectedVersion: 4n,
+        nextWakeAt: genuineWakeAt,
+        nextWakeReason: "assistant",
+        prisma: client,
+        reason: "idle_shutdown",
+        redactedStatusJson: { hostedMailboxConversationImportedSeq: "1" },
+        snapshotRef: recoveredSnapshotRef,
+        userId,
+      });
+
+      expect(recovered).toMatchObject({
+        conversationInputAhead: true,
+        status: "updated",
+        workspace: {
+          nextWakeAt: genuineWakeAt.toISOString(),
+          nextWakeReason: "assistant",
+          snapshotRef: recoveredSnapshotRef,
+          version: "5",
+        },
+      });
+      expect(recovered.workspace?.redactedStatusJson).toEqual({
+        hostedMailboxConversationImportedSeq: "1",
+      });
+      await expect(readConsumedIds(client, [pendingItemId])).resolves.toEqual([]);
     });
 
     it("enforces system progress generation transitions atomically with checkpoint CAS", async () => {

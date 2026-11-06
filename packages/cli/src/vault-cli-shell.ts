@@ -11,7 +11,6 @@ import { incurErrorBridge } from './incur-error-bridge.js'
 const CLI_SYNC_SUGGESTIONS = [
   'initialize a new Murph vault',
   'search recent notes in a Murph vault',
-  'bootstrap the Murph inbox runtime',
 ]
 
 export function createVaultCliShell(

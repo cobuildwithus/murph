@@ -1,0 +1,86 @@
+import { projectHostedRuntimeOwner } from "./runtime-owner-snapshot";
+import type { PrismaClient } from "@prisma/client";
+import type { HostedRuntimeOwner } from "./runtime-owner";
+import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
+import {
+  recordHostedRuntimeFailure, isHostedRuntimeDeletionReady, recordHostedRuntimeTargetRetired, authorizeHostedRuntimeProvider,
+  claimHostedRuntime, completeHostedRuntime, prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted,
+  releaseHostedRuntimeAfterRetirement, authorizeHostedRuntimeEffect, retireHostedRuntime,
+  revokeHostedRuntimeAiUsageTx, selectHostedRuntimeTarget, releaseHostedRuntimeAfterCompletion,
+} from "./runtime-owner";
+
+type CommandInput = { prisma: PrismaClient; userId: string; command: HostedRuntimeOwnerCommand };
+type CommandResult = { cutover?: HostedRuntimeOwnerResponse["cutover"]; status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null;
+  blockedReason?: HostedRuntimeOwnerResponse["blockedReason"] };
+type IdentityCommand = Exclude<Extract<HostedRuntimeOwnerCommand, { attemptId: string }>, { operation: "authorize_effect" }>;
+
+/** Durable ownership commands. The HTTP boundary owns advisory completion hints. */
+export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Promise<HostedRuntimeOwnerResponse> {
+  if (input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect") {
+    const result = input.command.operation === "authorize_provider"
+      ? await authorizeHostedRuntimeProvider({ ...input.command, prisma: input.prisma, userId: input.userId })
+      : await authorizeHostedRuntimeEffect({ ...input.command, prisma: input.prisma, userId: input.userId });
+    return parseHostedRuntimeOwnerResponse({ cutover: result.cutover,
+      status: result.owner ? "authorized" : "blocked", owner: projectHostedRuntimeOwner(result.owner) });
+  }
+  const result = await executeCommand({ ...input, command: input.command });
+  const cutover = "postgres";
+  return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectHostedRuntimeOwner(result.owner),
+    blockedReason: result.blockedReason });
+}
+
+async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "authorize_provider" | "authorize_effect" }> }): Promise<CommandResult> {
+  const { prisma, userId, command } = input;
+  switch (command.operation) {
+    case "reconcile":
+      return { status: "observed", owner: await prisma.hostedRuntimeOwner.findUnique({ where: { userId } }) };
+    case "deletion_ready": {
+      const { reconcileHostedRuntimeUploads } = await import("./runtime-upload-recovery");
+      await reconcileHostedRuntimeUploads({ prisma, now: new Date(), deadlineAtMs: Date.now() + 5_000, deletedUserId: userId });
+      return authorized(await isHostedRuntimeDeletionReady(input));
+    }
+    case "claim": {
+      const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode });
+      return result.status === "blocked"
+        ? { cutover: result.cutover, status: result.status, owner: null, blockedReason: result.reason }
+        : { cutover: result.cutover, status: result.status, owner: result.owner };
+    }
+    case "target_retired":
+      return mutated(await recordHostedRuntimeTargetRetired({ ...command, prisma, userId }));
+    default:
+      return executeIdentityCommand({ ...input, command });
+  }
+}
+
+async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { command: IdentityCommand }): Promise<CommandResult> {
+  const { prisma, userId, command } = input;
+  const identity = { userId, attemptId: command.attemptId, generation: command.generation };
+  switch (command.operation) {
+    case "select_target":
+      return { cutover: "postgres", status: "updated", owner: await selectHostedRuntimeTarget({ prisma, identity, runnerContainerName: command.runnerContainerName }) };
+    case "prepare_launch":
+      return { cutover: "postgres", status: "updated", owner: await prepareHostedRuntimeLaunch({ ...command, prisma, identity }) };
+    case "accepted":
+      return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
+    case "record_failure":
+      return mutated(await recordHostedRuntimeFailure({ prisma, identity, errorCode: command.errorCode }));
+    case "complete":
+      return mutated(await completeHostedRuntime({ prisma, identity, settledRunnerContainerName: command.settledRunnerContainerName }));
+    case "retire":
+      return mutated(await retireHostedRuntime({ prisma, identity, completed: command.completed }));
+    case "release":
+      return mutated(await releaseHostedRuntimeAfterRetirement({ prisma, identity, runnerContainerName: command.runnerContainerName }));
+    case "release_completed":
+      return mutated(await releaseHostedRuntimeAfterCompletion({ prisma, identity, runnerContainerName: command.runnerContainerName }));
+    case "revoke_ai_usage":
+      await prisma.$transaction((tx) => revokeHostedRuntimeAiUsageTx(tx, identity));
+      return mutated(true);
+  }
+}
+
+function mutated(applied: boolean): CommandResult {
+  return { status: applied ? "updated" : "stale", owner: null };
+}
+function authorized(allowed: boolean): CommandResult {
+  return { status: allowed ? "authorized" : "blocked", owner: null };
+}

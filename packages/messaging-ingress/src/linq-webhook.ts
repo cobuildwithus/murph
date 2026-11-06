@@ -387,13 +387,6 @@ export function assertLinqWebhookTimestampFresh(
   }
 }
 
-export function readLinqWebhookHeader(
-  headers: LinqWebhookHeaders,
-  headerName: string,
-): string | null {
-  return readLinqWebhookHeaderValues(headers, headerName).values[0] ?? null;
-}
-
 export function parseRawLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {

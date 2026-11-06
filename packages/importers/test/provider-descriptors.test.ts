@@ -51,16 +51,15 @@ describe("device provider descriptors", () => {
 
   it("keeps the common scheduled device-sync backfill window at 180 days", () => {
     expect(DEFAULT_DEVICE_SYNC_BACKFILL_DAYS).toBe(180);
-    expect(OURA_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(
-      DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
-    );
-    expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(
-      DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
-    );
     expect(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(
       DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
     );
-    expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(30);
+    for (const descriptor of [OURA_DEVICE_PROVIDER_DESCRIPTOR, WHOOP_DEVICE_PROVIDER_DESCRIPTOR, STRAVA_DEVICE_PROVIDER_DESCRIPTOR]) {
+      expect(descriptor.transportModes).toEqual([]);
+      expect(descriptor).not.toHaveProperty("connection");
+      expect(descriptor).not.toHaveProperty("sync");
+      expect(descriptor).not.toHaveProperty("webhook");
+    }
   });
 
   it("resolves implementation-slug aliases to the canonical provider identity", () => {

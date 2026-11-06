@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -742,5 +742,62 @@ describe('workout primitive core mutations', () => {
       expect.arrayContaining(measurementPaths),
     )
     expect(measurementRewrite.event.rawRefs).toEqual(expect.arrayContaining(measurementPaths))
+  })
+})
+
+
+describe('measurement keep-existing writes', () => {
+  const draft = {
+    id: 'evt_01JSHY3D0V5A8XJQF8M0Q0Q0A4',
+    occurredAt: '2026-11-06T12:00:00.000Z',
+    source: 'manual' as const,
+    title: 'VO2 max',
+    measurements: [{ metric: 'estimated-vo2-max', value: 42.5, unit: 'ml/kg/min' }],
+  }
+
+  async function canonicalFiles(vaultRoot: string) {
+    const files = await readdir(vaultRoot, { recursive: true, withFileTypes: true })
+    const entries = await Promise.all(files.filter(file => file.isFile()).map(async file => {
+      const absolute = path.join(file.parentPath, file.name)
+      const relative = path.relative(vaultRoot, absolute)
+      if (!relative.startsWith('ledger/') && !relative.startsWith('audit/')) return null
+      return [relative, await readFile(absolute, 'utf8')] as const
+    }))
+    return entries.filter(entry => entry !== null).sort(([left], [right]) => left.localeCompare(right))
+  }
+
+  it.each(['commit', 'later reading', 'correction', 'deletion'] as const)(
+    'replays after %s without changing any ledger or audit bytes', async scenario => {
+      const vaultRoot = await createTempVault('measurement-replay-')
+      const input = { vaultRoot, draft, onExisting: 'keep' as const }
+      expect((await addMeasurement(input)).created).toBe(true)
+      if (scenario === 'later reading') {
+        await addMeasurement({ ...input, draft: { ...draft, id: 'evt_01JSHY3D0V5A8XJQF8M0Q0Q0A5',
+          occurredAt: '2026-11-06T13:00:00.000Z', measurements: [{ ...draft.measurements[0]!, value: 44 }] } })
+      } else if (scenario === 'correction') {
+        await addMeasurement({ vaultRoot, draft: { ...draft,
+          occurredAt: '2026-12-06T12:00:00.000Z', measurements: [{ ...draft.measurements[0]!, value: 45 }] } })
+      } else if (scenario === 'deletion') {
+        await deleteEvent({ vaultRoot, eventId: draft.id })
+      }
+      const before = await canonicalFiles(vaultRoot)
+      expect(before.length).toBeGreaterThan(0)
+      const replay = await addMeasurement(input)
+      expect(replay.created).toBe(false)
+      expect(await canonicalFiles(vaultRoot)).toEqual(before)
+      if (scenario === 'correction') expect(replay.event.measurements[0]!.value).toBe(45)
+      if (scenario === 'deletion') expect(replay.event.lifecycle?.state).toBe('deleted')
+    },
+  )
+
+  it('serializes concurrent identical calls to one revision and one audit entry', async () => {
+    const vaultRoot = await createTempVault('measurement-concurrent-')
+    const results = await Promise.all(Array.from({ length: 4 }, () => addMeasurement({
+      vaultRoot, draft, onExisting: 'keep',
+    })))
+    expect(results.filter(result => result.created)).toHaveLength(1)
+    expect(await readJsonlRecords({ vaultRoot, relativePath: results[0]!.ledgerFile })).toHaveLength(1)
+    const audits = await readAuditRecords(vaultRoot, draft.occurredAt)
+    expect(audits.filter(record => record.commandName === 'core.addMeasurement')).toHaveLength(1)
   })
 })

@@ -8,7 +8,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   buildJunctionProviderSourceInstanceKey,
-  listConfiguredDeviceSyncReconnectTargets,
+  listConfiguredDeviceSyncConnectTargets,
   listJunctionDeviceConnectRouteEntries,
 } from "@murphai/device-syncd/connect-config";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
@@ -914,7 +914,7 @@ describe.skipIf(!runPostgresProof)(
       const snapshotRequests: Array<
         Parameters<HostedDeviceSyncStatusSnapshotReader["fetchSnapshot"]>[0]
       > = [];
-      const reconnectTargets = listConfiguredDeviceSyncReconnectTargets({
+      const reconnectTargets = listConfiguredDeviceSyncConnectTargets({
         junction: { providerFilter: [] },
       });
 

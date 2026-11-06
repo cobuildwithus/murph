@@ -1,17 +1,23 @@
+import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, runHostedRecoveryBatch } from "../hosted-orchestration/recovery-batch";
 import { getPrisma } from "../prisma";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { preflightHostedScheduledReconcile } from "./scheduled-reconcile-preflight";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId,
 } from "./wake-service";
 
-const DEFAULT_WAKE_LIMIT = 25;
+const DEFAULT_WAKE_LIMIT = 100;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
 const MAX_WAKE_LIMIT = 250;
-const WAKE_CONCURRENCY = 5;
+// Probes stop first so each candidate they skip or cancel can still get its ordinary wake.
+const PROBE_WAKE_RESERVE_MS = 6_000;
+const BENIGN_WAKE_SKIP_REASONS = new Set<string | undefined>([
+  "health_data_consent_withdrawn", "schedule_superseded",
+]);
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
@@ -20,7 +26,7 @@ export interface HostedDeviceSyncDueReconcileSweeperResult {
   wakeFailed: number;
   wakeLimit: number;
   wakeNotAccepted: number;
-  skippedDueConnections: number;
+  hasMoreDueConnections: boolean;
 }
 
 type HostedDeviceSyncDueReconcileSweeperLogger = Pick<Console, "info" | "warn">;
@@ -28,12 +34,16 @@ type HostedDeviceSyncScheduledReconcileWakeRequest =
   typeof appendHostedDeviceSyncScheduledReconcileWake;
 
 export async function runHostedDeviceSyncDueReconcileSweeper(input: {
+  deadlineMs?: number;
   logger?: HostedDeviceSyncDueReconcileSweeperLogger;
   now?: Date;
   requestWake?: HostedDeviceSyncScheduledReconcileWakeRequest;
+  preflight?: typeof preflightHostedScheduledReconcile;
   store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDueReconcileConnectionsForSweep">;
   wakeLimit?: number;
 } = {}): Promise<HostedDeviceSyncDueReconcileSweeperResult> {
+  const deadlineMs = input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS;
+  const stop = abortAtHostedRecoveryDeadline(deadlineMs);
   const logger = input.logger ?? console;
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
@@ -52,6 +62,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     recoveryBucketStartedAt: wakeBucketStartedAt,
   });
   const selectedDueConnections = dueConnections.slice(0, wakeLimit);
+  let hasMoreDueConnections = dueConnections.length > selectedDueConnections.length;
 
   logger.info("Hosted device-sync due reconcile sweeper scanned due connections.", {
     dueAt: nowIso,
@@ -59,6 +70,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeBucketStartedAt: wakeBucketStartedAtIso,
     wakeLimit,
     selectedDueConnections: selectedDueConnections.length,
+    hasMoreDueConnections,
     orphanedDirtyRecoveryCount: selectedDueConnections.filter(
       (connection) => connection.orphanedDirtyRecoveryKey !== undefined,
     ).length,
@@ -68,16 +80,55 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   let wakeAttempted = 0;
   let wakeFailed = 0;
   let wakeNotAccepted = 0;
+  const preflightTotals = {
+    attempted: 0, eligible: 0, avoidedWakes: 0, logicalCollectionReads: 0,
+    decodedRecordCount: 0, decodedRecordBytes: 0, elapsedMs: 0,
+    reasons: {} as Record<string, number>,
+    webhookAgeOutcomes: {} as Record<string, number>,
+  };
 
-  await runWithConcurrency(
+  const countPreflightReason = (reason: string) => {
+    preflightTotals.reasons[reason] = (preflightTotals.reasons[reason] ?? 0) + 1;
+  };
+
+  const stopProbes = abortAtHostedRecoveryDeadline(deadlineMs - PROBE_WAKE_RESERVE_MS);
+  const unstarted = await runHostedRecoveryBatch(
     selectedDueConnections,
-    WAKE_CONCURRENCY,
     async (dueConnection) => {
+      const canProbe = dueConnection.provider === "junction"
+        && dueConnection.orphanedDirtyRecoveryKey === undefined;
+      if (canProbe && stopProbes.aborted) {
+        countPreflightReason("budget_exhausted");
+      } else if (canProbe) {
+        preflightTotals.attempted += 1;
+        try {
+          const probe = await (input.preflight ?? preflightHostedScheduledReconcile)({ connection: dueConnection, now, signal: stopProbes });
+          preflightTotals.eligible += Number(probe.outcome !== "ineligible");
+          preflightTotals.logicalCollectionReads += probe.requestCount;
+          preflightTotals.decodedRecordCount += probe.recordCount;
+          preflightTotals.decodedRecordBytes += probe.responseBytes;
+          preflightTotals.elapsedMs += probe.elapsedMs;
+          const webhookAgeOutcome = `${probe.webhookAgeBucket ?? "unavailable"}:${probe.outcome}`;
+          preflightTotals.webhookAgeOutcomes[webhookAgeOutcome] = (preflightTotals.webhookAgeOutcomes[webhookAgeOutcome] ?? 0) + 1;
+          const reason = /^[a-z_]{1,64}$/.test(probe.reason) ? probe.reason : "other";
+          countPreflightReason(reason);
+          if (probe.outcome === "unchanged" && probe.wakeAvoided) {
+            preflightTotals.avoidedWakes += 1;
+            return;
+          }
+        } catch {
+          // No provider payload or raw error crosses the aggregate log boundary.
+          const reason = stopProbes.aborted ? "budget_exhausted" : "failed";
+          countPreflightReason(reason);
+        }
+      }
+      if (stop.aborted) return;
       wakeAttempted += 1;
 
       let wake;
       try {
         wake = await requestWake({
+          abortSignal: stop,
           connectionId: dueConnection.connectionId,
           createdAt: nowIso,
           eventId: [
@@ -100,6 +151,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
           userId: dueConnection.userId,
         });
       } catch (error) {
+        if (stop.aborted) return;
         wakeFailed += 1;
         wakeNotAccepted += 1;
         logger.warn("Hosted device-sync due reconcile sweeper wake request failed.", {
@@ -116,8 +168,8 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
       }
 
       wakeNotAccepted += 1;
-      if (wake.reason === "health_data_consent_withdrawn") {
-        logger.info("Hosted device-sync due reconcile wake skipped after consent withdrawal.", {
+      if (BENIGN_WAKE_SKIP_REASONS.has(wake.reason)) {
+        logger.info("Hosted device-sync due reconcile wake skipped before mailbox append.", {
           reason: wake.reason,
         });
         return;
@@ -130,13 +182,15 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         reason: wake.reason ?? null,
       });
     },
+    true,
+    stop,
   );
+  hasMoreDueConnections ||= unstarted > 0;
 
-  const skippedDueConnections = Math.max(0, dueConnections.length - selectedDueConnections.length);
-  if (skippedDueConnections > 0) {
-    logger.warn("Hosted device-sync due reconcile sweeper skipped due connections after wake limit.", {
+  if (hasMoreDueConnections) {
+    logger.warn("Hosted device-sync due reconcile sweeper has more due connections after its wake limit or deadline.", {
       wakeLimit,
-      skippedDueConnections,
+      hasMoreDueConnections,
     });
   }
 
@@ -147,7 +201,8 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeFailed,
     wakeLimit,
     wakeNotAccepted,
-    skippedDueConnections,
+    hasMoreDueConnections,
+    preflight: preflightTotals,
   });
 
   return {
@@ -157,7 +212,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeFailed,
     wakeLimit,
     wakeNotAccepted,
-    skippedDueConnections,
+    hasMoreDueConnections,
   };
 }
 
@@ -167,21 +222,4 @@ function normalizeLimit(value: number | null | undefined, fallback: number, max:
   }
 
   return Math.max(1, Math.min(Math.floor(value), max));
-}
-
-async function runWithConcurrency<T>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T) => Promise<void>,
-): Promise<void> {
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const item = items[nextIndex];
-      nextIndex += 1;
-      await worker(item);
-    }
-  }));
 }

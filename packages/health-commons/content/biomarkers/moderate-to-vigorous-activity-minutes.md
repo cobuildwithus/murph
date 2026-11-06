@@ -15,14 +15,13 @@ categories:
 - activity
 - wearable-metric
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:healthgov-physical-activity-guidelines-americans-2018-11-12
-- type: cites
-  target: source_artifact:who-physical-activity-guidelines-2020-11-25
-- type: cites
-  target: source_artifact:pmid-24528783
+  - type: cites
+    target: source_artifact:healthgov-physical-activity-guidelines-americans-2018-11-12
+  - type: cites
+    target: source_artifact:who-physical-activity-guidelines-2020-11-25
+  - type: cites
+    target: source_artifact:pmid-24528783
+
 measurementContexts:
 - wearable_activity_summary
 - accelerometer

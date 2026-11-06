@@ -10,10 +10,12 @@ import {
   resolveHostedDeviceSyncProviderLabel,
   type HostedDeviceSyncCallbackStatus,
 } from "@/src/lib/device-sync/messaging-return-destination";
-import type {
-  DeviceSyncCompletionContactAction,
-  DeviceSyncCompletionDialogModel,
+import {
+  FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  type DeviceSyncCompletionContactAction,
+  type DeviceSyncCompletionDialogModel,
 } from "@/src/lib/device-sync/connect-completion-types";
+import { resolveConnectLogoSrc } from "@/src/lib/device-sync/connect-logos";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/device-sync-voice-memos";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
@@ -38,6 +40,7 @@ export type DeviceSyncCompletionSearchParams = Record<string, string | string[] 
 interface CompletionCallback {
   connectSource: string | null;
   connectTarget: string | null;
+  errorCode: string | null;
   provider: string | null;
   providerLabel: string | null;
   sourceLabel: string | null;
@@ -103,16 +106,17 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     source: state.connectedSource,
   });
   const title = failed
-    ? `${providerLabel} connection did not finish`
+    ? `${providerLabel} didn’t connect.`
     : connected
-      ? `${providerLabel} is connected`
-      : "Device connection complete";
+      ? `${providerLabel} is connected.`
+      : "Device connection complete.";
 
   return {
     contactAction: state.contactAction,
     detail: resolveCompletionDetail({
       connected,
       failed,
+      fitbitGoogleHealthLinkFailed: failed && isFitbitGoogleHealthLinkFailure(callback),
       hasContactAction: Boolean(state.contactAction),
       hasMember: Boolean(state.member),
       loadError: state.loadError,
@@ -122,6 +126,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     }),
     failed,
     kind: "device-sync",
+    logo: readCompletionLogo({ callback, connected, failed, providerLabel }),
     retryHref: failed ? "/connect" : null,
     setupGuide: needsWhoopAppleHealthRelay
       ? buildWhoopAppleHealthSetupGuide(
@@ -141,6 +146,7 @@ function readCompletionCallback(searchParams: DeviceSyncCompletionSearchParams):
   return {
     connectSource,
     connectTarget,
+    errorCode: readSearchParamString(searchParams, "deviceSyncError"),
     provider,
     providerLabel: resolveHostedDeviceSyncProviderLabel(provider),
     sourceLabel: resolveDeviceConnectSourceById(connectSource ?? "")?.label ?? null,
@@ -336,7 +342,7 @@ function resolvePreferredContactAction(input: {
     return {
       href: messagesHref,
       kind: "imessage",
-      label: "Text Murph",
+      label: "Open Messages",
     };
   }
 
@@ -361,6 +367,7 @@ function resolvePreferredContactAction(input: {
 function resolveCompletionDetail(input: {
   connected: boolean;
   failed: boolean;
+  fitbitGoogleHealthLinkFailed: boolean;
   hasContactAction: boolean;
   hasMember: boolean;
   loadError: string | null;
@@ -368,8 +375,12 @@ function resolveCompletionDetail(input: {
   source: HostedDeviceSyncSettingsSource | null;
   needsWhoopAppleHealthRelay: boolean;
 }): string {
+  if (input.fitbitGoogleHealthLinkFailed) {
+    return FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL;
+  }
+
   if (input.failed) {
-    return "Try again from Murph when you are ready.";
+    return "Nothing changed. Try again.";
   }
 
   if (!input.connected && !input.failed) {
@@ -393,10 +404,39 @@ function resolveCompletionDetail(input: {
   }
 
   if (input.connected && input.source) {
-    return `${input.providerLabel} is ready. Say hi to start exploring your data.`;
+    return "Go back to your chat.";
   }
 
   return "Your wearable is ready. Murph will start learning from your data.";
+}
+
+// Fitbit links through Junction's Google Health provider. Google rejects a link
+// when the Google Account has no Google Health profile or a permission is
+// declined, and Junction reports both as a failed Link outcome.
+function readCompletionLogo(input: {
+  callback: CompletionCallback;
+  connected: boolean;
+  failed: boolean;
+  providerLabel: string;
+}) {
+  if (!input.failed && !input.connected) {
+    return null;
+  }
+  const { callback } = input;
+  return {
+    name: input.providerLabel,
+    src: resolveConnectLogoSrc(
+      callback.connectSource ?? callback.connectTarget ?? callback.provider,
+    ),
+  };
+}
+
+function isFitbitGoogleHealthLinkFailure(callback: CompletionCallback): boolean {
+  return callback.errorCode === "JUNCTION_LINK_FAILED"
+    && (
+      normalizeProviderKey(callback.connectSource) === "fitbit"
+      || normalizeProviderKey(callback.connectTarget) === "fitbit"
+    );
 }
 
 function isWhoopCompletion(input: {

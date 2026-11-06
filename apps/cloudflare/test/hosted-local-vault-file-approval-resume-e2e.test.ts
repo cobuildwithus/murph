@@ -37,7 +37,7 @@ const userId = `member_local_vault_file_approval_${runId}`;
 const chatId = `chat_local_vault_file_approval_${runId}`;
 const linqApiToken = "linq-local-vault-file-token";
 const linqWebhookSecret = "linq-local-vault-file-webhook-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const requestInboundText = "Create the synthetic report PDF and attach it here.";
 const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";
@@ -60,8 +60,7 @@ describe("hosted local vault-file approval resume e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

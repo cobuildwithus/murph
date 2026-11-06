@@ -1180,10 +1180,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Signed-out members return to Environment after login. On iOS, the microphone-permission handoff keeps the walkthrough mounted, and moving the page to the background safely ends an active recording.",
         relevanceTags: ["environment", "voice", "privacy", "accessibility"],
         sourcePullRequests: [1228, 1238, 1251],
-        tryIt: {
-          href: "/environment",
-          label: "Open Environment",
-        },
       },
       {
         id: "physical-notes-from-chat",
@@ -1389,10 +1385,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Missing or skipped facts never lower the grade, and optional equipment never counts against it. Each result explains what is known, what needs attention, and the next useful check.",
         relevanceTags: ["environment", "sleep", "workspace", "context"],
         sourcePullRequests: [573],
-        tryIt: {
-          href: "/environment",
-          label: "Open Environment",
-        },
       },
       {
         id: "environment-voice-walkthrough",
@@ -2800,10 +2792,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "When an imported result arrives without its own range, the page can show a clearly labeled published adult comparator without changing the reporting lab's status or presenting the comparator as that lab's range.",
         relevanceTags: ["biomarkers", "labs", "health", "dashboard"],
         sourcePullRequests: [838, 844, 871],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open Biomarkers",
-        },
       },
       {
         id: "family-usage-top-ups",
@@ -2838,10 +2826,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "A public Knowledge page covers the research, specialist skills, evidence grades, and personal data Murph works from, linked from the main navigation.",
         relevanceTags: ["web", "health", "search"],
         sourcePullRequests: [862],
-        tryIt: {
-          href: "/knowledge",
-          label: "Open Knowledge",
-        },
       },
       {
         id: "two-week-experiment-baselines",
@@ -2985,10 +2969,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Equivalent lab spellings such as BUN and blood urea nitrogen collapse into a single history, and report metadata no longer lands in a catch-all Other group. Qualitative and incompatible-unit results stay in the form the lab reported them.",
         relevanceTags: ["biomarkers", "labs", "dashboard", "design"],
         sourcePullRequests: [816, 817, 818, 826, 829],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open Biomarkers",
-        },
       },
       {
         id: "low-usage-mentioned-in-conversation",
@@ -3302,10 +3282,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Qualitative results, comparator values, unit changes, custom analytes, and lab-reported reference ranges stay visible without being forced into a misleading numeric series. Raw reports and external identifiers stay out of the browser view.",
         relevanceTags: ["biomarkers", "labs", "history", "dashboard"],
         sourcePullRequests: [771],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open your biomarkers",
-        },
       },
       {
         id: "device-metrics-on-biomarkers",
@@ -3531,10 +3507,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "Murph Safe names the evidence-checking process; it never stamps a product safe or unsafe. Search terms stay out of URLs, logs, and analytics, and the same records are available through a versioned public API.",
         relevanceTags: ["supplements", "nutrition", "search"],
         sourcePullRequests: [765],
-        tryIt: {
-          href: "/search",
-          label: "Search a product",
-        },
       },
       {
         id: "scheduled-replies-keep-context",
@@ -6875,10 +6847,6 @@ const LEGACY_CHANGELOG_EDITIONS = [
           "If you haven't connected a wearable or uploaded labs, the Biomarkers page now tells you exactly what to do next.",
         relevanceTags: ["dashboard", "biomarkers", "onboarding"],
         sourcePullRequests: [54],
-        tryIt: {
-          href: "/biomarkers",
-          label: "Open biomarkers",
-        },
       },
       {
         id: "leaner-wearable-imports",

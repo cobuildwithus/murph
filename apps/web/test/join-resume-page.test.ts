@@ -67,7 +67,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -93,7 +93,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -123,7 +123,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -144,7 +144,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -165,7 +165,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -190,7 +190,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -212,7 +212,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -237,7 +237,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -261,6 +261,8 @@ async function renderJoinResumePage(searchParams: {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    companionLastContactAt: null,
+    companionLastForegroundAt: null,
     groupJournalCaptureConsentRequestedAt: null,
     groupJournalCaptureEnabled: null,
     assistantPersona: null,
@@ -270,7 +272,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantHumor: null,
     assistantHumorCausalSeq: null,
     assistantModelPreference: null,
-    assistantProviderPreference: null,
+
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,

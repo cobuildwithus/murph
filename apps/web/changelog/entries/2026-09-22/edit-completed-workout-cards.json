@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "edit-completed-workout-cards",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable workout corrections",
+    "summary": "Workout corrections preserve the original finish time, and workout cards remain readable in older Messages extensions.",
+    "details": "Active cards keep their editing controls and completed cards keep their summary. If Murph cannot prepare a verified card, it replies with the saved workout details instead.",
+    "relevanceTags": [
+      "workouts",
+      "imessage"
+    ],
+    "sourcePullRequests": [
+      3654
+    ]
+  }
+}

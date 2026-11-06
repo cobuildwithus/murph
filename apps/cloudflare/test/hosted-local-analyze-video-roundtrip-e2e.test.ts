@@ -32,7 +32,7 @@ import {
 const runNonce = Date.now();
 const userId = `member_local_analyze_video_${runNonce}`;
 const chatId = `chat_local_analyze_video_${runNonce}`;
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const linqApiToken = "linq-local-analyze-video-token";
 const linqWebhookSecret = "linq-local-analyze-video-webhook-secret";
 const successQuestion = "What shape and color is centered in this video?";
@@ -65,8 +65,7 @@ describe("hosted local analyze-video Linq roundtrip e2e", () => {
         GEMINI_API_KEY: HOSTED_LOCAL_GEMINI_VIDEO_ANALYSIS_API_KEY,
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),

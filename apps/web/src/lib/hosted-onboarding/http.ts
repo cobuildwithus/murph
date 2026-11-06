@@ -9,7 +9,7 @@ import {
   readRawBodyBuffer,
   sanitizeJsonLogString,
 } from "../http";
-import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { getHostedAuthIdentityConflictReasonForLog, getHostedLinqRouteAuthorityMismatchReasonForLog, hostedOnboardingError, isHostedOnboardingError } from "./errors";
 
 const HOSTED_ONBOARDING_DEFAULT_HEADERS = {
   "Cache-Control": "no-store",
@@ -114,13 +114,23 @@ function mapHostedOnboardingError(error: unknown) {
   }
 
   const mapping = mapDomainJsonError(error);
+  // Result-size attribution is log-only; preserve the existing response body.
+  if (error.code === "CONNECTED_APPS_RESULT_TOO_LARGE") {
+    delete mapping.error.details;
+  }
   const logDetails = describeHostedOnboardingDomainErrorDetailsForLog(error.details);
+  const reconciliationReason = getHostedAuthIdentityConflictReasonForLog(error);
+  const linqRouteAuthorityMismatchReason = getHostedLinqRouteAuthorityMismatchReasonForLog(error);
 
-  return logDetails
+  return logDetails || reconciliationReason || linqRouteAuthorityMismatchReason
     ? {
         ...mapping,
         log: {
-          details: logDetails,
+          details: {
+            ...(logDetails ?? {}),
+            ...(reconciliationReason ? { authIdentityReconciliationReason: reconciliationReason } : {}),
+            ...(linqRouteAuthorityMismatchReason ? { linqRouteAuthorityMismatchReason } : {}),
+          },
         },
       }
     : mapping;

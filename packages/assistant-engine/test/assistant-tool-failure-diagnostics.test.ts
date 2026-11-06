@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseAssistantRuntimeIssueRecord } from '@murphai/runtime-state/node'
+import { cliTimingFailureCode } from '@murphai/runtime-state/cli-timing'
 import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import { DERIVED_KNOWLEDGE_PAGES_ROOT } from '@murphai/query'
 
@@ -21,12 +22,14 @@ import {
   createCodexActionRuntimeIssueTracker,
 } from '../src/assistant-codex/action-diagnostics.js'
 import { normalizeCodexEvent } from '../src/assistant-codex-events.js'
+import { classifyToolFailureCode } from '../src/assistant-codex/tool-failure-diagnostics.js'
 import type {
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
 } from '../src/assistant/execution-context.js'
 import {
+  appendAssistantRuntimeIssueInput,
   flushPendingAssistantRuntimeIssueWrites,
   recordAssistantRuntimeIssueInputsBestEffort,
   type AssistantRuntimeIssueInput,
@@ -76,7 +79,8 @@ function expectFailure(
 ) {
   const requestKind = action === 'attach_follow_up' ? 'attach-follow-up' : 'automation'
   const diagnostic = { failureStage, failureReason: reason,
-    ...(errorCategory === undefined ? {} : { errorCategory }) }
+    ...(errorCategory === undefined ? {} : { errorCategory }),
+    ...(requestKind === 'automation' && reason === 'handler_exception' ? { automationAction: action } : {}) }
   expect(result).toEqual({
     rpcResult: { success: false, contentItems: [{ type: 'inputText', text }] },
     failureDiagnostic: diagnostic,
@@ -243,7 +247,11 @@ describe('recognized CLI failure diagnostics', () => {
         summary: 'Codex command execution failed during provider turn.',
         details: { failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
           errorCategory: category, actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
-          commandFamily: 'vault-cli event', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category },
+          commandFamily: 'vault-cli event', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category,
+          commandAttribution: 'recognized', vaultCliCommand: 'event show',
+          vaultCliErrorAttribution: cliTimingFailureCode(code) === 'unknown' ? 'unknown_code' : 'recognized',
+          ...(cliTimingFailureCode(code) === 'unknown' ? {} : { vaultCliErrorCode: code }),
+          ...(stage ? { vaultCliErrorStage: stage } : {}) },
       })
       expect(JSON.stringify(issue)).not.toContain(sentinel)
     }
@@ -330,23 +338,33 @@ describe('recognized CLI failure diagnostics', () => {
     expect(tracker.recordEvent({ ...eventInput(complete), activeTurnId: 'other-turn' })).toBeNull()
     expect(tracker.recordEvent(eventInput(complete))?.details).toMatchObject({
       commandFamily: 'vault-cli event', commandOrdinal: 1, vaultCliErrorCategory: 'not_found',
+      commandAttribution: 'recognized', vaultCliCommand: 'event show', vaultCliErrorCode: 'not_found',
     })
     expect(tracker.recordEvent(eventInput(complete))).toBeNull()
   })
 })
 
-describe('knowledge command completion diagnostics', () => {
+describe('knowledge and memory command completion diagnostics', () => {
   it.each([
-    ['show', 'knowledge_page_not_found', 'read', 'not_found'],
-    ['show', 'knowledge_page_invalid', 'integrity', 'invalid_result'],
-    ['upsert', 'knowledge_page_conflict', undefined, 'conflict'],
-    ['append-section', 'knowledge_duplicate_slug', undefined, 'conflict'],
-  ] as const)('classifies %s %s without changing completion counts', (operation, code, stage, category) => {
-    const error = envelope(code, stage)
+    ['knowledge', 'show', 'knowledge_page_not_found', 'read', 'not_found'],
+    ['knowledge', 'show', 'knowledge_page_invalid', 'integrity', 'invalid_result'],
+    ['knowledge', 'upsert', 'knowledge_page_conflict', undefined, 'conflict'],
+    ['knowledge', 'append-section', 'knowledge_duplicate_slug', undefined, 'conflict'],
+    ['knowledge', 'append-section', 'knowledge_source_unreadable', undefined, 'unavailable'],
+    ['knowledge', 'upsert', 'knowledge_invalid_source_path', undefined, 'invalid_input'],
+    ['knowledge', 'upsert', 'knowledge_invalid_library_slug', undefined, 'invalid_input'],
+    ['memory', 'show', 'memory_not_found', 'read', 'not_found'],
+    ['memory', 'show', 'memory_document_invalid', 'read', 'invalid_result'],
+  ] as const)('classifies %s %s %s without changing completion counts', (family, operation, code, stage, category) => {
+    expect(cliTimingFailureCode(code)).toBe(code)
+    expect(classifyToolFailureCode(code, stage)).toBe(category)
+    const sourcePath = '/SYNTHETIC_PRIVATE_PATH/memory.md'
+    const error = { ...envelope(code, stage), sourcePath, values: [sentinel] }
     for (const fullOutput of [false, true]) {
-      const command = `vault-cli knowledge ${operation} ${sentinel} --format json${fullOutput ? ' --full-output' : ''}`
+      const command = `vault-cli ${family} ${operation} ${sentinel} --format json${fullOutput ? ' --full-output' : ''}`
       const output = JSON.stringify(fullOutput ? { ok: false, error, meta: { command: sentinel } } : error)
       const input = eventInput(commandEvent(output, command))
+      const unchanged = structuredClone(input.rawEvent)
       const tracker = createCodexActionRuntimeIssueTracker()
       const reducer = createCodexActionDiagnosticsReducer()
       const issue = tracker.recordEvent(input)
@@ -356,9 +374,13 @@ describe('knowledge command completion diagnostics', () => {
         summary: 'Codex command execution failed during provider turn.',
         details: { failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
           errorCategory: category, actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
-          commandFamily: 'vault-cli knowledge', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category },
+          commandFamily: family === 'memory' ? 'vault-cli memory show' : 'vault-cli knowledge', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category,
+          commandAttribution: 'recognized', vaultCliCommand: `${family} ${operation}`,
+          vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: code,
+          ...(stage ? { vaultCliErrorStage: stage } : {}) },
       })
       expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(JSON.stringify(issue)).not.toContain(sourcePath)
       expect(tracker.recordEvent(input)).toBeNull()
       reducer.recordEvent({ ...input, observedAtMs: 1 })
       reducer.recordEvent({ ...input, observedAtMs: 2 })
@@ -372,11 +394,35 @@ describe('knowledge command completion diagnostics', () => {
         providerStartedAtMs: null, turnCorrelation: null, turnId: null })).toMatchObject({
         codexActionCommandCount: 2, codexActionCompletedCount: 2, codexActionFailedCount: 1,
       })
+      expect(input.rawEvent).toEqual(unchanged)
     }
   })
 
   it.each([
-    ...['knowledge_page_not_found_extra', 'KNOWLEDGE_PAGE_NOT_FOUND', 'knowledge_page_not_found ',
+    sentinel, 'memory_persistence_invalid', 'memory_not_f\u043eund',
+    ...['memory_not_found', 'memory_document_invalid'].flatMap((code) => [
+      `prefix_${code}`, `${code}_suffix`, `${code} `, code.toUpperCase(), code.replaceAll('_', '-'),
+    ]),
+  ])('keeps non-admitted memory code %s unknown at the action issue boundary', (code) => {
+    expect(cliTimingFailureCode(code)).toBe('unknown')
+    expect(classifyToolFailureCode(code, 'read')).toBe('unknown')
+    const sourcePath = '/SYNTHETIC_PRIVATE_PATH/memory.md'
+    const output = JSON.stringify({ ...envelope(code, 'read'), sourcePath, values: [sentinel] })
+    const issue = commandIssue(output, `vault-cli memory show ${sentinel} --format json`, 7)
+    expect(issue?.details).toMatchObject({
+      commandFamily: 'vault-cli memory show', vaultCliCommand: 'memory show', exitCode: 7,
+      failureReason: 'nonzero_exit', errorCategory: 'unknown', vaultCliErrorCategory: 'unknown',
+      vaultCliErrorAttribution: 'unknown_code', vaultCliErrorStage: 'read',
+    })
+    expect(issue?.details).not.toHaveProperty('vaultCliErrorCode')
+    for (const forbidden of [code, sentinel, sourcePath]) expect(JSON.stringify(issue)).not.toContain(forbidden)
+  })
+
+  it.each([
+    ...['knowledge_source_not_found', 'knowledge_source_unreadаble',
+      ...['knowledge_source_unreadable', 'knowledge_invalid_source_path', 'knowledge_invalid_library_slug'].flatMap((code) => [
+        `prefix_${code}`, `${code}_suffix`, `${code} `, code.toUpperCase(),
+      ]), 'knowledge_page_not_found_extra', 'KNOWLEDGE_PAGE_NOT_FOUND', 'knowledge_page_not_found ',
       'knowledge_page_reserved', 'knowledge_page_not_loadable', sentinel.repeat(4)]
       .map((code) => JSON.stringify(envelope(code))),
     JSON.stringify({ ...envelope('knowledge_page_not_found'), message: null }),
@@ -437,6 +483,163 @@ describe('knowledge command completion diagnostics', () => {
   })
 })
 
+describe('bounded CLI validation completion metadata', () => {
+  it.each([
+    ['automation list', 'limit', 'too_big', false],
+    ['automation list', 'status', 'invalid_value', false],
+    ['food search-labels', 'limit', 'too_big', false],
+    ['food search-labels', 'query', 'invalid_type', true],
+    ['knowledge show', 'arguments', 'custom', false],
+    ['knowledge upsert', 'body', 'invalid_type', true],
+    ['knowledge upsert', 'slug', 'invalid_format', false],
+    ['knowledge upsert', 'arguments', 'custom', false],
+    ['event list', 'kind', 'invalid_value', false],
+    ['event list', 'from', 'invalid_format', false],
+    ['event list', 'to', 'custom', false],
+    ['event list', 'tag', 'too_small', false],
+    ['event list', 'experiment', 'invalid_format', false],
+    ['event list', 'limit', 'too_big', false],
+    ['event list', 'arguments', 'custom', false],
+    ['knowledge append-section', 'heading', 'invalid_type', true],
+    ['meal add', 'nutritionCalories', 'too_small', false],
+    ['meal add', 'nutritionSource', 'invalid_value', false],
+    ['meal add', 'occurredAt', 'custom', false],
+    ['meal add', 'arguments', 'custom', false],
+    ['meal edit', 'nutritionCalories', 'too_small', false],
+    ['meal edit', 'nutritionSource', 'invalid_value', false],
+    ['meal edit', 'occurredAt', 'invalid_format', false],
+    ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
+  ] as const)('selects one finite %s %s issue from the existing error envelope', (command, field, code, missing) => {
+    const error = { ...envelope('VALIDATION_ERROR'), fieldErrors: [
+      { path: `body.${sentinel}`, code: 'invalid_type', missing: true },
+      { path: field, code, missing, expected: sentinel, received: sentinel, value: sentinel, message: sentinel },
+      { path: field, code: 'custom', missing: false },
+    ] }
+    for (const full of [false, true]) {
+      const output = JSON.stringify(full ? { ok: false, error } : error)
+      const issue = commandIssue(output, `vault-cli ${command} --format json`)
+      expect(issue?.details).toMatchObject({
+        vaultCliCommand: command, commandAttribution: 'recognized', vaultCliErrorCode: 'VALIDATION_ERROR',
+        errorCategory: 'invalid_input', vaultCliValidationField: field, vaultCliValidationCode: code,
+        vaultCliValidationMissing: missing,
+      })
+      expect(Object.keys(issue?.details ?? {}).length).toBeLessThanOrEqual(24)
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(commandIssue(output, `vault-cli ${command} --format json`, 0)).toBeNull()
+    }
+  })
+
+  it('adds only finite automation completion fields and omits unsupported or malformed detail', () => {
+    const command = `vault-cli automation list --status ${sentinel} --format json`
+    const base = envelope('VALIDATION_ERROR', 'validation')
+    const baseline = commandIssue(JSON.stringify(base), command)
+    expect(baseline?.details).toMatchObject({ vaultCliCommand: 'automation list',
+      vaultCliErrorCode: 'VALIDATION_ERROR', vaultCliErrorStage: 'validation', errorCategory: 'invalid_input' })
+    for (const [field, code] of [['limit', 'too_big'], ['status', 'invalid_value']] as const) {
+      for (const missing of [false, undefined]) for (const full of [false, true]) {
+        const error = { ...base, fieldErrors: [{ path: field, code, ...(missing === undefined ? {} : { missing }),
+          message: sentinel, value: sentinel, received: sentinel, expected: sentinel }] }
+        const output = JSON.stringify(full ? { ok: false, error } : error)
+        const issue = commandIssue(output, command)
+        expect(issue).toEqual({ ...baseline, details: { ...baseline?.details,
+          vaultCliValidationField: field, vaultCliValidationCode: code,
+          ...(missing === undefined ? {} : { vaultCliValidationMissing: missing }) } })
+        expect(JSON.stringify(issue)).not.toContain(sentinel)
+        expect(commandIssue(output, command, 0)).toBeNull()
+      }
+    }
+    for (const fieldErrors of [undefined, null, {}, [],
+      ...['vault', 'requestId', 'sourcePath', 'text', 'supportSeriesId', 'cursor', 'compact', 'status.0', 'status[0]', sentinel]
+        .map((path) => [{ path, code: 'invalid_value', missing: false }]),
+      [{ path: ['status'], code: 'invalid_value', missing: false }],
+      [{ path: 'status', code: 'invalid_value', missing: 'false' }],
+      [{ path: 'limit', code: sentinel, missing: false }],
+      Array(8).fill({ path: sentinel, code: 'invalid_type' }).concat({ path: 'limit', code: 'too_big' })]) {
+      for (const full of [false, true]) {
+        const error = { ...base, fieldErrors }
+        expect(commandIssue(JSON.stringify(full ? { ok: false, error } : error), command)).toEqual(baseline)
+      }
+    }
+    expect(JSON.stringify(baseline)).not.toContain(sentinel)
+  })
+
+  it.each([
+    ['automation list', [{ path: 'limit', code: 'too_big', missing: false }, { path: 'status', code: 'invalid_value', missing: false }]],
+    ['event list', [{ path: 'limit', code: 'too_big', missing: false }, { path: 'arguments', code: 'custom', missing: false }]],
+    ['knowledge upsert', [{ path: 'body', code: 'too_small', missing: false }, { path: 'arguments', code: 'custom', missing: false }]],
+    ['meal add', [
+      { path: 'nutritionCalories', code: 'too_small', missing: false },
+      { path: 'nutritionSource', code: 'invalid_value', missing: false },
+      { path: 'occurredAt', code: 'custom', missing: false },
+      { path: 'arguments', code: 'custom', missing: false },
+    ]],
+    ['meal edit', [
+      { path: 'id', code: 'invalid_type', missing: true },
+      { path: 'nutritionProteinGrams', code: 'too_small', missing: false },
+      { path: 'nutritionConfidence', code: 'invalid_value', missing: false },
+      { path: 'nutritionCalories', code: 'too_small', missing: false },
+      { path: 'nutritionSource', code: 'invalid_value', missing: false },
+      { path: 'occurredAt', code: 'invalid_format', missing: false },
+      { path: 'arguments', code: 'custom', missing: false },
+    ]],
+  ] as const)('round-trips %s detail and absence through the existing issue sanitizer and parser', async (command, details) => {
+    const issues = [undefined, ...details].map((detail) => {
+      const issue = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),
+        fieldErrors: detail ? [{ ...detail, message: sentinel, value: sentinel }] : [] }),
+      `vault-cli ${command} --format json`)
+      if (!issue) throw new Error('Expected synthetic command validation diagnostic')
+      expect(issue.details?.vaultCliValidationField).toBe(detail?.path)
+      expect(issue.details?.vaultCliValidationCode).toBe(detail?.code)
+      expect(issue.details?.vaultCliValidationMissing).toBe(detail?.missing)
+      return issue
+    })
+    writes.write.mockResolvedValue(undefined)
+    recordAssistantRuntimeIssueInputsBestEffort({ issues, vault: 'synthetic-vault',
+      policy: { environment: 'hosted', surface: null, privateIssueCaptureEnabled: true } })
+    await flushPendingAssistantRuntimeIssueWrites()
+    expect(writes.write).toHaveBeenCalledTimes(issues.length)
+    for (const [index, [input]] of writes.write.mock.calls.entries()) {
+      const encoded = JSON.stringify(input.record)
+      expect(encoded).not.toContain(sentinel)
+      expect(parseAssistantRuntimeIssueRecord(JSON.parse(encoded)).details).toEqual(issues[index]!.details)
+    }
+  })
+
+  it('does not promote unsupported commands, nested paths, unknown flags or oversized output into validation evidence', () => {
+    const good = { path: 'body', code: 'invalid_type', missing: true }
+    const base = { ...envelope('VALIDATION_ERROR'), fieldErrors: [good] }
+    const cases = [
+      ['vault-cli knowledge show synthetic', base],
+      ['vault-cli future-command synthetic', base],
+      ['vault-cli --format json knowledge upsert', base],
+      ['vault-cli knowledge upsert && node synthetic.js', base],
+      ['node synthetic.js', base],
+      ['vault-cli knowledge upsert', { ...base, code: 'invalid_payload' }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: [{ ...good, path: ['body'] }] }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: [{ ...good, path: `body.${sentinel}` }] }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: [{ ...good, missing: 'true' }] }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: Array(8).fill({ path: sentinel, code: 'invalid_type' }).concat(good) }],
+      ['vault-cli knowledge upsert', { ...base, message: '界'.repeat(6000) }],
+      ['vault-cli knowledge upsert', { ok: true, error: base }],
+    ] as const
+    for (const [command, error] of cases) {
+      const issue = commandIssue(JSON.stringify(error), command)
+      expect(issue).not.toBeNull()
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationField')
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationCode')
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationMissing')
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+    }
+    const absent = commandIssue(JSON.stringify({ ...base, fieldErrors: [{ path: 'body', code: 'invalid_type', received: 'undefined' }] }),
+      'vault-cli knowledge upsert')
+    expect(absent?.details).toMatchObject({ vaultCliValidationField: 'body', vaultCliValidationCode: 'invalid_type' })
+    expect(absent?.details).not.toHaveProperty('vaultCliValidationMissing')
+  })
+})
+
 describe('opaque MCP and command failures', () => {
   it.each([
     ['mcpToolCall', { success: false }, 'result', 'reported_failure'],
@@ -457,19 +660,69 @@ describe('opaque MCP and command failures', () => {
     expect(createCodexActionRuntimeIssueTracker().recordEvent(eventInput(completed))).toBeNull()
   })
 
-  it('does not parse arbitrary shell JSON even when its code is allowlisted', () => {
+  it.each([
+    ...[-1, 1, 3, 127].map((exitCode) => [
+      'vault-cli event list; false', exitCode, 'command', 'shell_syntax',
+    ] as const),
+    ['cat synthetic-source', 1, 'cat', 'recognized'],
+    ['node synthetic.js', 2, 'node', 'recognized'],
+  ] as const)('keeps synthetic shell completion %s (exit %s) opaque', (command, exitCode, commandFamily, commandAttribution) => {
     const parse = vi.spyOn(JSON, 'parse')
     try {
-      const issue = commandIssue(JSON.stringify(envelope('not_found')), 'node synthetic.js', 2)
+      const output = JSON.stringify(envelope('not_found'))
+      const input = eventInput(commandEvent(output, command, exitCode))
+      const tracker = createCodexActionRuntimeIssueTracker()
+      const issue = tracker.recordEvent(input)
       expect(parse).not.toHaveBeenCalled()
       expect(issue?.details).toMatchObject({ failureStage: 'execution', failureReason: 'nonzero_exit',
-        errorCategory: 'unknown', exitCode: 2, commandFamily: 'node' })
+        errorCategory: 'unknown', exitCode, commandFamily, commandAttribution, commandOrdinal: 1 })
+      expect(issue?.details).not.toHaveProperty('vaultCliCommand')
       expect(issue?.details).not.toHaveProperty('vaultCliErrorCategory')
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(tracker.recordEvent(input)).toBeNull()
+      expect(commandIssue(output, command, 0)).toBeNull()
+      expect(parse).not.toHaveBeenCalled()
     } finally { parse.mockRestore() }
   })
 })
 
 describe('existing diagnostic transport and denominator', () => {
+  it.each(['phone-first', 'phone-last', 'interleaved'])('bounds collection and persistence independently with reserved phone failures: %s', async order => {
+    const ordinary: AssistantRuntimeIssueInput = {
+      component: 'assistant.codex-dynamic-tool', operation: 'computer-open',
+      issueKind: 'tool_error', errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED', phase: 'tool_call',
+      severity: 'warning', summary: 'Synthetic backend failure.',
+    }
+    const phone = { ...ordinary, operation: 'create-phone-call' }
+    const regularIssues = Array.from({ length: 12 }, () => ordinary)
+    const phoneIssues = Array.from({ length: 5 }, () => phone)
+    const issues = order === 'phone-first' ? [...phoneIssues, ...regularIssues]
+      : order === 'phone-last' ? [...regularIssues, ...phoneIssues]
+        : regularIssues.flatMap((issue, index) => index < 5 ? [issue, phone] : [issue])
+    const collected: AssistantRuntimeIssueInput[] = []
+    for (const issue of issues) appendAssistantRuntimeIssueInput(collected, issue)
+    expect(collected).toHaveLength(10)
+    expect(collected.filter(issue => issue.operation === 'create-phone-call')).toHaveLength(2)
+    writes.write.mockResolvedValue(undefined)
+    // Test the persistence cap with unbounded input too: it must not depend on
+    // callers already having applied the collection cap.
+    recordAssistantRuntimeIssueInputsBestEffort({ issues, vault: 'synthetic-vault',
+      policy: { environment: 'hosted', surface: null, privateIssueCaptureEnabled: true } })
+    await flushPendingAssistantRuntimeIssueWrites()
+    expect(writes.write).toHaveBeenCalledTimes(10)
+    expect(writes.write.mock.calls.filter(([input]) => input.record.operation === 'create-phone-call')).toHaveLength(2)
+  })
+
+  it('does not reserve phone slots for validation or unrelated issue producers', () => {
+    const ordinary: AssistantRuntimeIssueInput = { component: 'assistant.tool', operation: 'create-phone-call',
+      issueKind: 'tool_error', phase: 'tool_call', severity: 'warning', summary: 'Synthetic issue.' }
+    const collected: AssistantRuntimeIssueInput[] = []
+    for (let index = 0; index < 12; index++) appendAssistantRuntimeIssueInput(collected, ordinary)
+    appendAssistantRuntimeIssueInput(collected, { ...ordinary, component: 'assistant.codex-dynamic-tool',
+      issueKind: 'schema_rejection', errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED' })
+    expect(collected).toHaveLength(8)
+  })
+
   it('keeps one generic failed action per completed call, separate from branch evidence', async () => {
     const result = await dispatch(requests[0])
     const rawEvent = { method: 'item/completed', params: { turnId: 'synthetic-turn', item: {
@@ -488,7 +741,15 @@ describe('existing diagnostic transport and denominator', () => {
     })
   })
 
-  it('round-trips new details through the real sanitizer/parser with the existing cap and best-effort writes', async () => {
+  it.each([
+    ['knowledge upsert', 'body', 'invalid_type', true],
+    ['knowledge show', 'arguments', 'custom', false],
+    ['knowledge upsert', 'arguments', 'custom', false],
+    ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
+  ] as const)('round-trips %s %s details through the real sanitizer/parser with the existing cap and best-effort writes', async (command, field, code, missing) => {
     const automation = await dispatch(requests[0], { automationTool: { request: vi.fn<AssistantHostedAutomationTool['request']>().mockRejectedValue(
       Object.assign(new Error(sentinel), { code: 'invalid_option', cause: { content: sentinel } }),
     ) } })
@@ -496,32 +757,154 @@ describe('existing diagnostic transport and denominator', () => {
       `vault-cli knowledge show ${sentinel} --format json --full-output`)
     if (!cli || !automation.runtimeIssueInputs) throw new Error('Expected synthetic diagnostics')
     const issues: AssistantRuntimeIssueInput[] = [...automation.runtimeIssueInputs, cli]
+    for (const code of ['memory_not_found', 'memory_document_invalid']) {
+      const memory = commandIssue(JSON.stringify(envelope(code, 'read')), `vault-cli memory show ${sentinel} --format json`)
+      if (!memory) throw new Error('Expected synthetic memory diagnostic')
+      expect(memory.details?.vaultCliErrorCode).toBe(code)
+      issues.push(memory)
+    }
+    const validation = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),
+      fieldErrors: [{ path: field, code, missing, value: sentinel, message: sentinel }] }),
+      `vault-cli ${command}`)
+    if (!validation) throw new Error('Expected synthetic validation diagnostic')
+    expect(validation.details).toMatchObject({ vaultCliValidationField: field, vaultCliValidationCode: code, vaultCliValidationMissing: missing })
+    issues.push(validation)
+    for (const code of ['knowledge_source_unreadable', 'knowledge_invalid_source_path', 'knowledge_invalid_library_slug']) {
+      const source = commandIssue(JSON.stringify(envelope(code)), 'vault-cli knowledge upsert')
+      if (!source) throw new Error('Expected synthetic source diagnostic')
+      expect(source.details?.vaultCliErrorCode).toBe(code)
+      issues.push(source)
+    }
     let release!: () => void
     const pending = new Promise<void>((resolve) => { release = resolve })
     writes.write.mockReturnValue(pending)
     const policy = { environment: 'hosted' as const, surface: null, privateIssueCaptureEnabled: true }
     try {
       expect(recordAssistantRuntimeIssueInputsBestEffort({
-        issues: Array.from({ length: 10 }, (_, index) => issues[index % 2]!), policy, vault: 'synthetic-vault',
+        issues: Array.from({ length: 10 }, (_, index) => issues[index % issues.length]!), policy, vault: 'synthetic-vault',
       })).toBeUndefined()
       expect(writes.write).toHaveBeenCalledTimes(8)
       for (const [index, [input]] of writes.write.mock.calls.entries()) {
         const encoded = JSON.stringify(input.record)
         expect(encoded).not.toContain(sentinel)
         const parsed = parseAssistantRuntimeIssueRecord(JSON.parse(encoded))
-        expect(parsed.details).toEqual(issues[index % 2]!.details)
-        expect(parsed.operation).toBe(issues[index % 2]!.operation)
-        expect(parsed.errorCode).toBe(issues[index % 2]!.errorCode)
+        expect(parsed.details).toEqual(issues[index % issues.length]!.details)
+        expect(Object.keys(parsed.details ?? {}).length).toBeLessThanOrEqual(24)
+        const legacy = JSON.parse(encoded)
+        for (const key of ['commandAttribution', 'vaultCliCommand', 'vaultCliErrorAttribution', 'vaultCliErrorCode', 'vaultCliErrorStage',
+          'vaultCliValidationField', 'vaultCliValidationCode', 'vaultCliValidationMissing']) {
+          Reflect.deleteProperty(legacy.details, key)
+        }
+        expect(parseAssistantRuntimeIssueRecord(legacy).details).toEqual(legacy.details)
+        expect(parsed.operation).toBe(issues[index % issues.length]!.operation)
+        expect(parsed.errorCode).toBe(issues[index % issues.length]!.errorCode)
       }
     } finally { release() }
     await flushPendingAssistantRuntimeIssueWrites()
     writes.write.mockReset().mockRejectedValue(new Error(sentinel))
     recordAssistantRuntimeIssueInputsBestEffort({ issues, policy, vault: 'synthetic-vault' })
     await expect(flushPendingAssistantRuntimeIssueWrites()).resolves.toBeUndefined()
-    expect(writes.write).toHaveBeenCalledTimes(2)
+    expect(writes.write).toHaveBeenCalledTimes(issues.length)
     writes.write.mockClear()
     recordAssistantRuntimeIssueInputsBestEffort({ issues,
       policy: { ...policy, privateIssueCaptureEnabled: false }, vault: 'synthetic-vault' })
     expect(writes.write).not.toHaveBeenCalled()
   })
+})
+
+describe('finite shell attribution without private payloads', () => {
+  const privateValues = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', '/SYNTHETIC_PRIVATE_PATH']
+
+  it.each([
+    ['exercise_not_found', 'not_found'],
+    ['exercise_catalog_unavailable', 'unavailable'],
+    ['exercise_catalog_invalid', 'invalid_result'],
+    ['VALIDATION_ERROR', 'invalid_input'],
+  ])('distinguishes the existing exercise rejection %s', (code, category) => {
+    const issue = commandIssue(JSON.stringify(envelope(code, 'read')), 'vault-cli exercise show synthetic')
+    expect(issue?.details).toMatchObject({ commandAttribution: 'recognized', vaultCliCommand: 'exercise show',
+      vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: code, vaultCliErrorStage: 'read',
+      errorCategory: category, vaultCliErrorCategory: category })
+  })
+
+  it.each([
+    [undefined, 'missing_output'], ['', 'missing_output'], ['plain stderr', 'unstructured_output'],
+    ['null', 'unstructured_output'], ['[]', 'unstructured_output'],
+    ['false', 'unstructured_output'], ['0', 'unstructured_output'],
+    ['"SYNTHETIC_SECRET_TOKEN"', 'unstructured_output'],
+    ['{"cause":{"code":"not_found"}}', 'unstructured_output'],
+    [' '.repeat(16_385), 'oversized_output'], ['界'.repeat(6000), 'oversized_output'],
+    [JSON.stringify(envelope('SYNTHETIC_SECRET_TOKEN')), 'unknown_code'],
+    [JSON.stringify(envelope('exercise_not_found_extra')), 'unknown_code'],
+  ] as const)('explains why structured failure detail is unavailable (%#)', (output, reason) => {
+    const raw = commandEvent(output, 'vault-cli exercise list')
+    Object.assign(raw.params.item, { stderr: JSON.stringify(envelope('conflict')), stdout: JSON.stringify(envelope('conflict')) })
+    const issue = createCodexActionRuntimeIssueTracker().recordEvent(eventInput(raw))
+    expect(issue?.details).toMatchObject({ vaultCliCommand: 'exercise list', vaultCliErrorAttribution: reason })
+    expect(issue?.details).not.toHaveProperty('vaultCliErrorCode')
+    expect(issue?.details).not.toHaveProperty('vaultCliErrorStage')
+    for (const value of privateValues) expect(JSON.stringify(issue)).not.toContain(value)
+  })
+
+  it('drops unknown codes/stages and all messages, paths, nested errors and results', () => {
+    for (const code of [privateValues[0], `exercise_not_found:${privateValues[1]}`, `ENOENT ${privateValues[2]}`]) {
+      const body = { ...envelope(code!, privateValues[1]), message: privateValues.join(' '),
+        hint: privateValues.join(' '), cause: envelope('conflict', 'write'), fieldErrors: privateValues }
+      const issue = commandIssue(JSON.stringify(body), `vault-cli food search-labels '${privateValues.join(' ')}'`)
+      expect(issue?.details).toMatchObject({ commandAttribution: 'recognized', vaultCliCommand: 'food search-labels',
+        vaultCliErrorAttribution: 'unknown_code', vaultCliErrorCategory: 'unknown' })
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorCode')
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorStage')
+      for (const value of privateValues) expect(JSON.stringify(issue)).not.toContain(value)
+    }
+  })
+
+  it('does not attribute a pipeline, compound command, oversized command or missing command to a subcommand', () => {
+    const examples: Array<[string | null, string]> = [
+      ['vault-cli exercise list | vault-cli food search-labels synthetic', 'shell_syntax'],
+      ['vault-cli exercise list; vault-cli food search-labels synthetic', 'shell_syntax'],
+      [`vault-cli exercise list ${'x'.repeat(4096)}`, 'oversized_command'],
+      [null, 'missing_command'], [`${privateValues[2]} synthetic`, 'unrecognized_executable'],
+    ]
+    for (const [command, reason] of examples) {
+      const raw = commandEvent(JSON.stringify(envelope('exercise_not_found')))
+      if (command === null) Reflect.deleteProperty(raw.params.item, 'command')
+      else raw.params.item.command = command
+      const parse = vi.spyOn(JSON, 'parse')
+      try {
+        const tracker = createCodexActionRuntimeIssueTracker()
+        const issue = tracker.recordEvent(eventInput(raw))
+        expect(parse).not.toHaveBeenCalled()
+        expect(issue?.details).toMatchObject({ commandFamily: 'command', commandAttribution: reason, commandOrdinal: 1 })
+        expect(issue?.details).not.toHaveProperty('vaultCliCommand')
+        expect(issue?.details).not.toHaveProperty('vaultCliErrorCategory')
+        expect(tracker.recordEvent(eventInput(raw))).toBeNull()
+      } finally { parse.mockRestore() }
+    }
+  })
+})
+
+it('recognizes invalid_operation only on positively attributed meal remove-photo completion', () => {
+  for (const full of [false, true]) {
+    const error = envelope('invalid_operation')
+    const output = JSON.stringify(full ? { ok: false, error } : error)
+    const command = `vault-cli meal remove-photo ${sentinel} --format json`
+    const issue = commandIssue(output, command)
+    expect(issue?.details).toMatchObject({ vaultCliCommand: 'meal remove-photo',
+      vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: 'invalid_operation',
+      failureReason: 'nonzero_exit', exitCode: 1 })
+    expect(issue?.details?.vaultCliErrorStage).toBeUndefined()
+    expect(issue?.details?.vaultCliValidationField).toBeUndefined()
+    expect(JSON.stringify(issue)).not.toContain(sentinel)
+    expect(commandIssue(output, command, 0)).toBeNull()
+    for (const other of ['vault-cli meal edit synthetic', 'vault-cli meal add', 'vault-cli event show synthetic',
+      'vault-cli meal remove-photo synthetic && node synthetic.js']) {
+      expect(commandIssue(output, other)?.details?.vaultCliErrorCode).toBeUndefined()
+    }
+    for (const code of ['unknown', 'invalid_operation_extra', 'INVALID_OPERATION', 'invalid_operation ', sentinel]) {
+      const rejected = envelope(code)
+      expect(commandIssue(JSON.stringify(full ? { ok: false, error: rejected } : rejected), command)
+        ?.details?.vaultCliErrorCode).toBeUndefined()
+    }
+  }
 })

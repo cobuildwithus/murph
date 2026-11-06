@@ -15,11 +15,8 @@ categories:
   - metabolic-health
   - consumer-device
   - fasting
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 measurementContexts:
   - continuous_glucose_monitor
   - glucometer_if_clinician_directed

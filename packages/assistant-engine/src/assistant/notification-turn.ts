@@ -1,3 +1,6 @@
+import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
+import type { HostedGameChatBootstrapResult, HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
+import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
@@ -19,14 +22,19 @@ import type {
 import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import {
+  renderAssistantResponseCardText,
+  renderAssistantResponseCardTranscriptText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   stripAutomationAvailabilityConflictEvidenceForProvider,
 } from '@murphai/core'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
-import { normalizeAssistantExecutionContext } from './execution-context.js'
+import { normalizeAssistantExecutionContext, type AssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
@@ -70,6 +78,7 @@ import { readAssistantGroupRoomModelState } from './group-room-model.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
+  ExecutedAssistantProviderTurnResult,
   AssistantSessionResolutionFields,
   ResolvedAssistantSession,
 } from './service-contracts.js'
@@ -100,6 +109,7 @@ import {
   readAssistantOutboxIntentByDeliveryIdempotencyKey,
 } from './outbox.js'
 import { createAssistantBinding } from './bindings.js'
+import { prepareAssistantChannelWelcome } from './connected-channel-greeting.js'
 import {
   createAssistantSessionId,
   resolveAssistantStatePaths,
@@ -166,29 +176,21 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
-const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'creative-notification',
-  threadScope: 'isolated-thread',
-  toolProfile: 'provider-turn',
-}
-const ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'creative-notification',
-  threadScope: 'isolated-thread',
-  toolProfile: 'output-only-turn',
-}
-const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
+const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
   promptProfile: 'conversation',
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
+}
+const ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'game-host-turn',
 }
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
@@ -213,14 +215,16 @@ export type AssistantNotificationTurnPolicy =
 
 export type AssistantNotificationPromptProfile =
   | 'context-handoff'
-  | 'creative-response'
-  | 'creative-response-text'
   | 'operator-message'
 
 export type AssistantNotificationResponsePolicy =
+  | HostedGameGroupMissedCheckInPolicy
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
+  | { kind: 'require_game_recap'; eventId: string; gameId: string; pairFingerprint: string; loreAccess?: 'read' }
+  | { kind: 'require_game_rematch'; eventId: string; gameId: string; termsVersion: number }
+  | { kind: 'game_missed_check_in'; eventId: string; firstMissedDate: string; gameId: string; memberId: string; pairFingerprint: string }
 
 type AssistantModelBackedNotificationResponsePolicy = Exclude<
   AssistantNotificationResponsePolicy,
@@ -278,22 +282,31 @@ export interface AssistantNotificationInput
       | 'scheduledAutomationAuthority'
       | 'scheduledInvocationAuthority'
       | 'scheduledOccurrenceAt'
+      | 'deviceActivityOccurrence'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
       | 'turnTrigger'
       | 'workingDirectory'
     > {
+  /** Host-injected source-specific delivery; never accepted from model/wire input. */
+  gameChatBootstrap?: {
+    recover(): Promise<HostedGameChatBootstrapResult>
+    send(text: string): Promise<HostedGameChatBootstrapResult>
+  }
   deliveryDedupeToken?: string | null
   beforeToolExecution?: (() => Promise<void> | void) | null
   beforeDelivery?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
+  /** Trusted runtime welcome policy; never accepted from notification wire data. */
+  connectedChannelGreeting?: boolean
+  /** Trusted manual app capture; never accepted from notification wire data. */
+  manualMealEstimation?: true
   instructions: string
   onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
-  recurringReminderConversation?: boolean | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
   scheduledAutomationScheduleKind?: AutomationScheduleKind | null
@@ -319,6 +332,7 @@ export async function sendAssistantNotificationLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  const markFirstContactOnAccepted = input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
   const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
@@ -334,6 +348,11 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const bootstrap = await prepareAssistantGameBootstrap(input)
+      input = bootstrap.input
+      const welcome = await prepareAssistantChannelWelcome(input)
+      if (welcome.recovered) return welcome.recovered
+      input = welcome.input
       const recoveredOperatorMessage =
         await recoverQueuedAssistantOperatorMessage(input)
       if (recoveredOperatorMessage) {
@@ -359,6 +378,8 @@ export async function sendAssistantNotificationLocal(
               defaults,
               message: resolutionMessageInput,
             })
+      const bootstrapRecovery = await recoverAssistantGameBootstrapResult({ notification: input, recovery: bootstrap.recovery, session: resolved.session })
+      if (bootstrapRecovery) return bootstrapRecovery
       const preparedInput = await prepareAssistantCronNotificationInput(input, {
         sessionId: resolved.session.sessionId,
       })
@@ -435,12 +456,15 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedExecutionContext =
-        isAssistantNotificationScheduledOccurrence(input) &&
-        !isAssistantNotificationMaintenanceExactSkip(input)
-          ? executionContext?.hosted ?? null
-          : null
+      const hostedExecutionContext = resolveAssistantNotificationHostedExecutionContext(
+        input,
+        executionContext,
+      )
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
+      let savedGameRecapChatLine: string | null = null
+      const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
+      const groupMissedTurn = responsePolicy.kind === 'game_group_missed_check_in'
+      const textOnlyGameTurn = gameRecapTurn || groupMissedTurn
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
@@ -467,6 +491,12 @@ export async function sendAssistantNotificationLocal(
               groupEmailPendingDeliveryIntentId = intentId
               input.onGroupEmailPendingDeliveryIntentId?.(intentId)
             },
+            ...buildAssistantGameRecapToolContextFields({
+              enabled: gameRecapTurn,
+              recordSavedChatLine: (chatLine) => {
+                savedGameRecapChatLine = chatLine
+              },
+            }),
             route,
             session: resolved.session,
           })
@@ -474,23 +504,16 @@ export async function sendAssistantNotificationLocal(
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
-      const typingIndicator =
-        isAssistantNotificationMaintenanceExactSkip(input)
-          ? null
-          : startAssistantChannelTypingIndicator({
-              channelDependencies:
-                executionContext?.hosted?.channelTypingDependencies ?? null,
-              input: messageInput,
-              precedence: 'audience-first',
-              session: resolved.session,
-              sharedPlan,
-            })
+      let typingIndicator: ReturnType<typeof startAssistantNotificationTyping> = null
 
       try {
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
         let notificationProviderRequestStartedAt: string | undefined
-        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(input)
+        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(
+          input,
+          resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext, messageInput }),
+        )
         const notificationThreadScope =
           notificationTurnProfile?.threadScope ?? 'session-thread'
         const providerOutcome = await executeCodexTurnWithRecovery({
@@ -499,6 +522,7 @@ export async function sendAssistantNotificationLocal(
           // Adapt the runner's lean start event to the message-input hook
           // shape; notification turns accept no input items.
           onProviderRequestStarted: (event) => {
+            typingIndicator ??= startAssistantNotificationTyping({ input, messageInput, executionContext, resolved, sharedPlan })
             notificationProviderRequestStartedAt = event.startedAt
             return notificationProviderRequestStarted?.({
                   acceptedInputIds: [],
@@ -598,6 +622,7 @@ export async function sendAssistantNotificationLocal(
           resolveAssistantNotificationProviderResumeStateAction({
             input,
             providerResult,
+            threadScope: notificationThreadScope,
           })
         await recordAssistantUsageEvent({
           executionContext,
@@ -626,12 +651,7 @@ export async function sendAssistantNotificationLocal(
         }
         const providerAuthoredResponse =
           providerResult.providerAuthoredResponse ?? providerResult.response
-        const runtimeOwnsFinalPresentation =
-          providerResult.responseCard !== null &&
-            providerResult.responseCard !== undefined ||
-          providerResult.providerAuthoredResponse !== null &&
-            providerResult.providerAuthoredResponse !== undefined &&
-            providerResult.response !== providerResult.providerAuthoredResponse
+        const runtimeOwnsFinalPresentation = runtimeOwnsNotificationPresentation(providerResult, groupMissedTurn)
         const hasAppendOnlyRuntimePresentation =
           (providerResult.responseCard === null ||
             providerResult.responseCard === undefined) &&
@@ -640,7 +660,9 @@ export async function sendAssistantNotificationLocal(
           providerResult.response.startsWith(providerAuthoredResponse)
         let decision: AssistantNotificationDecision
         try {
-          decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
+          decision = resolveAssistantGameRecapDecision(
+            savedGameRecapChatLine,
+            () => providerResult.finalAction?.kind === 'none' && groupEmailSendResult
             ? {
                 kind: 'skip',
                 privateSummary: 'Group email effect completed.',
@@ -658,8 +680,11 @@ export async function sendAssistantNotificationLocal(
                   runtimeReplacesFinalPresentation:
                     runtimeOwnsFinalPresentation &&
                     !hasAppendOnlyRuntimePresentation,
-                  runtimeResponse: providerResult.response,
+                  runtimeResponse: providerResult.responseCard?.kind === 'sleep_summary'
+                    ? renderAssistantResponseCardText(providerResult.responseCard)
+                    : providerResult.response,
                 })
+          )
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
             throw createAssistantNotificationInvalidResponseError(
               'runtime_presentation_non_send_decision',
@@ -672,6 +697,7 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
+        assertAssistantGameRecapSaved(gameRecapTurn, savedGameRecapChatLine)
         if (isAssistantNotificationMaintenanceExactSkip(input)) {
           try {
             assertAssistantMaintenanceNotificationDecision({
@@ -710,6 +736,7 @@ export async function sendAssistantNotificationLocal(
             turnCreatedAt,
             turnId,
           })
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
           return withPostTurnDeliveryExpectations({
             decision,
             response: null,
@@ -717,26 +744,18 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
-        let responseMedia: readonly AssistantResponseMedia[]
-        try {
-          responseMedia = resolveAssistantNotificationResponseMedia({
-            notificationPromptProfile: input.notificationPromptProfile ?? null,
-            responseMedia: providerResult.responseMedia,
-          })
-        } catch (error) {
-          throw annotateAssistantNotificationError(
-            error,
-            providerValidationErrorDetails,
-          )
-        }
-        const { responseText, transcriptText } =
-          resolveAssistantNotificationPresentation({
+        const responseMedia = providerResult.responseMedia ?? []
+        const generatedPresentation = resolveAssistantNotificationPresentation({
             decision,
             hasAppendOnlyRuntimePresentation,
             providerAuthoredResponse,
             providerResult,
             runtimeOwnsFinalPresentation,
           })
+        const { responseText, transcriptText } = resolveAssistantGameRecapPresentation(
+          generatedPresentation,
+          savedGameRecapChatLine,
+        )
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -777,12 +796,13 @@ export async function sendAssistantNotificationLocal(
             turnId,
           })
           const deliveryOutcome = await deliverAssistantNotificationMessage({
+            gameChatBootstrap: input.gameChatBootstrap,
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
-            followUpRequest: providerResult.followUpRequest,
-            card: providerResult.responseCard ?? null,
-            media: responseMedia,
+            followUpRequest: textOnlyGameTurn ? null : providerResult.followUpRequest,
+            card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
+            media: textOnlyGameTurn ? [] : responseMedia,
             message: responseText,
             session: savedSession,
             sharedPlan,
@@ -796,7 +816,7 @@ export async function sendAssistantNotificationLocal(
             vault: input.vault,
           })
           if (
-            input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+            markFirstContactOnAccepted &&
             assistantNotificationDeliveryAcceptedFirstContact({
               deliveryOutcome,
               dispatchMode: input.deliveryDispatchMode,
@@ -812,12 +832,6 @@ export async function sendAssistantNotificationLocal(
               vault: input.vault,
             })
           }
-          await state.status.refreshSnapshot().catch((error) => {
-            warnAssistantBestEffortFailure({
-              error,
-              operation: 'status snapshot refresh',
-            })
-          })
 
           if (deliveryOutcome.kind === 'failed') {
             throw annotateAssistantNotificationError(
@@ -831,6 +845,7 @@ export async function sendAssistantNotificationLocal(
             )
           }
 
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
           return withPostTurnDeliveryExpectations({
             decision: {
               ...decision,
@@ -843,12 +858,13 @@ export async function sendAssistantNotificationLocal(
         }
 
         const deliveryOutcome = await deliverAssistantNotificationMessage({
+          gameChatBootstrap: input.gameChatBootstrap,
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
-          followUpRequest: providerResult.followUpRequest,
-          card: providerResult.responseCard ?? null,
-          media: responseMedia,
+          followUpRequest: textOnlyGameTurn ? null : providerResult.followUpRequest,
+          card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
+          media: textOnlyGameTurn ? [] : responseMedia,
           message: responseText,
           session: providerResult.session,
           sharedPlan,
@@ -910,7 +926,7 @@ export async function sendAssistantNotificationLocal(
         })()
         committedDeliveryOutcomeKind = committedDeliveryOutcome.kind
         if (
-          input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+          markFirstContactOnAccepted &&
           assistantNotificationDeliveryAcceptedFirstContact({
             deliveryOutcome: committedDeliveryOutcome,
             dispatchMode: input.deliveryDispatchMode,
@@ -926,13 +942,8 @@ export async function sendAssistantNotificationLocal(
             vault: input.vault,
           })
         }
-        await state.status.refreshSnapshot().catch((error) => {
-          warnAssistantBestEffortFailure({
-            error,
-            operation: 'status snapshot refresh',
-          })
-        })
 
+        acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
         return withPostTurnDeliveryExpectations({
           decision: {
             ...decision,
@@ -951,6 +962,23 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+function acceptCommittedNotificationProductFeedback(
+  executionContext: AssistantExecutionContext | null | undefined,
+  providerResult: Pick<ExecutedAssistantProviderTurnResult, 'productFeedbackCandidate'>,
+  context: Omit<Parameters<typeof resolveUsageOptimizerFeedbackScope>[0], 'executionContext'>,
+): void {
+  const candidate = providerResult.productFeedbackCandidate
+  const sink = executionContext?.hosted?.productFeedbackCandidateSink
+  if (!candidate || !sink) return
+  try {
+    const scope = resolveUsageOptimizerFeedbackScope({ ...context, executionContext })
+    if (scope) sink.acceptProductFeedbackCandidate(candidate, { committedUsageOptimizerScope: scope })
+    else sink.acceptProductFeedbackCandidate(candidate)
+  } catch {
+    // Optional feedback cannot affect a committed notification turn.
+  }
 }
 
 async function recoverQueuedAssistantOperatorMessage(
@@ -1018,6 +1046,16 @@ function resolveAssistantNotificationPresentation(input: {
   }
   runtimeOwnsFinalPresentation: boolean
 }): AssistantNotificationPresentation {
+  if (input.providerResult.responseCard?.kind === 'sleep_summary') {
+    return {
+      responseText: renderAssistantResponseCardText(
+        input.providerResult.responseCard, input.decision.text,
+      ),
+      transcriptText: renderAssistantResponseCardTranscriptText(
+        input.providerResult.responseCard, input.decision.text,
+      ),
+    }
+  }
   if (!input.runtimeOwnsFinalPresentation) {
     const responseText = normalizeRequiredText(
       input.decision.text,
@@ -1055,6 +1093,68 @@ function resolveAssistantNotificationPresentation(input: {
       input.providerResult.transcriptResponse ?? responseText,
       'runtime-owned notification transcript',
     ),
+  }
+}
+
+function resolveAssistantNotificationHostedExecutionContext(
+  input: AssistantNotificationInput,
+  executionContext: AssistantExecutionContext | null,
+): NonNullable<AssistantExecutionContext['hosted']> | null {
+  if (isAssistantNotificationMaintenanceExactSkip(input)) return null
+  if (
+    !isAssistantNotificationScheduledOccurrence(input) &&
+    executionContext?.hosted?.gameRecapScope == null
+    && executionContext?.hosted?.gameMissedCheckInScope == null
+  ) return null
+  return executionContext?.hosted ?? null
+}
+
+function buildAssistantGameRecapToolContextFields(input: {
+  enabled: boolean
+  recordSavedChatLine(chatLine: string): void
+}): {
+  recordSavedGameRecapChatLine?: (chatLine: string) => void
+} {
+  if (!input.enabled) return {}
+  return {
+    recordSavedGameRecapChatLine: input.recordSavedChatLine,
+  }
+}
+
+function resolveAssistantGameRecapDecision(
+  savedChatLine: string | null,
+  fallback: () => AssistantNotificationDecision,
+): AssistantNotificationDecision {
+  return savedChatLine === null
+    ? fallback()
+    : {
+        kind: 'send_message',
+        privateSummary: 'Saved game recap chat line.',
+        text: savedChatLine,
+      }
+}
+
+function assertAssistantGameRecapSaved(
+  gameRecapTurn: boolean,
+  savedChatLine: string | null,
+): void {
+  if (!gameRecapTurn || savedChatLine !== null) return
+  throw createAssistantNotificationInvalidResponseError(
+    'game_recap_not_saved',
+    'A game recap notification requires one accepted write_recap call before delivery.',
+  )
+}
+
+function resolveAssistantGameRecapPresentation(
+  generated: AssistantNotificationPresentation,
+  savedChatLine: string | null,
+): AssistantNotificationPresentation {
+  if (savedChatLine === null) return generated
+  // Validate presence without trimming the server's accepted delivery text.
+  normalizeRequiredText(savedChatLine, 'saved game recap chat line')
+  return {
+    responseText: savedChatLine,
+    transcriptText: savedChatLine,
   }
 }
 
@@ -1109,6 +1209,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   }
 
   const deliveryOutcome = await deliverAssistantNotificationMessage({
+    gameChatBootstrap: input.input.gameChatBootstrap,
     dedupeToken: input.input.deliveryDedupeToken ?? null,
     decisionSubject: null,
     input: input.messageInput,
@@ -1212,13 +1313,6 @@ async function sendAssistantExactTextNotificationLocal(input: {
       vault: input.input.vault,
     })
   }
-
-  await state.status.refreshSnapshot().catch((error) => {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'status snapshot refresh',
-    })
-  })
 
   return {
     decision: {
@@ -1441,12 +1535,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
   const providerBaseUrl = readAssistantNotificationUrlDetails(
     readAssistantNotificationStringProperty(providerOptions, 'baseUrl'),
   )
-  const gatewayOnlyProviders = summarizeAssistantNotificationGatewayOnlyProviders(
-    readAssistantNotificationStringListProperty(
-      providerOptions,
-      'gatewayOnlyProviders',
-    ),
-  )
 
   return {
     assistantNotificationChannel: channel,
@@ -1459,7 +1547,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.identityId) !== null,
     assistantNotificationLinqBaseUrlOrigin: linqBaseUrl.origin,
     assistantNotificationLinqBaseUrlPath: linqBaseUrl.path,
-    assistantNotificationGatewayOnlyProviders: gatewayOnlyProviders,
     assistantNotificationProvider: input.route.provider,
     assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
     assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
@@ -1475,18 +1562,6 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.workingDirectory) !== null,
     assistantNotificationHostedExecutionPresent: input.input.executionContext?.hosted != null,
   }
-}
-
-function summarizeAssistantNotificationGatewayOnlyProviders(
-  values: readonly string[] | null | undefined,
-): string | null {
-  const normalized = [...(values ?? [])]
-    .map((value) => normalizeNullableString(value)?.toLowerCase() ?? null)
-    .filter((value): value is string =>
-      value !== null && /^[a-z0-9][a-z0-9._-]*$/u.test(value),
-    )
-
-  return normalized.length > 0 ? Array.from(new Set(normalized)).join(',') : null
 }
 
 function readAssistantNotificationUrlDetails(value: string | null | undefined): {
@@ -1523,18 +1598,6 @@ function readAssistantNotificationStringProperty(
   return typeof candidate === 'string'
     ? normalizeNullableString(candidate)
     : null
-}
-
-function readAssistantNotificationStringListProperty(
-  value: object,
-  key: string,
-): readonly string[] | null {
-  const candidate: unknown = Reflect.get(value, key)
-  if (!Array.isArray(candidate)) {
-    return null
-  }
-
-  return candidate.filter((entry): entry is string => typeof entry === 'string')
 }
 
 function buildAssistantNotificationMessageInput(
@@ -1614,6 +1677,7 @@ function buildAssistantNotificationMessageInput(
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+    deviceActivityOccurrence: input.deviceActivityOccurrence,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
@@ -1631,6 +1695,7 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  gameChatBootstrap?: AssistantNotificationInput['gameChatBootstrap']
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   dedupeToken: string | null
@@ -1643,6 +1708,14 @@ async function deliverAssistantNotificationMessage(input: {
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
+  if (input.gameChatBootstrap) {
+    return deliverAssistantGameBootstrapMessage({
+      bootstrap: input.gameChatBootstrap, card: input.card, media: input.media,
+      followUpRequest: input.followUpRequest, message: input.message,
+      memberId: input.input.executionContext?.hosted?.memberId,
+      session: input.session, vault: input.input.vault,
+    })
+  }
   const state = createAssistantRuntimeStateService(input.input.vault)
   const deliveryFieldsBase = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
@@ -1747,15 +1820,12 @@ async function deliverAssistantNotificationMessage(input: {
 function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
+  threadScope: AssistantCodexTurnThreadScopeProfile['threadScope']
 }): AssistantProviderResumeStateAction {
   if (input.input.notificationPromptProfile === 'context-handoff') {
     return 'clear'
   }
-  if (
-    isAssistantNotificationMaintenanceExactSkip(input.input) ||
-    isAssistantOnboardingGoalCheckinNotification(input.input) ||
-    !isAssistantNotificationScheduledOccurrence(input.input)
-  ) {
+  if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }
 
@@ -1854,6 +1924,17 @@ async function resolveEmptyAssistantMaintenanceSummary(input: {
   ) {
     return null
   }
+  // Existing memory can need faithful compaction even
+  // without new conversation. Failed reads retain the ordinary tool path.
+  if (policy.maintenanceProfile === 'member-memory') {
+    try {
+      if ((await readMemoryDocument(input.input.vault)).records.length > 0) {
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
   // Existing room pages can need cleanup even without new conversation.
   // Unreadable pages and evidence retain the ordinary maintenance path.
   if (policy.maintenanceProfile === 'group-room-model') {
@@ -1885,6 +1966,7 @@ function isAssistantNotificationScheduledOccurrence(
 
 function resolveAssistantNotificationTurnProfile(
   input: AssistantNotificationInput,
+  usageOptimizerScope: UsageOptimizerFeedbackScope | null,
 ): Required<AssistantCodexTurnThreadScopeProfile> | null {
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
@@ -1892,17 +1974,23 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'context-handoff') {
     return ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE
   }
-  if (input.notificationPromptProfile === 'creative-response') {
-    return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
-  }
-  if (input.notificationPromptProfile === 'creative-response-text') {
-    return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
-  }
   if (input.notificationPromptProfile === 'operator-message') {
     return ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE
   }
-  if (isAssistantOnboardingGoalCheckinNotification(input)) {
-    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
+  if (input.manualMealEstimation) {
+    if (input.threadIsDirect !== true) {
+      throw new TypeError('Manual meal estimation requires a private direct route.')
+    }
+    return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
+  }
+  if (input.executionContext?.hosted?.gameRecapScope != null) {
+    return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
+  }
+  if (input.executionContext?.hosted?.gameMissedCheckInScope != null) {
+    return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
+  }
+  if (isAssistantOnboardingGoalCheckinNotification(input) || usageOptimizerScope !== null) {
+    return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
@@ -1934,51 +2022,19 @@ function assistantMaintenanceRawEventsIncludeMutation(
   rawEvents: readonly unknown[],
   profile: AssistantMaintenanceProfile,
 ): boolean {
-  return rawEvents.some((rawEvent) => {
-    const event = normalizeCodexEvent(rawEvent)
-    const dynamicMutationActions = profile === 'group-room-model'
-      ? ['delete', 'upsert'] as const
-      : profile === 'member-memory'
-        ? ['forget', 'update', 'upsert'] as const
-        : null
-    const dynamicMutationTool = profile === 'group-room-model'
-      ? 'group_room_model'
-      : profile === 'member-memory'
-        ? 'member_memory'
-        : null
-    if (
-      dynamicMutationActions &&
-      dynamicMutationTool &&
-      assistantMaintenanceDynamicMutationCompleted({
-        actions: dynamicMutationActions,
-        event,
-        toolName: dynamicMutationTool,
-      })
-    ) {
-      return true
-    }
-    return (
-      event.kind === 'status_item' &&
-      event.itemType === 'commandExecution' &&
-      event.itemState === 'completed' &&
-      event.exitCode === 0 &&
-      isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
-    )
-  })
-}
-
-function isAssistantMaintenanceMutationCommand(
-  commandLabel: string | null,
-  profile: AssistantMaintenanceProfile,
-): boolean {
-  const normalized = normalizeNullableString(commandLabel)
-  if (normalized === null) {
-    return false
-  }
-  if (profile !== 'habitat-voice') {
-    return false
-  }
-  return /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
+  const actions = profile === 'group-room-model'
+    ? ['delete', 'upsert'] as const
+    : ['forget', 'update', 'upsert'] as const
+  const toolName = profile === 'group-room-model'
+    ? 'group_room_model'
+    : 'member_memory'
+  return rawEvents.some((rawEvent) =>
+    assistantMaintenanceDynamicMutationCompleted({
+      actions,
+      event: normalizeCodexEvent(rawEvent),
+      toolName,
+    }),
+  )
 }
 
 function assistantMaintenanceDynamicMutationCompleted(input: {
@@ -2057,10 +2113,15 @@ function resolveAssistantNotificationFirstContactDocIds(input: {
   })
 }
 
+function runtimeOwnsNotificationPresentation(result: ExecutedAssistantProviderTurnResult, groupMissedTurn: boolean): boolean {
+  if (groupMissedTurn) return false
+  return result.responseCard != null || result.providerAuthoredResponse != null && result.response !== result.providerAuthoredResponse
+}
+
 function assertAssistantNotificationSkipAllowed(
   policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
-  if (policy.kind === 'allow_send_or_skip') {
+  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in') {
     return
   }
 
@@ -2141,7 +2202,7 @@ export function parseAssistantNotificationDecision(
   }
 }
 
-function resolveAssistantNotificationDecision(input: {
+export function resolveAssistantNotificationDecision(input: {
   providerAuthoredResponse: string
   runtimeReplacesFinalPresentation: boolean
   runtimeResponse: string
@@ -2190,23 +2251,6 @@ function normalizeRequiredContextHandoffText(value: string): string {
   }
 }
 
-function resolveAssistantNotificationResponseMedia(input: {
-  notificationPromptProfile: AssistantNotificationPromptProfile | null
-  responseMedia: readonly AssistantResponseMedia[] | null | undefined
-}): readonly AssistantResponseMedia[] {
-  if (input.notificationPromptProfile !== 'creative-response') {
-    return input.responseMedia ?? []
-  }
-  const media = normalizeAssistantResponseMediaList(input.responseMedia)
-  if (media.length !== 1 || media[0]?.kind !== 'voice_memo') {
-    throw createAssistantNotificationInvalidResponseError(
-      'creative_response_media_invalid',
-      'A song notification requires exactly one generated song attachment.',
-    )
-  }
-  return media
-}
-
 function createAssistantNotificationInvalidResponseError(
   reason: HostedAssistantNotificationValidationFailureReason,
   message: string,
@@ -2234,4 +2278,19 @@ function tryExtractAssistantNotificationDecisionObject(
   }
 
   return value.slice(firstBrace, lastBrace + 1).trim()
+}
+
+function startAssistantNotificationTyping(input: {
+  input: AssistantNotificationInput
+  messageInput: AssistantMessageInput
+  executionContext: AssistantExecutionContext | null | undefined
+  resolved: ResolvedAssistantSession
+  sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
+}) {
+  if (input.input.gameChatBootstrap || isAssistantNotificationMaintenanceExactSkip(input.input)) return null
+  return startAssistantChannelTypingIndicator({
+    channelDependencies: input.executionContext?.hosted?.channelTypingDependencies ?? null,
+    input: input.messageInput, precedence: 'audience-first',
+    session: input.resolved.session, sharedPlan: input.sharedPlan,
+  })
 }

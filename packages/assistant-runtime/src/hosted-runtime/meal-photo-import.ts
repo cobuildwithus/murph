@@ -26,6 +26,12 @@ import type { HostedRuntimeEffectsPort } from "./platform.ts";
 const MEAL_PHOTO_EXTERNAL_SYSTEM = "meal-photo-capture";
 const MEAL_PHOTO_EXTERNAL_RESOURCE_TYPE = "photo";
 
+export function isHostedManualMealPhotoWake(
+  wake: HostedExecutionMealPhotoCapturedWake,
+): boolean {
+  return wake.eventId === `meal-photo:manual:${wake.mealPhoto.captureId}`;
+}
+
 export async function importHostedMealPhotoCapturedMailboxItem(input: {
   effectsPort: HostedRuntimeEffectsPort;
   item: HostedMailboxResolvedImportItem;
@@ -114,6 +120,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
   try {
     await writeFile(temporaryPhotoPath, bytes);
     await addMeal({
+      uploadId: input.wake.mealPhoto.uploadId,
       eventId: deterministicContractId(
         ID_PREFIXES.event,
         `meal-photo-capture:event:${input.wake.mealPhoto.captureId}`,
@@ -125,6 +132,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
       ),
       occurredAt: input.wake.mealPhoto.capturedAt,
       photoPath: temporaryPhotoPath,
+      photoCapturedAt: input.wake.mealPhoto.capturedAt,
       source: "device",
       vaultRoot: input.vaultRoot,
     });

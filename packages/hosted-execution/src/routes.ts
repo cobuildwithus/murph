@@ -1,6 +1,13 @@
+// Every Web route under this prefix is machine ingress protected by the scheduled firewall check.
+export const HOSTED_MACHINE_ROUTE_PREFIX = "/api/internal/";
+// Public Web data routes the Cloudflare runner also proxies hosted tool calls to.
+export const HOSTED_RUNTIME_DATA_API_PATHS: readonly string[] = ["/api/foods", "/api/supplements"];
+
+export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
 
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
+export const HOSTED_RUNTIME_VOICE_INPUT_PATH = "/api/internal/hosted-mailbox/voice-input";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH =
@@ -107,10 +114,15 @@ export const HOSTED_RUNTIME_CRYPTO_ROOT_PATH =
   "/api/internal/hosted-runtime/crypto-context/root";
 export const HOSTED_RUNTIME_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
+export const HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH =
+  "/api/internal/hosted-execution/usage/feedback";
 export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
 export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
+export const HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH =
+  "/api/internal/hosted-execution/usage/diagnostics";
+
 export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
 export const HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH =
@@ -129,8 +141,6 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH =
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES = 32 * 1_024;
 export const HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH =
   "/api/internal/hosted-execution/operator-tasks/runtime";
-export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
-  "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD =
@@ -171,6 +181,7 @@ export type HostedRuntimeLinqDeliveryPosture =
   typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES[number];
 
 export const HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES = [
+  "automation_engagement_paused",
   "operator_disabled",
   "line_flagged",
   "line_critical",
@@ -187,6 +198,8 @@ export const HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH =
   "/api/internal/hosted-runtime/email-egress/recipient";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/authority";
+export const HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH =
+  "/api/internal/hosted-runtime/member-notification-route";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

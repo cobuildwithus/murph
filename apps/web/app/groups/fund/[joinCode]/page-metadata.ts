@@ -24,8 +24,7 @@ export async function generateMetadata({
   return {
     ...createMurphPageMetadata({
       title: "Sponsor Murph in this chat",
-      description:
-        "Keep the group talking and make the thank-you unnecessarily entertaining.",
+      description: "Keep Murph in the group chat.",
       openGraph: { images: [ogImage] },
       twitter: { images: [ogImage] },
     }),

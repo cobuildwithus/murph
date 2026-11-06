@@ -1,3 +1,5 @@
+import { sleepSummaryResponseCardV1Schema, type SleepSummaryResponseCardV1 } from "./sleep-summary-card.ts";
+
 import * as z from "./zod-runtime.ts";
 
 import {
@@ -71,6 +73,23 @@ export type NutritionCardMetric = {
   mealCount: number;
 };
 
+/** Frozen presentation status for a metric and its accepted positive target. */
+export function getNutritionCardGoalStatus(
+  metric: NutritionCardMetric,
+  cardMealCount: number,
+  target: number,
+): NutritionCardGoalStatus {
+  if (metric.total === null || metric.mealCount < cardMealCount) {
+    return "unavailable";
+  }
+  const ratio = metric.total / target;
+  if (ratio < 0.6) return "far_under_target";
+  if (ratio < 0.9) return "under_target";
+  if (ratio <= 1.1) return "on_target";
+  if (ratio <= 1.4) return "over_target";
+  return "far_over_target";
+}
+
 export type NutritionCardGoalSnapshot = {
   target: number;
   status: NutritionCardGoalStatus;
@@ -118,7 +137,8 @@ export type AssistantResponseCard =
   | CompactTableResponseCardV1
   | ExerciseRoutineResponseCardV1
   | TelegramRichContentResponseCardV1
-  | ChallengeStandingsResponseCardV1;
+  | ChallengeStandingsResponseCardV1
+  | SleepSummaryResponseCardV1;
 
 export function assistantResponseCardMatchesConversationAudience(input: {
   card: AssistantResponseCard;
@@ -376,22 +396,38 @@ export const dailyNutritionResponseCardV2Schema: z.ZodType<
   addDailyNutritionResponseCardV2Issues,
 );
 
-/** New tool calls require all goals; the nullable V2 schema remains replay-safe. */
+/** Fresh cards are totals-only or goal-aware, never a partly authored goal bundle.
+ * The permissive nullable V2 reader remains unchanged for historical replay.
+ */
 export const dailyNutritionResponseCardV2AuthoringSchema: z.ZodType<
   DailyNutritionResponseCardV2
 > = dailyNutritionResponseCardV2BaseSchema
   .extend({
-    goals: z
-      .object({
+    goals: z.union([
+      z.object({
+        calories: z.null(),
+        proteinGrams: z.null(),
+        carbsGrams: z.null(),
+        fatGrams: z.null(),
+        fiberGrams: z.null(),
+      }).strict(),
+      z.object({
         calories: calorieGoalSnapshotSchema,
         proteinGrams: macroGoalSnapshotSchema,
         carbsGrams: macroGoalSnapshotSchema,
         fatGrams: macroGoalSnapshotSchema,
         fiberGrams: macroGoalSnapshotSchema,
-      })
-      .strict(),
+      }).strict(),
+    ]),
   })
   .superRefine(addDailyNutritionResponseCardV2Issues);
+
+export function isTotalsOnlyDailyNutritionResponseCard(
+  card: AssistantResponseCard,
+): boolean {
+  return card.kind === "daily_nutrition" && "version" in card &&
+    card.version === 2 && Object.values(card.goals).every((goal) => goal === null);
+}
 
 export const dailyNutritionResponseCardSchema: z.ZodType<
   DailyNutritionResponseCard
@@ -407,6 +443,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
     exerciseRoutineResponseCardV1Schema,
     telegramRichContentResponseCardV1Schema,
     challengeStandingsResponseCardV1Schema,
+    sleepSummaryResponseCardV1Schema,
   ]);
 
 function isValidLocalCalendarDate(value: string): boolean {
@@ -439,4 +476,9 @@ function isValidLocalCalendarDate(value: string): boolean {
 
 function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+/** Legacy persisted selections are read through; execution and writes stay strict. */
+export function normalizeStoredAssistantModel(model: string | null): string | null {
+  return model === "gpt-5.6-sol" ? "gpt-6.1-sol" : model;
 }

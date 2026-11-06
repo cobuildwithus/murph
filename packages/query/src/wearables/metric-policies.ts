@@ -1,13 +1,25 @@
+import { normalizeWearableOriginSourceSlug } from "./origin.ts";
+import { isActivitySummaryResource } from "./provider-policy.ts";
 import { compareIsoDesc, normalizeLowercaseString } from "./shared.ts";
 import type { WearableMetricCandidate, WearableMetricKey } from "./types.ts";
 
 const WHOOP_DAY_STRAIN_FRAGMENT_PENALTY = -8;
+// Outranks every other score, including the Junction duplicate penalty.
+const PASSED_OVER_STEPS_PENALTY = -10_000;
+const WORN_SOURCE_TYPES: ReadonlySet<string> = new Set(["ring", "watch"]);
+const MERGED_SOURCE_TYPES: ReadonlySet<string> = new Set(["multiple-sources"]);
+const MINIMUM_WORN_SHARE_OF_MERGED_STEPS = 0.5;
 
 export function scoreMetricPolicy(
   metric: WearableMetricKey,
   candidate: WearableMetricCandidate,
   candidates: readonly WearableMetricCandidate[],
 ): number {
+  if (metric === "steps") {
+    const dailyTotal = selectDailyStepsTotal(candidates);
+    return !dailyTotal || dailyTotal.candidateId === candidate.candidateId ? 0 : PASSED_OVER_STEPS_PENALTY;
+  }
+
   if (!isWhoopDayStrainCycleCandidate(metric, candidate)) {
     return 0;
   }
@@ -23,26 +35,24 @@ export function scoreMetricPolicy(
     : WHOOP_DAY_STRAIN_FRAGMENT_PENALTY;
 }
 
-export function buildMetricPolicySelectionReason(
-  metric: WearableMetricKey,
-  selection: WearableMetricCandidate,
-  candidates: readonly WearableMetricCandidate[],
-): string | null {
-  const sameDayCandidates = collectSameDayWhoopDayStrainCycleCandidates(metric, selection, candidates);
-  if (sameDayCandidates.length < 2) {
+/**
+ * A merged total combines every app writing to a health store, so it can count
+ * a device twice or miss a walk without the phone. A worn device's own daily
+ * total is the day's count, unless it is so far below the merged total that the
+ * device came off. Days without both keep the standard ranking.
+ */
+function selectDailyStepsTotal(candidates: readonly WearableMetricCandidate[]): WearableMetricCandidate | null {
+  const dailyTotals = candidates.filter((candidate) => isActivitySummaryResource(candidate.externalRef?.resourceType));
+  const highest = (sourceTypes: ReadonlySet<string>) => dailyTotals
+    .filter((candidate) => sourceTypes.has(normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceType) ?? ""))
+    .sort((left, right) => right.value - left.value)[0];
+  const worn = highest(WORN_SOURCE_TYPES);
+  const merged = highest(MERGED_SOURCE_TYPES);
+  if (!worn || worn.value <= 0 || !merged) {
     return null;
   }
 
-  const representative = selectWhoopDayStrainCycleRepresentative(sameDayCandidates);
-  if (representative?.candidateId !== selection.candidateId) {
-    return null;
-  }
-
-  return [
-    "Applied WHOOP day-strain cycle policy: selected the highest same-day WHOOP cycle strain",
-    `from ${sameDayCandidates.length} cycle candidates`,
-    "so a newer lower cycle fragment cannot override a higher accumulated strain candidate.",
-  ].join(" ");
+  return worn.value >= merged.value * MINIMUM_WORN_SHARE_OF_MERGED_STEPS ? worn : merged;
 }
 
 function collectSameDayWhoopDayStrainCycleCandidates(

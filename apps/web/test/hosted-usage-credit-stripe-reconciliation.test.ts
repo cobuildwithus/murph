@@ -46,7 +46,8 @@ vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
     mocks.reconcileRefundNetReversal,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-credit-grant-capacity", () => ({
+vi.mock("@/src/lib/hosted-execution/usage-credit-grant-capacity", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/lib/hosted-execution/usage-credit-grant-capacity")>(),
   readHostedUsageCreditGrantCapacityTx: mocks.readGrantCapacity,
 }));
 

@@ -6,11 +6,13 @@ import {
   assistantBindingDeliverySchema,
   assistantChannelDeliverySchema,
   assistantProviderMessageEffectSchema,
-  type AssistantBindingDelivery,
-  type AssistantBindingDeliveryKind,
-  type AssistantProviderMessageEffect,
-  type AssistantResponseMedia,
-  type AssistantResponseMediaKind,
+} from '@murphai/operator-config/assistant-delivery-contracts'
+import type {
+  AssistantBindingDelivery,
+  AssistantBindingDeliveryKind,
+  AssistantProviderMessageEffect,
+  AssistantResponseMedia,
+  AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardSchema,

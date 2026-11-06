@@ -83,12 +83,11 @@ const BASE_USAGE_RECORD = {
   },
   rawUsageJsonHash: "sha256:hosted-usage-hash",
   reasoningTokens: 8,
-  requestedModel: "gpt-5.6-terra",
+  requestedModel: "gpt-6.1-sol",
   routeId: "primary",
   schema: "murph.assistant-usage.v1",
-  servedModel: "gpt-5.6-terra",
+  servedModel: "gpt-6.1-sol",
   sessionId: "asst_123",
-  stripeMeterSource: "murph",
   totalTokens: 165,
   turnId: "turn_123",
   usageId: "turn_123.attempt-1",
@@ -854,10 +853,6 @@ describe("recordHostedAiUsageRecords", () => {
           total_tokens: 165,
         },
         rawUsageJsonHash: "sha256:hosted-usage-hash",
-        stripeMeterError:
-          "Hosted AI usage is recorded locally; Stripe usage metering is not configured.",
-        stripeMeterSource: "murph",
-        stripeMeterStatus: "skipped",
         tokenPricingBasis: "standard",
         totalTokens: 165,
         usageExtractionSourcePath: "params.usage",
@@ -874,21 +869,7 @@ describe("recordHostedAiUsageRecords", () => {
     expect(upsertCall?.create).not.toHaveProperty("providerMetadataJson");
     expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("prompt");
     expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("authorization");
-    expect(prisma.hostedAiUsage.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "turn_123.attempt-1",
-        stripeMeterSource: "murph",
-        stripeMeterStatus: {
-          in: ["pending", "processing"],
-        },
-      },
-      data: {
-        stripeMeterError:
-          "Hosted AI usage is recorded locally; Stripe usage metering is not configured.",
-        stripeMeterNextAttemptAt: null,
-        stripeMeterStatus: "skipped",
-      },
-    });
+
   });
 
   it("does not read billing refs while recording local usage", async () => {
@@ -910,12 +891,7 @@ describe("recordHostedAiUsageRecords", () => {
 
     expect(findUnique).not.toHaveBeenCalled();
     expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        stripeMeterError:
-          "Hosted AI usage is recorded locally; Stripe usage metering is not configured.",
-        stripeMeterSource: "murph",
-        stripeMeterStatus: "skipped",
-      }),
+      create: expect.objectContaining({ id: "turn_123.attempt-1", memberId: "member_123" }),
     }));
   });
 
@@ -1279,25 +1255,6 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("rejects an existing usage row when the stored Stripe meter source differs", async () => {
-    const prisma = makeUsagePrisma(
-      vi.fn(async (args: { create: Record<string, unknown> }) => ({
-        ...args.create,
-        stripeMeterSource: "external-meter",
-      })),
-    );
-
-    await expect(
-      recordHostedAiUsageRecords({
-        prisma: prisma as never,
-        trustedUserId: "member_123",
-        usage: [BASE_USAGE_RECORD],
-      }),
-    ).rejects.toThrow(
-      "Hosted AI usage already exists with different immutable fields: stripeMeterSource.",
-    );
-  });
-
   it("rejects an existing usage row when the stored token pricing basis differs", async () => {
     const prisma = makeUsagePrisma(
       vi.fn(async (args: { create: Record<string, unknown> }) => ({
@@ -1348,31 +1305,6 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("rejects unsupported meter source payloads", async () => {
-    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const findUnique = vi.fn(async () => {
-      throw new Error("billing ref lookup should not run for usage imports");
-    });
-    const prisma = makeUsagePrisma(hostedAiUsageUpsert, findUnique);
-
-    await expect(
-      recordHostedAiUsageRecords({
-        prisma: prisma as never,
-        trustedUserId: "member_123",
-        usage: [
-          {
-            ...BASE_USAGE_RECORD,
-            stripeMeterSource: "external-meter",
-          },
-        ],
-      }),
-    ).rejects.toThrow(
-      "Hosted AI usage recording contains an invalid usage record.",
-    );
-
-    expect(findUnique).not.toHaveBeenCalled();
-    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
-  });
 });
 
 function makeUsagePrisma(

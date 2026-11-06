@@ -189,27 +189,6 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   });
 }
 
-export function buildHostedRunnerIdleCheckpointRuntimeConfig(input: {
-  configSource?: Readonly<Record<string, string | undefined>>;
-  forwardedEnv: Readonly<Record<string, string>>;
-  rewritePlatformUrlsForContainer?: boolean;
-}): HostedAssistantRuntimeConfig {
-  const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerContainerPlatformEnv(configSource, {
-    rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
-  });
-
-  return buildHostedRunnerJobRuntime({
-    commitTimeoutMs: readHostedRuntimeCommitTimeoutConfigValue(
-      configSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
-    ),
-    configSource,
-    forwardedEnv: input.forwardedEnv,
-    platformEnv,
-    runnerSecrets: {},
-  });
-}
-
 function readHostedRunnerParserToolchain(
   parserToolchain:
     | HostedAssistantRuntimeParserToolchainConfig

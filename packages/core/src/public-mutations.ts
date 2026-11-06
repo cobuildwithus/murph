@@ -112,6 +112,8 @@ export interface CanonicalTextWriteInput {
   content: string;
   overwrite?: boolean;
   allowExistingMatch?: boolean;
+  /** Explicit retention/repair only; raw replacement requires an exact preimage. */
+  rawReplacement?: { sha256: string; byteLength: number };
 }
 
 export interface CanonicalJsonlAppendInput<TRecord extends object = Record<string, unknown>> {
@@ -277,15 +279,6 @@ export async function appendMetricSample(input: {
   });
 }
 
-export async function appendMetricSamples(input: {
-  vaultRoot: string;
-  records: readonly MetricSampleRecord[];
-}): Promise<MetricSampleRecord[]> {
-  const output: MetricSampleRecord[] = [];
-  for (const record of input.records) output.push(await appendMetricSample({ vaultRoot: input.vaultRoot, record }));
-  return output;
-}
-
 export async function applyCanonicalWriteBatch(
   input: ApplyCanonicalWriteBatchInput,
 ): Promise<ApplyCanonicalWriteBatchResult> {
@@ -352,6 +345,10 @@ export async function applyCanonicalWriteBatch(
         await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
           overwrite: textWrite.overwrite,
           allowExistingMatch: textWrite.allowExistingMatch,
+          ...(textWrite.rawReplacement ? {
+            allowRaw: true,
+            expectedTargetReceipt: textWrite.rawReplacement,
+          } : {}),
         });
       }
 

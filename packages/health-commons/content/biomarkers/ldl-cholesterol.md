@@ -18,25 +18,17 @@ categories:
   - "lab-marker"
   - "lipids"
 relations:
+  - type: cites
+    target: source_artifact:pmid-18774613
+  - type: cites
+    target: source_artifact:pmid-22113870
+  - type: cites
+    target: source_artifact:pmid-21975919
+  - type: cites
+    target: source_artifact:pmid-38317191
+  - type: cites
+    target: source_artifact:dailymed-lovaza-label-2026-04-25
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-18774613"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-22113870"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-21975919"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-38317191"
-  -
-    type: "cites"
-    target: "source_artifact:dailymed-lovaza-label-2026-04-25"
 unit: "mg/dL"
 measurementContexts:
   - "fasting_lipid_panel"
@@ -86,7 +78,6 @@ claims:
 
 ## Role in this protocol
 
-LDL Cholesterol is used as a secondary endpoint for `protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation`.
 
 ## Interpretation
 

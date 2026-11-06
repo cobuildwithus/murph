@@ -149,14 +149,6 @@ function createHealthEntityCrudConfig(
   };
 }
 
-export function registerHealthEntityCrudGroup(
-  cli: Cli.Cli,
-  services: VaultServices,
-  commandName: string,
-) {
-  cli.command(createHealthEntityCrudGroup(services, commandName));
-}
-
 export function createHealthEntityCrudGroup(
   services: VaultServices,
   commandName: string,

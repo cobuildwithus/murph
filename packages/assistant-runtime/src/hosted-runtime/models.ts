@@ -174,17 +174,6 @@ export type HostedSystemMailboxPostCheckpointRecord =
       retainedWake?: HostedExecutionDeviceSyncWake;
       records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
     }
-  | {
-      audioKey: string;
-      kind: "environment-voice.audio-delete";
-      nextWakeAt?: null;
-    }
-  | {
-      attemptId: string;
-      kind: "codex-auth.updated";
-      nextWakeAt?: null;
-      phase: "connected" | "disconnected";
-    }
     | {
       kind: "member-action.outcome-recorded";
       nextWakeAt?: null;
@@ -206,7 +195,6 @@ export type HostedMailboxLane =
   | "conversation-message"
   | "clinical-records"
   | "device-sync"
-  | "environment-voice"
   | "member-activated"
   | "member-channels-updated"
   | "member-preferences-updated"
@@ -228,6 +216,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationOutboxOnlyNextWakeAt?: string | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
+  assistantAutomationCommittedUsageAuditKeys?: readonly string[] | null;
   assistantAutomationProductFeedbackCandidates?:
     readonly HostedRuntimeProductFeedbackRecord[] | null;
   assistantAutomationProgressed?: boolean | null;
@@ -263,19 +252,11 @@ export type HostedAssistantAutomationLaneMetrics = Omit<
   | "stagedDirtyAcks"
 >;
 
-export interface HostedWorkspaceArtifactMaterializationResult {
-  materializedArtifactPaths: ReadonlySet<string>;
-  missingArtifactPaths: ReadonlySet<string>;
-}
-
-export interface HostedWorkspaceArtifactMaterializationOptions {
-  maxFileBytes?: number;
-}
-
-export type HostedWorkspaceArtifactMaterializer = (
-  relativePaths: readonly string[],
-  options?: HostedWorkspaceArtifactMaterializationOptions,
-) => Promise<HostedWorkspaceArtifactMaterializationResult>;
+export type {
+  AssistantWorkspaceArtifactMaterializationResult as HostedWorkspaceArtifactMaterializationResult,
+  AssistantWorkspaceArtifactMaterializationOptions as HostedWorkspaceArtifactMaterializationOptions,
+  AssistantWorkspaceArtifactMaterializer as HostedWorkspaceArtifactMaterializer,
+} from "@murphai/assistant-engine";
 
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;

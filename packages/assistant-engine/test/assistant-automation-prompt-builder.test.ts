@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.ts'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -433,6 +434,38 @@ function createRichUserMessageContent(
 }
 
 describe('buildAssistantAutoReplyPrompt', () => {
+  it.each(['sms', 'rcs', 'email'])('preserves batched %s source refs in both prompt paths without native targets', async (transport) => {
+    const inputs = ['1', '2'].map((digit, index) => createPromptInput({
+      inputId: `ain_${digit.repeat(32)}`,
+      captureOverrides: {
+        source: transport === 'email' ? 'email' : 'linq',
+        text: index === 0 ? 'Set Humor to 10.' : 'Use sentence case.',
+      },
+      replyTarget: null,
+      sourceMetadata: transport === 'email' ? null : {
+        kind: 'linq', partCount: 1, reactionEligible: false,
+        replyToMessageId: null, service: transport,
+      },
+    }))
+    const prepared = await prepareAssistantAutoReplyInput(inputs, '/tmp/assistant-engine-prompt-builder-vault')
+    for (const result of [buildAssistantAutoReplyPrompt(inputs), prepared]) {
+      expect(result.kind).toBe('ready')
+      if (result.kind !== 'ready') throw new Error('Expected a ready preference prompt.')
+      for (const [index, input] of inputs.entries()) {
+        expect(result.prompt).toContain(`Input ${index + 1}:\nMessage ref: ${input.inputId}\n\nMessage text:\n${input.text}`)
+      }
+    }
+  })
+
+  it.each(['invalid', 'ain_short', `ain_${'g'.repeat(32)}`])('omits malformed source identity %s', (inputId) => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({ inputId, captureOverrides: { text: 'Use sentence case.' } }),
+    ])
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') throw new Error('Expected a ready prompt.')
+    expect(result.prompt).not.toContain('Message ref:')
+  })
+
   it('renders each accepted Telegram message ref once without exposing provider ids', () => {
     const firstInputId = 'ain_11111111111111111111111111111111'
     const secondInputId = 'ain_22222222222222222222222222222222'
@@ -489,11 +522,11 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (malformed.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(malformed.prompt).not.toContain('Message ref:')
+    expect(malformed.prompt).toContain('Message ref: ain_44444444444444444444444444444444')
     expect(malformed.prompt).not.toContain('not-numeric')
   })
 
-  it('renders one Linq message ref only when the accepted input has a matching target', () => {
+  it('renders source identity independently of Linq native target eligibility', () => {
     const inputId = 'ain_33333333333333333333333333333333'
     const providerMessageId = 'linq-provider-message-1'
     const result = buildAssistantAutoReplyPrompt([
@@ -542,7 +575,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (mismatched.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(mismatched.prompt).not.toContain('Message ref:')
+    expect(mismatched.prompt).toContain(`Message ref: ${inputId}`)
     expect(mismatched.prompt).not.toContain(providerMessageId)
 
     const ineligibleService = buildAssistantAutoReplyPrompt([
@@ -571,7 +604,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (ineligibleService.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(ineligibleService.prompt).not.toContain('Message ref:')
+    expect(ineligibleService.prompt).toContain(`Message ref: ${inputId}`)
 
     const groupWithoutExternalThreadAuthority = buildAssistantAutoReplyPrompt([
       createPromptInput({
@@ -599,8 +632,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (groupWithoutExternalThreadAuthority.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(groupWithoutExternalThreadAuthority.prompt).not.toContain(
-      'Message ref:',
+    expect(groupWithoutExternalThreadAuthority.prompt).toContain(
+      `Message ref: ${inputId}`,
     )
     expect(groupWithoutExternalThreadAuthority.prompt).not.toContain(
       providerMessageId,
@@ -751,7 +784,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Message text:\nmorning crew')
   })
 
-  it('preserves legacy direct Linq speaker presentation and ignores group-only labels', () => {
+  it.each(['+12125550123', 'member@example.test', null])('omits private Linq sender from ordinary prompt: %s', (senderHandle) => {
+    const result = buildAssistantAutoReplyPrompt([createPromptInput({
+      captureOverrides: { source: 'linq', text: 'Call me tomorrow.', threadIsDirect: true },
+      sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false,
+        senderHandle, partCount: 1, reactionEligible: false, replyToMessageId: null, service: 'iMessage' },
+    })])
+    if (result.kind !== 'ready') throw new Error('Expected private prompt.')
+    expect(result.prompt).not.toContain('Sender:')
+    if (senderHandle) expect(result.prompt).not.toContain(senderHandle)
+  })
+
+  it('omits legacy direct Linq sender presentation and group-only labels', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: { text: 'direct hello', threadIsDirect: true },
@@ -776,9 +820,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain(
-      'Sender: +15551110000\n\nSpeaker name: \"Legacy Direct Name\"',
-    )
+    expect(result.prompt).not.toContain('Sender:')
+    expect(result.prompt).not.toContain('Legacy Direct Name')
     expect(result.prompt).not.toContain('Must Not Render')
     expect(result.prompt).not.toContain('Profile name:')
     expect(result.prompt).not.toContain(
@@ -2018,7 +2061,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       }
       return {
         materializedArtifactPaths: new Set(paths.map((item) => `vault:${item}`)),
-        missingArtifactPaths: new Set<string>(),
+        missingArtifactPaths: new Map(),
       }
     })
     const events: unknown[] = []
@@ -2601,6 +2644,19 @@ describe('prepareAssistantAutoReplyInput', () => {
       providerKind: 'status',
       providerState: 'completed',
     })
+  })
+
+  it('lets materialization interruption end the turn instead of degrading attachments', async () => {
+    const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockRejectedValueOnce(interrupted)
+    await expect(prepareAssistantAutoReplyInput(
+      [createPromptInput({
+        attachmentEvidence: createRawZipAttachmentEvidence({ parseState: null, rawPath: 'raw/inbox/capture-1/attachments/private.zip' }),
+        captureOverrides: { text: 'Please review the attachment.' },
+      })],
+      '/tmp/assistant-engine-prompt-builder-vault',
+      { onEvent: vi.fn() },
+    )).rejects.toBe(interrupted)
   })
 
   it('emits a safe nonblocking event when rich attachment evidence cannot be read', async () => {

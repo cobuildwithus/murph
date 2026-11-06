@@ -67,13 +67,6 @@ readonly shell_syntax_check_scripts=(
   "scripts/package-audit-context-full.sh"
   "scripts/package-data-context.sh"
   "scripts/repo-tools.config.sh"
-  "scripts/release.sh"
-  "scripts/release-check.sh"
-  "scripts/setup-host.sh"
-  "scripts/setup-linux.sh"
-  "scripts/setup-macos.sh"
-  "scripts/update-changelog.sh"
-  "scripts/generate-release-notes.sh"
   "scripts/workspace-verify.sh"
   "apps/web/scripts/verify-fast.sh"
   "apps/cloudflare/scripts/verify-fast.sh"
@@ -88,11 +81,7 @@ readonly node_syntax_check_scripts=(
   "scripts/check-runner-bundle-budget-ci.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
   "scripts/release-artifact-secret-guard.mjs"
-  "scripts/release-helpers.mjs"
   "scripts/release-verification-plan.mjs"
-  "scripts/verify-release-target.mjs"
-  "scripts/pack-publishables.mjs"
-  "scripts/publish-publishables.mjs"
   "scripts/verify-workspace-boundaries.mjs"
   "scripts/verify-dependency-policy.mjs"
   "scripts/rm-paths.mjs"
@@ -106,8 +95,6 @@ readonly typecheck_package_dirs=(
   "packages/cloudflare-hosted-control"
   "packages/operator-config"
   "packages/assistant-engine"
-  "packages/assistant-cli"
-  "packages/setup-cli"
   "packages/core"
   "packages/importers"
   "packages/device-syncd"
@@ -120,7 +107,6 @@ readonly typecheck_package_dirs=(
   "packages/messaging-ingress"
   "packages/gateway-core"
   "packages/cli"
-  "packages/openclaw-plugin"
   "packages/assistant-runtime"
   "packages/vault-usecases"
   "apps/web"
@@ -596,7 +582,6 @@ readonly cli_verify_test_files=(
   "packages/cli/test/cli-expansion-samples-audit.test.ts"
   "packages/cli/test/cli-expansion-workout.test.ts"
   "packages/cli/test/device-cli.test.ts"
-  "packages/cli/test/device-daemon.test.ts"
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/canonical-write-source-audit.test.ts"
   "packages/cli/test/assistant-cron.test.ts"
@@ -605,7 +590,6 @@ readonly cli_verify_test_files=(
   "packages/cli/test/incur-smoke.test.ts"
   "packages/cli/test/inbox-service-boundaries.test.ts"
   "packages/cli/test/search-runtime.test.ts"
-  "packages/cli/test/setup-cli.test.ts"
   "packages/cli/test/release-script-coverage-audit.test.ts"
   "packages/cli/test/release-workflow-guards.test.ts"
 )
@@ -864,7 +848,7 @@ wait_for_background_jobs_allow_failures() {
 }
 
 run_test_packages_common() {
-  # The contracts and OpenClaw Vitest suites already run inside the root
+  # The contracts Vitest suite already runs inside the root
   # multi-project Vitest lane, so the only prerequisite here is the contracts
   # artifact verification, which rebuilds the shared contracts dist that
   # built-runtime consumers import and must finish before that lane starts.
@@ -919,7 +903,7 @@ prepare_repo_vitest_runtime_artifacts() {
   else
     run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry || return $?
   fi
-  run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
+  run_timed_step "CLI runtime artifacts verification" pnpm exec tsx "packages/cli/scripts/verify-runtime-artifacts.ts"
 }
 
 run_repo_acceptance_guards() {
@@ -946,7 +930,7 @@ run_workspace_package_coverage() {
   if [[ "$package_dir" == "packages/cli" ]]; then
     run_timed_step \
       "$label" \
-      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
     return $?
   fi
 
@@ -1192,7 +1176,7 @@ run_all_package_coverage() {
         local status_file="${active_status_files[$active_index]}"
 
         if [[ ! -f "$status_file" ]]; then
-          if package_coverage_pid_finished_without_status "$active_pid"; then
+          if package_coverage_pid_finished_without_status "$active_pid" && [[ ! -f "$status_file" ]]; then
             wait "$active_pid" 2>/dev/null || true
             unregister_background_pid "$active_pid"
             if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
@@ -1409,7 +1393,7 @@ run_typecheck_preflight() {
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Provider request boundary guard" pnpm provider-requests:guard
-  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" check -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
 }
 
@@ -1461,7 +1445,7 @@ run_typecheck_overlapped() {
   pids+=("$provider_request_guard_pid")
   register_background_pid "$provider_request_guard_pid"
 
-  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false &
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" check -p "tsconfig.tools.json" --pretty false &
   local repo_tools_typecheck_pid="$!"
   pids+=("$repo_tools_typecheck_pid")
   register_background_pid "$repo_tools_typecheck_pid"
@@ -1646,6 +1630,7 @@ run_test_coverage() {
 
 run_verify_acceptance() {
   run_typecheck
+  run_timed_step "Repo tools tests" pnpm test:repo-tools
   run_test_coverage 1
 }
 
@@ -1657,7 +1642,7 @@ run_diff_repo_internal_fast_path() {
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Provider request boundary guard" pnpm provider-requests:guard
-  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" check -p "tsconfig.tools.json" --pretty false
 }
 
 run_test_diff() {
@@ -1689,7 +1674,7 @@ run_test_diff() {
     return 0
   fi
 
-  if [[ "$diff_repo_internal_fast_path" == "1" ]]; then
+  if [[ "$diff_repo_internal_fast_path" == "1" && "$diff_run_verify_cli" != "1" ]]; then
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
     if [[ "$run_repo_tools_tests" == "1" ]]; then
@@ -1732,19 +1717,21 @@ run_test_diff() {
     run_timed_step "Affected package tests" run_test_diff_package_tests "${test_dirs[@]}"
   fi
 
+  if [[ "${diff_run_fixture_smoke:-0}" == "1" ]]; then
+    run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
+  fi
+
   if [[ "${#affected_app_dirs[@]}" -gt 0 ]]; then
     run_timed_step "Affected app verification" run_test_diff_app_verification "${affected_app_dirs[@]}"
   fi
 }
 
 run_verify_cli() {
-  run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck || return $?
-  run_timed_step "Setup CLI typecheck" pnpm --dir "packages/setup-cli" typecheck || return $?
   run_timed_step "CLI package typecheck" pnpm --dir "packages/cli" typecheck || return $?
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts || return $?
   run_timed_step \
     "CLI workspace Vitest" \
-    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
+    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
 }
 
 log_acceptance_resource_plan() {

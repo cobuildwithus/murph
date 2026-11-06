@@ -32,7 +32,7 @@ if (
 const saveRequest: HostedInitialOnboardingCompletionRequest = {
   action: "save",
   preferences: {
-    persona: "navy-seal-with-classic",
+    persona: "classic",
     tone: "formal",
     voice: "drill-sergeant",
   },

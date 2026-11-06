@@ -1,3 +1,5 @@
+import { listHostedBrowserVaultReplicaSiblingObjectKeys, browserVaultReplicaShardObjectKey, browserVaultReplicaMetricBucketObjectKey } from "./storage-paths.ts";
+export { listHostedBrowserVaultReplicaSiblingObjectKeys } from "./storage-paths.ts";
 import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import {
   buildHostedStorageAad as buildRuntimeHostedStorageAad,
@@ -232,16 +234,6 @@ export function listHostedBrowserVaultReplicaObjectKeys(
   ])];
 }
 
-export function listHostedBrowserVaultReplicaSiblingObjectKeys(
-  objectKey: string,
-): string[] {
-  return [
-    ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.map((shard) =>
-      browserVaultReplicaShardObjectKey(objectKey, shard)),
-    ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) =>
-      browserVaultReplicaMetricBucketObjectKey(objectKey, bucketId)),
-  ];
-}
 
 export function createHostedBrowserVaultReplicaStore(input: {
   bucket: HostedBrowserVaultReplicaBucketLike;
@@ -562,26 +554,7 @@ async function assertHostedBrowserVaultReplicaOwnedByUser(
   }
 }
 
-function browserVaultReplicaShardObjectKey(
-  objectKey: string,
-  shard: HostedBrowserVaultReplicaShardKind,
-): string {
-  if (!objectKey.endsWith(".json")) {
-    throw new TypeError("Hosted browser vault replica object key must end in .json.");
-  }
-  const suffix = shard === "metricsIndex" ? "metrics-index" : shard;
-  return `${objectKey.slice(0, -".json".length)}.${suffix}.json`;
-}
 
-function browserVaultReplicaMetricBucketObjectKey(
-  objectKey: string,
-  bucketId: HostedBrowserVaultReplicaMetricBucketId,
-): string {
-  if (!objectKey.endsWith(".json")) {
-    throw new TypeError("Hosted browser vault replica object key must end in .json.");
-  }
-  return `${objectKey.slice(0, -".json".length)}.metric-bucket-${bucketId}.json`;
-}
 
 function browserVaultReplicaShardSchema(
   shard: HostedBrowserVaultReplicaShardKind,

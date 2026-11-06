@@ -14,6 +14,7 @@ import {
   analyzeExperimentOutcomeRecord,
   showExperimentProgress,
   showExperimentProgressCard,
+  writeExperimentOutcomeRecord,
 } from "../src/usecases/experiment-journal-vault.ts";
 
 const createdVaultRoots: string[] = [];
@@ -717,6 +718,24 @@ test("progress uses current metrics without building the search cache", async ()
   const vault = await createExperimentMetricProjectionVault();
   const progress = await showExperimentProgress({ vault, lookup: "sleep-efficiency", asOf: "2026-06-06" });
   assert.equal(progress.progress.adherence.completedSessions, 3);
+  assert.equal(existsSync(path.join(vault, ".runtime/projections/query.sqlite")), false);
+});
+
+test("outcome analysis and persistence use current evidence without building the search cache", async () => {
+  const vault = await createExperimentMetricProjectionVault();
+  const input = { vault, lookup: "sleep-efficiency", asOf: "2026-06-06" };
+  const analyzed = await analyzeExperimentOutcomeRecord(input);
+  assert.equal(analyzed.outcome.adherenceSummary.completedSessions, 3);
+  assert.equal(existsSync(path.join(vault, ".runtime/projections/query.sqlite")), false);
+
+  const saved = await writeExperimentOutcomeRecord(input);
+  assert.deepEqual(saved.outcome.metricResults, analyzed.outcome.metricResults);
+  assert.equal(saved.outcome.adherenceSummary.completedSessions, 3);
+  assert.equal(existsSync(path.join(vault, ".runtime/projections/query.sqlite")), false);
+
+  const replayed = await writeExperimentOutcomeRecord(input);
+  assert.equal(replayed.updatedExperiment, false);
+  assert.deepEqual(replayed.outcome, saved.outcome);
   assert.equal(existsSync(path.join(vault, ".runtime/projections/query.sqlite")), false);
 });
 

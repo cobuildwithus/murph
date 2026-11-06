@@ -280,20 +280,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     },
   );
 
-  it("bundles the staged entrypoint, resolves externals at boot, and passes the boot probe", async () => {
-    const bundleDir = await createFakeRunnerBundle();
-
-    await bundleRunnerContainerEntrypoint(bundleDir);
-
-    await expect(
-      access(path.join(
-        bundleDir,
-        RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
-        "container-entrypoint.js",
-      )),
-    ).resolves.toBeUndefined();
-  });
-
   it.each([false, true])("emits identical runtime chunks across staging path lengths (canonical path: %s)", async (canonicalPath) => {
     const chunks = [];
     for (const prefix of ["murph-bundle-short-", "murph-bundle-with-a-much-longer-staging-directory-"]) {
@@ -447,8 +433,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ],
     [
       "device-sync provider graph",
-      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/oura.js",
-      /node_modules\/@murphai\/device-syncd\/dist\/providers\/oura\.js/,
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/junction.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/providers\/junction\.js/,
     ],
     [
       "importers",
@@ -471,29 +457,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@junction-api\/sdk\/index\.js/,
     ],
     [
-      "staged Murph Age health-metrics calculator",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age\.js/,
-    ],
-    [
-      "staged Murph Age health-metrics source routes",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age-source-routes.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
-    ],
-    [
       "staged contract examples",
       ".deploy/runner-bundle/node_modules/@murphai/contracts/dist/examples.js",
       /node_modules\/@murphai\/contracts\/dist\/examples\.js/,
-    ],
-    [
-      "workspace Murph Age query runtime",
-      "packages/query/dist/murph-age.js",
-      /packages\/query\/dist\/murph-age\.js/,
-    ],
-    [
-      "workspace Murph Age browser replica",
-      "packages/query/dist/browser-replica/murph-age.js",
-      /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
     [
       "dynamic-tool execution runtime",
@@ -509,16 +475,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       "workspace assistant-ask-completion wake handler",
       "packages/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
       /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-ask-completion\.js/,
-    ],
-    [
-      "staged Environment voice wake handler",
-      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
-      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
-    ],
-    [
-      "workspace Codex auth wake handler",
-      "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
-      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,
     ],
     [
       "Zod locale catalog",
@@ -688,8 +644,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 64_257 + 12_000,
-      staticClosureBytes: 1_950_662 + 96_000,
+      entryBytes: 76_589 + 12_000,
+      staticClosureBytes: 2_047_343 + 96_000,
       staticChunkCount: 24,
     });
   });

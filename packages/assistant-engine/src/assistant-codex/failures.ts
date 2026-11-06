@@ -19,7 +19,7 @@ type CodexTurnMessage = Record<string, unknown>
 export const ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE =
   'ASSISTANT_CODEX_USAGE_LIMIT'
 
-// CodexErrorInfo variants (app-server protocol, pinned codex 0.153.4) that
+// CodexErrorInfo variants (app-server protocol, pinned codex 0.166.0) that
 // describe a lost or unusable provider connection. These map to the
 // retryable ASSISTANT_CODEX_CONNECTION_LOST process-exit classification.
 const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
@@ -27,7 +27,6 @@ const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
   'responseStreamConnectionFailed',
   'responseStreamDisconnected',
   'responseTooManyFailedAttempts',
-  'serverOverloaded',
 ])
 
 function isCodexUsageLimitErrorInfo(
@@ -39,8 +38,15 @@ function isCodexUsageLimitErrorInfo(
 function isCodexConnectionLossErrorInfo(
   errorInfo: CodexStructuredErrorInfo | null,
 ): boolean {
+  // Codex 0.158 also uses httpConnectionFailed for unexpected HTTP statuses.
+  // Permanent rejections must not enter Murph's connection-recovery loop.
   return errorInfo !== null &&
-    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(errorInfo.kind)
+    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(errorInfo.kind) &&
+    (errorInfo.kind !== 'httpConnectionFailed' ||
+      errorInfo.httpStatusCode === null ||
+      errorInfo.httpStatusCode === 408 ||
+      errorInfo.httpStatusCode === 429 ||
+      errorInfo.httpStatusCode >= 500)
 }
 
 function buildCodexErrorInfoContext(
@@ -166,6 +172,9 @@ export function buildCodexTurnFailedError(input: {
   if (detail) {
     parts.push(detail)
   }
+  const capacityUnavailable = input.errorInfo?.kind === 'serverOverloaded'
+    || input.errorInfo?.kind === 'flexUnavailable'
+    || input.errorInfo?.kind === 'policyCapacityUnavailable'
   const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
   const connectionLost =
     !usageLimit &&
@@ -199,7 +208,7 @@ export function buildCodexTurnFailedError(input: {
       codexThreadIdPresent: input.codexThreadId !== null,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       recoverableConnectionLoss: connectionLost,
-      retryable: connectionLost,
+      retryable: connectionLost || capacityUnavailable,
     },
   )
 }
@@ -219,6 +228,9 @@ export function buildCodexFailure(input: {
     normalizeStatusText(input.fallback ?? stderrTail) ??
     input.fallback ??
     stderrTail
+  const capacityUnavailable = input.errorInfo?.kind === 'serverOverloaded'
+    || input.errorInfo?.kind === 'flexUnavailable'
+    || input.errorInfo?.kind === 'policyCapacityUnavailable'
   const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
   // Prefer the structured protocol classification when an RPC error arrived
   // before the process died; fall back to stderr text sniffing only for true
@@ -263,7 +275,7 @@ export function buildCodexFailure(input: {
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       codexThreadIdPresent: input.codexThreadId !== null,
       recoverableConnectionLoss: connectionLost,
-      retryable: connectionLost,
+      retryable: connectionLost || capacityUnavailable,
     },
   )
 }

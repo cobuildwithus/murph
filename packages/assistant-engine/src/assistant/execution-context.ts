@@ -1,3 +1,7 @@
+import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
+import { gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
+import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 import {
   normalizeAssistantBackendTarget,
@@ -76,6 +80,10 @@ import type {
   HostedPhysicalNoteSendResponse,
 } from '@murphai/hosted-execution/physical-notes'
 import type {
+  HostedUsageDiagnosticsRequest,
+  HostedUsageDiagnosticsResponse,
+} from '@murphai/hosted-execution/usage-diagnostics'
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
@@ -118,6 +126,7 @@ export interface AssistantHostedDeviceConnectProvider {
 }
 
 export type AssistantHostedDeviceToolRequest =
+  | { action: 'companion_status' }
   | {
       action: 'list_accounts'
       provider?: string | null
@@ -158,6 +167,7 @@ export interface AssistantHostedDeviceAccountSummary {
 }
 
 export type AssistantHostedDeviceToolResponse =
+  | ({ action: 'companion_status' } & CompanionPresence)
   | {
       accounts: readonly AssistantHostedDeviceAccountSummary[]
       action: 'list_accounts'
@@ -202,6 +212,7 @@ export interface AssistantHostedLabsTool {
 export type AssistantHostedAutomationToolRequest =
   | {
       action: 'inspect'
+      view?: 'full' | 'model_review'
       lookup: string
     }
   | {
@@ -270,14 +281,19 @@ export type AssistantAutomationOccurrenceProjection =
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
+      view?: 'model_review'
+      instructionsOmitted?: 'managed_model_preserved'
       executionInspection?: AssistantAutomationExecutionInspection
       automationId: string
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      managed?: boolean
       contextReferences?: readonly AutomationContextReference[]
       instructions?: string
       title?: string
-      effectiveTimeZone: string | null
+      deliveryChannel?: string
+      effectiveTimeZone?: string | null
       lookupId: string
-      occurrenceProjection: AssistantAutomationOccurrenceProjection
+      occurrenceProjection?: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
@@ -285,13 +301,18 @@ export type AssistantHostedAutomationToolResponse =
     }
   | {
       action: 'patch' | 'save'
+      instructions?: string
+      title?: string
       automationId: string
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      managed?: boolean
       contextReferences?: readonly AutomationContextReference[]
       created: boolean
+      deliveryChannel?: string
       effectiveTimeZone: string | null
       lookupId: string
       occurrenceProjection: AssistantAutomationOccurrenceProjection
-      routeBinding: 'current_conversation' | 'preserved'
+      routeBinding: 'current_conversation' | 'member_notification' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
       updatedAt: string
@@ -310,6 +331,7 @@ export interface AssistantHostedAutomationTool {
     request: AssistantHostedAutomationToolRequest,
     context?: {
       onboardingFirstReadCompletionTransition?: true
+      acceptedInputIds?: readonly string[]
       signal?: AbortSignal | null
     },
   ): Promise<AssistantHostedAutomationToolResponse>
@@ -332,6 +354,8 @@ export interface AssistantHostedActionApprovalPort {
 export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
+    // Host-created only after the exact private weekly notification commits.
+    authorization?: { committedUsageOptimizerScope: { memberId: string; occurrenceAt: string } },
   ): void
   deliverProductSupportEscalation?(
     feedback: HostedRuntimeProductFeedbackRecord,
@@ -342,6 +366,10 @@ export interface AssistantHostedFamilyPlanTool {
   request(
     request: HostedRuntimeFamilyPlanToolRequest,
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
+}
+
+export interface AssistantHostedUsageDiagnostics {
+  read(request: HostedUsageDiagnosticsRequest): Promise<HostedUsageDiagnosticsResponse>
 }
 
 export interface AssistantHostedPlanUsageTool {
@@ -438,6 +466,7 @@ export interface AssistantHostedGroupParticipantDisplayNameReader {
 export interface AssistantHostedGroupSharedReader {
   request(
     request: AssistantHostedGroupSharedReadRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<AssistantHostedGroupSharedReadResponse>
 }
 
@@ -541,13 +570,34 @@ export interface AssistantHostedImageGenerationLauncher {
   readStatus?(scopeId: string): 'pending' | 'queued' | null
 }
 
+/** A failed invocation (including cancellation/owner loss), never a missing file.
+ * Best-effort evidence readers must propagate this control flow. */
+export class AssistantWorkspaceArtifactMaterializationError extends Error {
+  constructor(cause: unknown) {
+    super('Workspace artifact materialization interrupted.', { cause })
+    this.name = 'AssistantWorkspaceArtifactMaterializationError'
+  }
+
+  static rethrowIfInterrupted(error: unknown): void {
+    if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
+  }
+}
+
+export type AssistantWorkspaceArtifactUnavailableReason =
+  | 'missing' | 'expired' | 'integrity' | 'size' | 'transport' | 'obsolete'
+
+/** Keys are canonical root-qualified paths, e.g. vault:raw/inbox/photo.jpg.
+ * A rejection is authoritative even when a local file remains at that path. */
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
-  missingArtifactPaths: ReadonlySet<string>
+  missingArtifactPaths: ReadonlyMap<string, AssistantWorkspaceArtifactUnavailableReason>
 }
 
 export interface AssistantWorkspaceArtifactMaterializationOptions {
+  signal?: AbortSignal | null
   maxFileBytes?: number
+  /** Bounds remote reads only. Retired, expired and locally cached files cost nothing. */
+  maxTotalDownloadBytes?: number
 }
 
 export type AssistantWorkspaceArtifactMaterializer = (
@@ -556,12 +606,15 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
+  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read' } | null
+  gameMissedCheckInScope?: HostedGameGroupMissedCheckInPolicy | { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   assertTurnCommitAuthority?(input: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
     turnId: string
   }): Promise<void>
   automationTool?: AssistantHostedAutomationTool | null
+  createAutomationTool?(route: AssistantCurrentDeliveryRoute): AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
     channel: string
@@ -580,6 +633,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  pollTool?: ConversationPollTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
@@ -588,6 +642,7 @@ export interface AssistantHostedExecutionContext {
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  usageDiagnostics?: AssistantHostedUsageDiagnostics | null
   physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -598,6 +653,16 @@ export interface AssistantHostedExecutionContext {
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
+  /**
+   * Hosted Linq only: the emoji Web's "on it" tapback already put on this
+   * accepted member message, or null. Consulted by Murph's own
+   * `react_to_message`, whose reaction replaces it, so Murph knows what was
+   * there.
+   */
+  readLinqMessageAckReaction?: ((input: {
+    signal: AbortSignal
+    targetInputId: string
+  }) => Promise<string | null>) | null
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
@@ -648,71 +713,98 @@ export function appendAssistantHostedDynamicContextPrompt(input: {
   }
 }
 
+function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext['gameRecapScope']): AssistantHostedExecutionContext['gameRecapScope'] {
+  const gameId = normalizeNullableString(scope?.gameId)
+  const eventId = normalizeNullableString(scope?.eventId)
+  const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
+  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint, ...(scope?.loreAccess === 'read' ? { loreAccess: 'read' as const } : {}) } : null
+}
+
+function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {
+  // Production pair policies also carry kind (game_missed_check_in); only the group kind selects the group schema.
+  if ((scope as { kind?: unknown } | null | undefined)?.kind === 'game_group_missed_check_in') return gameGroupMissedCheckInPolicySchema.parse(scope)
+  const pair = scope as Partial<Record<'gameId' | 'eventId' | 'memberId' | 'firstMissedDate' | 'pairFingerprint', string>> | null | undefined
+  const gameId = normalizeNullableString(pair?.gameId)
+  const eventId = normalizeNullableString(pair?.eventId)
+  const memberId = normalizeNullableString(pair?.memberId)
+  const firstMissedDate = normalizeNullableString(pair?.firstMissedDate)
+  const pairFingerprint = normalizeNullableString(pair?.pairFingerprint)
+  return gameId && eventId && memberId && firstMissedDate && pairFingerprint
+    ? { gameId, eventId, memberId, firstMissedDate, pairFingerprint }
+    : null
+}
+
 export function normalizeAssistantExecutionContext(
   input: AssistantExecutionContext | null | undefined,
 ): AssistantExecutionContext {
   const hosted = input?.hosted
-  const memberId = normalizeNullableString(hosted?.memberId)
+  if (!hosted) {
+    return { hosted: null }
+  }
+  const memberId = normalizeNullableString(hosted.memberId)
   const actionApprovalPort = normalizeAssistantActionApprovalPort(
-    hosted?.actionApprovalPort,
+    hosted.actionApprovalPort,
   )
-  const automationTool = normalizeAssistantAutomationTool(hosted?.automationTool)
+  const automationTool = normalizeAssistantAutomationTool(hosted.automationTool)
   const assistantConfigurationTool = normalizeAssistantConfigurationTool(
-    hosted?.assistantConfigurationTool,
+    hosted.assistantConfigurationTool,
   )
-  const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
+  const connectedApps = normalizeAssistantConnectedAppsPort(hosted.connectedApps)
   const clinicalRecordsConnectLinkTool = normalizeAssistantClinicalRecordsConnectLinkTool(
-    hosted?.clinicalRecordsConnectLinkTool,
+    hosted.clinicalRecordsConnectLinkTool,
   )
-  const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
+  const defaultTarget = normalizeAssistantBackendTarget(hosted.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
-    hosted?.channelTypingDependencies,
+    hosted.channelTypingDependencies,
   )
   const progressDeliveryDependencies = normalizeAssistantHostedProgressDeliveryDependencies(
-    hosted?.progressDeliveryDependencies,
+    hosted.progressDeliveryDependencies,
   )
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
-    hosted?.deviceConnectProviders,
+    hosted.deviceConnectProviders,
   )
-  const deviceTool = normalizeAssistantDeviceTool(hosted?.deviceTool)
+  const deviceTool = normalizeAssistantDeviceTool(hosted.deviceTool)
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
-    hosted?.dynamicContextPrompts,
+    hosted.dynamicContextPrompts,
   )
-  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const gameRecapScope = normalizeAssistantGameRecapScope(hosted.gameRecapScope)
+  const gameMissedCheckInScope = normalizeAssistantGameMissedCheckInScope(hosted.gameMissedCheckInScope)
+  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted.familyPlanTool)
   const imessageContactTool = normalizeAssistantIMessageContactTool(
-    hosted?.imessageContactTool,
+    hosted.imessageContactTool,
   )
   const personalizationTool = normalizeAssistantPersonalizationTool(
-    hosted?.personalizationTool,
+    hosted.personalizationTool,
   )
   const groupParticipantDisplayNameReader =
     normalizeAssistantGroupParticipantDisplayNameReader(
-      hosted?.groupParticipantDisplayNameReader,
+      hosted.groupParticipantDisplayNameReader,
     )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
-    hosted?.groupPermissionOfferTool,
+    hosted.groupPermissionOfferTool,
   )
-  const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
+  const groupTool = normalizeAssistantGroupTool(hosted.groupTool)
   const groupSharedReader = normalizeAssistantGroupSharedReader(
-    hosted?.groupSharedReader,
+    hosted.groupSharedReader,
   )
-  const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
-  const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
+  const labsTool = normalizeAssistantLabsTool(hosted.labsTool)
+  const planUsageTool = normalizeAssistantReadTool(hosted.planUsageTool)
+  const usageDiagnostics = normalizeAssistantReadTool(hosted.usageDiagnostics)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
-    hosted?.subscriptionTool,
+    hosted.subscriptionTool,
   )
-  const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
-  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted?.physicalNotes)
+  const phoneCalls = normalizeAssistantPhoneCallPort(hosted.phoneCalls)
+  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted.physicalNotes)
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
-    hosted?.privateImageUrlPublisher,
+    hosted.privateImageUrlPublisher,
   )
   const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
-    hosted?.productFeedbackCandidateSink,
+    hosted.productFeedbackCandidateSink,
   )
-  const releaseSha = normalizeNullableString(hosted?.releaseSha)
-  const runtimeAttemptId = normalizeNullableString(hosted?.runtimeAttemptId)
-  const runtimeName = normalizeNullableString(hosted?.runtimeName)
-  const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
+  const releaseSha = normalizeNullableString(hosted.releaseSha)
+  const runtimeAttemptId = normalizeNullableString(hosted.runtimeAttemptId)
+  const runtimeName = normalizeNullableString(hosted.runtimeName)
+  const usageRecorder = normalizeAssistantUsageRecorder(hosted.usageRecorder)
   if (!memberId) {
     return {
       hosted: null,
@@ -721,106 +813,114 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
-      ...(actionApprovalPort ? { actionApprovalPort } : {}),
-      ...(typeof hosted?.assertTurnCommitAuthority === 'function'
+      ...optionalHostedField('actionApprovalPort', actionApprovalPort),
+      ...(typeof hosted.assertTurnCommitAuthority === 'function'
         ? {
             assertTurnCommitAuthority:
               hosted.assertTurnCommitAuthority.bind(hosted),
           }
         : {}),
-      ...(automationTool ? { automationTool } : {}),
-      ...(typeof hosted?.currentAssistantInputId === 'function'
+      ...optionalHostedField('automationTool', automationTool),
+      ...optionalHostedField('createAutomationTool', hosted.createAutomationTool),
+      ...(typeof hosted.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,
           }
         : {}),
-      ...(typeof hosted?.createScheduledGroupTools === 'function'
+      ...(typeof hosted.createScheduledGroupTools === 'function'
         ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
         : {}),
-      ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
-      ...(connectedApps ? { connectedApps } : {}),
-      ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-      ...(hosted?.imageGenerationLauncher
+      ...optionalHostedField('assistantConfigurationTool', assistantConfigurationTool),
+      ...optionalHostedField('connectedApps', connectedApps),
+      ...optionalHostedField('clinicalRecordsConnectLinkTool', clinicalRecordsConnectLinkTool),
+      ...(hosted.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
-      ...(familyPlanTool ? { familyPlanTool } : {}),
-      ...(imessageContactTool ? { imessageContactTool } : {}),
-      ...(personalizationTool ? { personalizationTool } : {}),
-      ...(groupParticipantDisplayNameReader
-        ? { groupParticipantDisplayNameReader }
-        : {}),
-      ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
-      ...(groupSharedReader ? { groupSharedReader } : {}),
-      ...(groupTool ? { groupTool } : {}),
-      ...(labsTool ? { labsTool } : {}),
-      ...(planUsageTool ? { planUsageTool } : {}),
-      ...(physicalNotes ? { physicalNotes } : {}),
-      ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
-      ...(subscriptionTool ? { subscriptionTool } : {}),
-      ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
+      ...optionalHostedField('familyPlanTool', familyPlanTool),
+      ...optionalHostedField('pollTool', hosted.pollTool && typeof hosted.pollTool.request === 'function' ? { request: hosted.pollTool.request.bind(hosted.pollTool) } : undefined),
+      ...optionalHostedField('imessageContactTool', imessageContactTool),
+      ...optionalHostedField('personalizationTool', personalizationTool),
+      ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),
+      ...optionalHostedField('groupPermissionOfferTool', groupPermissionOfferTool),
+      ...optionalHostedField('groupSharedReader', groupSharedReader),
+      ...optionalHostedField('groupTool', groupTool),
+      ...optionalHostedField('gameRecapScope', gameRecapScope),
+      ...optionalHostedField('gameMissedCheckInScope', gameMissedCheckInScope),
+      ...optionalHostedField('labsTool', labsTool),
+      ...optionalHostedField('planUsageTool', planUsageTool),
+      ...optionalHostedField('usageDiagnostics', usageDiagnostics),
+      ...optionalHostedField('physicalNotes', physicalNotes),
+      ...optionalHostedField('privateImageUrlPublisher', privateImageUrlPublisher),
+      ...optionalHostedField('subscriptionTool', subscriptionTool),
+      ...(typeof hosted.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
           }
         : {}),
-      ...(typeof hosted?.persistGeneratedImageCapture === 'function'
+      ...(typeof hosted.persistGeneratedImageCapture === 'function'
         ? {
             persistGeneratedImageCapture: hosted.persistGeneratedImageCapture,
           }
         : {}),
-      ...(defaultTarget
-        ? {
-            defaultTarget,
-          }
-        : {}),
-      ...(channelTypingDependencies
-        ? {
-            channelTypingDependencies,
-          }
-        : {}),
+      ...optionalHostedField('defaultTarget', defaultTarget),
+      ...optionalHostedField('channelTypingDependencies', channelTypingDependencies),
       ...(deviceConnectProviders.length > 0
         ? {
             deviceConnectProviders,
           }
         : {}),
-      ...(deviceTool ? { deviceTool } : {}),
+      ...optionalHostedField('deviceTool', deviceTool),
       ...(dynamicContextPrompts.length > 0
         ? {
             dynamicContextPrompts,
           }
         : {}),
-      ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
-      ...(releaseSha ? { releaseSha } : {}),
-      ...(runtimeAttemptId ? { runtimeAttemptId } : {}),
-      ...(runtimeName ? { runtimeName } : {}),
-      ...(usageRecorder ? { usageRecorder } : {}),
+      ...optionalHostedField('productFeedbackCandidateSink', productFeedbackCandidateSink),
+      ...optionalHostedField('releaseSha', releaseSha),
+      ...optionalHostedField('runtimeAttemptId', runtimeAttemptId),
+      ...optionalHostedField('runtimeName', runtimeName),
+      ...optionalHostedField('usageRecorder', usageRecorder),
       memberId,
-      ...(progressDeliveryDependencies
-        ? {
-            progressDeliveryDependencies,
-          }
-        : {}),
-      ...(phoneCalls ? { phoneCalls } : {}),
-      ...(typeof hosted?.providerFetch === 'function'
+      ...optionalHostedField('progressDeliveryDependencies', progressDeliveryDependencies),
+      ...readHostedLinqMessageAckReactionField(hosted),
+      ...optionalHostedField('phoneCalls', phoneCalls),
+      ...(typeof hosted.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
         : {}),
-      ...(typeof hosted?.publicInternetFetch === 'function'
+      ...(typeof hosted.publicInternetFetch === 'function'
         ? { publicInternetFetch: hosted.publicInternetFetch }
         : {}),
-      ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
+      ...(typeof hosted.resolveScheduledLinqRoute === 'function'
         ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }
         : {}),
-      ...(typeof hosted?.resolveScheduledExternalThreadRoute === 'function'
+      ...(typeof hosted.resolveScheduledExternalThreadRoute === 'function'
         ? {
             resolveScheduledExternalThreadRoute:
               hosted.resolveScheduledExternalThreadRoute,
           }
         : {}),
-      userEnvKeys:
-        hosted?.userEnvKeys
-          .map((key) => normalizeNullableString(key))
-          .filter((key): key is string => key !== null) ?? [],
+      userEnvKeys: hosted.userEnvKeys
+        .map((key) => normalizeNullableString(key))
+        .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+// Normalized capabilities and metadata are omitted, not emitted as undefined.
+// Callers retain the field order and keep raw accessor/function checks explicit.
+function readHostedLinqMessageAckReactionField(
+  hosted: AssistantHostedExecutionContext,
+): Pick<AssistantHostedExecutionContext, 'readLinqMessageAckReaction'> {
+  return typeof hosted.readLinqMessageAckReaction === 'function'
+    ? { readLinqMessageAckReaction: hosted.readLinqMessageAckReaction }
+    : {}
+}
+
+function optionalHostedField<Key extends keyof AssistantHostedExecutionContext>(
+  key: Key,
+  value: AssistantHostedExecutionContext[Key],
+) {
+  return value ? { [key]: value } : {}
 }
 
 function normalizeAssistantDynamicContextPrompts(
@@ -972,9 +1072,9 @@ function normalizeAssistantFamilyPlanTool(
   }
 }
 
-function normalizeAssistantPlanUsageTool(
-  input: AssistantHostedExecutionContext['planUsageTool'] | undefined,
-): AssistantHostedPlanUsageTool | undefined {
+function normalizeAssistantReadTool<Request, Response>(
+  input: { read(request: Request): Promise<Response> } | null | undefined,
+): { read(request: Request): Promise<Response> } | undefined {
   if (!input || typeof input.read !== 'function') {
     return undefined
   }
@@ -1259,5 +1359,22 @@ export function resolveAssistantExecutionOperatorDefaults(input: {
     identityId: input.defaults?.identityId ?? null,
     selfDeliveryTargets: input.defaults?.selfDeliveryTargets ?? null,
     backend: hostedDefaultTarget,
+  }
+}
+
+export function scopeAssistantAutomationToolToRoute(input: {
+  executionContext: AssistantExecutionContext
+  route: AssistantCurrentDeliveryRoute | null
+}): AssistantExecutionContext {
+  const hosted = input.executionContext.hosted
+  if (!hosted) return input.executionContext
+  const { automationTool: _previousTool, ...unscopedHosted } = hosted
+  void _previousTool
+  const automationTool = input.route ? hosted.createAutomationTool?.(input.route) : null
+  return {
+    hosted: {
+      ...unscopedHosted,
+      ...(automationTool ? { automationTool } : {}),
+    },
   }
 }

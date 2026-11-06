@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "medical-provider-logo-legibility",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Clearer hospital and clinic logos",
+    "summary": "Provider search now shows larger logos on a light background, with room for wide wordmarks.",
+    "details": "Logos stay fully visible on phones and larger screens. Providers without a logo still show their initials.",
+    "relevanceTags": ["medical-records", "connections"],
+    "sourcePullRequests": [3526]
+  }
+}

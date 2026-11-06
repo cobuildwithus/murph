@@ -39,6 +39,15 @@ function snapshot(resource: object, documents: Array<{ bytes: Buffer; mediaType:
   };
 }
 
+it("keeps versioned parent prose unchanged while exposing RTF to background extraction", () => {
+  const bytes = Buffer.from(String.raw`{\rtf1 Explicit source finding.}`);
+  const resource = { ...baseResource, content: [{ attachment: { contentType: "application/rtf", url: "Binary/rtf" } }] };
+  const plan = buildClinicalImportPlanFromSnapshot(snapshot(resource, [{ bytes, mediaType: "application/rtf", attachmentIndex: 0 }]));
+  expect(readClinicalAttachmentText(bytes, "application/rtf")).toBe("Explicit source finding.");
+  expect(JSON.stringify(plan.decisions)).not.toContain("Explicit source finding.");
+  expect(plan.decisions[0]).toMatchObject({ action: "upsert", payload: { kind: "note" } });
+});
+
 describe("clinical document bodies", () => {
   it.each(["DocumentReference", "DiagnosticReport"])("records a scanned %s revision, retires older extraction, and materializes same-revision text", async (resourceType) => {
     const resource = resourceType === "DocumentReference"
@@ -79,11 +88,20 @@ describe("clinical document bodies", () => {
   });
 
   it.each([
-    { meta: { lastUpdated: undefined } },
+    { meta: { lastUpdated: "not-a-comparable-revision" } },
     { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
   ])("keeps unsafe raw-only document metadata on review", (invalid) => {
     const resource = { ...baseResource, ...invalid, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] };
     expect(buildClinicalImportPlanFromSnapshot(snapshot(resource)).decisions[0]).toMatchObject({ action: "review" });
+  });
+
+  it("imports a document without meta.lastUpdated at the retrieval revision", () => {
+    const { meta: _meta, ...undated } = baseResource;
+    const input = snapshot({ ...undated, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] });
+    expect(buildClinicalImportPlanFromSnapshot(input).decisions[0]).toMatchObject({
+      action: "upsert",
+      payload: { externalRef: { resourceId: "document-1", version: input.manifest.fetchedAt } },
+    });
   });
 
   it.each(["DocumentReference", "DiagnosticReport"])("uses a %s source-update receipt when clinical dates are absent or date-only", (resourceType) => {

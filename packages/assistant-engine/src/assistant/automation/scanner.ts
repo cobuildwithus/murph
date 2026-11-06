@@ -19,7 +19,7 @@ import {
   type AssistantInputSource,
 } from '../input-source.js'
 import { compareAssistantInputCursors } from '../input-store.js'
-import { sameAssistantAutoReplyState } from '../automation-state.js'
+import type { AssistantAutoReplyCursorProposal } from '../auto-reply-channels.js'
 import { emitHostedAssistantTurnTimingTrace } from '../hosted-turn-timing.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
@@ -43,7 +43,6 @@ import {
   normalizeScanLimit,
   type AssistantAutoReplyTerminalNonReplyHook,
   type AssistantAutomationScanResult,
-  type AssistantAutomationScanStateProgress,
   type AssistantRunEvent,
 } from './shared.js'
 
@@ -67,9 +66,7 @@ export async function scanAssistantAutomationOnce(input: {
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTerminalNonReplyCommitted?: AssistantAutoReplyTerminalNonReplyHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  onStateProgress?: (
-    state: AssistantAutomationScanStateProgress,
-  ) => Promise<void> | void
+  onCursorProgress?: (proposal: AssistantAutoReplyCursorProposal) => Promise<void> | void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -87,8 +84,23 @@ export async function scanAssistantAutomationOnce(input: {
   const replies = createEmptyAutoReplyScanResult()
   const currentTurnDeliveryIntentIds: string[] = []
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
-  const scanState = cloneAutomationScanState(input.state)
-  let persistedState = cloneAutomationScanState(scanState)
+  const proposedCursors = new Map<string, AssistantAutoReplyCursorProposal['cursor']>()
+  const proposeCursorProgress = async (
+    channel: string,
+    cursor: AssistantAutoReplyCursorProposal['cursor'],
+  ): Promise<boolean> => {
+    const observed = input.state.autoReply.find((entry) => entry.channel === channel)
+    if (!observed) {
+      return false
+    }
+    const highWater = proposedCursors.get(observed.channel) ?? observed.eligibleAfter
+    if (highWater && compareAssistantInputCursors(cursor, highWater) <= 0) {
+      return false
+    }
+    await input.onCursorProgress?.({ channel: observed.channel, cursor, observed })
+    proposedCursors.set(observed.channel, cursor)
+    return true
+  }
   let providerStartCriticalPath = input.providerStartCriticalPath ?? null
   let automationLaneSubdivisionEligible = true
   const onProviderRequestStarted: AssistantAutoReplyProviderRequestStartHook = (
@@ -99,18 +111,8 @@ export async function scanAssistantAutomationOnce(input: {
   }
   void input.vaultServices
   const replyChannels = applyCanonicalWrites
-    ? scanState.autoReply.map((entry) => entry.channel)
+    ? input.state.autoReply.map((entry) => entry.channel)
     : []
-  const persistScanState = async (): Promise<boolean> => {
-    return await persistAssistantAutomationScanState({
-      onStateProgress: input.onStateProgress,
-      persistedState,
-      scanState,
-      updatePersistedState: (next) => {
-        persistedState = next
-      },
-    })
-  }
 
   if (replyChannels.length === 0) {
     return {
@@ -121,7 +123,7 @@ export async function scanAssistantAutomationOnce(input: {
   }
 
   const candidates = await listAssistantReplyCandidates({
-    autoReply: applyCanonicalWrites ? scanState.autoReply : [],
+    autoReply: applyCanonicalWrites ? input.state.autoReply : [],
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
     onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted,
@@ -271,16 +273,13 @@ export async function scanAssistantAutomationOnce(input: {
     currentTurnDeliveryIntentIds.push(
       ...(replyResult.currentTurnDeliveryIntentIds ?? []),
     )
-    if (replyResult.advanceCursor) {
-      advanceAssistantAutoReplyChannelCursor({
-        autoReply: scanState.autoReply,
-        channel: context.firstItem.summary.source,
-        cursor: replyResult.lastInputCursor ?? context.lastInputCursor,
-      })
-    }
-
     const scanStatePersistStartedAt = Date.now()
-    const scanStateChanged = await persistScanState()
+    const scanStateChanged = replyResult.advanceCursor
+      ? await proposeCursorProgress(
+          context.firstItem.summary.source,
+          replyResult.lastInputCursor ?? context.lastInputCursor,
+        )
+      : false
     emitHostedAssistantTurnTimingTrace({
       currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
       elapsedMs: elapsedSince(scanStartedAt),
@@ -320,7 +319,7 @@ export async function hasPendingAssistantAutoReplyInput(input: {
 }
 
 async function listAssistantReplyCandidates(input: {
-  autoReply: AssistantAutomationScanStateProgress['autoReply']
+  autoReply: AssistantAutomationState['autoReply']
   inputSource: AssistantInputSource
   limit: number
   onTerminalNonReplyCommitted?: AssistantAutoReplyTerminalNonReplyHook | null
@@ -408,29 +407,6 @@ async function listAssistantReplyCandidates(input: {
     .slice(0, input.limit)
 }
 
-function advanceAssistantAutoReplyChannelCursor(input: {
-  autoReply: AssistantAutomationScanStateProgress['autoReply']
-  channel: string | null
-  cursor: AssistantInputCandidate['event']['cursor']
-}): void {
-  if (!input.channel) {
-    return
-  }
-
-  for (const entry of input.autoReply) {
-    if (entry.channel !== input.channel) {
-      continue
-    }
-    if (
-      !entry.eligibleAfter ||
-      compareAssistantInputCursors(input.cursor, entry.eligibleAfter) > 0
-    ) {
-      entry.eligibleAfter = input.cursor
-    }
-    return
-  }
-}
-
 function assistantAutomationCandidateFromInput(
   input: AssistantInputCandidate,
 ): AssistantAutomationCandidate {
@@ -448,41 +424,4 @@ function assistantInputSummaryFromInputCandidate(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
-}
-
-async function persistAssistantAutomationScanState(input: {
-  onStateProgress?: (
-    state: AssistantAutomationScanStateProgress,
-  ) => Promise<void> | void
-  persistedState: AssistantAutomationScanStateProgress
-  scanState: AssistantAutomationScanStateProgress
-  updatePersistedState: (state: AssistantAutomationScanStateProgress) => void
-}): Promise<boolean> {
-  if (assistantAutomationScanStateEqual(input.persistedState, input.scanState)) {
-    return false
-  }
-
-  const next = cloneAutomationScanState(input.scanState)
-  await input.onStateProgress?.(next)
-  input.updatePersistedState(next)
-  return true
-}
-
-function cloneAutomationScanState(
-  state: Pick<AssistantAutomationScanStateProgress, 'autoReply'>,
-): AssistantAutomationScanStateProgress {
-  return {
-    autoReply: state.autoReply.map((entry) => ({
-      channel: entry.channel,
-      eligibleAfter: entry.eligibleAfter,
-      enabledAt: entry.enabledAt,
-    })),
-  }
-}
-
-function assistantAutomationScanStateEqual(
-  left: AssistantAutomationScanStateProgress,
-  right: AssistantAutomationScanStateProgress,
-): boolean {
-  return sameAssistantAutoReplyState(left.autoReply, right.autoReply)
 }

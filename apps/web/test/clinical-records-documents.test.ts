@@ -70,6 +70,14 @@ describe("Clinical document attachment boundary", () => {
       .toEqual([["DocumentReference", "doc-1", 0, "opaque-ticket"], ["DiagnosticReport", "report-1", 0, "opaque-ticket"]]);
     expect(JSON.parse(mocks.seal.mock.calls[0]![0].value)).toMatchObject({ resourceVersion: parent.meta.lastUpdated, url: `${base}/Binary/body-1` });
   });
+  it("issues a ticket for a parent without meta.lastUpdated and withholds one for a non-comparable revision", async () => {
+    const { meta: _meta, ...undated } = parent;
+    expect(await issue([undated])).toMatchObject([{ resourceId: "doc-1", attachmentIndex: 0, ticket: "opaque-ticket" }]);
+    expect(JSON.parse(mocks.seal.mock.calls[0]![0].value)).not.toHaveProperty("resourceVersion");
+    expect(await issue([{ ...parent, meta: { lastUpdated: "not-a-timestamp" } }]))
+      .toMatchObject([{ ticket: null, errorCode: "document-reference-unavailable" }]);
+    expect(mocks.seal).toHaveBeenCalledTimes(1);
+  });
   it("withholds tickets from wrong patients, foreign absolute patient bases, and ambiguous duplicate parents", async () => {
     for (const reference of ["Patient/other", "https://outside.example.test/FHIR/R4/Patient/patient-1"]) {
       expect(await issue([{ ...parent, subject: { reference } }])).toMatchObject([{ ticket: null, errorCode: "document-patient-mismatch" }]);

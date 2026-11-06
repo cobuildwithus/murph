@@ -20,6 +20,12 @@ import {
 } from "@murphai/contracts";
 import { advanceAutomationDeviceActivityCursor, upsertAutomation } from "@murphai/core";
 import {
+  getMurphMaintenanceAutomationIds as rootMaintenanceAutomationIds,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  MURPH_MANAGED_AUTOMATIONS,
+} from "@murphai/assistant-engine";
+import { getMurphMaintenanceAutomationIds } from "@murphai/assistant-engine/managed-automations";
+import {
   listAutomations,
   showAutomation,
   type AutomationListPageOptions,
@@ -456,7 +462,7 @@ const automationPublicPathCases = [
     invalidValue: () => ({ reasoningEffort: "not-an-effort" }),
     saveOptions: [
       "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
-      "--assistant-target-override-model", "gpt-5.6-sol",
+      "--assistant-target-override-model", "gpt-6.1-sol",
     ],
     expectedPaths: ["assistantTargetOverride.reasoningEffort"],
   },
@@ -467,7 +473,7 @@ const automationPublicPathCases = [
     overrideIssuePath: ["privateTargetField"],
     saveOptions: [
       "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
-      "--assistant-target-override-model", "gpt-5.6-sol",
+      "--assistant-target-override-model", "gpt-6.1-sol",
     ],
     expectedPaths: [],
   },
@@ -957,9 +963,9 @@ test("automation save and edit manage assistant target overrides from typed fiel
       "--delivery-target",
       "telegram_thread_real",
       "--assistant-target-override-model",
-      "gpt-5.6-terra",
+      "gpt-6.1-sol",
       "--assistant-target-override-model-provider",
-      "vercel-ai-gateway",
+      "openai",
       "--assistant-target-override-reasoning-effort",
       "high",
       "--vault",
@@ -986,8 +992,8 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.deepEqual(shown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol",
+      modelProvider: "openai",
       reasoningEffort: "high",
     });
 
@@ -1026,8 +1032,8 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(editedShown.exitCode, null);
     assert.equal(editedShown.envelope.ok, true);
     assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol",
+      modelProvider: "openai",
       reasoningEffort: "medium",
     });
 
@@ -1613,6 +1619,173 @@ test("automation compact list preserves empty page semantics", async () => {
   }
 });
 
+test("automation instruction inventory bounds pages and exposes omitted instructions without losing records", async () => {
+  const cli = Cli.create("vault-cli", { version: "0.0.0-test" });
+  const records: AutomationQueryRecord[] = Array.from({ length: 25 }, (_, index) => ({
+    schemaVersion: AUTOMATION_SCHEMA_VERSION, docType: AUTOMATION_DOC_TYPE,
+    automationId: `automation_inventory_${String(index).padStart(3, "0")}`,
+    slug: `inventory-${index}`, title: `Inventory ${index}`, status: index % 2 ? "paused" : "active",
+    summary: null, activeUntil: null, schedule: { kind: "dailyLocal", localTime: "09:00", timeZone: "UTC" },
+    route: { channel: "linq", deliveryTarget: "synthetic-inventory", identityId: null, participantId: null, threadId: null },
+    assistantTargetOverride: { model: "gpt-6-luna", reasoningEffort: "high" },
+    supportKind: null, plannedOccurrenceOffsetMs: null,
+    contextReferences: [{ entityKind: "event", entityId: "evt_synthetic_context" }],
+    continuityPolicy: "fresh", tags: [], createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
+    instructions: index === 0 ? "🌿".repeat(20_000) : "Review the exact current plan. ".repeat(200),
+    relativePath: `bank/automations/inventory-${index}.md`, markdown: "must not duplicate the body",
+  }));
+  let queryCalls = 0;
+  registerAutomationCommands(cli, { async listAutomationPage(_vault, options) {
+    queryCalls++;
+    assert.equal(options?.orderById, true);
+    assert.equal(options.limit, 20);
+    const remaining = records.filter(record => !options.cursor || record.automationId.localeCompare(options.cursor) > 0);
+    const items = remaining.slice(0, options.limit);
+    return { items, nextCursor: remaining.length > items.length ? items.at(-1)!.automationId : null, totalCount: records.length };
+  } });
+  type Page = { includeInstructions: true; count: number; totalCount: number; nextCursor: string | null; items: Array<{
+    automationId: string; instructions: string | null; instructionsComplete: boolean; status: string;
+    contextReferences: unknown[]; assistantTargetOverride: unknown; updatedAt: string;
+  }> };
+  let cursor: string | null = null;
+  const seen: Page["items"] = [];
+  let pageCount = 0;
+  do {
+    const listed: Awaited<ReturnType<typeof runInProcessJsonCli<Page>>> = await runInProcessJsonCli<Page>(cli, ["automation", "list", "--include-instructions", "--limit", "200",
+      "--status", "active", "--status", "paused", ...(cursor ? ["--cursor", cursor] : []), "--vault", "/synthetic/inventory"]);
+    assert.equal(listed.envelope.ok, true);
+    const page = listed.envelope.data;
+    assert.ok(page);
+    assert.equal(page.includeInstructions, true);
+    assert.equal(page.totalCount, 25);
+    assert.equal(page.count, page.items.length);
+    assert.ok(page.count > 0 && page.count <= 20);
+    assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= 48 * 1024);
+    for (const item of page.items) assert.equal("markdown" in item, false);
+    seen.push(...page.items);
+    cursor = page.nextCursor;
+    assert.ok(++pageCount < 10, "bounded inventory must make cursor progress");
+  } while (cursor);
+  assert.equal(queryCalls, pageCount, "one canonical list query per page");
+  assert.deepEqual(seen.map(item => item.automationId), records.map(record => record.automationId));
+  assert.equal(seen[0]?.instructions, null);
+  assert.equal(seen[0]?.instructionsComplete, false);
+  for (const [index, item] of seen.slice(1).entries()) {
+    assert.equal(item.instructionsComplete, true);
+    assert.equal(item.instructions, records[index + 1]?.instructions);
+    assert.deepEqual(item.contextReferences, records[index + 1]?.contextReferences);
+    assert.deepEqual(item.assistantTargetOverride, records[index + 1]?.assistantTargetOverride);
+    assert.equal(item.status, records[index + 1]?.status);
+  }
+  const invalid = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--compact", "--vault", "/synthetic/inventory"]);
+  assert.equal(invalid.envelope.ok, false);
+  assert.equal(queryCalls, pageCount, "reject incompatible projections before querying");
+  const terminal = await runInProcessJsonCli<Page>(cli, ["automation", "list", "--include-instructions", "--limit", "20",
+    "--cursor", records.at(-1)!.automationId, "--vault", "/synthetic/inventory"]);
+  assert.equal(terminal.envelope.ok, true);
+  assert.deepEqual(terminal.envelope.data?.items, []);
+  assert.equal(terminal.envelope.data?.nextCursor, null);
+  const oversizedFilters = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--limit", "20",
+    "--cursor", records.at(-1)!.automationId, "--text", "x".repeat(50_000), "--vault", "/synthetic/inventory"]);
+  assert.equal(oversizedFilters.envelope.ok, false, "an empty result must still respect the byte budget");
+  records[0]!.summary = "x".repeat(50_000);
+  const oversizedMetadata = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--limit", "20", "--vault", "/synthetic/inventory"]);
+  assert.equal(oversizedMetadata.envelope.ok, false, "oversized metadata must fail instead of silently dropping its record");
+});
+
+test("automation maintenance ids share the canonical public owner", () => {
+  assert.strictEqual(getMurphMaintenanceAutomationIds, rootMaintenanceAutomationIds);
+  assert.deepEqual(getMurphMaintenanceAutomationIds(),
+    [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, ...MURPH_MANAGED_AUTOMATIONS].map(seed => seed.automationId));
+});
+
+test("automation maintenance exclusion preserves real reminder pages and removes routine instruction payloads", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-maintenance-inventory-");
+  try {
+    const cli = Cli.create("vault-cli", { version: "0.0.0-test" });
+    registerAutomationCommands(cli);
+    const payload = createAutomationScaffoldPayload();
+    const route = { ...payload.route, channel: "telegram", deliveryTarget: "telegram:synthetic-inventory" };
+    const seeds = [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, ...MURPH_MANAGED_AUTOMATIONS]
+      .filter(seed => seed.ownerScope === "member");
+    for (const seed of seeds) await upsertAutomation({ ...payload, vaultRoot, route,
+      automationId: seed.automationId, slug: seed.slug, title: "Renamed routine", tags: [],
+      instructions: seed.instructions,
+    });
+    const empty = await runInProcessJsonCli<{ count: number; totalCount: number; nextCursor: string | null; items: unknown[] }>(cli,
+      ["automation", "list", "--include-instructions", "--exclude-maintenance", "--vault", vaultRoot]);
+    assert.equal(empty.envelope.ok, true);
+    assert.equal(empty.envelope.data?.count, 0);
+    assert.equal(empty.envelope.data?.totalCount, 0);
+    assert.equal(empty.envelope.data?.nextCursor, null);
+    assert.deepEqual(empty.envelope.data?.items, []);
+    const reminders = [];
+    for (const [index, status] of (["active", "paused", "active"] as const).entries()) {
+      reminders.push((await upsertAutomation({ ...payload, vaultRoot, route,
+        slug: `retained-reminder-${index}`, title: index === 1 ? "Medication reminder" : "Weekly health digest",
+        status, instructions: index === 1 ? "Follow the saved clinician-directed reminder; preserve its pause." : "Bring shoes to the club.",
+        tags: index === 2 ? [buildAutomationSupportSeriesTag("habit:synthetic-plan")] : ["murph-managed:weekly-health-digest"],
+        supportKind: index === 2 ? "check_in" : undefined,
+      })).record);
+    }
+    type Page = { vault: string; count: number; totalCount: number; nextCursor: string | null;
+      filters: { excludeMaintenance?: boolean }; items: Array<{ automationId: string; instructions: string | null; status: string; supportKind: string | null }> };
+    for (const options of [[], ["--compact"]]) {
+      const result = await runInProcessJsonCli<Omit<Page, "items"> & { compact?: true; items: Array<{ automationId: string }> }>(cli,
+        ["automation", "list", ...options, "--exclude-maintenance", "--limit", "200", "--vault", vaultRoot]);
+      assert.equal(result.envelope.ok, true);
+      const page = result.envelope.data;
+      assert.ok(page);
+      assert.equal(page.count, reminders.length);
+      assert.equal(page.totalCount, reminders.length);
+      assert.equal(page.nextCursor, null);
+      assert.equal(page.filters.excludeMaintenance, true);
+      assert.equal(page.compact, options.length ? true : undefined);
+      assert.deepEqual(page.items.map(item => item.automationId).sort(), reminders.map(item => item.automationId).sort());
+      for (const item of page.items) {
+        assert.equal("instructions" in item, false);
+        assert.equal("markdown" in item, false);
+      }
+    }
+    const readInventory = async (exclude: boolean, limit = 20) => {
+      let cursor: string | null = null;
+      let bytes = 0;
+      let pages = 0;
+      const items: Page["items"] = [];
+      do {
+        const result: Awaited<ReturnType<typeof runInProcessJsonCli<Page>>> = await runInProcessJsonCli<Page>(cli,
+          ["automation", "list", "--include-instructions", "--status", "active", "--status", "paused", "--limit", String(limit),
+            ...(exclude ? ["--exclude-maintenance"] : []), ...(cursor ? ["--cursor", cursor] : []), "--vault", vaultRoot]);
+        assert.equal(result.envelope.ok, true);
+        const page = result.envelope.data;
+        assert.ok(page);
+        assert.equal(page.totalCount, reminders.length + (exclude ? 0 : seeds.length));
+        assert.equal(page.filters.excludeMaintenance, exclude ? true : undefined);
+        bytes += Buffer.byteLength(JSON.stringify({ ...page, vault: "<synthetic-vault>" }), "utf8");
+        items.push(...page.items);
+        cursor = page.nextCursor;
+        assert.ok(++pages < 20, "pagination must make progress");
+      } while (cursor);
+      return { items, bytes, pages };
+    };
+    const before = await readInventory(false);
+    const after = await readInventory(true);
+    assert.deepEqual(after.items.map(item => item.automationId).sort(), reminders.map(item => item.automationId).sort());
+    for (const reminder of reminders) {
+      const item = after.items.find(candidate => candidate.automationId === reminder.automationId);
+      assert.equal(item?.instructions, reminder.instructions);
+      assert.equal(item?.status, reminder.status);
+      assert.equal(item?.supportKind, reminder.supportKind);
+    }
+    assert.ok(before.bytes - after.bytes > 50_000, "exclude routine bodies, not just trim their metadata");
+    assert.ok(before.pages > after.pages);
+    assert.deepEqual((await readInventory(true, 1)).items, after.items);
+    process.stdout.write(`[maintenance-inventory-bytes] ${JSON.stringify({ baselineBytes: before.bytes, filteredBytes: after.bytes, baselinePages: before.pages, filteredPages: after.pages, eligible: after.items.length })}\n`);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test("automation compact list retains enumeration state and materially reduces a 25-item page", async () => {
   const cli = Cli.create("vault-cli", {
     description: "automation compact fixture test cli",
@@ -1634,8 +1807,8 @@ test("automation compact list retains enumeration state and materially reduces a
     const record = automationRecordSchema.parse({
       activeUntil: "2026-12-31T23:59:59.000Z",
       assistantTargetOverride: {
-        model: "gpt-5.6-terra",
-        modelProvider: "vercel-ai-gateway",
+        model: "gpt-6.1-sol",
+        modelProvider: "openai",
         reasoningEffort: "low",
       },
       automationId: `automation_01ARZ3NDEKTSV4RRFFQ69G5FA${suffix}`,

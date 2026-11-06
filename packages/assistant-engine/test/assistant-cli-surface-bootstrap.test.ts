@@ -286,26 +286,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         name: 'search docs',
       },
       {
-        description: 'Recursive assistant route',
-        name: 'assistant run',
-      },
-      {
-        description: 'Outbound delivery route',
-        name: 'assistant deliver',
-      },
-      {
-        description: 'Assistant runtime diagnostics',
-        name: 'assistant status',
-      },
-      {
-        description: 'Assistant session inspection',
-        name: 'assistant session list',
-      },
-      {
-        description: 'Assistant self delivery setup',
-        name: 'assistant self-target set',
-      },
-      {
         description: 'Assistant onboarding status',
         name: 'assistant onboarding status',
       },
@@ -323,14 +303,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
             type: 'object',
           },
         },
-      },
-      {
-        description: 'Murph Age readiness',
-        name: 'age inputs',
-      },
-      {
-        description: 'Murph Age report',
-        name: 'age report',
       },
       {
         description: 'Mark onboarding complete',
@@ -359,18 +331,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         },
       },
       {
-        description: 'Root status alias',
-        name: 'status',
-      },
-      {
-        description: 'Root doctor alias',
-        name: 'doctor',
-      },
-      {
-        description: 'Root model config',
-        name: 'model',
-      },
-      {
         description: '   ',
         name: '   ',
       },
@@ -390,7 +350,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
     /- `assistant`: `onboarding complete`, `onboarding resume-context`\./u,
   )
   assert.match(contract, /- `document`: `import`\./u)
-  assert.doesNotMatch(contract, /- `age`:/u)
   assert.match(
     contract,
     /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
@@ -414,8 +373,8 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   assert.doesNotMatch(contract, /`assistant session list`/u)
   assert.doesNotMatch(contract, /`assistant self-target set`/u)
   assert.doesNotMatch(contract, /`assistant onboarding status`/u)
-  assert.doesNotMatch(contract, /`age inputs`/u)
-  assert.doesNotMatch(contract, /`age report`/u)
+  assert.doesNotMatch(contract, /`assistant doctor`/u)
+  assert.doesNotMatch(contract, /`assistant stop`/u)
   assert.doesNotMatch(contract, /`status`/u)
   assert.doesNotMatch(contract, /`doctor`/u)
   assert.doesNotMatch(contract, /`model`/u)
@@ -464,7 +423,7 @@ test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action
     '- `device provider list`: List supported providers.',
     'Command index:',
     '- `automation`: `edit`, `import-json`, `list`, `save`, `scaffold`, `set-status`, `show`.',
-    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `daemon start`, `daemon status`, `daemon stop`, `provider list`.',
+    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `provider list`.',
   ].join('\n')
 
   assert.equal(
@@ -485,40 +444,6 @@ test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action
     scopeAssistantCliSurfaceContractForAssistant({
       contract,
       hostedRuntime: false,
-    }),
-    contract,
-  )
-})
-
-test('scopeAssistantCliSurfaceContractForAssistant hides the research family when Exa is unavailable', async () => {
-  const {
-    scopeAssistantCliSurfaceContractForAssistant,
-  } = await import('../src/assistant/cli-surface-bootstrap.ts')
-  const contract = [
-    'Murph CLI Contract:',
-    '- `research scout`: Search current human research.',
-    '- `goal list`: List goals.',
-    'Command index:',
-    '- `research`: `payload-schema`, `scout`, `scout-batch`.',
-    '- `goal`: `list`, `save`.',
-  ].join('\n')
-
-  assert.equal(
-    scopeAssistantCliSurfaceContractForAssistant({
-      contract,
-      researchAvailable: false,
-    }),
-    [
-      'Murph CLI Contract:',
-      '- `goal list`: List goals.',
-      'Command index:',
-      '- `goal`: `list`, `save`.',
-    ].join('\n'),
-  )
-  assert.equal(
-    scopeAssistantCliSurfaceContractForAssistant({
-      contract,
-      researchAvailable: true,
     }),
     contract,
   )
@@ -1115,12 +1040,6 @@ test('buildAssistantCliSurfaceContract keeps every normalized command reconstruc
         name: 'search docs',
       },
       {
-        name: 'age report',
-      },
-      {
-        name: 'assistant status',
-      },
-      {
         name: '   ',
       },
     ],
@@ -1227,4 +1146,16 @@ test('buildAssistantCliSurfaceContract keeps hot-path option signatures beside a
   assert.match(goalSaveLine, /--status=active\|paused\|completed\|abandoned/u)
   assert.match(goalSaveLine, /--horizon=short_term\|medium_term\|long_term\|ongoing/u)
   assert.match(goalSaveLine, /--priority=integer/u)
+})
+
+test('CLI discovery uses concise help for syntax and reserves schemas for structured contracts', async () => {
+  const { buildAssistantCliSurfaceContract } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [{ name: 'food search-labels', description: 'Look up food labels.' }],
+  })
+  assert.ok(contract)
+  assert.match(contract, /read `vault-cli <command> --help` for positional arguments, flags, and examples/u)
+  assert.match(contract, /Reuse the loaded skill or a precise error hint/u)
+  assert.match(contract, /--schema --format json` only when help omits a needed structured input or output contract/u)
+  assert.doesNotMatch(contract, /Before running.*--schema/u)
 })

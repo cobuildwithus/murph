@@ -7,6 +7,7 @@
 export {
   appendKnowledgePageSection,
   getKnowledgePage,
+  getKnowledgePageIfExists,
   lintKnowledgePages,
   listKnowledgePages,
   rebuildKnowledgeIndex,

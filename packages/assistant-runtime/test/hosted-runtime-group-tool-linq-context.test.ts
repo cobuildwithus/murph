@@ -253,6 +253,18 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])("forwards freshness only for authenticated conversation ingress (email=%s)", async (groupEmailIngress) => {
+    const request = vi.fn().mockResolvedValue({ action: "read_shared", result: { status: "ok" } });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress });
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const signal = new AbortController().signal;
+    await groupTool.request({ action: "read_shared", projectionScopes, freshness }, { signal });
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_shared", projectionScopes,
+      ...(groupEmailIngress ? {} : { freshness }),
+    }, { signal });
+  });
+
   it("forwards telegram current-turn sender evidence channel-qualified", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_shared",
@@ -1492,4 +1504,32 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       expect(request).not.toHaveBeenCalled();
     },
   );
+});
+
+
+it("rejects game actions from email without forwarding sender authority", async () => {
+  const request = vi.fn();
+  const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress: true });
+  await expect(tool.request({ action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } })).resolves.toEqual({ action: "read_game", result: { status: "unavailable", error: "authenticated_sender_required" } });
+  expect(request).not.toHaveBeenCalled();
+});
+
+
+it("forwards chat setup with the current accepted-input authority and preserves player task references", async () => {
+  const request = vi.fn().mockResolvedValue({ action: "update_game", result: { status: "ok", state: { games: [] } } });
+  const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [] });
+  const create: HostedRuntimeGroupToolRequest = { action: "update_game", origin: { kind: "accepted_input", assistantInputId: EXACT_GROUP_PARTICIPANT.assistantInputId }, update: {
+    operation: "create", gameId: "game_setup", terms: { tasks: [{ memberId: "player_sam", text: "Read" }, { memberId: "player_ava", text: "Walk" }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item: "Lunch" }] },
+  } };
+  expect(await tool.request(create)).toMatchObject({ result: { status: "ok" } });
+  expect(request).toHaveBeenCalledExactlyOnceWith(create);
+});
+
+
+it("preserves the marked game read without adding model-selected authority", async () => {
+  const read: HostedRuntimeGroupToolRequest = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: EXACT_GROUP_PARTICIPANT.assistantInputId }, includePlayers: true };
+  const request = vi.fn().mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
+  const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [] });
+  await tool.request(read);
+  expect(request).toHaveBeenCalledExactlyOnceWith(read);
 });
