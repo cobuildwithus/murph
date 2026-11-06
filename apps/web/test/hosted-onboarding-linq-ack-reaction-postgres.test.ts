@@ -73,6 +73,115 @@ describe.skipIf(!runPostgresProof)("hosted Linq ack-reaction burst state (Postgr
     return { messageId, reaction };
   }
 
+  it.each([
+    [299.999, true],
+    [300, true],
+    [300.001, false],
+  ] as const)("checks the five-minute live window at receipt (%ss after outbound)", async (receivedSeconds, live) => {
+    const chat = `ack-proof-${randomUUID()}`;
+    await recordOutbound(chat, at(0));
+    const result = await claimHostedLinqAckReaction({
+      ...ack(),
+      linqChatId: chat,
+      messageReceivedAt: at(receivedSeconds),
+      // The claim clock is outside the window even when receipt was inside.
+      now: clock(301),
+      prisma,
+      skipLiveConversation: true,
+    });
+    expect(result).toEqual(live ? "live_conversation" : at(301));
+    expect(await prisma.hostedLinqAckReaction.count({
+      where: { linqChatLookupKey: createHostedLinqChatLookupKey(chat)! },
+    })).toBe(live ? 0 : 1);
+    expect(await covered(chat, 302)).toBe(false);
+  });
+
+  it("reserves a kept kind inside the live window", async () => {
+    const chat = `ack-proof-${randomUUID()}`;
+    await recordOutbound(chat, at(0));
+    expect(await claimHostedLinqAckReaction({
+      ...ack(undefined, "🔎"),
+      linqChatId: chat,
+      messageReceivedAt: at(5),
+      now: clock(6),
+      prisma,
+      skipLiveConversation: false,
+    })).toEqual(at(6));
+  });
+
+  it("leaves progress and a later kept kind eligible after a live skip in the same burst", async () => {
+    const chat = `ack-proof-${randomUUID()}`;
+    await recordOutbound(chat, at(0));
+    expect(await claimHostedLinqAckReaction({
+      ...ack(),
+      linqChatId: chat,
+      messageReceivedAt: at(5),
+      now: clock(6),
+      prisma,
+      skipLiveConversation: true,
+    })).toBe("live_conversation");
+    expect(await prisma.hostedLinqAckReaction.count({
+      where: { linqChatLookupKey: createHostedLinqChatLookupKey(chat)! },
+    })).toBe(0);
+    expect(await covered(chat, 7)).toBe(false);
+    expect(await claimHostedLinqAckReaction({
+      ...ack(undefined, "🔎"),
+      linqChatId: chat,
+      messageReceivedAt: at(7),
+      now: clock(8),
+      prisma,
+      skipLiveConversation: false,
+    })).toEqual(at(8));
+  });
+
+  it("reserves a quick kind when the chat has no outbound", async () => {
+    expect(await claimHostedLinqAckReaction({
+      ...ack(),
+      linqChatId: `ack-proof-${randomUUID()}`,
+      messageReceivedAt: at(5),
+      now: clock(6),
+      prisma,
+      skipLiveConversation: true,
+    })).toEqual(at(6));
+  });
+
+  it.each([5, 6])("keeps the answered refusal ahead of a live skip (outbound at %ss)", async (outboundSeconds) => {
+    const chat = `ack-proof-${randomUUID()}`;
+    await recordOutbound(chat, at(outboundSeconds));
+    expect(await claimHostedLinqAckReaction({
+      ...ack(),
+      linqChatId: chat,
+      messageReceivedAt: at(5),
+      now: clock(7),
+      prisma,
+      skipLiveConversation: true,
+    })).toBeNull();
+  });
+
+  it.each(["reservation", "heavy"] as const)("keeps an existing %s ahead of a live skip", async (taken) => {
+    const chat = `ack-proof-${randomUUID()}`;
+    await recordOutbound(chat, at(0));
+    const input = { linqChatId: chat, messageReceivedAt: at(5), now: clock(6), prisma };
+    if (taken === "reservation") {
+      expect(await claimHostedLinqAckReaction({ ...ack(), ...input })).toEqual(at(6));
+    } else {
+      await markHostedLinqAckReactionHeavy(input);
+    }
+    const before = await prisma.hostedLinqAckReaction.findUniqueOrThrow({
+      where: { linqChatLookupKey: createHostedLinqChatLookupKey(chat)! },
+    });
+    expect(await claimHostedLinqAckReaction({
+      ...ack(),
+      ...input,
+      messageReceivedAt: at(7),
+      now: clock(8),
+      skipLiveConversation: true,
+    })).toBeNull();
+    expect(await prisma.hostedLinqAckReaction.findUniqueOrThrow({
+      where: { linqChatLookupKey: createHostedLinqChatLookupKey(chat)! },
+    })).toEqual(before);
+  });
+
   it("reserves one tapback per burst, suppresses progress only once confirmed, and reopens after Murph sends", async () => {
     const chat = `ack-proof-${randomUUID()}`;
     await recordOutbound(chat, at(0));
