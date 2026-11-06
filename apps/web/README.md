@@ -49,7 +49,7 @@ Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
 that transaction, and appends one deterministic `device-sync.wake` mailbox
 handoff only when the connection moves clean-to-dirty. Routine Junction daily
-totals defer that handoff up to fifteen minutes and the scheduled recovery sweep
+totals defer that handoff up to thirty minutes and the scheduled recovery sweep
 releases it. Already-dirty level hints coalesce without another mailbox row. The dirty row remains the source of truth;
 the mailbox row is only the durable handoff into the normal Temporal wake path.
 Post-commit Temporal signal failures are logged as best-effort mailbox handoff
