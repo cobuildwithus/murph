@@ -760,7 +760,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
 /**
  * Returns true only when the winning first dispatch certified a rejection. A
  * rejection on a resumed attempt proves nothing about the earlier one, so it
- * keeps the sealed reply and only stops that row blocking its chat.
+ * keeps the sealed reply held and Web does not resend it.
  */
 async function recordHostedLinqInstantFirstTurnSendFailure(input: {
   error: unknown;

@@ -105,7 +105,10 @@ async function seed() {
 
 describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
   it("B1: a losing request cannot abandon another request's sealed resume", async () => withFixture(async (f) => {
-    await f.sealed();
+    const initial = await claimHostedLinqInstantFirstTurn(f.claimInput);
+    if (initial.kind !== "generate") throw new Error("Expected generation");
+    provider.send.mockRejectedValueOnce(new Error("Synthetic timeout"));
+    await expect(completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: f.reply(initial.attemptedAt) })).rejects.toMatchObject(retry);
     const a = await claimHostedLinqInstantFirstTurn(f.claimInput);
     expect(a.kind).toBe("resume");
     await expect(claimHostedLinqInstantFirstTurn(f.claimInput)).rejects.toMatchObject(retry);
@@ -115,13 +118,13 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     expect(await f.egress()).toBe("defer");
     if (a.kind !== "resume") throw new Error("Expected resume");
     expect(await completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: a })).toMatchObject({ kind: "accepted" });
-    expect(provider.send).toHaveBeenCalledTimes(1);
-    expect(provider.send).toHaveBeenCalledWith(expect.objectContaining({ message: f.message, idempotencyKey: f.idempotencyKey }));
-    expect((await f.read()).skippedAt).toBeNull();
+    expect(provider.send).toHaveBeenCalledTimes(2);
+    for (const [call] of provider.send.mock.calls) expect(call).toMatchObject({ idempotencyKey: f.idempotencyKey, message: f.message });
+    expect(await f.read()).toMatchObject({ status: "accepted", skippedAt: null, payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null });
     expect(await f.egress()).toBe("already_answered");
   }));
 
-  it("N5: a resumed rejection holds only its exact input and preserves replay", async () => withFixture(async (f) => {
+  it("N5: a resumed rejection admits a later input but never replays its sealed reply", async () => withFixture(async (f) => {
     const distinctEventId = `next-${f.eventId}`;
     const conflictInput = { eventId: distinctEventId, linqChatId: f.chatId, prisma: f.prisma };
     const unresolvedInput = { linqChatId: f.chatId, prisma: f.prisma };
@@ -138,7 +141,8 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     if (a.kind !== "resume") throw new Error("Expected resume");
     provider.send.mockRejectedValueOnce(rejected());
     await expect(completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: a })).rejects.toMatchObject(retry);
-    expect(await f.read()).toMatchObject({
+    const held = await f.read();
+    expect(held).toMatchObject({
       failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
       payloadCiphertext: before.payloadCiphertext,
       status: "failed",
@@ -154,14 +158,11 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     await abandonHostedLinqInstantFirstTurn({
       ...conflictInput, expectedAttemptedAt: distinct.attemptedAt, reason: "synthetic-fallback",
     });
-    const next = await claimHostedLinqInstantFirstTurn(f.claimInput);
-    if (next.kind !== "resume") throw new Error("Expected resume");
+    expect(provider.send).toHaveBeenCalledTimes(2);
+    await expect(claimHostedLinqInstantFirstTurn(f.claimInput)).rejects.toMatchObject(retry);
+    expect(await f.read()).toEqual(held);
     expect(await f.egress()).toBe("defer");
-    await expect(completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: next })).resolves.toMatchObject({ kind: "accepted" });
-    expect(await f.read()).toMatchObject({ status: "accepted", payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null });
-    expect(provider.send).toHaveBeenCalledTimes(3);
-    for (const [call] of provider.send.mock.calls) expect(call).toMatchObject({ idempotencyKey: f.idempotencyKey, message: f.message });
-    expect(await f.egress()).toBe("already_answered");
+    expect(provider.send).toHaveBeenCalledTimes(2);
   }));
 
 
@@ -169,7 +170,7 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     { label: "absent", status: null, egress: "available", conflict: false, unresolved: false, claim: "generate" },
     { label: "reserved", status: "attempted", egress: "defer", conflict: true, unresolved: true, claim: "generate" },
     ...["attempted", "provider_dispatch_started", "failed"].map(status => ({ label: `sealed ${status}`, status, sealed: true, egress: "defer", conflict: true, unresolved: true, claim: "resume" })),
-    { label: "sealed retry rejected", status: "failed", sealed: true, failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE, egress: "defer", conflict: false, unresolved: false, claim: "resume" },
+    { label: "sealed retry rejected", status: "failed", sealed: true, failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE, egress: "defer", conflict: false, unresolved: false, claim: "retry" },
     ...["accepted", "delivered"].map(status => ({ label: status, status, egress: "already_answered", conflict: false, unresolved: false, claim: "completed" })),
     ...["acceptedAt", "deliveredAt", "lastReceiptAt", "messageLookupKey"].map(correlation => ({ label: `correlated failed ${correlation}`, status: "failed", correlation, sealed: true, egress: "already_answered", conflict: false, unresolved: false, claim: "completed" })),
     { label: "skipped empty", status: "skipped", egress: "available", conflict: false, unresolved: false, claim: "unavailable" },
@@ -270,6 +271,41 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
         expect(result).toMatchObject({ error: retry });
         expect(await f.read()).toEqual(before);
       }
+    } finally { finish.resolve(); await settled; }
+  }));
+
+  it("a late positive settles a held rejected retry", async () => withFixture(async (f) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const a = await claimHostedLinqInstantFirstTurn(f.claimInput);
+    if (a.kind !== "generate") throw new Error("Expected generation");
+    const entered = deferred();
+    const finish = deferred();
+    provider.send.mockImplementationOnce(async () => {
+      entered.resolve(); await finish.promise;
+      return { chatId: f.chatId, messageId: `late-positive-${f.eventId}` };
+    });
+    const pending = completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: f.reply(a.attemptedAt) });
+    const settled = pending.then(value => ({ value }), error => ({ error }));
+    try {
+      await Promise.race([entered.promise, pending]);
+      const before = await f.read();
+      expect(before.payloadCiphertext).not.toBeNull();
+      vi.setSystemTime(new Date(Date.now() + 1_200_000));
+      const b = await claimHostedLinqInstantFirstTurn(f.claimInput);
+      if (b.kind !== "resume") throw new Error("Expected resume");
+      provider.send.mockRejectedValueOnce(rejected());
+      await expect(completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: b })).rejects.toMatchObject(retry);
+      expect(await f.read()).toMatchObject({
+        status: "failed", skippedAt: null, payloadCiphertext: before.payloadCiphertext,
+        failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
+      });
+      expect(await f.egress()).toBe("defer");
+      await expect(claimHostedLinqInstantFirstTurn(f.claimInput)).rejects.toMatchObject(retry);
+      finish.resolve();
+      expect(await settled).toMatchObject({ value: { kind: "accepted" } });
+      expect(await f.read()).toMatchObject({ status: "accepted", failureCode: null, payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null });
+      expect(await f.egress()).toBe("already_answered");
+      expect(provider.send).toHaveBeenCalledTimes(2);
     } finally { finish.resolve(); await settled; }
   }));
 

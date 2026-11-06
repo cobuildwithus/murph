@@ -843,11 +843,12 @@ export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
  * | failed + empty + certified rejection  | fallback    | nobody                                    | available        |
  * | attempted + empty                     | reserved    | exact claim seals or skips; stale reclaim | defer            |
  * | attempted, started or failed + sealed | sealed      | exact claim dispatches or fails; a failed | defer            |
- * |                                       |             | or stale row reclaims                     |                  |
+ * | (except rejected retries)             |             | or stale row reclaims                     |                  |
  * | anything else                         | held        | positive evidence only                    | defer            |
  *
- * Held covers legacy skipped + sealed and uncertified failed + empty rows: their
- * evidence cannot show what the person received, so they never resume.
+ * Held covers rejected retries, legacy skipped + sealed and uncertified failed +
+ * empty rows. They never resume because a later reply could follow an ordinary
+ * answer to the same input.
  */
 function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   acceptedAt: Date | null;
@@ -872,6 +873,7 @@ function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
     return empty ? "fallback" : "held";
   }
   if (input.failedAt !== null || input.status === "failed") {
+    if (input.failureCode === HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE) return "held";
     return sealed ? "sealed"
       : empty && input.failureCode === HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE
         ? "fallback" : "held";
