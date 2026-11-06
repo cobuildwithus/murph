@@ -221,6 +221,8 @@ function createRoute(input?: {
 function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagnostics'] {
   return {
     assistantContextSnapshotElapsedMs: null,
+    assistantContextSnapshotRefreshElapsedMs: null,
+    followUpContextElapsedMs: null,
     cliBootstrapElapsedMs: null,
     dynamicToolCount: 0,
     messageTargetingAvailable: false,
@@ -495,7 +497,11 @@ describe('Codex provider routing', () => {
           },
           dynamicTools: [],
           onboardingGuidanceInjected: false,
-          planningDiagnostics: createRoutePlanningDiagnostics(),
+          planningDiagnostics: {
+            ...createRoutePlanningDiagnostics(),
+            assistantContextSnapshotRefreshElapsedMs: 73,
+            followUpContextElapsedMs: 41,
+          },
           promptCacheMetadata: null,
           resume: null,
           sessionContext: undefined,
@@ -527,6 +533,8 @@ describe('Codex provider routing', () => {
       expect(planTrace).toMatchObject({
         schema: 'murph.assistant-provider-plan-diagnostics.v1',
         type: 'assistant.provider.plan',
+        routePlanningAssistantContextSnapshotRefreshElapsedMs: 73,
+        routePlanningFollowUpContextElapsedMs: 41,
         reasoningEffort: expectedReasoningEffort,
       })
       expect(planTrace).not.toHaveProperty('providerConfig')

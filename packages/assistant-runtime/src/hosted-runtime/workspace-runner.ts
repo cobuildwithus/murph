@@ -8,6 +8,7 @@ import {
 } from "@murphai/runtime-state/node/assistant-state-fs";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  emitHostedExecutionStructuredLog,
   type HostedExecutionConversationMessageChannel,
 } from "@murphai/hosted-execution";
 import type {
@@ -827,7 +828,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (!isDeferredHostedMailboxImportDirty(result)) {
       return;
     }
+    const persistQueuedAt = performance.now();
     const persist = async (): Promise<void> => {
+      emitHostedExecutionStructuredLog({
+        component: "runtime", phase: "checkpoint", level: "info",
+        message: "Hosted mailbox persist wait timing.",
+        details: { persistWaitMs: Math.round(performance.now() - persistQueuedAt) },
+      });
       const pendingReceiptLog = readHostedCanonicalWriteReceiptLogStatusFingerprint(
         readCurrentRedactedStatus(),
       );
@@ -2530,6 +2537,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     vaultRoot: input.input.vaultRoot,
     workspacePort: input.input.platform.workspacePort,
   });
+  const runtimeLogStartedAt = performance.now();
   if (
     input.suppressNoopRuntimeLog !== true
     || !hostedMailboxImportCheckpointResultIsNoop(result)
@@ -2541,12 +2549,23 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
       runnerInput: input.input,
     });
   }
+  const runtimeLogMs = Math.round(performance.now() - runtimeLogStartedAt);
+  const dirtyMarkerStartedAt = performance.now();
   if (isDeferredHostedMailboxImportDirty(result)) {
     await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
       snapshotRef: input.input.workspace?.snapshotRef ?? null,
       vaultRoot: input.input.vaultRoot,
     });
   }
+  emitHostedExecutionStructuredLog({
+    component: "runtime", phase: "wake.running", level: "info",
+    message: "Hosted mailbox import tail timing.",
+    details: {
+      checkpointReason: input.checkpointReason,
+      runtimeLogMs,
+      dirtyMarkerMs: Math.round(performance.now() - dirtyMarkerStartedAt),
+    },
+  });
   await input.checkpointCanonicalMailboxImportProgress?.(result);
 
   return result;

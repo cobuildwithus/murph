@@ -9,6 +9,7 @@ import type {
   HostedExecutionEmailConversationMessagePayload,
 } from "@murphai/hosted-execution";
 import {
+  emitHostedExecutionStructuredLog,
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
@@ -464,21 +465,27 @@ async function stageHostedConversationMailboxItem(
     wake: decoded.wake,
   });
   const attachmentAdmissionDeferred = stagedInput.attachmentEvidenceRequired;
+  let pendingIndexEnqueueMs = 0;
+  let activeTurnNotifyMs = 0;
   const notifyActiveTurnInputAvailable = async (): Promise<void> => {
     if (!foregroundAssistantInputId) {
       return;
     }
+    const notifyStartedAt = performance.now();
     await notifyAssistantActiveTurnInputAvailableForInputIds({
       inputIds: [foregroundAssistantInputId],
       ...(input.signal ? { signal: input.signal } : {}),
       vault: input.vaultRoot,
     });
+    activeTurnNotifyMs += Math.round(performance.now() - notifyStartedAt);
   };
   const enqueuePendingReply = async (): Promise<void> => {
     if (!foregroundAssistantInputId) {
       return;
     }
+    const enqueueStartedAt = performance.now();
     await stagedInput.enqueuePendingReply();
+    pendingIndexEnqueueMs += Math.round(performance.now() - enqueueStartedAt);
     recordHostedConversationPendingReplyAdmittedBestEffort({
       inputId: foregroundAssistantInputId,
       runtime: input.runtime,
@@ -603,6 +610,11 @@ async function stageHostedConversationMailboxItem(
           ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
         };
       } finally {
+        emitHostedExecutionStructuredLog({
+          component: "runtime", phase: "wake.running", level: "info",
+          message: "Hosted conversation import admission timing.",
+          details: { pendingIndexEnqueueMs, activeTurnNotifyMs },
+        });
         if (!importSucceeded) cancelInputTyping?.();
       }
     },

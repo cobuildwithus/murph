@@ -1,3 +1,4 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedMailboxLane,
   HostedRuntimeRedactedJson,
@@ -163,9 +164,15 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   }
 
   if (stateChanged) {
+    const watermarkStartedAt = performance.now();
     await writeHostedMailboxImportState({
       state: importResult.state,
       vaultRoot: input.vaultRoot,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "runtime", phase: "wake.running", level: "info",
+      message: "Hosted mailbox watermark write timing.",
+      details: { watermarkWriteMs: Math.round(performance.now() - watermarkStartedAt) },
     });
   }
 

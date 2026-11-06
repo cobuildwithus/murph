@@ -11,6 +11,8 @@ import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-co
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
+import { createRoutePlanningTailFixture } from './support/route-planning-tail.js'
+import * as followUps from '../src/assistant/follow-ups.js'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import {
@@ -234,6 +236,81 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it.each([0, 20, 200])('attributes the serial route-planning tail with %i automations without changing prompt bytes', async (count) => {
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'murph-tail-planning-'))
+    let clock = Date.parse('2026-11-05T12:00:00.000Z')
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    const originalFollowUp = followUps.resolveAssistantFollowUpTurnContext
+    const followUp = vi.spyOn(followUps, 'resolveAssistantFollowUpTurnContext')
+    try {
+      await createRoutePlanningTailFixture(vault, count)
+      const session = createSession()
+      session.binding = {
+        ...session.binding, channel: 'telegram', actorId: 'synthetic-actor',
+        threadId: 'synthetic-thread', threadIsDirect: true,
+      }
+      const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
+        executionContext: null,
+        input: { ...createMessageInput(), vault },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+        route: createRoute(), session, sharedPlan: createSharedPlan(),
+      }
+      const baseline = await resolveAssistantRouteTurnPlan(planInput)
+      expect(baseline.turnContextPrompt?.includes('Pending optional follow-ups')).toBe(count > 0)
+      for (const branch of ['followUp', 'refresh', 'currentState'] as const) {
+        followUp.mockImplementation(async (input) => {
+          const result = await originalFollowUp(input)
+          if (branch === 'followUp') clock += 41
+          return result
+        })
+        planningMocks.refreshAssistantContextSnapshotBestEffort.mockImplementation(async () => {
+          if (branch === 'refresh') clock += 73
+          return { pendingDirtyDomains: [], refreshed: false, skipped: true }
+        })
+        planningMocks.readAssistantContextSnapshotPrompt.mockImplementation(async () => {
+          if (branch === 'currentState') clock += 29
+          return null
+        })
+        const plan = await resolveAssistantRouteTurnPlan(planInput)
+        expect(plan.planningDiagnostics).toMatchObject({
+          followUpContextElapsedMs: branch === 'followUp' ? 41 : 0,
+          assistantContextSnapshotRefreshElapsedMs: branch === 'refresh' ? 73 : 0,
+          assistantContextSnapshotElapsedMs: branch === 'currentState' ? 29 : 0,
+          routePlanningMeasuredElapsedMs: branch === 'followUp' ? 41 : branch === 'refresh' ? 73 : 29,
+          routePlanningUnaccountedElapsedMs: 0,
+          routePlanningSlowestStage: branch === 'followUp' ? 'follow_up_context'
+            : branch === 'refresh' ? 'assistant_context_snapshot_refresh' : 'assistant_context_snapshot',
+        })
+        for (const key of ['systemPrompt', 'developerInstructions', 'turnContextPrompt'] as const) {
+          expect(Buffer.from(plan[key] ?? '')).toEqual(Buffer.from(baseline[key] ?? ''))
+        }
+        expect(plan.resume).toEqual(baseline.resume)
+        expect(plan.followUpInvocation).toBe(baseline.followUpInvocation)
+        expect(plan.followUpAttachmentAllowed).toBe(baseline.followUpAttachmentAllowed)
+      }
+    } finally {
+      followUp.mockRestore()
+      now.mockRestore()
+      await rm(vault, { recursive: true, force: true })
+    }
+  })
+
+  it('reports null for a foreground snapshot refresh the turn skipped', async () => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: { promptProfile: 'assistant-ask-continuation', threadScope: 'isolated-thread', toolProfile: 'output-only-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
+    expect(plan.planningDiagnostics?.assistantContextSnapshotRefreshElapsedMs).toBeNull()
+  })
+
   it('characterizes complete route-plan outputs across planner branch families', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

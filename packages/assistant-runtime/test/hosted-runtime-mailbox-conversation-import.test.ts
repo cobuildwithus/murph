@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
+import * as hostedExecution from "@murphai/hosted-execution";
 
 import * as channelAdapters from "@murphai/assistant-engine/assistant-channel-adapters";
 import type { AssistantChannelActivityHandle } from "@murphai/assistant-engine/assistant-channel-adapters";
@@ -1127,6 +1128,7 @@ describe("hosted mailbox conversation import adapter", () => {
   });
 
   test("notifies active turn directly for attachment-free text without opening inbox projection", async () => {
+    const log = vi.spyOn(hostedExecution, "emitHostedExecutionStructuredLog");
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-text-fast-path-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -1197,6 +1199,13 @@ describe("hosted mailbox conversation import adapter", () => {
       expect(prepareWakeContext).not.toHaveBeenCalled();
       expect(importConversationWake).not.toHaveBeenCalled();
       assert.equal("conversationImportTiming" in outcome, false);
+      const timing = log.mock.results.map((result) => result.value)
+        .find((entry) => entry?.message === "Hosted conversation import admission timing.");
+      assert.ok(timing);
+      assert.deepEqual(Object.keys(timing.details ?? {}).sort(), ["activeTurnNotifyMs", "pendingIndexEnqueueMs"]);
+      for (const value of Object.values(timing.details ?? {})) {
+        assert.ok(typeof value === "number" && Number.isInteger(value) && value >= 0);
+      }
     } finally {
       controller.close();
     }
