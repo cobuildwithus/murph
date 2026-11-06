@@ -150,7 +150,6 @@ describe("hosted onboarding routes", () => {
       },
     });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       member: createHostedMember(),

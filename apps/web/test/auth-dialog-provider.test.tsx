@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
     onOpenChange?: (open: boolean) => void;
     description?: string;
     onCompleted?: (payload: {
-      activationPending: boolean;
       inviteCode: string;
       joinUrl: string;
       launchConsentGranted?: boolean;
@@ -53,7 +52,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     description?: string;
     onCompleted?: (payload: {
-      activationPending: boolean;
       inviteCode: string;
       joinUrl: string;
       launchConsentGranted?: boolean;
@@ -71,7 +69,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -194,7 +191,6 @@ test("dashboard sign-in keeps incomplete onboarding on its join route", async ()
     createElement(AuthProvider, { authenticated: false }),
   );
   await act(async () => mocks.authDialogProps?.onCompleted?.({
-    activationPending: false,
     inviteCode: "invite-code",
     joinUrl: "/join/invite-code",
     stage: "verify",
@@ -297,7 +293,6 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -346,7 +341,6 @@ test("AuthProvider returns an authenticated member to the Connect page", async (
   });
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -410,7 +404,6 @@ test("AuthProvider resumes a scrubbed Clinical Records connect intent after sign
   });
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -563,7 +556,6 @@ test("AuthProvider returns an unauthenticated medical-records viewer to that pag
   });
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -687,7 +679,6 @@ test("AuthProvider resumes privacy-only authentication without consent or stage 
 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       launchConsentGranted: false,
@@ -1335,7 +1326,6 @@ test("sign-in on a device connect link returns to the same URL, fragment include
   expect(pageCompletion).toBe(mocks.authDialogProps?.onCompleted);
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -1370,7 +1360,6 @@ test("sign-in on a records link returns to the same URL with extra parameters", 
 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -1478,7 +1467,6 @@ test("AuthProvider reloads plain home so it can read canonical onboarding state"
 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -1504,7 +1492,7 @@ test.each(["active", "checkout"])("AuthProvider resumes the native account-setti
     },
   });
   await act(async () => { await mocks.authDialogProps?.onCompleted?.({
-    activationPending: false, inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", stage,
+    inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", stage,
   }); });
   expect(reload).toHaveBeenCalledOnce();
   expect(assign).not.toHaveBeenCalled();
@@ -1526,7 +1514,7 @@ test.each(["active", "checkout"])("AuthProvider resumes the health-data Settings
     },
   });
   await act(async () => { await mocks.authDialogProps?.onCompleted?.({
-    activationPending: false, inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", stage,
+    inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", stage,
   }); });
   expect(reload).toHaveBeenCalledOnce();
   expect(assign).not.toHaveBeenCalled();

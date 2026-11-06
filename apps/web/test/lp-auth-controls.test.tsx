@@ -27,7 +27,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () =
     HostedFirstPartyAuthPanel(props: {
       autoSendPastedPhoneNumber?: boolean;
       onCompleted?: (payload: {
-        activationPending: boolean;
         inviteCode: string;
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
@@ -53,7 +52,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () =
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -67,7 +65,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () =
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -81,7 +78,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () =
             type: "button",
             onClick: () =>
               void props.onCompleted?.({
-                activationPending: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "checkout",

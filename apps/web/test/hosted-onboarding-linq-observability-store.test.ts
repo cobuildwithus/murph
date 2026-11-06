@@ -1474,7 +1474,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: null,
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: null,
         status: "attempted",
@@ -1490,7 +1490,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: "LINQ_SEND_FAILED",
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: "sealed-reply",
+        payloadCiphertext: "sealed-reply", payloadOwnerMemberId: "member_synthetic",
         payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
         skippedAt: null,
         status: "failed",
@@ -1506,7 +1506,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: null,
         lastReceiptAt: null,
         messageLookupKey: "hbidx:linq-message:accepted",
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: null,
         status: "accepted",
@@ -1522,7 +1522,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: null,
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: new Date("2026-03-26T12:00:01.000Z"),
         status: "skipped",
@@ -1530,15 +1530,15 @@ describe("hosted Linq observability stores", () => {
     },
     {
       expected: "available",
-      label: "definitive failed Web fallback",
+      label: "certified first-dispatch rejected Web fallback",
       row: {
         acceptedAt: null,
         deliveredAt: null,
         failedAt: new Date("2026-03-26T12:00:01.000Z"),
-        failureCode: "LINQ_REJECTED",
+        failureCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_FIRST_DISPATCH_REJECTED",
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: null,
         status: "failed",
@@ -1705,6 +1705,7 @@ describe("hosted Linq observability stores", () => {
       linqChatLookupKey:
         createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
       messageLookupKey: null,
+      payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
       phoneNumberLookupKey: null,
       retryAfterAt: null,
       skippedAt: null,
@@ -1719,7 +1720,7 @@ describe("hosted Linq observability stores", () => {
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      advancePreProviderAttempt: true,
+      expectedAttemptedAt: attemptedAt,
       attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
       idempotencyKey: "linq-instant-first-turn-v1:event",
       linqChatId: "chat_123",
@@ -1732,6 +1733,7 @@ describe("hosted Linq observability stores", () => {
       template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
     })).resolves.toEqual({
       claimed: true,
+      attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
       id: "hld_instant_first_turn",
     });
 
@@ -1740,10 +1742,7 @@ describe("hosted Linq observability stores", () => {
       where: expect.objectContaining({
         attemptedAt,
         id: "hld_instant_first_turn",
-        sourceRef:
-          createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
         status: "attempted",
-        updatedAt,
       }),
     });
   });
@@ -3141,7 +3140,7 @@ describe("hosted Linq observability stores", () => {
     },
     {
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
-      label: "definitively failed",
+      label: "certified first-dispatch rejection",
       skippedAt: null,
       status: "failed",
     },
@@ -3153,6 +3152,7 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
       buildInstantFirstTurnDeliveryFixture({
+        failureCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_FIRST_DISPATCH_REJECTED",
         failedAt,
         skippedAt,
         status,
@@ -3183,6 +3183,7 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
       buildInstantFirstTurnDeliveryFixture({
+        payloadCiphertext: "sealed-reply", payloadOwnerMemberId: "member_synthetic",
         failureCode: "provider-timeout",
         failedAt: new Date("2026-03-26T12:00:01.000Z"),
         payloadSchema:
@@ -3205,6 +3206,7 @@ describe("hosted Linq observability stores", () => {
       template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
     })).resolves.toEqual({
       claimed: true,
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
       id: "hld_instant_first_turn",
     });
 
@@ -6259,6 +6261,7 @@ function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
   lastReceiptAt: Date | null;
   messageLookupKey: string | null;
   payloadCiphertext: string | null;
+  payloadOwnerMemberId: string | null;
   payloadSchema: string | null;
   skippedAt: Date | null;
   status: string;
@@ -6276,7 +6279,7 @@ function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
     linqChatLookupKey:
       createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
     messageLookupKey: null,
-    payloadCiphertext: null,
+    payloadCiphertext: null, payloadOwnerMemberId: null,
     payloadSchema: null,
     phoneNumberLookupKey: null,
     retryAfterAt: null,

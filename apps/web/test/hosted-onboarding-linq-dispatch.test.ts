@@ -2055,6 +2055,26 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
+  it("rethrows a losing first-turn claim without abandoning another request", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValueOnce("member_123");
+    const error = hostedOnboardingError({ code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+      details: { reason: "delivery-in-flight" }, httpStatus: 503, message: "Synthetic overlapping claim", retryable: true });
+    mocks.claimHostedLinqInstantFirstTurn.mockRejectedValueOnce(error);
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: { create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({ payloadJson: { eventType: "message.received", receiptAttemptCount: 1, receiptStatus: "processing" } }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      hostedMember: { findUnique: vi.fn().mockResolvedValue({ accountGroupMemberships: [], billingStatus: HostedBillingStatus.active,
+        id: "member_123", invites: [], linqChatId: "chat_123", phoneLookupKey: "+15550000001" }) },
+    });
+    await expect(handleHostedOnboardingLinqWebhook({ prisma,
+      rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false, data: { parts: [{ type: "text", value: "Hello" }] }, service: "iMessage" }),
+      signature: null, timestamp: null,
+    })).rejects.toBe(error);
+    expect(mocks.abandonHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+  });
+
   it.each([
     { continuation: false, service: "iMessage" },
     { continuation: true, service: "iMessage" },
@@ -2067,7 +2087,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValueOnce("member_123");
       mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
         expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-        return { kind: "generate", opening: { tone: "formal", question: "identity" } };
+        return { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate", opening: { tone: "formal", question: "identity" } };
       });
       mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
         kind: "reply",
@@ -8312,7 +8332,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         callOrder.push("activation-continuation");
       });
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -8399,7 +8419,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
     });
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
-      claim: { kind: "generate" },
+      claim: { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate" },
       request: expect.objectContaining({
         eventId,
         text: "Hey Murph",
@@ -8834,7 +8854,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     );
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9390,7 +9410,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("keeps a model-approved new contact on the signup-link path when routing selects another line", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9529,6 +9549,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_instant_start_cross_line",
       linqChatId: "chat_instant_start_cross_line",
       prisma,
@@ -9588,7 +9609,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     configureEnrollment();
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9687,7 +9708,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       });
       expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
-        claim: { kind: "generate" },
+        claim: { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate" },
         request: expect.objectContaining({
           eventId: "evt_instant_start_fallback",
           text: "Hey Murph",
@@ -9700,6 +9721,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
         .not.toHaveBeenCalled();
       expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
         eventId: "evt_instant_start_fallback",
         linqChatId: "chat_123",
         prisma,
@@ -9740,6 +9762,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_instant_start_fallback",
       linqChatId: "chat_123",
       prisma,
@@ -9853,7 +9876,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       source: "model",
     });
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -9955,6 +9978,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledOnce();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenLastCalledWith({
+      expectedAttemptedAt: null,
       eventId: "evt_model_block_replay",
       linqChatId: "chat_123",
       prisma,
@@ -10612,7 +10636,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockImplementationOnce(async () => {
       expect(transactionOpen).toBe(false);
       admissionOrder.push("reply-claim");
-      return { kind: "generate" };
+      return { attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate" };
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockImplementationOnce(
       () => {
@@ -10726,6 +10750,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       "record",
     ]);
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_transactional_first_contact_block",
       linqChatId: "chat_123",
       prisma,
@@ -11743,7 +11768,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
-      kind: "generate",
+      attemptedAt: new Date("2026-08-22T21:00:00.000Z"), kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
@@ -11856,6 +11881,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      expectedAttemptedAt: expect.anything(),
       eventId: "evt_classifier_transport_retry",
       linqChatId: "chat_123",
       prisma,

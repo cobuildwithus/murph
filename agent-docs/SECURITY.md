@@ -1164,14 +1164,12 @@ Existing product admission, delivery and runtime safety rules still apply.
   enter provider dispatch on this reply path. Because the pre-generation claim
   is speculative only to preserve classifier/generation overlap, Web retains it
   after planning only for an exact model-approved active direct wake. Every
-  other successfully planned outcome marks that same row skipped before signup
-  or alternate-route egress. A caught planning failure marks an attempted row
-  skipped before rethrowing because it has no persisted reply to resume; the
-  existing final-state guard preserves ambiguous encrypted obligations. That
-  settlement reads only the exact existing event row under the chat lock and
-  is independent of request-local generation state, so replay cannot create a
-  synthetic skipped row or acknowledge an alternate effect while an old claim
-  remains unresolved. The
+  other successfully planned outcome settles only an untouched empty reservation
+  before signup or alternate-route egress. A caught planning failure abandons
+  only this request's winning generation reservation. Settlement names its exact
+  attemptedAt version under the chat lock; an exact replay without that version
+  can settle only a stale empty reservation. Sealed or held obligations remain
+  unresolved, and an absent row stays absent. The
   request retains every source part type in order, so
   multiple text parts remain multipart even when their bounded classifier text
   is joined. The classifier keeps its 2,000-character bound, but instant reply
@@ -1181,16 +1179,18 @@ Existing product admission, delivery and runtime safety rules still apply.
   validated source event and, under the existing chat lock, reopens that exact
   instant delivery row. An unresolved row defers runtime dispatch, a
   provider-correlated row terminates the stale runtime reply as already
-  answered, and only an absent or definitive uncorrelated
-  failed-without-payload row permits the runtime provider claim. Provider
+  answered, and only absence, an untouched empty skip, or a certified empty
+  first-dispatch rejection permits the runtime provider claim. Provider
   acceptance is irreversible sender ownership even when it observes a buffered
   failed receipt; later receipts remain evidence and never authorize a second
   response. The already-answered result preserves
   its exact reason while terminally superseding the stale runtime outbox intent,
   without a retry, failure-recovery input, or recovery wake. An exact replay
-  cannot reopen a skipped instant reply or a failed
-  instant reply whose encrypted payload was cleared; only an ambiguous failure
-  with retained payload may resume the exact prior body. This template-specific
+  cannot reopen an untouched empty skip or a certified first-dispatch rejection.
+  Only the winning first dispatch can atomically certify rejection and clear its
+  payload with its exact attemptedAt version. Rejected retries retain earlier
+  ambiguity and the sealed body. Legacy skipped payloads, uncertified empty
+  failures, and incomplete tuples hold only their exact input. This template-specific
   rule does not change signup or notice retries.
 - Inbound message content written by the retention-capable owners has one receipt-anchored 14-day maximum across hosted mailbox ciphertext, vault capture text/raw fields, out-of-line text, parser bundles, SQLite/FTS projections, assistant input events, and user transcript entries. The deadline is inclusive and active or retryable work cannot extend it. Every new user transcript entry carries `contentReceivedAt`; retention must never infer a missing legacy receipt from transcript `createdAt`, an accepted-turn journal, or an input event because normal settled-snapshot cleanup may already have discarded that join. The phase-one rollout therefore preserves unstamped legacy transcript entries while re-arming existing snapshots once to queue cleanup of every carrier with trustworthy receipt evidence; the rollout remains incomplete until that queue drains. Only after both 14 complete days from verified stamping-capable runner convergence and phase-one drain completion may a separate phase-two migration re-arm those snapshots again and retire every remaining unstamped user entry. Postgres cleanup deletes sidecar payload ciphertext, clears inline payload fields, and retains only structural mailbox metadata. If a conversation message reaches the deadline without terminal handling, the existing mailbox row becomes a durable `policy_non_reply.content_expired` tombstone and the runtime records its existing suppression evidence before local content retirement; neither owner may silently delete accepted work or later resurrect it as replyable. Promoted canonical health facts, explicit user saves/pins, Murph replies, delivery evidence, and content-free structural/audit metadata are outside this inbound-message-content policy and retain their owning lifecycle.
 - The Cloudflare `runtime/ensure-processing` route accepts exactly two credentials: the Temporal orchestrator's web-callback signature and web's Vercel OIDC identity (the same identity already used by the browser-vault/status/deletion control routes). Authorization dispatches on the credential the caller presented and never falls through a failed signature to OIDC or vice versa. The web direct wake is an ephemeral latency hint for eligible Linq and Assistant Ask request/completion mailbox appends. Linq may overlap Temporal acknowledgement only after the signal owner validates current member/participant access, exact mailbox ownership, and the live request deadline, then starts the pointer-only Temporal request. Webhook success still requires Temporal acknowledgement; failure remains retryable even if the hint has started. Assistant Ask keeps its post-acknowledgement hint. The hint carries no message payload, mints diagnostics-only `web-ingress-` attempt ids, and grants Web no authority beyond the validated signal; the `triggeredByWebDirect` diagnostic is derived from the authorizing credential, never from caller-supplied fields. Hosted R2 reads, writes, restores, presigns, and account deletion use one environment-selected ENAM bucket; authenticated callers cannot select a bucket, region, or presign target. The Assistant Ask child receives only the server-bound requester membership `participantId` as immutable identity context: first-person references require an exact `read_shared` participant match, while display names, handles, member order, and the opaque id itself are forbidden output authority.

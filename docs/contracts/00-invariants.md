@@ -326,8 +326,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   call.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
-  proof that the effect did not begin. Acknowledge, clean up, or advance
-  progress only after terminal or durable pending evidence.
+  proof that the effect did not begin. A definite provider rejection proves
+  only the attempt that received it: only the winning first dispatch may
+  release an obligation, atomically and naming its exact attempt. A rejected
+  retry keeps earlier ambiguity. Acknowledge, clean up, or advance progress
+  only after terminal or durable pending evidence.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
