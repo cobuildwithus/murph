@@ -1940,4 +1940,4 @@ The durable contract remains in `references/hosted-runtime-protocol.md`.
 The native usage denial contract is owned by `references/hosted-postgres-runtime.md`;
 its controller drain gate and rollback floor are in `../apps/cloudflare/DEPLOY.md`.
 
-Ordinary reminder input replay is tracked in [the active plan](exec-plans/active/2026-11-06-automation-input-replay.md).
+Ordinary reminder input replay is recorded in the [execution plan](exec-plans/completed/2026-11-06-automation-input-replay.md).
