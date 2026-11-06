@@ -265,8 +265,11 @@ export async function readGroupGameChatAuthority(game: GroupRoomGame, containerM
   if (route?.containerMemberId !== containerMemberId) return null;
   if (game.players.some(player => !player.leftAt && (!player.memberId || !audience.memberIds.includes(player.memberId) || player.seat < 0 || player.seat > 9))) return null;
   const restricted = [...new Set([...audience.memberIds, ...game.players.flatMap(player => player.memberId ? [player.memberId] : [])])];
-  if (waitOnBlock && await hasGameChatBlock(prisma, restricted)) throw new GameChatAudienceError("blocked", "Game chat is blocked.");
-  return await hasGameChatRestriction(prisma, restricted) ? null : audience;
+  if (await hasGameChatBlock(prisma, restricted)) {
+    if (waitOnBlock) throw new GameChatAudienceError("blocked", "Game chat is blocked.");
+    return null;
+  }
+  return await hasGameChatMemberRestriction(prisma, restricted) ? null : audience;
 }
 
 /** Accepted notices treat null as stale. A block can lift, so throw to keep the receipt and retry. */
@@ -283,6 +286,10 @@ export async function hasGameChatBlock(prisma: Pick<Prisma.TransactionClient, "g
 /** Shared projections and generated material respect every participant's consent. */
 export async function hasGameChatRestriction(prisma: Pick<Prisma.TransactionClient, "gameBlock" | "hostedMember">, players: readonly string[]): Promise<boolean> {
   if (await hasGameChatBlock(prisma, players)) return true;
+  return hasGameChatMemberRestriction(prisma, players);
+}
+
+async function hasGameChatMemberRestriction(prisma: Pick<Prisma.TransactionClient, "hostedMember">, players: readonly string[]): Promise<boolean> {
   return Boolean(await prisma.hostedMember.findFirst({ where: { id: { in: [...players] }, OR: [
     { suspendedAt: { not: null } }, { consentGrants: { some: { scope: "launch.health-data", status: "revoked" } } },
   ] }, select: { id: true } }));

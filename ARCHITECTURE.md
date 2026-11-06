@@ -5702,7 +5702,7 @@ without sending. Temporary unavailability and claimed provider work remain
 uncertain. A pair receipt skipped as `game_blocked` is also terminal after
 unblock because its room cannot be restored. A block row alone remains temporary.
 A group block skips nothing, so its generation waits and completes after the block
-lifts. Older group receipts already skipped as `game_blocked` remain terminal.
+lifts. Older group receipts already skipped as `game_blocked` are terminal.
 Regeneration previews use the pure witness check
 without writes; execution retires stale work before reserving a clean successor.
 The runner image
@@ -6044,9 +6044,10 @@ lists everyone they blocked in `GameHomeView.blocked`. Media reads refuse a
 blocked pair. Unblocking changes no game.
 
 Groups retain blocked players and their scoring eligibility. The game keeps its
-room and receipts. While a block stands, the room fails authority and funding and
-Murph sends nothing there. `readGroupGameNoticeAuthority` keeps talk and challenge from reading the
-block as stale. Anything still current sends after the block lifts. Symmetric
+room and receipts. While a block stands, the room fails authority and Murph sends
+nothing there. A block among its current participants also stops game funding.
+`readGroupGameNoticeAuthority` keeps talk and challenge from reading the block as
+stale. Anything still current sends after the block lifts. Symmetric
 `hiddenMemberIds` masks strip post payloads, media, blur hashes and timestamps
 before decryption or signing, retaining only aggregate posted status. Recaps are
 suppressed for affected viewers. Left viewers cannot fetch new game content.

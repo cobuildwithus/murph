@@ -15,7 +15,7 @@ import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-deliver
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
 import { requestGameRecapRegeneration } from "@/src/lib/game/recap-regeneration";
 import { markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
-import { readGameChatAudience, readGroupGameChatAuthority } from "@/src/lib/game/chat-membership";
+import { readGameChatAudience, readGroupGameChatAuthority, readGroupGameNoticeAuthority } from "@/src/lib/game/chat-membership";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import type { HostedGameRecap, HostedGameUpdate } from "@murphai/hosted-execution/runtime-control";
 import { hostedGameChatStateSchema } from "@murphai/hosted-execution/runtime-control";
@@ -2649,6 +2649,24 @@ describe.skipIf(!enabled)("group block keeps the room", () => {
   beforeEach(async () => {
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.withmurph.ai");
     vi.spyOn(await import("@/src/lib/game/service"), "reserveDueGameMissedDayCheckIns").mockResolvedValue(0);
+  });
+
+  it("keeps the authority answer when a block commits after its block read", async () => {
+    const f = await blockedGroupNotice("talk");
+    const game = await gameRow(f.group.id), room = f.context.chatContainerMemberId;
+    const late = new Proxy(db, { get(target, property, receiver) {
+      if (property !== "gameBlock") return Reflect.get(target, property, receiver);
+      return new Proxy(target.gameBlock, { get(blocks, operation, blockReceiver) {
+        if (operation !== "findFirst") return Reflect.get(blocks, operation, blockReceiver);
+        return async (args: Parameters<typeof blocks.findFirst>[0]) => {
+          const result = await blocks.findFirst(args);
+          await f.block("block");
+          return result;
+        };
+      } });
+    } });
+    expect(await readGroupGameNoticeAuthority(game, room, f.context.chatAudience, late)).toEqual(f.context.chatAudience);
+    await expect(readGroupGameNoticeAuthority(game, room, f.context.chatAudience, db)).rejects.toMatchObject({ reason: "blocked" });
   });
 
   it("keeps the live game and every waiting receipt byte-identical", async () => {
