@@ -13,6 +13,7 @@ import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts"
 import {
   type HostedMediaReferenceCatalogue,
   publishHostedWorkspaceMediaReferencesForSnapshot,
+  releaseHostedPhotoIntents,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
   publishHostedWorkspaceMediaReferences,
@@ -108,6 +109,8 @@ test("failed media pruning retains newly uploaded cold history and the cleanup p
     // Pruning requires the canonical retirement evidence written by meal deletion.
     await deleteEvent({ vaultRoot, eventId: meal.event.id });
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [stale] } });
+    const retirement = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    releaseHostedPhotoIntents(vaultRoot, retirement.retirementPendingMediaIds);
     await mkdir(path.dirname(path.join(vaultRoot, closedPath)), { recursive: true });
     await writeFile(path.join(vaultRoot, closedPath), brotliCompressSync(Buffer.from('{"synthetic":true}\n')));
     await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Synthetic prune failure");

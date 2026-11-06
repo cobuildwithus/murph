@@ -30,7 +30,7 @@ async function fixture(kind: "meal" | "measurement" | "body_measurement" = "meas
   }
   const store = createMealMediaStore();
   const publish = () => publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
-  const accept = async () => { const result = await publish(); releaseHostedPhotoIntents(vaultRoot, result.pendingPhotoMediaIds); return result; };
+  const accept = async () => { const result = await publish(); releaseHostedPhotoIntents(vaultRoot, [...result.pendingPhotoMediaIds, ...result.retirementPendingMediaIds]); return result; };
   let sequence = 0;
   const cold = async () => { const next = path.join(root, `cold-${++sequence}`); await cp(vaultRoot, next, { recursive: true }); vaultRoot = next; };
   const pass = (options: Partial<Parameters<typeof runHostedMealMediaMaintenance>[0]> = {}) => runHostedMealMediaMaintenance({
@@ -86,7 +86,7 @@ test.each(["retry", "cold_retry", "delete", "cold_delete"])("lost PUT response p
   await deleteEvent({ vaultRoot: f.vaultRoot, eventId: f.ids[0]! });
   const tombstone = await readFile(path.join(f.vaultRoot, f.paths[0]!));
   expect((await f.publish()).excludedVaultPaths).not.toContain(f.paths[0]);
-  await f.pass(); await f.publish();
+  await f.accept(); await f.pass(); await f.publish();
   expect(await readFile(path.join(f.vaultRoot, f.paths[0]!))).toEqual(tombstone);
   expect(f.store.bytes.size).toBe(0); expect((await f.catalogue()).entries).toEqual([]);
 });

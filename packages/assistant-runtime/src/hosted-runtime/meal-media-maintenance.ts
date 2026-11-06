@@ -13,7 +13,7 @@ import { HostedRuntimeMediaWriteError, type HostedRuntimeMediaStore } from "./pl
 import {
   isHostedPendingMealMedia, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue,
   type HostedMediaReference,
-  hostedPhotoIntentIsCommitted,
+  hostedPhotoIntentIsCommitted, hostedPhotoNeedsRetry,
 } from "./media-references.ts";
 
 export const HOSTED_MEAL_MEDIA_RETRY_MS = 60 * 60_000;
@@ -21,6 +21,10 @@ export interface HostedMealMediaBudget { remaining: number; deadlineMs: number |
 export function createHostedMealMediaBudget(): HostedMealMediaBudget { return { remaining: 10, deadlineMs: null, uploaded: 0, fullPhotosRetired: 0, pending: null }; }
 export async function hasHostedPendingMealMedia(vaultRoot: string): Promise<boolean> {
   return (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(isHostedPendingMealMedia);
+}
+
+export async function hasHostedPhotoRetry(vaultRoot: string): Promise<boolean> {
+  return (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(hostedPhotoNeedsRetry);
 }
 
 // One invocation owns this budget, including repeated retention-only slices.
@@ -55,7 +59,9 @@ export async function runHostedMealMediaMaintenance(input: {
       .slice(0, input.budget.remaining);
     if (!selected.length) return result;
     const holders = await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
-    await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
+    if (pending.some(hostedPhotoNeedsRetry)) {
+      await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
+    }
     for (const entry of selected) {
       live();
       input.budget.remaining -= 1;
@@ -155,7 +161,10 @@ async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, s
     signal.throwIfAborted();
     const current = catalogue.entries.find(value => value.relativePath === entry.relativePath && value.mediaId === entry.mediaId);
     if (!current) return;
-    if (action === "attempt") catalogue.mealUploadCursor = entry.mediaId;
+    if (action === "attempt") {
+      catalogue.mealUploadCursor = entry.mediaId;
+      current.uploadAttempts = (current.uploadAttempts ?? 0) + 1;
+    }
     else if (action === "delivered") current.pendingUpload = false;
     else catalogue.entries = catalogue.entries.filter(value => value !== current);
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
@@ -163,7 +172,7 @@ async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, s
 }
 
 export async function withHostedMealMediaRetry(workspace: HostedWorkspaceState | null, vaultRoot: string): Promise<HostedWorkspaceState | null> {
-  if (!workspace || !await hasHostedPendingMealMedia(vaultRoot)) return workspace;
+  if (!workspace || !await hasHostedPhotoRetry(vaultRoot)) return workspace;
   return mergeHostedMealMediaRetry(workspace, new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString());
 }
 export function mergeHostedMealMediaRetry(workspace: HostedWorkspaceState, retryAt: string): HostedWorkspaceState {

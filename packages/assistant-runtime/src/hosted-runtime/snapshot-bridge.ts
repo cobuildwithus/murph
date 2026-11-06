@@ -731,7 +731,7 @@ async function createHostedWorkspaceV2Snapshot(
       userId: input.userId,
     };
     checkpointAttempted = true;
-    const checkpointRequest = withPendingPhotoRetry(input.request, mediaReferences.pendingPhotoMediaIds);
+    const checkpointRequest = withPendingPhotoRetry(input.request, mediaReferences.hasRetryablePendingPhotos);
     delete checkpointRequest.handledConversationFrontierSelected;
     const completed = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotSessionCompleteElapsedMs",
@@ -746,7 +746,7 @@ async function createHostedWorkspaceV2Snapshot(
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
-    releaseHostedPhotoIntents(input.vaultRoot, mediaReferences.pendingPhotoMediaIds, checkpoint.checkpointed);
+    releaseHostedPhotoIntents(input.vaultRoot, [...mediaReferences.pendingPhotoMediaIds, ...mediaReferences.retirementPendingMediaIds], checkpoint.checkpointed);
     localWorkspaceCleanForWarmReuse = true;
   } catch (error) {
     snapshotFailureObserved = true;
@@ -1409,9 +1409,9 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
   };
 }
 
-function withPendingPhotoRetry(request: HostedWorkspaceSnapshotCheckpointRequest, mediaIds: readonly string[]) {
+function withPendingPhotoRetry(request: HostedWorkspaceSnapshotCheckpointRequest, hasRetryablePendingPhotos: boolean) {
   const next = { ...request };
-  if (!mediaIds.length) return next;
+  if (!hasRetryablePendingPhotos) return next;
   const retryAt = new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString();
   if (!next.inboxMediaRetentionWakeAt || next.inboxMediaRetentionWakeAt > retryAt) next.inboxMediaRetentionWakeAt = retryAt;
   if (!next.nextWakeAt || next.nextWakeAt > retryAt) {

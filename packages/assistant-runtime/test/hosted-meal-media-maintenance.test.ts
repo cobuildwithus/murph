@@ -10,7 +10,7 @@ import { createPlatform, createSnapshotFixtureRef, createWorkspaceState } from "
 import { externalizeHostedCanonicalWriteMediaPayloads } from "../src/hosted-runtime/canonical-write-media.ts";
 import { appendHostedCanonicalWriteReceiptToArtifactLog, hostedCanonicalWriteReceiptLogStatusFields } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import { restoreHostedWorkspaceRuntimeJobWorkspace } from "../src/hosted-runtime/workspace-restore.ts";
-import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue, HOSTED_MEDIA_REFS_RELATIVE_PATH } from "../src/hosted-runtime/media-references.ts";
+import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue, HOSTED_MEDIA_REFS_RELATIVE_PATH, releaseHostedPhotoIntents } from "../src/hosted-runtime/media-references.ts";
 import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import { createMealMediaStore, mediaFailure, type MediaOperation } from "./hosted-meal-media.harness.ts";
 
@@ -39,9 +39,10 @@ async function fixture(count = 1) {
     await hooks.published?.();
   } };
   const snapshot = async () => {
-    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
     const bytes = (await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] }))!;
     const hash = sha256HostedBundleHex(bytes); await artifactStore.put({ bytes, sha256: hash });
+    releaseHostedPhotoIntents(vaultRoot, [...publication.pendingPhotoMediaIds, ...publication.retirementPendingMediaIds]);
     return createSnapshotFixtureRef({ hash, size: bytes.byteLength });
   };
   const baseline = await snapshot();
@@ -64,7 +65,7 @@ async function fixture(count = 1) {
   };
 }
 async function assertGone(f: Awaited<ReturnType<typeof fixture>>) {
-  await f.pass(); await f.snapshot();
+  await f.pass(); await f.snapshot(); await f.snapshot();
   expect(f.store.bytes.size).toBe(0); expect(f.store.activeUnlimited()).toBe(0);
   expect((await f.catalogue()).entries).toHaveLength(0);
 }
@@ -301,4 +302,16 @@ test("foreground cancellation during integrity checking starts no registration",
   await expect(f.pass({ signal: cancel.signal })).rejects.toThrow("Foreground during integrity");
   expect(f.store.calls).toEqual([]); expect((await f.catalogue()).entries[0]?.pendingUpload).toBe(true);
   release(); await new Promise(resolve => setImmediate(resolve)); expect(f.store.calls).toEqual([]);
+});
+
+
+test("receipt replay preserves checkpointed upload attempts for an unchanged pending thumbnail", async () => {
+  const f = await fixture(); await f.maintain(new Date(CAPTURED));
+  f.store.hooks.before = async op => { if (op === "put") throw mediaFailure(); };
+  for (let attempt = 0; attempt < 5; attempt++) expect(await f.pass()).toMatchObject({ failed: 1, pending: 1 });
+  const snapshot = await f.snapshot();
+  await f.maintain(EXPIRED); // Publishes another receipt with the same thumbnail identity.
+  await f.restore(snapshot);
+  expect((await f.catalogue()).entries[0]).toMatchObject({ pendingUpload: true, uploadAttempts: 5 });
+  expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: f.vaultRoot, mediaStore: f.store.mediaStore })).hasRetryablePendingPhotos).toBe(false);
 });

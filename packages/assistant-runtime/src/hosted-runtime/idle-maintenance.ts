@@ -1,4 +1,4 @@
-import { runHostedMealMediaMaintenance, HOSTED_MEAL_MEDIA_RETRY_MS } from "./meal-media-maintenance.ts";
+import { runHostedMealMediaMaintenance, hasHostedPhotoRetry, HOSTED_MEAL_MEDIA_RETRY_MS } from "./meal-media-maintenance.ts";
 import {
   compactWarmCodexThread,
   type CodexWarmThreadCompactionOutcome,
@@ -952,6 +952,7 @@ function buildInterruptedMaintenanceOutcome(input: {
 async function maintainMealMedia(input: Parameters<typeof runHostedIdleCheckpointMaintenance>[0], vaultRoot: string, signal: AbortSignal): Promise<HostedIdleMaintenanceWake> {
   if (input.pendingWork || !input.mealMedia) return {};
   const media = await runHostedMealMediaMaintenance({ ...input.mealMedia, vaultRoot, signal });
+  if (!await hasHostedPhotoRetry(vaultRoot)) return {};
   if (media.failed > 0) throw media.failure;
   return media.pending > 0 ? resolveInboxMediaRetentionFailureWake(HOSTED_MEAL_MEDIA_RETRY_MS) : {};
 }

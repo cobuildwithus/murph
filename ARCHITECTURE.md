@@ -2593,20 +2593,33 @@ path, hash, size, media kind and canonical owner match. Local bytes still underg
 local integrity checks and cannot be overridden by a descriptor.
 
 During checkpoints, the producer discovers verified local image attachments on
-live meal and measurement events after seven days. Meals require a thumbnail
-and an established `photoCapturedAt`; full-photo expiry remains that capture
+live meal and measurement events after seven days. The raw directory owner must
+match the event supplying the lifetime; secondary references cannot extend it
+or recreate detached upload intent. Unprovable manifests leave bytes inline
+without blocking the checkpoint; cancellation still propagates. Meals require
+a thumbnail and an established `photoCapturedAt`; full-photo expiry remains that capture
 instant plus 90 days. Measurement age uses `recordedAt` and objects do not expire.
 Discovery writes pending descriptors with bytes still inline and performs no
 photo registration or PUT. Newly discovered IDs are denied to the warm uploader
 until the exact checkpoint is accepted; a rejected or ambiguous checkpoint does
 not release them. Cold restore derives eligibility from the committed catalogue.
-The accepted checkpoint retains an hourly idle retry. Existing thumbnail-v2
-intents continue to use canonical receipt durability.
+The accepted checkpoint retains an hourly idle retry while pending entries have
+fewer than five persisted `uploadAttempts`. Each attempted delivery increments
+that counter with the cursor; exact-identity receipt replay preserves it.
+Exhausted entries remain pending and inline and can still run on ordinary idle
+passes, but do not arm dedicated retry wakes.
+Existing thumbnail-v2 intents continue to use canonical receipt durability.
 
 The bounded idle owner settles uploads; a later checkpoint records settlement
 and excludes only settled descriptors matching current canonical artifact
 identity, including delivered thumbnails. A cleanup pointer cannot exclude a
 retirement tombstone or replacement file; uncertain identity keeps bytes inline.
+On first observing retirement, reconciliation retains the photo cleanup pointer
+with `retirementPending: true` and fences its ID until that exact checkpoint is
+accepted. A later publication deletes the object and drops the pointer. Cold
+restore preserves the marker as evidence that the tombstone was accepted;
+rejected checkpoints cannot release retirement. Marked identities never exclude
+vault bytes. Inbox, capture and cold-ingest pruning retain their own policy.
 Receipt payloads still include local meal and measurement bytes. Deploy the PR 3
 preserver reader to every runner before enabling this producer. That reader is
 the rollback floor after any producer checkpoint; earlier runners can delete

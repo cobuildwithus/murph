@@ -14,7 +14,7 @@ import { HOSTED_MEDIA_REFS_SCHEMA, HOSTED_MEDIA_REFS_RELATIVE_PATH } from "@murp
 import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
 import { applyHostedCanonicalWriteReceiptWithMedia, externalizeHostedCanonicalWriteMediaPayloads } from "../src/hosted-runtime/canonical-write-media.ts";
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
-import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { publishHostedWorkspaceMediaReferencesForSnapshot, releaseHostedPhotoIntents, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
 import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
@@ -186,6 +186,9 @@ test.each(["delete", "retention"])("absent meal bytes support review, %s and rec
     expect(JSON.parse(tombstone).reason).toBe(operation === "delete" ? "meal_deleted" : "meal_photo_retention");
     expect(await readFile(path.join(source, paths[0]!), "utf8")).toBe(tombstone);
     expect((await validateVault({ vaultRoot: restored })).valid).toBe(true);
+    const retirement = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
+    expect(objects.has(entries[0]!.mediaId)).toBe(true);
+    releaseHostedPhotoIntents(restored, retirement.retirementPendingMediaIds);
     await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
     expect(objects.has(entries[0]!.mediaId)).toBe(false);
     if (entries[1]) expect(objects.has(entries[1].mediaId)).toBe(true);
