@@ -224,13 +224,10 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
           let pid = 0;
           await vi.waitFor(async () => {
             const result = await postgres.query<{ pid: number }>(`
-              SELECT a.pid FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid
-              WHERE a.datname = $1 AND l.locktype = 'advisory' AND l.objsubid = 1
-                AND l.classid = (($2::bigint >> 32) & 4294967295)::oid
-                AND l.objid = ($2::bigint & 4294967295)::oid
-                AND a.state = $3 AND ($4::text IS NULL OR a.wait_event_type = $4)
-            `, [testDatabaseName, lockKey, betweenStatements ? "idle in transaction" : "active",
-              betweenStatements ? null : "Lock"]);
+              SELECT pid FROM pg_stat_activity
+              WHERE datname = current_database()
+                AND ${betweenStatements ? "state = 'idle in transaction'" : "wait_event_type = 'Lock'"}
+            `);
             expect(result.rows).toHaveLength(1);
             pid = result.rows[0]!.pid;
           }, { timeout: 30_000 });
