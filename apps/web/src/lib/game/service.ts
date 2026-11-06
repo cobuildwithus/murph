@@ -1224,7 +1224,7 @@ function needsChatLifecycleNotice(context: CommandContext, loaded: LoadedGame): 
 async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Promise<void> {
   const game = await tx.game.findUniqueOrThrow({ where: { id: gameId } });
   await resolveGroupGameChangeTx({ tx, game, actor: SYSTEM_ACTOR, now: new Date(), outcome: "change_expired", reason: GAME_ENDED_CHANGE_REASON });
-  await tx.game.update({ data: { ...data, ...(game.maxPlayers === 10 ? {} : { pendingChange: Prisma.DbNull }) }, where: { id: gameId } });
+  await tx.game.update({ data: { ...data, pendingChange: Prisma.DbNull }, where: { id: gameId } });
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
@@ -2157,11 +2157,11 @@ async function approvePendingChange(locked: LockedStep, context: CommandContext,
     catch (error) {
       if (!(error instanceof GameRuleError)) throw error;
       refusal = error.message;
-      if (loaded.row.maxPlayers !== 10 && needsChatLifecycleNotice(context, loaded)) await reserveGameChatLifecycleTx({ gameId, kind: "change_expired", proposalId: proposal.id, now: clock, tx });
     }
   }
   if (decision) return { events: await applyApprovedChange(locked, gameId, proposal, resolutionKey, context.actor, decision, answeredInBoundChat(context, loaded)) };
   if (loaded.row.maxPlayers === 10) return { events: [], refusal: await expireGroupChangeTx(locked, context, proposal) };
+  if (!outdated && needsChatLifecycleNotice(context, loaded)) await reserveGameChatLifecycleTx({ gameId, kind: "change_expired", proposalId: proposal.id, now: clock, tx });
   await tx.game.update({ where: { id: gameId }, data: { pendingChange: Prisma.DbNull } });
   return { refusal, events: [{ commandKey: resolutionKey, type: "change_expired", payload: { proposalId: proposal.id, ...(outdated ? {} : { reason: refusal }) } }] };
 }
@@ -2211,7 +2211,7 @@ async function applyChangeTermsTx({ tx, loaded }: LockedStep, gameId: string, pr
   const terms = { v: 1 as const, versions: [...loaded.state.game.terms.versions.filter((version) => version.fromDay < next.fromDay), next] };
   const lengthDays = proposal.change.kind === "edit" ? proposal.change.lengthDays : undefined;
   await tx.game.update({ where: { id: gameId }, data: {
-    ...(loaded.row.maxPlayers === 10 ? {} : { pendingChange: Prisma.DbNull }), terms: toPrismaJsonObject(terms),
+    pendingChange: Prisma.DbNull, terms: toPrismaJsonObject(terms),
     ...(proposal.termsWordsEncrypted ? { termsWordsEncrypted: proposal.termsWordsEncrypted } : {}),
     ...(lengthDays === undefined ? {} : { lengthDays }),
     ...(startsOn ? { startsOn: toDbDate(startsOn) } : proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}),

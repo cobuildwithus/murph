@@ -145,7 +145,7 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
       outcome: "change_expired", reason: GAME_ROSTER_CHANGE_REASON });
     await tx.game.update({ where: { id: row.id }, data: {
       wordsOwnerMemberId: plan.owner, termsWordsEncrypted: plan.termsWordsEncrypted,
-      recapEncrypted: null, ...(row.maxPlayers === 10 ? {} : { pendingChange: Prisma.DbNull }),
+      recapEncrypted: null, pendingChange: Prisma.DbNull,
       ...(active ? { status: "void", result: Prisma.DbNull } : {}),
       ...(row.createdBy && leaving.includes(row.createdBy) ? { createdBy: null, inviteTokenEncrypted: null } : {}),
       ...(!active && row.result !== null ? { result: withoutMembers(row.result, leaving) } : {}),
