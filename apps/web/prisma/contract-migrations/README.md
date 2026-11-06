@@ -77,3 +77,11 @@ removed route; they never access these tables directly. Deploy the new runner
 after Web to remove its obsolete tool offer. This Web version is the rollback
 floor after cleanup; restoring older Web requires re-expanding the tables first.
 Companion app presence, Apple push routes and game notifications remain live.
+
+The `20261106050000_drop_group_sponsorship_moment` cleanup removes the group
+sponsorship moment table and the personalization stored in it, after the Web
+deployment that stopped reading and writing it (#4615) is live and drained. That
+deletion cannot be undone. Billing, recovery and revenue reporting never needed the
+table, and the runner never accesses it directly. #4615 is the rollback floor after
+cleanup; older Web writes this table, so restoring it requires re-expanding the
+table first.
