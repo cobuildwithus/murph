@@ -44,6 +44,20 @@ function LinkPageFrame({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * A link page on a dashboard route that renders on the server, so there is no
+ * flash of the dashboard. It covers the frame, and hides that frame from the tab
+ * order and screen readers too.
+ */
+function LinkPageCover({ children }: { children: ReactNode }) {
+  return (
+    <div className="visible fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[#1C1915]">
+      <style>{"html,body{background:#1C1915}[data-slot=sidebar-wrapper]{visibility:hidden}"}</style>
+      <LinkPageSurface>{children}</LinkPageSurface>
+    </div>
+  );
+}
+
 /** One state of the page: its headline, then what it needs, then its actions. */
 function LinkPageScreen({
   actions,
@@ -203,6 +217,7 @@ function LinkPageError({ children }: { children: ReactNode }) {
 }
 
 export {
+  LinkPageCover,
   LINK_PAGE_FORM_CLASS,
   LINK_PAGE_LINK_CLASS,
   LINK_PAGE_NIGHT_TOKENS,

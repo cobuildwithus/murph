@@ -86,7 +86,11 @@ export function AuthProvider({
 }) {
   const pathname = usePathname();
   const dashboardRoute = useSelectedLayoutSegment() === "(dashboard)";
-  const autoOpenPath = dashboardRoute && !authenticated && authenticationStatus === "ready"
+  // Settings signs in on its own page, so the dialog never opens over it.
+  const autoOpenPath = dashboardRoute
+    && !authenticated
+    && authenticationStatus === "ready"
+    && pathname !== SETTINGS_PATH
     ? pathname
     : null;
   const [promptPath, setPromptPath] = useState(autoOpenPath);

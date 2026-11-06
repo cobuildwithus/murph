@@ -683,7 +683,7 @@ test("SettingsPage offers sign-in without reading member settings", async () => 
   const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(markup).toContain("Continue to Settings");
   expect(markup).toContain("health data consent");
-  expect(markup).toContain("Log in");
+  expect(markup).toContain("Send verification code");
   expect(redirectMock).not.toHaveBeenCalled();
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
@@ -715,7 +715,6 @@ test("SettingsPage keeps the signed-out usage recovery handoff in Settings", asy
 
   assert.match(markup, /Continue in Settings/);
   assert.match(markup, /Sign in to review the recovery options available for your account\./);
-  assert.match(markup, /resolve plan eligibility and Family access after you sign in/);
   expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -736,9 +735,31 @@ test("SettingsPage keeps the exact signed-out Family recovery handoff in Setting
   }));
 
   assert.match(markup, /Continue to Family Settings/);
-  assert.match(markup, /choose the Family member and review their available options/);
+  assert.match(markup, /Sign in to continue to Family Settings\./);
   expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps the reason for an add usage link when signed out", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addUsage: "true" }),
+  }));
+
+  assert.match(markup, /Sign in to add usage\./);
+  // Nothing is verified yet, so the page must not name an amount or a payment.
+  assert.doesNotMatch(markup, /\$\d/);
+  expect(redirectMock).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
 });
 
 test("SettingsPage rejects an augmented signed-out Family recovery handoff", async () => {

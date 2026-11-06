@@ -19,6 +19,8 @@ import { cn } from "@/src/lib/utils";
 type LinkPageSignInProps = {
   children?: ReactNode;
   detail?: ReactNode;
+  /** Settings skips this: a member may be there to change that very consent. */
+  requireLaunchConsent?: boolean;
   title: string;
 };
 
@@ -35,7 +37,12 @@ export function LinkPageSignIn(props: LinkPageSignInProps) {
   );
 }
 
-export function LinkPageSignInScreen({ children, detail, title }: LinkPageSignInProps) {
+export function LinkPageSignInScreen({
+  children,
+  detail,
+  requireLaunchConsent = true,
+  title,
+}: LinkPageSignInProps) {
   const { completeAuthentication } = useAuth();
   // Telegram prepares itself when it mounts, so a page view alone must not mount it.
   const [otherMethods, setOtherMethods] = useState(false);
@@ -53,7 +60,7 @@ export function LinkPageSignInScreen({ children, detail, title }: LinkPageSignIn
               methods={otherMethods ? ["phone", "telegram", "email"] : ["phone"]}
               onCompleted={completeAuthentication}
               onViewChange={setView}
-              requireLaunchConsentOnCompletion
+              requireLaunchConsentOnCompletion={requireLaunchConsent}
             />
           </div>
           {!otherMethods && view === "auth" ? (
