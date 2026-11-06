@@ -24,6 +24,7 @@ export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_TYPING_ALERT_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_RUNTIME_LEDGER_RETENTION_MS = 30 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
 // ceiling, so one hourly invocation can never open a long transaction against
 // the production pool. High-volume callback nonces keep the same small
@@ -72,6 +73,7 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
   expiredOperatorTaskResultsRetired: number;
+  expiredRuntimePutDrainsDeleted: number;
   expiredSensitiveActionChallengesDeleted: number;
   expiredSignupNotificationContextsRetired: number;
 }
@@ -136,6 +138,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
+  const expiredRuntimePutDrainsDeleted = await deleteExpiredRuntimePutDrains({ now, prisma });
 
   return {
     compactedLinqProviderEventDiagnostics,
@@ -158,6 +161,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredOperatorTaskResultsRetired,
+    expiredRuntimePutDrainsDeleted,
     expiredSensitiveActionChallengesDeleted,
     expiredSignupNotificationContextsRetired,
   };
@@ -952,6 +956,46 @@ async function deleteExpiredDeviceWebhookTraces(input: {
     USING doomed
     WHERE trace."provider" = doomed."provider"
       AND trace."trace_id" = doomed."trace_id"
+  `);
+}
+
+// A completed receipt only matters to its own attempt or its upload session,
+// expired sessions included. Attempt and snapshot identities are random and
+// never return, so outside both no later command can reuse it, and a late settle
+// finds nothing and fails closed. Media admission has no owner fence, so media
+// receipts stay.
+export async function deleteExpiredRuntimePutDrains(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_RUNTIME_LEDGER_RETENTION_MS);
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT drain."user_id", drain."write_id"
+      FROM "hosted_runtime_put_drain" AS drain
+      WHERE drain."completed_at" < ${cutoff}
+        AND drain."kind" IN ('replica', 'snapshot')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "hosted_runtime_owner" AS owner
+          WHERE owner."user_id" = drain."user_id"
+            AND owner."attempt_id" = drain."attempt_id"
+            AND owner."generation" = drain."generation"
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "hosted_runtime_snapshot_upload" AS upload
+          WHERE upload."user_id" = drain."user_id"
+            AND 'snapshot:' || upload."snapshot_id" = drain."write_id"
+        )
+      ORDER BY drain."completed_at" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF drain SKIP LOCKED
+    )
+    DELETE FROM "hosted_runtime_put_drain" AS drain
+    USING doomed
+    WHERE drain."user_id" = doomed."user_id"
+      AND drain."write_id" = doomed."write_id"
   `);
 }
 

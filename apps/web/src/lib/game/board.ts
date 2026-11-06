@@ -8,7 +8,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shar
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
 import { HOSTED_GROUP_BOARD_SCOPES } from "../hosted-groups/board-scopes";
-import { readHostedGroupBoardData, saveHostedGroupBoardSharingTx } from "../hosted-groups/group-store";
+import { lockHostedGroupRow, readHostedGroupBoardData, saveHostedGroupBoardSharingTx } from "../hosted-groups/group-store";
 import { finishHostedGroupJoin } from "../hosted-groups/join-post-commit";
 import { gameOnWhere } from "./access";
 import { areGamePlayersBlocked, lockGamePair } from "./blocks";
@@ -105,6 +105,7 @@ export async function readPairBoard(viewerId: string, otherId: string): Promise<
 
 export async function savePairBoardSharing(viewerId: string, otherId: string, input: {
   expectedMembershipId: string | null; numbers: readonly BoardMetric[];
+  beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
 }, signal?: AbortSignal): Promise<PairBoard | null> {
   if (!isGameBoardEnabled()) throw gameNotFound();
   const db = getPrisma();
@@ -117,6 +118,9 @@ export async function savePairBoardSharing(viewerId: string, otherId: string, in
   let result;
   try {
     result = await db.$transaction(async tx => {
+      // Match account deletion and group admission: group, then member, then game.
+      await lockHostedGroupRow(tx, binding.groupId);
+      await input.beforeMutationTx(tx);
       await lockGamePair(tx, viewerId, otherId);
       await tx.$executeRaw`SELECT id FROM game WHERE id = ${binding.gameId} FOR UPDATE`;
       const current = await resolvePairBoard(tx, viewerId, otherId);

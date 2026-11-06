@@ -1,11 +1,19 @@
+Failed account deletion recovery, where any retryable answer keeps the delete dialog open because a suspended account cannot reload Settings, is owned by [Architecture](../ARCHITECTURE.md#hosted-account-deletion) and [the invariants](../docs/contracts/00-invariants.md).
+
+The board sharing session recheck and its group, member, game lock order are owned by [Weekly Game](product-specs/weekly-game.md) and [the invariants](../docs/contracts/00-invariants.md).
+
 Meal fiber reader compatibility and deployment boundaries are owned by
 [iOS Meals](product-specs/ios-meals.md#release-order-and-compatibility); focused
 proof is recorded in [the reader plan](exec-plans/completed/2026-11-06-meals-fiber-reader.md).
+The separate [writer plan](exec-plans/completed/2026-11-06-meals-fiber-writer.md)
+records canonical fiber publication and unchanged day totals.
 
 Residual game deletion, the final key-dependency proof and surviving group
 invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
 and [Architecture](../ARCHITECTURE.md#weekly-game). Local proof is recorded in
 the [execution record](exec-plans/completed/2026-11-06-game-deletion-progress-survivors.md).
+Recap generation retirement and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
+A pair recap generation a block already ended answers the same terminal value, while group generations and block rows stay uncertain; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule.
 
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
 Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
@@ -15,6 +23,10 @@ Delivery publication fences and reply deadlines are owned by [the invariants](..
 Native game write outcomes, the empty-slot post guard and the Messages member-action session recheck are owned by [Weekly Game](product-specs/weekly-game.md) and [Security](SECURITY.md).
 
 The two-lane production Web admission, the Cloudflare predeploy gates, and the private nightly proof that owns reminder, foreground, and Codex cache-prefix journeys are owned by [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md) and `../apps/cloudflare/DEPLOY.md`.
+
+Vault display-name replication and deterministic actions are owned by
+[Architecture](../ARCHITECTURE.md#vault-display-name-projection-and-actions);
+the [execution record](exec-plans/completed/2026-11-06-vault-display-name-runtime.md) holds the design decisions.
 
 Shared demographic memory, generation-18 projection and native action contracts are owned by [Architecture](../ARCHITECTURE.md#canonical-memory-demographics) and [private numbers](product-specs/ios-meals.md#shared-demographics).
 The [backend execution record](exec-plans/completed/2026-11-04-vault-demographics-backend.md) contains local verification evidence for the parent-owned integration.

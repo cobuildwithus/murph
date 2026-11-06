@@ -5,7 +5,7 @@ import { handleGameChatPhoto } from "./chat-photo";
 import type { Prisma } from "@prisma/client";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import { parseGameRecapEventId, GAME_LIVE_LORE_GUIDANCE, hostedGameChatStateSchema, type HostedGameChatState, type HostedGameToolRequest, type HostedGameToolResponse, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, GAME_LIVE_LORE_GUIDANCE, hostedGameChatStateSchema, type HostedGameChatState, type HostedGameToolRequest, type HostedGameToolResponse, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionExternalThreadRouteAuthority, HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { buildHostedMailboxLiveItemWhere, decodeHostedMailboxStoredPayloads, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
@@ -14,6 +14,7 @@ import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-
 import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
 import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, sealGameRecap } from "./service";
+import { isGameRecapGenerationRetired } from "./recap-witness";
 import { gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
@@ -198,15 +199,20 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const { gameId, eventId } = input.request.origin;
   if (parseGameRecapEventId(eventId)?.gameId !== gameId) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const prisma = getPrisma();
+  const unavailable = async (): Promise<HostedGameToolResponse> => ({ action: input.request.action, result: {
+    status: "unavailable", error: await isGameRecapGenerationRetired(prisma, gameId, eventId, input.memberId) ? GAME_RECAP_GENERATION_RETIRED : "recap_authority_unavailable",
+  } });
   await prisma.$transaction(async (tx) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
+  if (await isGameRecapGenerationRetired(prisma, gameId, eventId, input.memberId)) return { action: input.request.action, result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   const players = await requireExactGameChat(input.memberId, input.multiplayer);
   if (!supportsGameChatRoster(input, players)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const audience = input.multiplayer ? await readGameChatAudience(input.memberId) : undefined;
   const material = await readGameRecapMaterial(gameId, input.memberId, players, eventId);
-  if (!material || (!input.multiplayer && material.validation.group) || !material.validation.group && audience && (audience.contacts.length !== 2 || await hasGameChatRestriction(prisma, audience.memberIds))) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  if (!material) return unavailable();
+  if ((!input.multiplayer && material.validation.group) || !material.validation.group && audience && (audience.contacts.length !== 2 || await hasGameChatRestriction(prisma, audience.memberIds))) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   if (input.request.action === "read_game") return { action: "read_game", result: { status: "ok", recapGame: material.game } };
   const authorizeMutation = async (tx: Prisma.TransactionClient) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
@@ -215,6 +221,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
   if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: gameRecapMessage(gameId, replay.chatLine) } };
+  if (await isGameRecapGenerationRetired(prisma, gameId, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material });
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result, group: material.validation.group });
@@ -223,7 +230,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId)) });
   return saved
     ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(saved, input.request.recap), chatLine: gameRecapMessage(gameId, saved.chatLine) } }
-    : { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
+    : unavailable();
 }
 
 // Older runtime schemas reject unknown fields, including on replay of a newer story.

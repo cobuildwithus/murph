@@ -476,10 +476,10 @@ resulting avatar. No private photo is shared with the subject or other players.
   and the retake stay as they are. The field names no day, so capture-age
   placement is unchanged. A client that omits it keeps the older rule: a new
   entry ID replaces the live post.
-- **Write outcomes.** Every native game command rechecks its exact session
-  inside the transaction that commits it. A session revoked after admission
-  returns 401 `UNAUTHENTICATED` and writes nothing. Once a command or upload has
-  read its request, a server failure is not a refusal: it returns
+- **Write outcomes.** Every native game command and board sharing save rechecks
+  its exact session inside the transaction that commits it. A session revoked
+  after admission returns 401 `UNAUTHENTICATED` and writes nothing. Once a
+  command or upload has read its request, a server failure is not a refusal: it returns
   `retryable: true`, as `INTERNAL_ERROR` (500) or `GAME_MEDIA_UNAVAILABLE` (503),
   and the app keeps its unsent shot or reply. Same-ID replay makes that retry
   safe after a commit whose response failed. Malformed input, a foreign or
@@ -626,16 +626,31 @@ resulting avatar. No private photo is shared with the subject or other players.
   Pair and game locks, the roster re-read, no departed player, no block, settled
   status, rollout and room binding all apply. Runtime authority, fresh provider
   roster checks, recap validation and normal egress guards still apply downstream.
-  A newer rematch is never changed. An unfinished or uncertain prior delivery
+  Stale published, unclaimed generations retire as `skipped` / `game_recap_retired`
+  during takedown or the next material read or seal. After runtime authorization,
+  Web answers `GAME_RECAP_GENERATION_RETIRED` before roster work, allowing the
+  runner to consume the pending item without sending. Temporary roster, access,
+  audience or storage failures and claimed provider work keep their uncertainty.
+  A pair receipt skipped as `game_blocked` also permanently ends the generation,
+  even after unblock: its room cannot be restored. A block row alone leaves an
+  unskipped generation temporary. Group generations skipped for a block stay
+  non-terminal because a group block does not end the game. Nothing yet restores
+  a settled group's room, so such a generation retries without being able to send.
+  A dry run can answer `would_regenerate` for stale work without changing rows;
+  execution retires it before reserving a clean generation, even without a stored
+  story. Unpublished work gets its first clean witness at publication.
+  A newer rematch is never changed. Any other unfinished or uncertain prior delivery
   refuses another regeneration; diagnose it through its existing lifecycle owner
   rather than changing the request id to force another send. Request events keep
   retries idempotent even after delivery receipt retention.
-  Web may deploy on merge before the compatible Cloudflare runtime event reader:
-  only an explicit operator execute emits the new identity. Keep operator execution
-  paused until Web and the Cloudflare runtime have converged on the release.
-  Ordinary recap identities remain compatible. No migration or client change is needed.
-  Before rollback, stop operator requests and drain all admitted regeneration work;
-  keep compatible Web and runtime readers while any remains. Accepted replacements
+  The runner image with the #4653 terminal consumer must be live before this Web
+  activation merges. Older runners retry the terminal item forever. Keep that
+  consumer as the runner rollback floor once Web can emit retirement; no migration,
+  new wire field or client change is needed.
+  Before rollback, stop operator requests and drain all admitted regeneration work
+  and every retired recap item, original generations included: older Web no longer
+  answers the terminal value for them. Keep compatible Web and runtime readers while
+  any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
   or all-perfect game owes nothing. Each ticket carries its stake kind. The

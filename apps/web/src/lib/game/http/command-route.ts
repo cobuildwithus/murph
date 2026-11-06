@@ -1,8 +1,9 @@
+import { withRetryableServerFailures } from "../../hosted-onboarding/errors";
 import type { GameView } from "../contract";
 import { jsonOk, readJsonObject } from "../../hosted-onboarding/http";
 import { runGameCommand } from "../service";
 import { assertGameMemberAuthCurrentTx, requireCurrentTermsFor, requireGameMemberAuth } from "./auth";
-import { gameCommandError, withGameServiceFailures } from "./errors";
+import { gameCommandError } from "./errors";
 import { hasGameMultiplayer } from "./capability";
 
 const BODY_LIMIT_BYTES = 64 * 1024;
@@ -26,11 +27,11 @@ export async function respondToGameCommand(
     inviteToken?: string;
   } = { body: true },
 ): Promise<Response> {
-  const auth = await withGameServiceFailures(() => requireGameMemberAuth(request, options.inviteToken));
+  const auth = await withRetryableServerFailures(() => requireGameMemberAuth(request, options.inviteToken));
   const memberId = auth.member.id;
   const body = options.body ? await readJsonObject(request, { limitBytes: options.limitBytes ?? BODY_LIMIT_BYTES }) : {};
   const built = command(body);
-  return withGameServiceFailures(async () => {
+  return withRetryableServerFailures(async () => {
     await requireCurrentTermsFor(memberId, built);
     const result = await runGameCommand({ actorMemberId: memberId, command: built, multiplayer: hasGameMultiplayer(request),
       beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx) });

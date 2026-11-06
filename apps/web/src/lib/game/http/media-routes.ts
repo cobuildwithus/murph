@@ -1,3 +1,4 @@
+import { withRetryableServerFailures } from "../../hosted-onboarding/errors";
 import type { GameHistoryView, GameHomeView, GameView } from "../contract";
 import {
   GAME_MEDIA_MAX_BYTES,
@@ -13,7 +14,7 @@ import {
 import { authorizeLockedPreviewReads, authorizeMediaRead, authorizeMediaReads, mediaKeyPrefixFor } from "../service";
 import { gameMediaKeyOf } from "../views";
 import { readRawBodyBuffer } from "../../http";
-import { gameHttpError, gameMediaUnavailable, invalidGameRequest, withGameServiceFailures } from "./errors";
+import { gameHttpError, gameMediaUnavailable, invalidGameRequest } from "./errors";
 
 /**
  * Stores a photo under the member's prefix, keyed by its bytes: a retry
@@ -28,7 +29,7 @@ export async function uploadGameMedia(input: { memberId: string; request: Reques
   if (bytes.byteLength === 0 || !matchesGameMediaContentType(bytes, contentType)) {
     throw invalidGameRequest("The upload doesn't match its Content-Type.");
   }
-  return withGameServiceFailures(() => putGameMedia({ bytes, contentType, prefix: mediaKeyPrefixFor(input.memberId) }));
+  return withRetryableServerFailures(() => putGameMedia({ bytes, contentType, prefix: mediaKeyPrefixFor(input.memberId) }));
 }
 
 /**

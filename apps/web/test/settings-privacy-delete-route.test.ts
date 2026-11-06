@@ -88,6 +88,51 @@ describe("settings privacy delete route", () => {
     expect(settingsPrivacyDeleteRoute.maxDuration).toBe(300);
   });
 
+  const deletionRequest = (body = JSON.stringify({ confirmationPhrase: "DELETE MY ACCOUNT" })) =>
+    new Request("https://join.example.test/api/settings/privacy/delete", { method: "POST", body,
+      headers: { "Content-Type": "application/json", origin: "https://join.example.test" } });
+
+  it.each([
+    ["session", Error], ["session", TypeError], ["deletion", Error], ["deletion", TypeError],
+  ] as const)("makes an unexpected %s %s retryable with plain guidance", async (stage, ErrorType) => {
+    const boundary = stage === "session" ? mocks.requireHostedAccountDeletionSessionFromRequest : mocks.deleteHostedAccountData;
+    boundary.mockRejectedValueOnce(new ErrorType("Synthetic internal failure"));
+    const response = await settingsPrivacyDeleteRoute.POST(deletionRequest());
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", retryable: true,
+      message: "Something went wrong while deleting your account. Retry account deletion, or contact support if it keeps failing." } });
+    expect(mocks.buildHostedAppSessionClearCookies).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [500, "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED", "Billing is not configured.", true],
+    [409, "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED", "Reconnect your device first.", false],
+  ] as const)("preserves the hosted %s %s response", async (httpStatus, code, message, retryable) => {
+    mocks.deleteHostedAccountData.mockRejectedValueOnce(hostedOnboardingError({ httpStatus, code, message }));
+    const response = await settingsPrivacyDeleteRoute.POST(deletionRequest());
+    expect(response.status).toBe(httpStatus);
+    expect(await response.json()).toEqual({ error: { code, message, retryable } });
+    expect(mocks.buildHostedAppSessionClearCookies).not.toHaveBeenCalled();
+  });
+
+  it("keeps AUTH_REQUIRED final", async () => {
+    mocks.requireHostedAccountDeletionSessionFromRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue.",
+    }));
+    const response = await settingsPrivacyDeleteRoute.POST(deletionRequest());
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "AUTH_REQUIRED", retryable: false } });
+    expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
+  });
+
+  it("keeps malformed JSON final", async () => {
+    const response = await settingsPrivacyDeleteRoute.POST(deletionRequest("{"));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.retryable).not.toBe(true);
+    expect(mocks.parseHostedAccountDeletionRequest).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
+  });
+
   it("ignores the retired maintenance value and uses member auth before deleting account data", async () => {
     vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
 

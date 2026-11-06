@@ -1,9 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), loreRows: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
-vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ game: { findFirst: m.game, findMany: m.loreRows }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
+vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedLinqDelivery: { findFirst: async () => null }, game: { findFirst: m.game, findMany: m.loreRows }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({
@@ -44,14 +41,7 @@ describe("game chat tool authority", () => {
     m.loreRows.mockResolvedValue([{ id: "game_synthetic", maxPlayers: 2, audienceKey: null }]);
     m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"], reply: { text: "synthetic-private-reply", audio: "private-reply-audio" } } });
   });
-  it("keeps the new retirement value out of every Web source file until activation", () => {
-    const root = fileURLToPath(new URL("../src/", import.meta.url));
-    const references = readdirSync(root, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())
-      .filter(entry => /GAME_RECAP_GENERATION_RETIRED|recap_generation_retired/u.test(readFileSync(join(entry.parentPath, entry.name), "utf8")))
-      .map(entry => entry.name);
-    expect(references).toEqual([]);
-  });
-  it.each(["read_game", "write_recap"] as const)("preserves today's unavailable shape for stale %s and retries temporary roster failures", async action => {
+  it.each(["read_game", "write_recap"] as const)("keeps unretired %s unavailability nonterminal and retries temporary roster failures", async action => {
     const origin = { kind: "game_recap" as const, gameId: "game_synthetic", eventId: "game-recap:game_synthetic" };
     const request = action === "read_game" ? { action, origin } : { action, origin, priorChatLines: [], recap: { pages: [], chatLine: "Synthetic story" } };
     m.recapMaterial.mockResolvedValue(null);

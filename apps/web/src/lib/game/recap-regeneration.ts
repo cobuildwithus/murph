@@ -1,4 +1,6 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
+import { GAME_RECAP_RETIRED, readGameRecapEntryIdsTx, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx } from "./recap-witness";
 import { groupGameRecapPlayers } from "./recap-cohort";
 import { getPrisma } from "../prisma";
 import { lockGamePair } from "./blocks";
@@ -27,6 +29,20 @@ function recapRosterRefusal(game: RecapRoster | null, expected: readonly string[
   return null;
 }
 
+/** Inspect the previous generation without writing, including for Ops previews. */
+async function recapDeliveryRefusal(tx: Prisma.TransactionClient, game: RecapRoster & { id: string; recapEncrypted: string | null }, latestEventId: string): Promise<string | null> {
+  // Do not overlap generations or replace the story while its delivery is
+  // uncertain. Accepted/delivered receipts already own their provider identity.
+  const key = createHostedLinqDeliveryIdempotencyLookupKey(latestEventId);
+  const delivery = key ? await tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key }, select: { status: true, skipReason: true } }) : null;
+  const stale = delivery?.status === "generation_queued" && await readGameRecapEntryIdsTx(tx, game, latestEventId) === null;
+  if (!game.recapEncrypted && !stale && delivery?.skipReason !== GAME_RECAP_RETIRED
+    && !await tx.gameEntry.findFirst({ where: { gameId: game.id, withdrawnReason: "removed" }, select: { id: true } })) return "recap_unavailable";
+  if (delivery && !stale && !["accepted", "delivered", "read", "sent_no_receipt_expected", "skipped"].includes(delivery.status)) return "delivery_pending";
+  if (latestEventId !== gameChatLifecycleEventId(game.id, "recap") && !delivery) return "delivery_unavailable";
+  return null;
+}
+
 /** Ops authentication belongs to the route. No provider, crypto or signal work here. */
 export async function requestGameRecapRegeneration(input: GameRecapRegenerationRequest & { operatorMemberId: string }) {
   const prisma = getPrisma();
@@ -44,7 +60,7 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     // Account deletion also owns this row before changing the roster or recap.
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const game = await tx.game.findUnique({ where: { id: input.gameId }, select: {
-      maxPlayers: true, settledAt: true, status: true, chatContainerMemberId: true, recapEncrypted: true,
+      id: true, maxPlayers: true, settledAt: true, status: true, chatContainerMemberId: true, recapEncrypted: true,
       players: { select: { memberId: true, leftAt: true }, take: 11 },
     } });
     const refusal = recapRosterRefusal(game, players);
@@ -54,16 +70,11 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     if (await hasGameChatBlock(tx, game.players.flatMap(player => player.memberId ? [player.memberId] : []))) return result("players_blocked");
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: eventId }, select: { id: true } });
     if (prior) return result("already_requested");
-    if (!game.recapEncrypted && !await tx.gameEntry.findFirst({ where: { gameId: input.gameId, withdrawnReason: "removed" }, select: { id: true } })) return result("recap_unavailable");
-    const latest = await tx.gameEvent.findFirst({ where: { gameId: input.gameId, type: "recap_regeneration_requested" },
-      orderBy: { id: "desc" }, select: { commandKey: true } });
-    // Do not overlap generations or replace the story while its delivery is
-    // uncertain. Accepted/delivered receipts already own their provider identity.
-    const key = createHostedLinqDeliveryIdempotencyLookupKey(latest?.commandKey ?? gameChatLifecycleEventId(input.gameId, "recap"));
-    const delivery = key ? await tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key }, select: { status: true } }) : null;
-    if (delivery && !["accepted", "delivered", "read", "sent_no_receipt_expected", "skipped"].includes(delivery.status)) return result("delivery_pending");
-    if (latest && !delivery) return result("delivery_unavailable");
+    const latestEventId = await readLatestGameRecapEventIdTx(tx, input.gameId);
+    const deliveryRefusal = await recapDeliveryRefusal(tx, game, latestEventId);
+    if (deliveryRefusal) return result(deliveryRefusal);
     if (!input.execute) return result("would_regenerate");
+    await settleGameRecapGenerationTx(tx, game, latestEventId);
     await tx.gameEvent.create({ data: { gameId: input.gameId, actor: input.operatorMemberId,
       type: "recap_regeneration_requested", commandKey: eventId, payload: {} } });
     await reserveGameChatLifecycleTx({ gameId: input.gameId, kind: "recap", regenerationId: input.regenerationId, now: new Date(), tx });

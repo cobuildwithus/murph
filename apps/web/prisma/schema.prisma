@@ -2982,5 +2982,6 @@ model GameEvent {
   game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
   @@index([gameId, id])
+  @@index([actor, type])
   @@map("game_event")
 }

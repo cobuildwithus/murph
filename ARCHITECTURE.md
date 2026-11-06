@@ -1553,10 +1553,11 @@ existing session. This exception grants only deletion; ordinary session reads,
 runtime access, and transaction-time session guards still reject suspension.
 Revoked or expired sessions never qualify.
 Game history beyond one page commits in separate transactions under the suspension
-fence; a request stops after 20 partial pages with a retryable error, and the
-delete dialog stays open for that retry because a suspended account cannot reload
-Settings. Keys remain until the final transaction applies the last page and proves
-no dependency remains.
+fence; a request stops after 20 partial pages with a retryable error. The endpoint
+reports every server failure as retryable, and the delete dialog stays open for any
+retryable answer because a suspended account cannot reload Settings. A refusal, a
+lost session or an unknown outcome still reloads. Keys remain until the final
+transaction applies the last page and proves no dependency remains.
 
 Account deletion first locks and suspends the owner plus every owned thread
 container, and every relationship writer that can add a runtime, Stripe, or Family
@@ -5615,6 +5616,23 @@ read these observations to help explain sync status; contact never proves Health
 permissions, successful ingestion, or continuous app execution.
 See [companion presence](agent-docs/references/companion-presence.md).
 
+## Vault display-name projection and actions
+
+Browser Vault replicas and their core shard carry optional `displayName` beside
+`demographics`. The hosted runtime uses `readProjectableProfileName`, including
+canonical memory and its narrow legacy `bank/profile.md` fallback. A missing or
+failed name read omits the field without failing the replica. The resolved name
+participates in every hosted source digest check. Adding its digest segment
+invalidates older source hashes on the next refresh before the skip decision;
+projection generation remains 18. Older parsers copy known fields and ignore it.
+
+`display-name.set` V1 carries `displayName` validated by
+`memoryDisplayNameSchema`. The existing encrypted member-action mailbox calls
+core `setMemoryDisplayName`; its locked `changed` result selects `applied` or
+`unchanged`. It uses the same silent no-op mailbox effect as demographics,
+without a model turn or a new dispatch event. Deploy this consumer before the
+Web producer; keep it while accepted actions can remain queued or restored.
+
 ## Weekly Game
 
 Operator recap regeneration reuses the lifecycle receipt, minute sweep, hosted
@@ -5642,9 +5660,18 @@ Reports keep their existing viewer-specific suppression, and withdrawals or
 retakes alone do not hide a story. A clean accepted replacement can show again.
 Existing mailbox items remain legacy generations with no witness; they proceed only
 while no entry has been removed or reported, and takedown clears their story
-conservatively. Web answers stale work with the existing unavailable shape for
-now and leaves its receipt queued. The runner accepts durable retirement, but
-Web will emit it only in the later activation release.
+conservatively. Web retires stale published, unclaimed generations by marking the
+existing receipt `skipped` with `game_recap_retired`, at takedown or the next
+material read or seal. After runtime authorization, recap tools answer the shared
+`GAME_RECAP_GENERATION_RETIRED` value before roster work; the runner consumes it
+without sending. Temporary unavailability and claimed provider work remain
+uncertain. A pair receipt skipped as `game_blocked` is also terminal after
+unblock because its room cannot be restored; a block row alone and blocked group
+generations remain uncertain, though nothing yet restores a settled group's room.
+Regeneration previews use the pure witness check
+without writes; execution retires stale work before reserving a clean successor.
+The runner image
+with the #4653 consumer must be live before this Web activation merges.
 
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).

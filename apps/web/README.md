@@ -1905,6 +1905,14 @@ Extra objects, constraints/index names, defaults, and timestamp precision do
 not fail this presence-only gate. It does not repair drift or undo migrations.
 `@prisma/get-dmmf` is pinned to the installed Prisma version to read the full
 schema DMMF without depending on a stale or pruned generated runtime client.
+The four Prisma packages (`prisma`, `@prisma/client`, `@prisma/adapter-pg`, and
+`@prisma/get-dmmf`) are pinned exactly to 7.9.1. `trustPolicy: no-downgrade`
+refuses `prisma` 7.10.x because it has no trusted-publisher evidence
+([prisma/orm#30850](https://github.com/prisma/orm/issues/30850)), and a range
+would re-resolve to it. Do not add a trust exclusion. Prisma 7.10 also reports
+a unique violation by index name rather than fields, so that upgrade must
+update `isNonceUniqueViolation` to accept index names, including
+`REINDEX CONCURRENTLY`'s `_ccnew` and `_ccold` names.
 
 The Linq provider-health rollout follows the same boundary. Predeploy adds the
 independent service/reputation columns and their per-dimension ordering
@@ -2087,11 +2095,11 @@ A `pool_checkout_timeout` means the statement never reached Postgres. A
 `connection_establishment_timeout` means the driver failed while opening the
 physical connection. A `transaction_start_timeout` is Prisma's `P2028` raised
 before it invokes the transaction callback. The timed-out start can still
-complete later. A release inside a transaction closes the connection and logs
-`transaction_left_open`, which counts connections that would otherwise have
-hidden later writes. Closed connections, including pg's plain `Connection
-terminated unexpectedly` error, also permit one retry for standalone model reads
-or interactive transaction setup before callback entry. The model-read allowlist
+complete later; Prisma then rolls it back. A release inside a transaction closes
+the connection and logs `transaction_left_open`, which counts connections that
+would otherwise have hidden later writes. Closed connections, including pg's
+plain `Connection terminated unexpectedly` error, also permit one retry for
+standalone model reads or interactive transaction setup before callback entry. The model-read allowlist
 excludes raw SQL, which may have effects even through a query API. The existing
 public transaction wrapper carries an async scope so reads inside interactive or
 batch transactions do not independently retry a closed connection or escape
