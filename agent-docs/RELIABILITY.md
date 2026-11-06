@@ -3332,6 +3332,12 @@ Current product admission, delivery and native runtime safety rules remain.
   barrier. Generic non-idempotent transport work remains excluded from the hot
   pass, and generic notifications or unrelated pending outbox work cannot
   hitchhike. Fresh conversation input retains priority.
+  A Linq reply boundary carrying a parked file-approval cycle or post-acceptance
+  settlement obligation publishes its prepared claims and obligations before
+  any reply bubble can consume the input. A crash after publication but before
+  non-idempotent provider entry can still leave an ambiguous unsent effect.
+  Fresh Telegram and email first sends stay outside this fence by owner
+  decision and can still repeat through input replay.
   Referral recovery also selects each lane containing a live pending celebration
   and re-signals only its first live item above the canonical lane-consumption
   cursor. The shared live-row predicates naturally skip retention-old or expired

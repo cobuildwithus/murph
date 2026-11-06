@@ -79,12 +79,17 @@ async function fixture(channel: "email" | "telegram", options: {
     if (!current) throw new Error("Missing outbox intent");
     return current;
   };
-  const drain = async (overrides: Partial<Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]> = {}) =>
-    drainHostedPreparedAssistantDeliveries({
-      assistantDeliveryEffects: await collect(), effectsPort, forwardedEnv: env, platformEnv: {}, providerFetch,
+  const drain = async (overrides: Partial<Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]> = {}) => {
+    const assistantDeliveryEffects = overrides.assistantDeliveryEffects ?? await collect();
+    // Due non-idempotent retries now require the prepared claim used by production.
+    const preparation = overrides.preparedDispatches ? null : await prepareHostedAssistantDeliveryEffectsForDispatch({ assistantDeliveryEffects, vaultRoot });
+    return drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true, preparedDispatches: preparation?.preparedDispatches,
+      assistantDeliveryEffects, effectsPort, forwardedEnv: env, platformEnv: {}, providerFetch,
       vaultRoot, wake: buildHostedExecutionRuntimeTimerWake({ eventId: "evt_settlement", occurredAt: new Date().toISOString(), triggerKind: "runtime_timer", userId: "member_synthetic" }),
       ...overrides,
     });
+  };
   const advance = async () => {
     const current = await read();
     vi.setSystemTime(new Date(current.nextAttemptAt ?? Date.now() + 60_000));

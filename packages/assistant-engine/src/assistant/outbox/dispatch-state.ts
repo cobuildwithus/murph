@@ -406,6 +406,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     sending: input.sending,
   })
   const abandonedAmbiguousDelivery = Boolean(ambiguousDelivery) ||
+    readRecord(input.error)?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS' ||
     isAmbiguousDeliveryWithoutProviderIds({
       deliveryMayHaveSucceeded: input.deliveryMayHaveSucceeded,
       error: input.error,

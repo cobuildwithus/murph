@@ -257,15 +257,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   construction normally waits for the shared runner idle duration (ten minutes
   by default). An observed consented-member Ask deferred by its admission gate
   advances the existing checkpoint deadline after foreground work, so waiting
-  does not consume the request's ten-minute validity. Internal assistant,
-  maintenance, retention, cleanup, projection, and scheduled wakes must not
-  shorten it. Only the exact assistant retry or follow-up wake projected
-  directly by the current foreground assistant phase may run as foreground
-  work inside that window without publishing a snapshot. The only other
-  exception is a server-identified, fixed-destination exact completion: a
-  generation-scoped phone-call-result or transport-idempotent
-  usage-referral-reward notification,
-  or a private Assistant Ask completion whose `aask_done_*` identity binds its
+  does not consume the request's ten-minute validity. An exact foreground reply
+  prerequisite may also advance it; no later pass may rearm the deadline while
+  that reply waits. Internal assistant, maintenance, retention, cleanup,
+  projection, and scheduled wakes must not shorten it. A background delivery
+  claim waiting for publication keeps that window within eight minutes of the
+  claim, so stale-send recovery cannot judge a live, unsent claim. Only the exact
+  assistant retry or follow-up wake projected directly by the current foreground
+  assistant phase may run as foreground work inside that window without
+  publishing a snapshot. The only other exception is a server-identified,
+  fixed-destination exact completion: a generation-scoped phone-call-result or
+  transport-idempotent usage-referral-reward notification, or a private Assistant
+  Ask completion whose `aask_done_*` identity binds its
   exact text, personal member, current direct route, and expiry. After fresh
   conversation work has priority, the runtime may select only those durable
   mailbox families, compose them queue-only, and persist their causal outbox
@@ -330,7 +333,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   must outlive those changes.
 - Validate target, configuration, and authority before claiming an irreversible
   effect. Persist the minimum effect identity and intent before the provider
-  call.
+  call. A due non-idempotent retry or durable pending send dispatches only after
+  its exact prepared claim is published; a missing claim means no dispatch.
+  Fresh Telegram and email first sends stay outside this rule.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
   proof that the effect did not begin. Acknowledge, clean up, or advance

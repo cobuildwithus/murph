@@ -384,6 +384,8 @@ export interface HostedWorkspaceDurableCheckpointEffectContext {
 }
 
 export interface HostedWorkspaceDurableCheckpointEffect {
+  /** Latest time routine publication may start so this effect can run. */
+  readonly checkpointStartByMs?: number;
   (
     context?: HostedWorkspaceDurableCheckpointEffectContext,
   ): Promise<HostedWorkspaceDurableCheckpointEffectResult | null | void>

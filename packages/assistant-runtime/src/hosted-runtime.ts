@@ -2909,6 +2909,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ) !== null;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
     const readyDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const readOutstandingDurableCheckpointEffects = (
+      additionalEffects: readonly HostedWorkspaceDurableCheckpointEffect[] = [],
+    ): HostedWorkspaceDurableCheckpointEffect[] => [
+      ...pendingDurableCheckpointEffects,
+      ...readyDurableCheckpointEffects,
+      ...additionalEffects,
+    ];
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
     const publishCheckpointPublicationExpectation = (
@@ -2965,6 +2972,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         // has finished, release their existing checkpoint gate without spending
         // another quiet window or weakening Ask authority.
         setIdleCheckpointStartBy(Date.now());
+      }
+      const effectDeadline = readHostedDurableEffectsCheckpointStartByMs(
+        readOutstandingDurableCheckpointEffects(passResult.afterDurableCheckpoint),
+      );
+      if (effectDeadline < (idleCheckpointStartByMs ?? Infinity)) {
+        setIdleCheckpointStartBy(effectDeadline);
       }
     };
     if (runtimeStateDirty) {
@@ -3746,6 +3759,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   messageVolumeReceiptPort: foregroundRuntime.platform.effectsPort,
                   preferredIntentIds,
                   vaultRoot: restored.vaultRoot,
+                  workspace: activeWorkspace,
                 })).filter((effect) =>
                   preferredIntentIdSet.has(effect.effectId)
                 );
@@ -6887,11 +6901,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
+        const effects = readOutstandingDurableCheckpointEffects();
+        if (hostedDurableEffectsCheckpointIsDue(effects)) return null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
           canonicalReceiptCount: pendingCanonicalReceiptCount,
-          durableEffectCount: pendingDurableCheckpointEffects.length + readyDurableCheckpointEffects.length,
+          durableEffectCount: effects.length,
           durableFollowUpPending: durableCheckpointFollowUpPending,
         });
         let workDeadline = !runtimeOwnerHandoffRequested
@@ -6903,13 +6919,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (imageGenerationController?.hasCompleted()) return Date.now();
         if (
           imageGenerationController?.hasWork()
-          && pendingDurableCheckpointEffects.length === 0
-          && readyDurableCheckpointEffects.length === 0
+          && effects.length === 0
           && !durableCheckpointFollowUpPending
         ) {
           workDeadline ??= Date.now() + runnerIdleTtlMs;
         }
-        return workDeadline;
+        return workDeadline === null
+          ? null
+          : Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects));
       };
       const prepareDirtyRuntimeCheckpointAttempt = async (
         initialCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null,
@@ -7504,6 +7521,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true
           && !runtimeOwnerHandoffRequested;
+        const mayOfferVaultShareProjection = (): boolean =>
+          mayRunPostCheckpointWork()
+          && !mailboxBudgetExhausted()
+          && !hostedDurableEffectsCheckpointIsDue(readyDurableCheckpointEffects);
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
@@ -7614,10 +7635,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           continue;
         }
         let vaultShareOpportunity: HostedVaultShareProjectionOpportunity | null = null;
-        if (
-          mayRunPostCheckpointWork()
-          && !mailboxBudgetExhausted()
-        ) {
+        if (mayOfferVaultShareProjection()) {
           vaultShareOpportunity = await runOptionalPostCheckpointWork(
             async () =>
               await offerHostedVaultShareProjectionDuringIdle({
@@ -9605,6 +9623,18 @@ function selectHostedIdleCheckpointWake(input: {
     nextWakeAt: input.projectedWakeAt,
     nextWakeReason: input.projectedWakeReason,
   };
+}
+
+function readHostedDurableEffectsCheckpointStartByMs(
+  effects: readonly HostedWorkspaceDurableCheckpointEffect[],
+): number {
+  return Math.min(...effects.map((effect) => effect.checkpointStartByMs ?? Number.POSITIVE_INFINITY));
+}
+
+function hostedDurableEffectsCheckpointIsDue(
+  effects: readonly HostedWorkspaceDurableCheckpointEffect[],
+): boolean {
+  return readHostedDurableEffectsCheckpointStartByMs(effects) <= Date.now();
 }
 
 function readHostedWorkspaceDurableCheckpointEffectResult(
