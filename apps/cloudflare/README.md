@@ -1266,19 +1266,12 @@ which cannot implicitly start a stopped container. Cleanup recognizes native
 stopped state even if the SDK's cached lifecycle state still says running.
 Explicit readiness retains its separate authorized startup path; ambiguous
 health or active work still prevents cleanup.
-After an exact successful completion clears the fence, Cloudflare makes at most
-one signed, bodyless owner-release callback to web with a timeout capped at two
-seconds. Its signed query binds the opaque runtime attempt whose fence was
-cleared and may include the exact positive `immediateRecheckRequested` edge.
-A future mailbox retry continuation still sends this callback so Web can
-recheck actionable work after the owner releases its fence. The edge means the
-invocation newly committed an unserviced default or retention schedule; it does
-not carry the schedule itself. Without the edge, Web signals only when current runnable mailbox lag or a live system
-mailbox item beyond the handled-through frontier remains. Exact callbacks use
-the attempt-bound owner-release signal; legacy pointerless callbacks use the
-facts-only recheck. A persisted due wake alone therefore never becomes a
-repeated level-triggered signal. Callback failure is logged and ignored with no
-retry or result mutation.
+Cloudflare sends the owner route's `complete` command for an exact successful
+completion, adding the container name once the native invocation settles.
+Web sends Temporal a `runtime_owner_released` hint on every successful final
+release; early completion, duplicates and stale commands send none.
+The Worker always sends `immediateRecheckRequested: false` for compatibility
+with Web's parser and live protocol admission; Web ignores its value.
 
 ## Deploy Artifacts
 

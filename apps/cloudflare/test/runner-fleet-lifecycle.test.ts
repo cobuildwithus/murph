@@ -471,7 +471,7 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
       const receipt = new RunnerInvocationReceiptStore(initial.sql);
       const identity = { attemptId: current.attemptId!, generation: current.generation };
       receipt.register(identity);
-      receipt.complete(identity, false);
+      receipt.complete(identity);
       const h = reactivated ? runnerHarness({ running: true, durable: initial, health }) : initial;
       await alarm(h);
       assert.equal(current.phase, "idle");
@@ -498,7 +498,7 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
       const receipt = new RunnerInvocationReceiptStore(initial.sql);
       const identity = { attemptId: current.attemptId!, generation: current.generation };
       receipt.register(identity);
-      receipt.complete(identity, false);
+      receipt.complete(identity);
       let completionCalls = 0;
       vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
         if (command.operation === "complete") {
@@ -542,7 +542,7 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
       const identity = { attemptId: condition === "wrong-attempt" ? "other-attempt" : current.attemptId!,
         generation: condition === "wrong-generation" ? "2" : current.generation };
       receipt.register(identity);
-      if (condition !== "registered") receipt.complete(identity, true);
+      if (condition !== "registered") receipt.complete(identity);
       await h.container.onActivityExpired();
       assert.equal(web.commands.filter(c => c.operation === "complete").length,
         ["failed-completion", "successor", "wrong-target"].includes(condition) ? 1 : 0);
@@ -559,7 +559,7 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     const web = webOwner(owner("retiring"));
     const receipts = new RunnerInvocationReceiptStore(h.sql);
     receipts.register({ attemptId: web.current.attemptId!, generation: "1" });
-    receipts.complete({ attemptId: web.current.attemptId!, generation: "1" }, false);
+    receipts.complete({ attemptId: web.current.attemptId!, generation: "1" });
     await h.container.onActivityExpired();
     assert.deepEqual(web.commands.map(c => c.operation), ["reconcile"]);
     assert.equal(h.calls.destroy, 0);
@@ -626,11 +626,11 @@ describe("alarm recovery of native outcomes", () => {
       assert.equal(h.calls.destroy, 0);
       assert.equal((await h.container.readActiveRuntimeUserFence()).active, true);
       const receipts = new RunnerInvocationReceiptStore(h.sql);
-      if (condition === "completed") receipts.complete({ attemptId: "attempt-starting", generation: "1" }, false);
+      if (condition === "completed") receipts.complete({ attemptId: "attempt-starting", generation: "1" });
       if (condition === "wrong-attempt" || condition === "wrong-generation") {
-        receipts.complete({ attemptId: "attempt-starting", generation: "1" }, false);
+        receipts.complete({ attemptId: "attempt-starting", generation: "1" });
         receipts.register({ attemptId: condition === "wrong-attempt" ? "another-attempt" : "attempt-starting", generation: "2" });
-        receipts.complete({ attemptId: condition === "wrong-attempt" ? "another-attempt" : "attempt-starting", generation: "2" }, false);
+        receipts.complete({ attemptId: condition === "wrong-attempt" ? "another-attempt" : "attempt-starting", generation: "2" });
       }
       if (condition === "stopped") h.setNative(false);
       if (condition === "stale-stopped-status") h.setNative(true, "stopped");
@@ -656,7 +656,7 @@ describe("alarm recovery of native outcomes", () => {
       invoke: async () => { throw new Error("Network connection lost"); },
       destroy: async () => { if (stopFails) throw new Error("synthetic stop failure"); },
     });
-    new RunnerInvocationReceiptStore(h.sql).complete({ attemptId: "attempt-starting", generation: "1" }, false);
+    new RunnerInvocationReceiptStore(h.sql).complete({ attemptId: "attempt-starting", generation: "1" });
     await alarm(h);
     const failedStops = h.calls.destroy;
     assert.ok(failedStops > 0);
