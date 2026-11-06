@@ -52,26 +52,12 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
   return (
     <LinkPageScreen
       actions={props.onKeepUpdatedChange && !noMatches ? (
-        <label
-          className={cn(PROVIDER_ROW_CLASS, "flex w-full items-center gap-3")}
-          htmlFor={`${inputId}-daily`}
-        >
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-[17px] font-semibold leading-[22px]">
-              Check for new records daily
-            </span>
-            <span className="text-sm font-medium leading-[19px] text-[#FFFCF6]/60">
-              Where your portal supports ongoing access. You choose the access period at your portal and can disconnect in Murph anytime. Otherwise, this is a one-time import.
-            </span>
-          </span>
-          <Checkbox
-            checked={props.keepUpdated ?? false}
-            className="size-[26px] rounded-full border-[1.5px] border-[#FFFCF6]/35 data-checked:border-[#FFFCF6] data-checked:bg-[#FFFCF6] data-checked:text-[#2D3436] [&_svg]:size-4"
-            disabled={locked}
-            id={`${inputId}-daily`}
-            onCheckedChange={props.onKeepUpdatedChange}
-          />
-        </label>
+        <DailyCheck
+          checked={props.keepUpdated ?? false}
+          id={`${inputId}-daily`}
+          locked={locked}
+          onCheckedChange={props.onKeepUpdatedChange}
+        />
       ) : undefined}
       announceDetail={false}
       below={
@@ -139,57 +125,13 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
             </div>
           ) : null}
 
-          <p
-            id={statusId}
-            aria-live="polite"
-            className={atRest || noMatches
-              ? "sr-only"
-              : "px-0.5 pt-[18px] pb-2.5 text-sm font-semibold leading-5 tabular-nums text-[#FFFCF6]/60"}
-          >
-            {noMatches
-              ? "No matching providers"
-              : props.searchPending
-                ? "Finding your care provider"
-                : props.searchError
-                  ? "Search unavailable"
-                  : props.hasSearched
-                    ? `${props.providers.length} ${props.providers.length === 1 ? "match" : "matches"}`
-                    : "Start typing to see matching providers"}
-          </p>
-          {props.searchError ? (
-            <div className="flex flex-col items-center">
-              <LinkPageError>{props.searchError}</LinkPageError>
-              <LinkPageLink onClick={props.onSearch}>Try again</LinkPageLink>
-            </div>
-          ) : null}
-          <ul
-            id={resultsId}
-            aria-label="Matching hospitals and clinics"
-            aria-busy={props.searchPending}
-            className="flex flex-col gap-2"
-          >
-            {props.providers.map((provider) => (
-              <ProviderResult
-                key={provider.id}
-                provider={provider}
-                pending={props.startingProviderId === provider.id}
-                disabled={props.searchPending || Boolean(props.startingProviderId) || Boolean(props.selectedProviderId && props.selectedProviderId !== provider.id)}
-                onSelect={() => props.onSelect(provider)}
-              />
-            ))}
-          </ul>
-          {props.searchPending && props.providers.length === 0 ? (
-            <div aria-hidden="true" className="flex flex-col gap-2">
-              {[0, 1, 2].map((index) => (
-                <Skeleton className="h-[72px] rounded-[18px]" key={index} />
-              ))}
-            </div>
-          ) : null}
-          {noMatches ? (
-            <p className="pt-[18px] text-base font-medium leading-[22px] text-[#FFFCF6]/60">
-              Try another name, city, or ZIP code. Your portal may not be supported yet.
-            </p>
-          ) : null}
+          <ProviderSearchResults
+            atRest={atRest}
+            noMatches={noMatches}
+            resultsId={resultsId}
+            statusId={statusId}
+            view={props}
+          />
         </div>
       }
       detail={props.hasSearched
@@ -197,6 +139,100 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
         : "You’ll sign in on your provider’s website and choose what to share with Murph."}
       title="Find your hospital or clinic."
     />
+  );
+}
+
+function ProviderSearchResults({ atRest, noMatches, resultsId, statusId, view: props }: {
+  atRest: boolean;
+  noMatches: boolean;
+  resultsId: string;
+  statusId: string;
+  view: Omit<ProviderSearchViewProps, "inputRef">;
+}) {
+  return (
+    <>
+      <p
+        id={statusId}
+        aria-live="polite"
+        className={atRest || noMatches
+          ? "sr-only"
+          : "px-0.5 pt-[18px] pb-2.5 text-sm font-semibold leading-5 tabular-nums text-[#FFFCF6]/60"}
+      >
+        {noMatches
+          ? "No matching providers"
+          : props.searchPending
+            ? "Finding your care provider"
+            : props.searchError
+              ? "Search unavailable"
+              : props.hasSearched
+                ? `${props.providers.length} ${props.providers.length === 1 ? "match" : "matches"}`
+                : "Start typing to see matching providers"}
+      </p>
+      {props.searchError ? (
+        <div className="flex flex-col items-center">
+          <LinkPageError>{props.searchError}</LinkPageError>
+          <LinkPageLink onClick={props.onSearch}>Try again</LinkPageLink>
+        </div>
+      ) : null}
+      <ul
+        id={resultsId}
+        aria-label="Matching hospitals and clinics"
+        aria-busy={props.searchPending}
+        className="flex flex-col gap-2"
+      >
+        {props.providers.map((provider) => (
+          <ProviderResult
+            key={provider.id}
+            provider={provider}
+            pending={props.startingProviderId === provider.id}
+            disabled={props.searchPending || Boolean(props.startingProviderId) || Boolean(props.selectedProviderId && props.selectedProviderId !== provider.id)}
+            onSelect={() => props.onSelect(provider)}
+          />
+        ))}
+      </ul>
+      {props.searchPending && props.providers.length === 0 ? (
+        <div aria-hidden="true" className="flex flex-col gap-2">
+          {[0, 1, 2].map((index) => (
+            <Skeleton className="h-[72px] rounded-[18px]" key={index} />
+          ))}
+        </div>
+      ) : null}
+      {noMatches ? (
+        <p className="pt-[18px] text-base font-medium leading-[22px] text-[#FFFCF6]/60">
+          Try another name, city, or ZIP code. Your portal may not be supported yet.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function DailyCheck({ checked, id, locked, onCheckedChange }: {
+  checked: boolean;
+  id: string;
+  locked: boolean;
+  onCheckedChange: NonNullable<ProviderSearchViewProps["onKeepUpdatedChange"]>;
+}) {
+  return (
+        <label
+          className={cn(PROVIDER_ROW_CLASS, "flex w-full items-center gap-3")}
+          htmlFor={id}
+        >
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-[17px] font-semibold leading-[22px]">
+              Check for new records daily
+            </span>
+            <span className="text-sm font-medium leading-[19px] text-[#FFFCF6]/60">
+              Where your portal supports ongoing access. You choose the access period at your portal and can disconnect in Murph anytime. Otherwise, this is a one-time import.
+            </span>
+          </span>
+          <Checkbox
+            checked={checked}
+            className="size-[26px] rounded-full border-[1.5px] border-[#FFFCF6]/35 data-checked:border-[#FFFCF6] data-checked:bg-[#FFFCF6] data-checked:text-[#2D3436] [&_svg]:size-4"
+            disabled={locked}
+            id={id}
+            onCheckedChange={onCheckedChange}
+          />
+        </label>
   );
 }
 

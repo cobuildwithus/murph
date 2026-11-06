@@ -126,14 +126,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     }),
     failed,
     kind: "device-sync",
-    logo: failed || connected
-      ? {
-          name: providerLabel,
-          src: resolveConnectLogoSrc(
-            callback.connectSource ?? callback.connectTarget ?? callback.provider,
-          ),
-        }
-      : null,
+    logo: readCompletionLogo({ callback, connected, failed, providerLabel }),
     retryHref: failed ? "/connect" : null,
     setupGuide: needsWhoopAppleHealthRelay
       ? buildWhoopAppleHealthSetupGuide(
@@ -420,6 +413,24 @@ function resolveCompletionDetail(input: {
 // Fitbit links through Junction's Google Health provider. Google rejects a link
 // when the Google Account has no Google Health profile or a permission is
 // declined, and Junction reports both as a failed Link outcome.
+function readCompletionLogo(input: {
+  callback: CompletionCallback;
+  connected: boolean;
+  failed: boolean;
+  providerLabel: string;
+}) {
+  if (!input.failed && !input.connected) {
+    return null;
+  }
+  const { callback } = input;
+  return {
+    name: input.providerLabel,
+    src: resolveConnectLogoSrc(
+      callback.connectSource ?? callback.connectTarget ?? callback.provider,
+    ),
+  };
+}
+
 function isFitbitGoogleHealthLinkFailure(callback: CompletionCallback): boolean {
   return callback.errorCode === "JUNCTION_LINK_FAILED"
     && (
