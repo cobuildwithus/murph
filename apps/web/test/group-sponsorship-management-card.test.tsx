@@ -447,7 +447,7 @@ test("offers a read-only recheck after bounded pending polls without starting an
       await vi.advanceTimersByTimeAsync(7_000);
     });
 
-    expect(rendered.container.textContent).toContain("No new payment is needed");
+    expect(rendered.container.textContent).toContain("You don’t need to pay again");
     const recheckButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Check payment status");
     assert.ok(recheckButton);
@@ -509,10 +509,10 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       "Increase your limit to $50?",
     );
     expect(rendered.container.textContent).toContain(
-      "Your monthly limit will change from $10 to $50",
+      "up to $50 a month instead of $10",
     );
     expect(rendered.container.textContent).toContain(
-      "When automatic refills are on, Murph may charge $5 at a time",
+      "When refills are on, Murph charges $5 at a time",
     );
     expect(rendered.container.textContent).toContain("Keep $10 limit");
     assert.equal(fetchMock.mock.calls.length, 0);
@@ -588,7 +588,7 @@ test.each([
 
     assert.equal(fetchMock.mock.calls.length, 0);
     expect(rendered.container.textContent).toContain(
-      "When automatic refills are on, Murph may charge $5 at a time",
+      "When refills are on, Murph charges $5 at a time",
     );
 
     const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
@@ -698,7 +698,7 @@ test("offers only cancellation when billing changes are unavailable", async () =
     expect(labels).not.toContain("Review payment");
     expect(labels).not.toContain("$20");
     expect(rendered.container.textContent).toContain(
-      "you can still stop future automatic refills",
+      "you can stop future refills",
     );
   } finally {
     await rendered.cleanup();
@@ -736,7 +736,7 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
       "Cancel your monthly sponsorship?",
     );
     expect(rendered.container.textContent).toContain(
-      "Any usage credit already purchased will stay with the group",
+      "Credit you already bought stays with the group",
     );
 
     const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
@@ -749,10 +749,10 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
 
     expect(rendered.reload).not.toHaveBeenCalled();
     expect(rendered.container.textContent).toContain(
-      "Monthly sponsorship canceled",
+      "Sponsorship canceled",
     );
     expect(rendered.container.textContent).toContain(
-      "Future automatic refills are stopped",
+      "Automatic refills have stopped",
     );
     expect(
       [...rendered.container.querySelectorAll("button")]
@@ -815,7 +815,7 @@ test.each([false, true])(
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(rendered.reload).not.toHaveBeenCalled();
       expect(rendered.container.textContent).toContain(
-        "Monthly sponsorship canceled",
+        "Sponsorship canceled",
       );
     } finally {
       await rendered.cleanup();

@@ -496,4 +496,54 @@ function createPoll(run = 0): HostedUsageTopUpPoll {
   return { kind: "dormant", run };
 }
 
-export { createHostedUsageTopUpState, hostedUsageTopUpReducer };
+interface HostedUsageTopUpPurchaseActions {
+  canCancel: boolean;
+  canCheckAgain: boolean;
+  canResume: boolean;
+  canRetry: boolean;
+}
+
+function readHostedUsageTopUpPurchaseActions(
+  purchase: HostedUsageTopUpPurchaseScreen | null,
+  returnedFromSuccessfulCheckout: boolean,
+): HostedUsageTopUpPurchaseActions {
+  const canResume =
+    !returnedFromSuccessfulCheckout &&
+    purchase?.targetConflict !== true &&
+    purchase?.status === "checkout_open" &&
+    purchase.checkoutUrl !== null;
+  const canCancel =
+    !returnedFromSuccessfulCheckout &&
+    (purchase?.status === "checkout_open" ||
+      purchase?.cancelAllowed === true);
+  const canRetry =
+    purchase !== null &&
+    !purchase.targetConflict &&
+    purchase.retryOfferCode !== null &&
+    (purchase.status === "reconciling" ||
+      (purchase.status === "checkout_open" && !canResume) ||
+      (purchase.status === "payment_pending" &&
+        (purchase.poll.kind === "exhausted" ||
+          purchase.poll.kind === "failed")));
+  const canCheckAgain = Boolean(
+    purchase &&
+      !canResume &&
+      !canRetry &&
+      (purchase.poll.kind === "failed" ||
+        (purchase.poll.kind === "exhausted" &&
+          (purchase.status === null ||
+            shouldPollPurchaseStatus(purchase.status)))),
+  );
+  return { canCancel, canCheckAgain, canResume, canRetry };
+}
+
+export {
+  createHostedUsageTopUpState,
+  hostedUsageTopUpReducer,
+  readHostedUsageTopUpPurchaseActions,
+};
+export type {
+  HostedUsageTopUpPurchaseActions,
+  HostedUsageTopUpPurchaseScreen,
+  HostedUsageTopUpSelectionScreen,
+};

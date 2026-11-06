@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
 
 import * as React from "react";
-import {
-  renderToReadableStream,
-  renderToStaticMarkup,
-} from "react-dom/server";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(() => ({ label: "test-prisma" })),
-  hasHostedGroupSponsorshipCustomizationAuthority: vi.fn(),
   GroupSponsorshipManagementCard: vi.fn((props: {
     management: {
       chargedThisPeriodMinor: number;
@@ -23,14 +19,12 @@ const mocks = vi.hoisted(() => ({
     null,
     `management:${props.management.status}:${props.management.chargedThisPeriodMinor}:${props.management.pendingThisPeriodMinor}:${props.management.monthlyCapMinor}`,
   )),
-  HostedUsageTopUpDialog: vi.fn((props: Record<string, unknown>) =>
-    React.createElement("div", null, `top-up:${String(props.scope)}`)
+  GroupFundingCheckout: vi.fn((_props: Record<string, unknown>) =>
+    React.createElement("div", null, "funding-checkout")
   ),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
   readHostedGroupChatName: vi.fn(),
-  readHostedGroupFundingSupporters: vi.fn(),
   readHostedGroupSponsorshipAuthorizationByPurchase: vi.fn(),
-  readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupSponsorshipManagementProjection: vi.fn(),
   readHostedGroupUsageFundingManagementTargetByLocator: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
@@ -50,8 +44,8 @@ vi.mock("@/src/components/hosted-groups/group-funding-sign-in-button", () => ({
   GroupFundingSignInRequired: () => React.createElement("button", null, "Sign in"),
 }));
 
-vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
-  HostedUsageTopUpDialog: mocks.HostedUsageTopUpDialog,
+vi.mock("@/src/components/hosted-groups/group-funding-checkout", () => ({
+  GroupFundingCheckout: mocks.GroupFundingCheckout,
 }));
 
 vi.mock("@/src/components/hosted-groups/group-sponsorship-management-card", () => ({
@@ -62,21 +56,6 @@ vi.mock("@/src/components/ui/button", () => ({
   Button: (props: { children?: React.ReactNode }) =>
     React.createElement("button", null, props.children),
   buttonVariants: () => "button-variant",
-}));
-
-vi.mock("@/src/components/ui/card", () => ({
-  Card: (props: { children?: React.ReactNode }) =>
-    React.createElement("section", null, props.children),
-  CardContent: (props: { children?: React.ReactNode }) =>
-    React.createElement("div", null, props.children),
-  CardDescription: (props: { children?: React.ReactNode }) =>
-    React.createElement("p", null, props.children),
-  CardFooter: (props: { children?: React.ReactNode }) =>
-    React.createElement("footer", null, props.children),
-  CardHeader: (props: { children?: React.ReactNode }) =>
-    React.createElement("header", null, props.children),
-  CardTitle: (props: { children?: React.ReactNode }) =>
-    React.createElement("div", null, props.children),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-chat-name", () => ({
@@ -96,15 +75,6 @@ vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
     mocks.readHostedGroupSponsorshipAuthorizationByPurchase,
   readHostedGroupSponsorshipManagementProjection:
     mocks.readHostedGroupSponsorshipManagementProjection,
-}));
-
-vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
-  hasHostedGroupSponsorshipCustomizationAuthority:
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority,
-  readHostedGroupFundingSupporters:
-    mocks.readHostedGroupFundingSupporters,
-  readHostedGroupSponsorshipDraftForCreator:
-    mocks.readHostedGroupSponsorshipDraftForCreator,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -132,23 +102,12 @@ import GroupFundingPage, {
 
 const PURCHASE_ID = "hucp_abcdefghijklmnop";
 
-async function renderReadyFundingPage(
-  input: Parameters<typeof GroupFundingPage>[0],
-): Promise<string> {
-  const stream = await renderToReadableStream(await GroupFundingPage(input));
-  await stream.allReady;
-  return await new Response(stream).text();
-}
-
 describe("hosted group funding page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticatedMember: { id: "member_payer", suspendedAt: null },
     });
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValue(
-      false,
-    );
     mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
       displayName: "Sunday sleep crew",
       joinCode: "group_join_code_1234",
@@ -164,11 +123,6 @@ describe("hosted group funding page", () => {
       sponsorshipStatus: "not_sponsored",
     });
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
-    mocks.readHostedGroupFundingSupporters.mockResolvedValue({
-      monthlySponsor: null,
-      oneTimeContributions: [],
-    });
-    mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValue(null);
     mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValue(null);
     mocks.readHostedUsageCreditPurchaseStatus.mockResolvedValue({
       purchaseId: PURCHASE_ID,
@@ -191,16 +145,13 @@ describe("hosted group funding page", () => {
   });
 
   it("passes a checkout return only after payer and group beneficiary validation", async () => {
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValueOnce(
-      true,
-    );
-    const markup = await renderReadyFundingPage({
+    const markup = renderToStaticMarkup(await GroupFundingPage({
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
       searchParams: Promise.resolve({
         usageCheckout: "success",
         usagePurchase: PURCHASE_ID,
       }),
-    });
+    }));
 
     assert.match(markup, /Sunday sleep crew/u);
     assert.match(
@@ -208,27 +159,21 @@ describe("hosted group funding page", () => {
       /<h1[^>]*><span[^>]*>Support Murph in<\/span><span[^>]*>Sunday sleep crew<\/span><\/h1>/u,
     );
     assert.doesNotMatch(markup, /Keep Murph going/u);
-    assert.doesNotMatch(markup, /Support Murph for everyone in this chat\./u);
     assert.doesNotMatch(markup, /Group usage|Running low/u);
-    assert.doesNotMatch(markup, /Supporters/u);
-    assert.match(markup, /top-up:group/u);
-    assert.match(markup, /href="\/home"[^>]*>Back to Murph<\/a>/u);
+    assert.doesNotMatch(markup, /Supporters|Personalize/u);
+    assert.match(markup, /funding-checkout/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_group_runtime",
       payerMemberId: "member_payer",
       prisma: { label: "test-prisma" },
       purchaseId: PURCHASE_ID,
     });
-    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         payerMemberId: "member_payer",
         purchaseReturn: { kind: "success", purchaseId: PURCHASE_ID },
-        scope: "group",
       }),
       undefined,
-    );
-    expect(mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0]).not.toHaveProperty(
-      "contactOptions",
     );
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
       serverApprovedPayableTargets: [{
@@ -239,14 +184,9 @@ describe("hosted group funding page", () => {
       payerMemberId: "member_payer",
       prisma: { label: "test-prisma" },
     });
-    expect(mocks.readHostedGroupFundingSupporters).toHaveBeenCalledWith({
-      beneficiaryMemberId: "member_group_runtime",
-      prisma: { label: "test-prisma" },
-      signal: expect.any(AbortSignal),
-    });
   });
 
-  it("shows a payer-wide target conflict without another amount picker", async () => {
+  it("marks a payer-wide target conflict as nonpayable", async () => {
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
       offerCode: "usage_10_usd",
       purchaseId: "hucp_familyactive12",
@@ -263,7 +203,7 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         activePurchase: expect.objectContaining({
           purchaseId: "hucp_familyactive12",
@@ -271,21 +211,14 @@ describe("hosted group funding page", () => {
           targetConflict: true,
           url: undefined,
         }),
-        offers: [],
-        scope: "group",
       }),
       undefined,
     );
   });
 
-  it("restores the payer's exact frozen sponsor details with a matching active purchase", async () => {
+  it("hands an open purchase to the checkout on the signed locator", async () => {
     const signedFundingLocator =
       "gf1.member_group_runtime.signed_exhaustion_locator";
-    const frozenSponsorship = {
-      publicAlias: "The Group Historian",
-      runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-      sponsorMessage: "For whatever adventure comes next.",
-    };
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
       offerCode: "usage_10_usd",
       purchaseId: "hucp_groupactive12",
@@ -303,9 +236,6 @@ describe("hosted group funding page", () => {
       kind: "friends",
       runtimeMemberId: "member_group_runtime",
     });
-    mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValueOnce(
-      frozenSponsorship,
-    );
 
     renderToStaticMarkup(await GroupFundingPage({
       params: Promise.resolve({ joinCode: signedFundingLocator }),
@@ -324,27 +254,20 @@ describe("hosted group funding page", () => {
       payerMemberId: "member_payer",
       prisma: { label: "test-prisma" },
     });
-    expect(mocks.readHostedGroupSponsorshipDraftForCreator).toHaveBeenCalledWith({
-      creatorMemberId: "member_payer",
-      prisma: { label: "test-prisma" },
-      purchaseId: "hucp_groupactive12",
-    });
-    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         activePurchase: expect.objectContaining({
           purchaseId: "hucp_groupactive12",
         }),
-        offers: [],
-        renderPurchaseDetails: expect.anything(),
-        scope: "group",
+        initialMode: "one_time",
       }),
       undefined,
     );
-    const renderedActivePurchase = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0]
+    const renderedActivePurchase = mocks.GroupFundingCheckout.mock.calls[0]?.[0]
       ?.activePurchase;
     expect(renderedActivePurchase).not.toHaveProperty("targetConflict");
     expect(renderedActivePurchase).not.toHaveProperty("target");
-    for (const [props] of mocks.HostedUsageTopUpDialog.mock.calls) {
+    for (const [props] of mocks.GroupFundingCheckout.mock.calls) {
       expect(props.checkoutUrl).toBe(
         `/api/groups/fund/${encodeURIComponent(signedFundingLocator)}/usage-credit/checkout`,
       );
@@ -352,27 +275,44 @@ describe("hosted group funding page", () => {
     }
   });
 
-  it("does not offer payment recovery when the frozen sponsor draft cannot be read", async () => {
+  it("resumes a monthly activation with the cap the payer chose", async () => {
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
-      offerCode: "usage_10_usd",
-      purchaseId: "hucp_groupactive12",
+      offerCode: "usage_5_usd",
+      purchaseId: "hucp_activation12",
       retryAllowed: true,
-      status: "reconciling",
+      status: "checkout_open",
       target: {
         beneficiaryMemberId: "member_group_runtime",
         groupJoinCode: "group_join_code_1234",
         kind: "group",
       },
+      url: "https://checkout.stripe.test/session",
     });
-    mocks.readHostedGroupSponsorshipDraftForCreator.mockRejectedValueOnce(
-      new Error("secure box unavailable"),
-    );
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargedThisPeriodMinor: 0,
+      monthlyCapMinor: 5_000,
+      pendingThisPeriodMinor: 0,
+      pendingMonthlyCapMinor: null,
+      periodEnd: "2026-08-30T12:00:00.000Z",
+      status: "pending_activation",
+    });
 
-    await expect(GroupFundingPage({
+    renderToStaticMarkup(await GroupFundingPage({
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    })).rejects.toThrow("secure box unavailable");
+    }));
 
-    expect(mocks.HostedUsageTopUpDialog).not.toHaveBeenCalled();
+    expect(mocks.GroupSponsorshipManagementCard).not.toHaveBeenCalled();
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialMode: "monthly",
+        initialMonthlyCapMinor: 5_000,
+        monthly: expect.objectContaining({
+          offer: expect.objectContaining({ offerCode: "usage_5_usd" }),
+        }),
+      }),
+      undefined,
+    );
   });
 
   it("ignores a checkout return belonging to another funding target", async () => {
@@ -388,8 +328,8 @@ describe("hosted group funding page", () => {
       }),
     }));
 
-    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
-      expect.objectContaining({ purchaseReturn: null, scope: "group" }),
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ purchaseReturn: null }),
       undefined,
     );
   });
@@ -406,27 +346,24 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(markup, /top-up:group/u);
+    assert.match(markup, /funding-checkout/u);
     assert.doesNotMatch(markup, /No refill needed right now\./u);
     assert.doesNotMatch(markup, /becomes available when capacity runs low/iu);
-    const monthlyProps = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0];
-    expect(monthlyProps).toEqual(expect.objectContaining({
-      initialOpen: true,
-      offers: [expect.objectContaining({ offerCode: "usage_5_usd" })],
-      scope: "group",
-    }));
-    const buildCheckoutPayload = monthlyProps?.buildCheckoutPayload as
-      | ((input: { clientRequestKey: string; offerCode: string }) => unknown)
-      | undefined;
-    expect(buildCheckoutPayload?.({
-      clientRequestKey: "request_monthly",
-      offerCode: "usage_5_usd",
-    })).toEqual(expect.objectContaining({
-      clientRequestKey: "request_monthly",
-      monthlyCapMinor: 500,
-      offerCode: "usage_5_usd",
-      sponsorshipKind: "monthly",
-    }));
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        monthly: {
+          capOptions: [
+            { amountLabel: "$5", monthlyCapMinor: 500 },
+            { amountLabel: "$10", monthlyCapMinor: 1_000 },
+            { amountLabel: "$20", monthlyCapMinor: 2_000 },
+            { amountLabel: "$50", monthlyCapMinor: 5_000 },
+          ],
+          offer: { amountLabel: "$5", offerCode: "usage_5_usd" },
+        },
+        oneTimeOffers: [{ amountLabel: "$5", offerCode: "usage_5_usd" }],
+      }),
+      undefined,
+    );
   });
 
   it("shows only the authenticated payer their private sponsorship management projection", async () => {
@@ -473,12 +410,7 @@ describe("hosted group funding page", () => {
       }),
       undefined,
     );
-    for (const [props] of mocks.HostedUsageTopUpDialog.mock.calls) {
-      expect(props.checkoutUrl).toBe(
-        `/api/groups/fund/${encodeURIComponent(signedFundingLocator)}/usage-credit/checkout`,
-      );
-      expect(JSON.stringify(props)).not.toContain("group_join_code_1234");
-    }
+    expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
     expect(JSON.stringify(mocks.GroupSponsorshipManagementCard.mock.calls))
       .not.toContain("group_join_code_1234");
   });
@@ -510,7 +442,7 @@ describe("hosted group funding page", () => {
 
     assert.match(sponsorMarkup, /<span[^>]*>Saturday long run<\/span><\/h1>/u);
     // A monthly sponsor raises the limit instead of starting a one-time payment.
-    assert.doesNotMatch(sponsorMarkup, /top-up:group/u);
+    assert.doesNotMatch(sponsorMarkup, /funding-checkout/u);
     expect(mocks.readHostedGroupChatName).toHaveBeenCalledWith({
       memberId: "member_group_runtime",
     });
@@ -603,7 +535,7 @@ describe("hosted group funding page", () => {
     );
     expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
-    expect(mocks.HostedUsageTopUpDialog).not.toHaveBeenCalled();
+    expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
   });
 
   it("offers a private sign-in handoff before resolving inactive sponsorship management", async () => {
@@ -617,54 +549,11 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /Sign in/u);
-    assert.doesNotMatch(markup, /This group funding link isn&#x27;t available/u);
+    assert.doesNotMatch(markup, /This link isn’t available/u);
     expect(mocks.readHostedGroupUsageFundingManagementTargetByLocator)
       .not.toHaveBeenCalled();
     expect(mocks.readHostedGroupSponsorshipManagementProjection)
       .not.toHaveBeenCalled();
-  });
-
-  it("keeps supporter recognition private until the viewer signs in", async () => {
-    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
-      authenticatedMember: null,
-    });
-
-    const markup = renderToStaticMarkup(await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    }));
-
-    assert.match(markup, /Sign in/u);
-    assert.doesNotMatch(markup, /Supporters|Monthly sponsor/u);
-    expect(mocks.readHostedGroupFundingSupporters).not.toHaveBeenCalled();
-  });
-
-  it("keeps supporter recognition private from signed-in non-participants", async () => {
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValueOnce(
-      false,
-    );
-    const markup = renderToStaticMarkup(await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    }));
-
-    assert.doesNotMatch(markup, /Supporters|Private alias/u);
-    expect(mocks.readHostedGroupFundingSupporters).not.toHaveBeenCalled();
-  });
-
-  it("keeps supporter recognition private from suspended members on a public target", async () => {
-    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
-      authenticatedMember: {
-        id: "member_payer",
-        suspendedAt: new Date("2026-08-10T00:00:00.000Z"),
-      },
-    });
-    const markup = renderToStaticMarkup(await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    }));
-
-    assert.doesNotMatch(markup, /Supporters|Private alias/u);
-    expect(mocks.hasHostedGroupSponsorshipCustomizationAuthority)
-      .not.toHaveBeenCalled();
-    expect(mocks.readHostedGroupFundingSupporters).not.toHaveBeenCalled();
   });
 
   it("keeps inactive sponsorship management unavailable to an authenticated non-payer", async () => {
@@ -681,7 +570,7 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(markup, /This group funding link isn&#x27;t available/u);
+    assert.match(markup, /This link isn’t available/u);
     assert.doesNotMatch(markup, /management:/u);
     expect(mocks.readHostedGroupSponsorshipManagementProjection)
       .toHaveBeenCalledWith({
@@ -691,7 +580,34 @@ describe("hosted group funding page", () => {
       });
   });
 
-  it("shows sponsored status with a secondary one-time contribution to a non-sponsor", async () => {
+  it("offers only a one-time contribution when someone else sponsors the chat", async () => {
+    mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
+      fundingNeeded: false,
+      fundingUrl: null,
+      sponsorshipStatus: "sponsored",
+    });
+
+    renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: null,
+        monthly: null,
+        note: "Murph is sponsored in this chat.",
+      }),
+      undefined,
+    );
+  });
+
+  it("says the chat is sponsored when this account can't contribute", async () => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticatedMember: {
+        id: "member_payer",
+        suspendedAt: new Date("2026-08-10T00:00:00.000Z"),
+      },
+    });
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
       fundingNeeded: false,
       fundingUrl: null,
@@ -703,118 +619,7 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /Murph is sponsored in this chat/u);
-    assert.match(markup, /top-up:group/u);
-    const props = mocks.HostedUsageTopUpDialog.mock.calls.at(-1)?.[0];
-    expect(props).toEqual(expect.objectContaining({
-      initialOpen: true,
-      scope: "group",
-    }));
-    expect(props).not.toHaveProperty("activePurchase");
-    const buildCheckoutPayload = props?.buildCheckoutPayload as
-      | ((input: { clientRequestKey: string; offerCode: string }) => unknown)
-      | undefined;
-    expect(buildCheckoutPayload?.({
-      clientRequestKey: "request_one_time",
-      offerCode: "usage_5_usd",
-    })).toEqual(expect.objectContaining({
-      clientRequestKey: "request_one_time",
-      offerCode: "usage_5_usd",
-      sponsorshipKind: "one_time",
-    }));
-  });
-
-  it("shows the current monthly sponsor and recent one-time contributions", async () => {
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValueOnce(
-      true,
-    );
-    mocks.readHostedGroupFundingSupporters.mockResolvedValueOnce({
-      monthlySponsor: {
-        id: "hucp_monthlysponsor1",
-        name: "The Group Historian",
-      },
-      oneTimeContributions: [
-        {
-          id: "hucp_onetimecontrib1",
-          name: "Night Shift",
-        },
-        {
-          id: "hucp_onetimecontrib2",
-          name: "Anonymous",
-        },
-      ],
-    });
-
-    const markup = await renderReadyFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    });
-
-    assert.match(markup, /Supporters/u);
-    assert.match(markup, /The Group Historian/u);
-    assert.match(markup, /Monthly sponsor/u);
-    assert.match(markup, /Night Shift/u);
-    assert.match(markup, /Anonymous/u);
-    assert.doesNotMatch(markup, /\$\d/u);
-  });
-
-  it("keeps the funding controls available when supporter recognition fails", async () => {
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValueOnce(
-      true,
-    );
-    mocks.readHostedGroupFundingSupporters.mockRejectedValueOnce(
-      new Error("optional supporter read unavailable"),
-    );
-
-    const markup = await renderReadyFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    });
-
-    assert.match(markup, /top-up:group/u);
-    assert.match(markup, /href="\/home"[^>]*>Back to Murph<\/a>/u);
-    assert.doesNotMatch(markup, /Supporters/u);
-  });
-
-  it("streams the funding controls before supporter recognition settles", async () => {
-    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValueOnce(
-      true,
-    );
-    const supporters = deferred<{
-      monthlySponsor: null;
-      oneTimeContributions: Array<{ id: string; name: string }>;
-    }>();
-    mocks.readHostedGroupFundingSupporters.mockReturnValueOnce(
-      supporters.promise,
-    );
-
-    const view = await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-    });
-    const stream = await renderToReadableStream(view);
-    const reader = stream.getReader();
-    const first = await reader.read();
-    const decoder = new TextDecoder();
-    const shellMarkup = decoder.decode(first.value, { stream: true });
-
-    assert.match(shellMarkup, /top-up:group/u);
-    assert.match(shellMarkup, /Back to Murph/u);
-    assert.doesNotMatch(shellMarkup, /Night Shift/u);
-
-    supporters.resolve({
-      monthlySponsor: null,
-      oneTimeContributions: [{
-        id: "hucp_onetimecontrib1",
-        name: "Night Shift",
-      }],
-    });
-    let completedMarkup = shellMarkup;
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) {
-        completedMarkup += decoder.decode();
-        break;
-      }
-      completedMarkup += decoder.decode(chunk.value, { stream: true });
-    }
-    assert.match(completedMarkup, /Night Shift/u);
+    expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
   });
 
   it("keeps a non-sponsor's one-time recovery reachable after another monthly sponsorship activates", async () => {
@@ -835,31 +640,22 @@ describe("hosted group funding page", () => {
       },
       url: "https://checkout.stripe.test/session",
     });
-    mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValueOnce(null);
 
-    const markup = renderToStaticMarkup(await GroupFundingPage({
+    renderToStaticMarkup(await GroupFundingPage({
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(markup, /Murph is sponsored in this chat/u);
-    assert.match(markup, /top-up:group/u);
     expect(mocks.GroupSponsorshipManagementCard).not.toHaveBeenCalled();
-    const props = mocks.HostedUsageTopUpDialog.mock.calls.at(-1)?.[0];
-    expect(props).toEqual(expect.objectContaining({
-      activePurchase: expect.objectContaining({
-        purchaseId: "hucp_onetimerecover",
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: expect.objectContaining({
+          purchaseId: "hucp_onetimerecover",
+        }),
+        initialMode: "one_time",
+        monthly: null,
       }),
-      scope: "group",
-    }));
-    const buildCheckoutPayload = props?.buildCheckoutPayload as
-      | ((input: { clientRequestKey: string; offerCode: string }) => unknown)
-      | undefined;
-    expect(buildCheckoutPayload?.({
-      clientRequestKey: "request_recovery",
-      offerCode: "usage_5_usd",
-    })).toEqual(expect.objectContaining({
-      sponsorshipKind: "one_time",
-    }));
+      undefined,
+    );
   });
 
   it("fails closed when the linked runtime has no group usage projection", async () => {
@@ -869,20 +665,7 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(
-      markup,
-      /<h1[^>]*>This group funding link isn&#x27;t available<\/h1>/u,
-    );
-    expect(mocks.HostedUsageTopUpDialog).not.toHaveBeenCalled();
+    assert.match(markup, /<h1[^>]*>This link isn’t available<\/h1>/u);
+    expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
   });
 });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, reject, resolve };
-}

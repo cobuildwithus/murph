@@ -5,33 +5,23 @@ import { useState } from "react";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { Button } from "@/src/components/ui/button";
+
 import {
-  Card,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/src/components/ui/card";
+  GroupFundingMessage,
+  GroupFundingPage,
+} from "./group-usage-funding-shell";
 
 export function GroupFundingSignInRequired(props: {
   initiallyOpen?: boolean;
 } = {}) {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-16">
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            Sign in to continue
-          </CardTitle>
-          <CardDescription>
-            Open your private Murph account, then we&apos;ll bring you back to this group funding link.
-          </CardDescription>
-        </CardHeader>
-        <CardFooter>
-          <GroupFundingSignInButton initiallyOpen={props.initiallyOpen} />
-        </CardFooter>
-      </Card>
-    </main>
+    <GroupFundingPage>
+      <GroupFundingMessage
+        action={<GroupFundingSignInButton initiallyOpen={props.initiallyOpen} />}
+        description="We’ll bring you straight back here."
+        title="Sign in to continue"
+      />
+    </GroupFundingPage>
   );
 }
 
@@ -46,15 +36,20 @@ export function GroupFundingSignInButton(props: {
 
   return (
     <>
-      <Button type="button" size="xl" onClick={() => setOpen(true)}>
-        Continue to group funding
+      <Button
+        className="w-full"
+        onClick={() => setOpen(true)}
+        size="xl"
+        type="button"
+      >
+        Sign in
       </Button>
       <AuthDialog
         open={open}
         onCompleted={handleCompleted}
         onOpenChange={setOpen}
-        title="Open group funding"
-        description="Create or open your private Murph account, then we'll bring you back here."
+        title="Sign in to Murph"
+        description="We'll bring you straight back here."
       />
     </>
   );

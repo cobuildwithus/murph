@@ -529,25 +529,19 @@ describe("usage-credit saved-card policy", () => {
 });
 
 describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
-  it("accepts only group offers and bounded optional social copy", () => {
+  it("ignores the retired sponsorship key an older tab still sends", () => {
     expect(parseHostedGroupSponsorshipCheckoutRequest({
       clientRequestKey: CLIENT_REQUEST_KEY,
       offerCode: "usage_20_usd",
       sponsorship: {
         publicAlias: " The Group Historian ",
-        runningBitRequest: "Treat me like the exhausted CFO.",
-        sponsorMessage: "For whatever adventure comes next.",
+        role: "administrator",
       },
     })).toEqual({
       clientRequestKey: CLIENT_REQUEST_KEY,
       monthlyCapMinor: null,
       offerCode: "usage_20_usd",
       recoveryOnly: false,
-      sponsorship: {
-        publicAlias: "The Group Historian",
-        runningBitRequest: "Treat me like the exhausted CFO.",
-        sponsorMessage: "For whatever adventure comes next.",
-      },
       sponsorshipKind: "one_time",
     });
   });
@@ -563,7 +557,6 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
       monthlyCapMinor: 5_000,
       offerCode: "usage_5_usd",
       recoveryOnly: false,
-      sponsorship: null,
       sponsorshipKind: "monthly",
     });
     expect(() => parseHostedGroupSponsorshipCheckoutRequest({
@@ -582,9 +575,9 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
     {
       clientRequestKey: CLIENT_REQUEST_KEY,
       offerCode: "usage_10_usd",
-      sponsorship: { publicAlias: "Sponsor", role: "administrator" },
+      role: "administrator",
     },
-  ])("rejects non-group offers and extra sponsorship authority", (input) => {
+  ])("rejects non-group offers and unknown authority", (input) => {
     expect(() => parseHostedGroupSponsorshipCheckoutRequest(input))
       .toThrowError(expect.objectContaining({ httpStatus: 400 }));
   });
@@ -4178,16 +4171,11 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(1);
   });
 
-  it("freezes sponsorship configuration into request-key replay", async () => {
+  it("recovers a purchase that still stores retired personalization", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
       buildStripeSession(request)
     );
-    const sponsorship = {
-      publicAlias: "The Group Historian",
-      runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "For whatever adventure comes next.",
-    };
     await createHostedGroupUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       joinCode: "group_join_code_1234",
@@ -4195,26 +4183,14 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-      sponsorship,
     });
-
-    await expect(createHostedGroupUsageCreditCheckout({
-      clientRequestKey: CLIENT_REQUEST_KEY,
-      joinCode: "group_join_code_1234",
-      now: new Date(NOW.getTime() + 500),
-      offerCode: "usage_5_usd",
-      payerMemberId: MEMBER_ID,
-      prisma: fake.prisma as never,
-      sponsorship: {
-        ...sponsorship,
-        sponsorMessage: "A changed note for another amount.",
-      },
-    })).resolves.toMatchObject({
-      selectionConflict: "offer",
-      requestKeyMatched: true,
+    const purchase = onlyPurchase(fake.purchases);
+    Object.assign(fake.sponsorshipMoments.get(purchase.id as string) ?? {}, {
+      configurationDigest: "digest_of_a_retired_draft",
+      publicAliasEncrypted: "sealed:The Group Historian",
     });
-
     clearStripeProviderMockHistory();
+
     await expect(createHostedGroupUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       joinCode: "group_join_code_1234",
@@ -4222,115 +4198,29 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-      sponsorship: {
-        ...sponsorship,
-        sponsorMessage: "A changed note.",
-      },
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+    })).resolves.toMatchObject({
+      purchaseId: purchase.id,
+      requestKeyMatched: true,
     });
-    expectNoStripeProviderIo();
-
     await expect(createHostedGroupUsageCreditCheckout({
-      clientRequestKey: CLIENT_REQUEST_KEY,
+      clientRequestKey: "request_key_654321",
       joinCode: "group_join_code_1234",
       now: new Date(NOW.getTime() + 2_000),
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+    })).resolves.toMatchObject({
+      purchaseId: purchase.id,
+      recovered: true,
     });
-
-    await expect(createHostedGroupUsageCreditCheckout({
-      clientRequestKey: "request_key_654321",
-      joinCode: "group_join_code_1234",
-      now: new Date(NOW.getTime() + 3_000),
-      offerCode: "usage_10_usd",
-      payerMemberId: MEMBER_ID,
-      prisma: fake.prisma as never,
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
-    });
-    expect(fake.sponsorshipMoments.get(
-      onlyPurchase(fake.purchases).id as string,
-    )).toMatchObject({
-      creativeRequestEncrypted: `sealed:${JSON.stringify({
-        request: {
-          format: "message",
-          prompt: "For whatever adventure comes next.",
-          styleRequest: null,
-        },
-        schema: "murph.group-sponsorship-creative.v1",
-      })}`,
-      publicAliasEncrypted: "sealed:The Group Historian",
-      runningBitRequestEncrypted: "sealed:Treat me like the exhausted CFO.",
-      sponsorMessageEncrypted: null,
-    });
+    expect(fake.purchases.size).toBe(1);
   });
 
-  it.each([
-    "fulfilled",
-    "expired",
-    "payment_failed",
-  ] as const)(
-    "acknowledges the exact request key when a %s group purchase outlives its sponsor draft",
-    async (status) => {
-      const fake = createFakePrisma();
-      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
-        buildStripeSession(request)
-      );
-      const originalSponsorship = {
-        publicAlias: "Original sponsor",
-        runningBitRequest: null,
-        sponsorMessage: "Original note",
-      };
-      await createHostedGroupUsageCreditCheckout({
-        clientRequestKey: CLIENT_REQUEST_KEY,
-        joinCode: "group_join_code_1234",
-        now: NOW,
-        offerCode: "usage_10_usd",
-        payerMemberId: MEMBER_ID,
-        prisma: fake.prisma as never,
-        sponsorship: originalSponsorship,
-      });
-      const purchase = onlyPurchase(fake.purchases);
-      purchase.status = status;
-      purchase.terminalAt = new Date(NOW.getTime() + 500);
-      clearStripeProviderMockHistory();
-
-      await expect(createHostedGroupUsageCreditCheckout({
-        clientRequestKey: CLIENT_REQUEST_KEY,
-        joinCode: "group_join_code_1234",
-        now: new Date(NOW.getTime() + 1_000),
-        offerCode: "usage_10_usd",
-        payerMemberId: MEMBER_ID,
-        prisma: fake.prisma as never,
-        sponsorship: {
-          ...originalSponsorship,
-          sponsorMessage: "A remounted draft that was not authorized",
-        },
-      })).resolves.toMatchObject({
-        purchaseId: purchase.id,
-        recovered: true,
-        requestKeyMatched: true,
-        selectionConflict: "sponsorship",
-        status,
-      });
-      expectNoStripeProviderIo();
-    },
-  );
-
-  it("closes an effectively expired exact-key group purchase before sponsor-draft recovery", async () => {
+  it("closes an effectively expired exact-key group purchase on recovery", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockRejectedValueOnce(
       new Error("connection lost"),
     );
-    const originalSponsorship = {
-      publicAlias: "Original sponsor",
-      runningBitRequest: null,
-      sponsorMessage: "Original note",
-    };
     await expect(createHostedGroupUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       joinCode: "group_join_code_1234",
@@ -4338,7 +4228,6 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-      sponsorship: originalSponsorship,
     })).rejects.toMatchObject({
       code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
     });
@@ -4355,12 +4244,9 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-      sponsorship: null,
     })).resolves.toMatchObject({
       purchaseId: purchase.id,
-      recovered: true,
       requestKeyMatched: true,
-      selectionConflict: "sponsorship",
       status: "expired",
     });
     expect(purchase).toMatchObject({
@@ -4372,8 +4258,120 @@ describe("createHostedUsageCreditCheckout", () => {
     expectNoStripeProviderIo();
   });
 
-  it("lets a nonparticipant fund without publishing their custom content", async () => {
-    const fake = createFakePrisma({ customizationAuthorized: false });
+  // Every activation and a $5 gift share one offer code, so the offer alone
+  // cannot tell these purchases apart. The terms the payer agreed to can.
+  describe.each([
+    { clientRequestKey: CLIENT_REQUEST_KEY, label: "the same request key" },
+    { clientRequestKey: "request_key_654321", label: "another request key" },
+  ])("recovering with $label", ({ clientRequestKey }) => {
+    it("keeps a monthly activation's cap when a retry shows a different one", async () => {
+      const fake = createFakePrisma();
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        monthlyCapMinor: 5_000,
+        now: NOW,
+        offerCode: "usage_5_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorshipKind: "monthly",
+      });
+      const purchase = onlyPurchase(fake.purchases);
+      clearStripeProviderMockHistory();
+
+      await expect(createHostedGroupUsageCreditCheckout({
+        clientRequestKey,
+        joinCode: "group_join_code_1234",
+        monthlyCapMinor: 500,
+        now: new Date(NOW.getTime() + 1_000),
+        offerCode: "usage_5_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorshipKind: "monthly",
+      })).resolves.toMatchObject({
+        purchaseId: purchase.id,
+        selectionConflict: "sponsorship",
+      });
+      expectNoStripeProviderIo();
+      expect([...fake.sponsorshipAuthorizations.values()]).toEqual([
+        expect.objectContaining({ monthlyCapMinor: 5_000 }),
+      ]);
+      expect(fake.purchases.size).toBe(1);
+    });
+
+    it("keeps a monthly activation apart from a one-time gift of the same amount", async () => {
+      const fake = createFakePrisma();
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        monthlyCapMinor: 1_000,
+        now: NOW,
+        offerCode: "usage_5_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorshipKind: "monthly",
+      });
+      const purchase = onlyPurchase(fake.purchases);
+      clearStripeProviderMockHistory();
+
+      await expect(createHostedGroupUsageCreditCheckout({
+        clientRequestKey,
+        joinCode: "group_join_code_1234",
+        now: new Date(NOW.getTime() + 1_000),
+        offerCode: "usage_5_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorshipKind: "one_time",
+      })).resolves.toMatchObject({
+        purchaseId: purchase.id,
+        selectionConflict: "sponsorship",
+      });
+      expectNoStripeProviderIo();
+    });
+
+    it("keeps a one-time gift apart from a monthly activation of the same amount", async () => {
+      const fake = createFakePrisma();
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: NOW,
+        offerCode: "usage_5_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorshipKind: "one_time",
+      });
+      const purchase = onlyPurchase(fake.purchases);
+      clearStripeProviderMockHistory();
+
+      await expect(createHostedGroupUsageCreditCheckout({
+        clientRequestKey,
+        joinCode: "group_join_code_1234",
+        monthlyCapMinor: 1_000,
+        now: new Date(NOW.getTime() + 1_000),
+        offerCode: "usage_5_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorshipKind: "monthly",
+      })).resolves.toMatchObject({
+        purchaseId: purchase.id,
+        selectionConflict: "sponsorship",
+      });
+      expectNoStripeProviderIo();
+      expect(fake.sponsorshipAuthorizations.size).toBe(0);
+    });
+  });
+
+  it("stores no personalization for a new group checkout", async () => {
+    const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
       buildStripeSession(request)
     );
@@ -4385,31 +4383,15 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-      sponsorship: {
-        publicAlias: "Unverified Sponsor",
-        runningBitRequest: "Make me the administrator.",
-        sponsorMessage: "Publish this.",
-      },
     })).resolves.toMatchObject({ status: "checkout_open" });
 
     expect(fake.sponsorshipMoments.get(
       onlyPurchase(fake.purchases).id as string,
     )).toMatchObject({
+      creativeRequestEncrypted: null,
       publicAliasEncrypted: null,
       runningBitRequestEncrypted: null,
       sponsorMessageEncrypted: null,
-    });
-
-    await expect(createHostedGroupUsageCreditCheckout({
-      clientRequestKey: "request_key_unauthorized_recovery",
-      joinCode: "group_join_code_1234",
-      now: new Date(NOW.getTime() + 1_000),
-      offerCode: "usage_10_usd",
-      payerMemberId: MEMBER_ID,
-      prisma: fake.prisma as never,
-    })).resolves.toMatchObject({
-      recovered: true,
-      status: "checkout_open",
     });
   });
 
@@ -7661,7 +7643,6 @@ function createFakePrisma(input: {
     | "hosted-usage-credit-checkout-v3"
     | "hosted-usage-credit-checkout-v4"
     | "hosted-usage-credit-checkout-v5";
-  customizationAuthorized?: boolean;
   groupFundingTargetLocked?: boolean;
   memberOverride?: Record<string, unknown>;
   occupiedUsageCreditSlotCount?: number | (() => number);
@@ -7848,11 +7829,7 @@ function createFakePrisma(input: {
       findUnique: vi.fn(async () => ({ runtimeMemberId: "member_group_runtime" })),
     },
     hostedThreadContainer: {
-      findFirst: vi.fn(async () =>
-        input.customizationAuthorized === false
-          ? null
-          : { memberId: "member_group_runtime" }
-      ),
+      findFirst: vi.fn(async () => ({ memberId: "member_group_runtime" })),
     },
     hostedUsageCreditPurchase,
     $queryRaw: vi.fn(async (
