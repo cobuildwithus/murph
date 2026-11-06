@@ -688,24 +688,16 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       replyToMessageId: input.inboundMessageId,
     });
   } catch (error) {
-    let rejected = false;
-    const definitive = isDefinitiveHostedLinqInstantFirstTurnSendFailure(error);
+    let rejected: boolean;
     try {
-      if (!resumed && definitive) {
-        rejected = await recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx({
-          expectedAttemptedAt: dispatchAttemptedAt, idempotencyKey, prisma,
-        });
-      } else {
-        await markHostedLinqDeliverySendFailedTx({
-          expectedAttemptedAt: dispatchAttemptedAt,
-          failureCode: definitive
-            ? HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE
-            : readHostedLinqInstantFirstTurnFailureCode(error),
-          idempotencyKey,
-          linqChatId: input.wakeHandoff.linqChatId,
-          prisma,
-        });
-      }
+      rejected = await recordHostedLinqInstantFirstTurnSendFailure({
+        error,
+        expectedAttemptedAt: dispatchAttemptedAt,
+        idempotencyKey,
+        linqChatId: input.wakeHandoff.linqChatId,
+        prisma,
+        resumed,
+      });
     } catch (markError) {
       throw buildHostedLinqInstantFirstTurnRetryError("delivery-failure-unrecorded", markError);
     }
@@ -763,6 +755,39 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       error,
     );
   }
+}
+
+/**
+ * Returns true only when the winning first dispatch certified a rejection. A
+ * rejection on a resumed attempt proves nothing about the earlier one, so it
+ * keeps the sealed reply and only stops that row blocking its chat.
+ */
+async function recordHostedLinqInstantFirstTurnSendFailure(input: {
+  error: unknown;
+  expectedAttemptedAt: Date;
+  idempotencyKey: string;
+  linqChatId: string | null | undefined;
+  prisma: PrismaClient;
+  resumed: boolean;
+}): Promise<boolean> {
+  const definitive = isDefinitiveHostedLinqInstantFirstTurnSendFailure(input.error);
+  if (definitive && !input.resumed) {
+    return await recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx({
+      expectedAttemptedAt: input.expectedAttemptedAt,
+      idempotencyKey: input.idempotencyKey,
+      prisma: input.prisma,
+    });
+  }
+  await markHostedLinqDeliverySendFailedTx({
+    expectedAttemptedAt: input.expectedAttemptedAt,
+    failureCode: definitive
+      ? HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE
+      : readHostedLinqInstantFirstTurnFailureCode(input.error),
+    idempotencyKey: input.idempotencyKey,
+    linqChatId: input.linqChatId,
+    prisma: input.prisma,
+  });
+  return false;
 }
 
 async function generateHostedLinqInstantFirstTurn(input: {
