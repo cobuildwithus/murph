@@ -120,6 +120,7 @@ export type HostedCanonicalWriteReceiptAction =
       effect: "copy" | "reuse";
       contentRef?: HostedCanonicalWriteReceiptContentRef;
       mediaRef?: {
+        pendingUpload?: boolean;
         id: string;
         mediaKind: "image" | "video";
         expiresAt: string | null;

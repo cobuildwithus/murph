@@ -323,13 +323,20 @@ it has been explicitly elevated to a cross-cutting invariant.
   or provider facts. Attempt identities are unique to one attempt. These roles
   remain distinct across retry, replay, overlapping ingestion, restart, reorder,
   resend, and migration re-entry.
+- A redelivered provider event or member gesture repeats the operation first
+  accepted, under the identity first accepted. It never takes its owner from the
+  current account binding, and once accepted it cannot re-apply after leave,
+  revocation, or relink. The durable row or receipt that records that acceptance
+  must outlive those changes.
 - Validate target, configuration, and authority before claiming an irreversible
   effect. Persist the minimum effect identity and intent before the provider
   call.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
   proof that the effect did not begin. Acknowledge, clean up, or advance
-  progress only after terminal or durable pending evidence.
+  progress only after terminal or durable pending evidence. Accepted delivery
+  needing confirmation settles through its existing delivery retry deadline;
+  optional accounting may update its own marker but never moves that deadline.
   A retry under a provider idempotency key sends the bytes accepted for that
   key, so freeze those inputs on the accepted receipt and never rebuild them
   from current source state.

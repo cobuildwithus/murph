@@ -26,6 +26,7 @@ import {
   resolveVaultPathOnDisk,
   statAndHashVaultFileInterruptible,
   canonicalRawArtifactMatches,
+  canonicalRawArtifactIsPrivacyTombstone,
   isVaultError,
   withCanonicalWriteLock,
   VAULT_LAYOUT,
@@ -38,6 +39,9 @@ import {
 } from "@murphai/inboxd/retention";
 import {
   HOSTED_MEDIA_REFS_SCHEMA,
+  isHostedMealMediaV2Path,
+  type HostedMediaReference,
+  type HostedMediaReferenceCatalogue,
   hostedColdIngestMonth,
   readHostedMediaReferenceCatalogueValue,
   readHostedColdIngestReferences,
@@ -59,29 +63,10 @@ export function isHostedPendingMealMedia(entry: HostedMediaReference): boolean {
   return isHostedMealMediaV2Path(entry.relativePath) && entry.pendingUpload === true;
 }
 
-export function isHostedMealMediaV2Path(relativePath: string): boolean {
-  return /^raw\/meals\/.+\/thumbnail-v2-[a-zA-Z0-9_-]+\.jpg$/u.test(relativePath);
-}
+export { isHostedMealMediaV2Path } from "@murphai/runtime-state/node";
+export type { HostedMediaReference, HostedMediaReferenceCatalogue } from "@murphai/runtime-state/node";
 
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
-
-export interface HostedMediaReference {
-  byteSize: number;
-  expiresAt: string | null;
-  mediaId: string;
-  mediaKind: HostedRuntimeMediaKind;
-  mimeType: string | null;
-  pendingUpload?: boolean;
-  recordedAt: string;
-  relativePath: string;
-  sha256: string;
-}
-
-export interface HostedMediaReferenceCatalogue {
-  entries: HostedMediaReference[];
-  mealUploadCursor?: string;
-  schema: typeof HOSTED_MEDIA_REFS_SCHEMA;
-}
 
 export interface PublishHostedWorkspaceMediaReferencesResult {
   excludedVaultPaths: string[];
@@ -134,11 +119,11 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   // Unacknowledged pending cleanup belongs to the abortable idle owner.
   // Preserve its pointer without obstructing snapshots on an absent-row 409.
   const nextMediaIds = new Set(entries.map((entry) => entry.mediaId));
-  entries.push(...existingCatalogue.entries.filter(entry => isHostedPendingMealMedia(entry) && !nextMediaIds.has(entry.mediaId)));
+  entries.push(...existingCatalogue.entries.filter(entry => entry.pendingUpload === true && !nextMediaIds.has(entry.mediaId)));
   let prunedMediaCount = 0;
   for (const entry of existingCatalogue.entries) {
     assertHostedMediaReferenceLive(input.signal);
-    if (nextMediaIds.has(entry.mediaId) || isHostedPendingMealMedia(entry)) {
+    if (nextMediaIds.has(entry.mediaId) || entry.pendingUpload === true) {
       continue;
     }
     await input.mediaStore.delete?.({ mediaId: entry.mediaId });
@@ -157,9 +142,9 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   });
 
   return {
-    // Meal CLI/native image tools read local paths. Keep their canonical bytes
-    // in encrypted snapshots; the media store serves only thumbnail delivery.
-    excludedVaultPaths: entries.filter(entry => !entry.relativePath.startsWith(RAW_MEALS_PREFIX)).map(entry => entry.relativePath),
+    // Preserving future photo descriptors must not expand archive exclusions.
+    // Meal and measurement bytes stay inline whenever they are present.
+    excludedVaultPaths: entries.filter(entry => !isHostedCanonicalPhotoPath(entry.relativePath)).map(entry => entry.relativePath),
     prunedMediaCount,
     referenceCount: entries.length,
     uploadedMediaCount,
@@ -217,6 +202,7 @@ async function prepareHostedWorkspaceMediaReferences(input: {
   if (nextEntries.some((entry) => (hostedColdIngestMonth(entry.relativePath) ?? "") >= currentMonth)) {
     throw new Error("Cold ingest month is not closed; retry with a current workspace clock.");
   }
+  nextEntries.push(...await collectRetainedPhotoReferences(input, existingCatalogue.entries));
   let uploadedMediaCount = 0;
 
   for (const candidate of candidates) {
@@ -277,6 +263,32 @@ async function prepareHostedWorkspaceMediaReferences(input: {
   };
 }
 
+// Preservation follows canonical retained ownership, independently of upload
+// candidates. Measurement deletion keeps raw evidence; meal retirement does not.
+async function collectRetainedPhotoReferences(
+  input: { vaultRoot: string; signal?: AbortSignal | null },
+  entries: readonly HostedMediaReference[],
+): Promise<HostedMediaReference[]> {
+  const retained: HostedMediaReference[] = [];
+  for (const entry of entries) {
+    assertHostedMediaReferenceLive(input.signal);
+    if (isHostedCanonicalPhotoPath(entry.relativePath)
+      && await hostedPhotoReferenceMayBeLive(input.vaultRoot, entry)) retained.push(entry);
+  }
+  return retained;
+}
+
+// Dropping an entry deletes its object, which may be the only copy. Prove a
+// reference obsolete before pruning, and let doubt keep the object.
+async function hostedPhotoReferenceMayBeLive(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
+  if (entry.relativePath.startsWith("raw/measurements/")) return true;
+  try {
+    return !await canonicalRawArtifactIsPrivacyTombstone({ vaultRoot, relativePath: entry.relativePath });
+  } catch {
+    return true;
+  }
+}
+
 export async function materializeHostedWorkspaceMediaReferences(input: {
   mediaStore?: HostedRuntimeMediaStore | null;
   relativePaths: readonly string[];
@@ -318,6 +330,10 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       continue;
     }
 
+    if (entry.pendingUpload === true) {
+      missingArtifactPaths.set(key, "missing");
+      continue;
+    }
     if (!input.mediaStore) {
       missingArtifactPaths.set(key, "transport");
       continue;
@@ -451,7 +467,7 @@ function isHostedMediaCanonicalLockBusy(error: unknown): boolean {
 export async function readHostedMediaReferenceCatalogue(input: {
   vaultRoot: string;
 }): Promise<HostedMediaReferenceCatalogue> {
-  return parseHostedMediaReferenceCatalogue(await readHostedMediaReferenceCatalogueValue(input.vaultRoot));
+  return readHostedMediaReferenceCatalogueValue(input.vaultRoot);
 }
 
 async function collectHostedMediaCandidates(
@@ -790,56 +806,6 @@ export async function writeHostedMediaReferenceCatalogue(input: {
   }
 }
 
-function parseHostedMediaReferenceCatalogue(
-  value: unknown,
-): HostedMediaReferenceCatalogue {
-  if (!isRecord(value) || value.schema !== HOSTED_MEDIA_REFS_SCHEMA || !Array.isArray(value.entries)) {
-    return {
-      entries: [],
-      schema: HOSTED_MEDIA_REFS_SCHEMA,
-    };
-  }
-  return {
-    ...(typeof value.mealUploadCursor === "string" ? { mealUploadCursor: value.mealUploadCursor } : {}),
-    entries: value.entries
-      .map(parseHostedMediaReference)
-      .filter((entry): entry is HostedMediaReference => entry !== null)
-      .sort(compareHostedMediaReferences),
-    schema: HOSTED_MEDIA_REFS_SCHEMA,
-  };
-}
-
-function parseHostedMediaReference(value: unknown): HostedMediaReference | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const relativePath = normalizeHostedMediaCataloguePath(value.relativePath);
-  const mediaId = normalizeHostedMediaSha256(value.mediaId);
-  const sha256 = normalizeHostedMediaSha256(value.sha256);
-  const byteSize = normalizeHostedMediaByteSize(value.byteSize);
-  const expiresAt = normalizeHostedMediaExpiresAt(value.expiresAt);
-  const mediaKind = value.mediaKind === "image" || value.mediaKind === "video" || value.mediaKind === "integration-ingest"
-    ? value.mediaKind
-    : null;
-  const recordedAt = normalizeHostedMediaRecordedAt(value.recordedAt);
-  if (!relativePath || !mediaId || !sha256 || byteSize === null || !mediaKind) {
-    return null;
-  }
-  return {
-    byteSize,
-    expiresAt,
-    mediaId,
-    mediaKind,
-    mimeType: normalizeHostedMediaMimeType(value.mimeType),
-    // Only the new namespace implies deferred delivery after an old writer
-    // drops the marker. Legacy absence is settled, never a bulk upload request.
-    ...(isHostedMealMediaV2Path(relativePath) ? { pendingUpload: value.pendingUpload !== false } : {}),
-    recordedAt,
-    relativePath,
-    sha256,
-  };
-}
-
 function dedupeHostedMediaCandidates(
   candidates: readonly HostedMediaCandidate[],
 ): HostedMediaCandidate[] {
@@ -954,26 +920,6 @@ function normalizeHostedMediaVaultPath(
   }
 }
 
-function normalizeHostedMediaCataloguePath(value: unknown): string | null {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
-  }
-  try {
-    const normalized = normalizeRelativeVaultPath(value);
-    if (
-      normalized.startsWith(RAW_INBOX_PREFIX)
-      || normalized.startsWith(RAW_CAPTURES_PREFIX)
-      || normalized.startsWith(RAW_MEALS_PREFIX)
-      || hostedColdIngestMonth(normalized) !== null
-    ) {
-      return normalized;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 function normalizeHostedMediaSha256(value: unknown): string | null {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value) ? value : null;
 }
@@ -982,17 +928,6 @@ function normalizeHostedMediaByteSize(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
-}
-
-function normalizeHostedMediaExpiresAt(value: unknown): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    return null;
-  }
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 function normalizeHostedMediaMimeType(value: unknown): string | null {
@@ -1026,8 +961,4 @@ function assertHostedMediaReferenceLive(
   throw signal.reason instanceof Error
     ? signal.reason
     : new Error("Hosted media reference publication was interrupted.");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

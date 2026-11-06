@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -1613,4 +1615,37 @@ test('meal totals resolves same-date goal context through the canonical query wi
     const invalid = await runInProcessJsonCli(cli, ['meal', 'totals', '--resolve-goals', '--vault', vaultRoot])
     assert.equal(invalid.envelope.ok, false)
   } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+
+test('meal remove-photo and validate accept a settled sole-copy photo with absent local bytes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-capture-hosted-review-'))
+  try {
+    const vaultRoot = path.join(root, 'vault')
+    const photoPath = path.join(root, 'capture.jpg')
+    await initializeVault({ vaultRoot })
+    const bytes = Buffer.from('synthetic image bytes')
+    await writeFile(photoPath, bytes)
+    const meal = await addMeal({ vaultRoot, photoPath, source: 'device',
+      occurredAt: '2030-01-15T23:05:51.000Z',
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' } })
+    const relativePath = meal.photo!.relativePath
+    const cataloguePath = resolveHostedMediaReferenceCataloguePath(vaultRoot)
+    await mkdir(path.dirname(cataloguePath), { recursive: true })
+    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{
+      relativePath, byteSize: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+      mediaId: 'a'.repeat(64), mediaKind: 'image', mimeType: 'image/jpeg',
+      recordedAt: '2030-01-15T23:05:51.000Z', expiresAt: null, pendingUpload: false,
+    }] }))
+    await rm(path.join(vaultRoot, relativePath))
+    const cli = createDocumentMealSchemaCli()
+    const reviewed = await runInProcessJsonCli<{ entity: { data: { attachments: Array<{ role: string }> } } }>(cli,
+      ['meal', 'remove-photo', meal.mealId, '--vault', vaultRoot])
+    assert.equal(reviewed.exitCode, null)
+    assert.deepEqual(requireData(reviewed.envelope).entity.data.attachments.map(attachment => attachment.role), ['reviewed_photo'])
+    const validated = await runInProcessJsonCli<{ valid: boolean }>(cli, ['validate', '--vault', vaultRoot])
+    assert.equal(validated.exitCode, null)
+    assert.equal(requireData(validated.envelope).valid, true)
+    await assert.rejects(readFile(path.join(vaultRoot, relativePath)), { code: 'ENOENT' })
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

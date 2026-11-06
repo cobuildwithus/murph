@@ -351,9 +351,37 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     return skipHostedGroupJoinOfferReaction({ reason: "member_inactive" });
   }
 
+  const reactionHandle = input.event.reactionFromHandle;
   let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
   const result = await acceptHostedGroupOfferAffirmation({
     affirmationEventId: input.event.eventId,
+    // The lookup above is mutable, and unlink commits under the member lock the
+    // acceptance owner already holds here. Re-resolve through the core projection
+    // so this check adds no decryption or provider call to the transaction.
+    assertActorStillBound: async (tx) => {
+      const phoneNumber = readHostedGroupJoinOfferReactionParticipantPhone(reactionHandle);
+      const locked = reactionHandle.includes("@")
+        ? await lookupHostedMemberByVerifiedEmailAddress({
+            address: reactionHandle,
+            prisma: tx,
+            projection: "core",
+          })
+        : phoneNumber
+          ? await lookupHostedMemberIdentityByPhoneNumber({
+              phoneNumber,
+              prisma: tx,
+              projection: "core",
+            })
+          : null;
+      if (locked?.core.id !== member.id) {
+        throw hostedOnboardingError({
+          code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
+          httpStatus: 409,
+          message: "This account is no longer linked to that Murph member.",
+          retryable: false,
+        });
+      }
+    },
     channel: "linq",
     kinds,
     memberId: member.id,
@@ -376,7 +404,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     ...(input.signal ? { signal: input.signal } : {}),
     threadIdentityLookupKeyReadCandidates,
   });
-  if (result.status === "accepted") {
+  // A replay was decided by another delivery. Stay terminal so the shared
+  // webhook cannot turn a decided reaction into ordinary group work.
+  if (result.status !== "ignored") {
     await signalHostedGroupOfferReactionBestEffort({
       append: reactionMailboxAppend,
       prisma: input.prisma,
