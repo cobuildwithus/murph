@@ -32,7 +32,6 @@ import type {
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import {
   access,
@@ -50,6 +49,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as core from "@murphai/core";
+import { deleteMealRecord, importEventRecordsFromJsonl } from "@murphai/vault-usecases/records";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -450,8 +450,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       const baseline = f.archive();
       const sparse = await restorePhotoCheckpoint(baseline);
       for (const entry of settled) await expectMissing(path.join(sparse, entry.relativePath));
-      // The shell mutation has no in-process hosted canonical receipt publisher.
-      await runPhotoFixtureCli(vaultRoot, ["meal", "delete", meal.mealId]);
+      // A shell mutation runs outside the hosted scope, so no canonical receipt publisher sees it.
+      await deleteMealRecord({ vault: vaultRoot, lookup: meal.mealId });
       f.calls.completeSnapshotSession.mockImplementationOnce(async input => {
         expect(f.store.bytes.size).toBe(2);
         return { snapshotRef: input.ref, checkpoint: { ...createCheckpointResponse({ snapshotRef: input.ref,
@@ -501,7 +501,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       if (kind === "meal") await runMealPhotoMaintenance({ vaultRoot });
       const inputPath = path.join(vaultRoot, "secondary.jsonl");
       await writeFile(inputPath, JSON.stringify({ ...draft, kind: "measurement", recordedAt: new Date().toISOString(), attachments: [photo] }) + "\n");
-      await runPhotoFixtureCli(vaultRoot, ["event", "import-jsonl", "--input", `@${inputPath}`, "--apply"]);
+      await importEventRecordsFromJsonl({ vault: vaultRoot, inputFile: `@${inputPath}`, apply: true });
       if (kind === "measurement") {
         await upsertEvent({ vaultRoot, allowSpecializedKindRewrite: true,
           payload: { ...owner.event, attachments: [], rawRefs: [] } });
@@ -513,7 +513,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       if (kind === "meal") {
         expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.find(entry => entry.relativePath === photo.relativePath)?.expiresAt)
           .toBe("2030-04-01T12:00:00.000Z");
-        await runPhotoFixtureCli(vaultRoot, ["meal", "delete", owner.event.kind === "meal" ? owner.event.mealId : "unreachable"]);
+        await deleteMealRecord({ vault: vaultRoot, lookup: owner.event.kind === "meal" ? owner.event.mealId : "unreachable" });
       }
       for (let pass = 0; pass < 3; pass++) {
         await f.checkpoint(); await deliverPendingMealMediaForTest(vaultRoot, f.store.mediaStore);
@@ -3980,15 +3980,4 @@ async function restorePhotoCheckpoint(archive: Buffer): Promise<string> {
   await promisify(execFile)("tar", ["-xf", archivePath, "-C", durableRoot]);
   resetHostedPhotoIntentsAfterColdRestore(vaultRoot);
   return vaultRoot;
-}
-async function runPhotoFixtureCli(vaultRoot: string, args: string[]): Promise<void> {
-  const bin = fileURLToPath(new URL("../../cli/dist/bin.js", import.meta.url));
-  try {
-    await promisify(execFile)(process.execPath, [bin, ...args, "--vault", vaultRoot, "--format", "json"], {
-      cwd: vaultRoot, env: { PATH: process.env.PATH, HOME: vaultRoot }, timeout: 30_000,
-    });
-  } catch (error) {
-    if (error && typeof error === "object" && "stdout" in error) throw new Error(String(error.stdout).replaceAll(vaultRoot, "<VAULT>"));
-    throw error;
-  }
 }
