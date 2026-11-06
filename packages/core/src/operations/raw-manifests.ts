@@ -289,11 +289,13 @@ export async function canonicalRawArtifactMatches(input: {
   sha256: string;
   byteSize: number;
   mimeType: string | null;
+  mediaKind?: "image" | "video" | "integration-ingest";
 }): Promise<boolean> {
   const artifacts = await readCanonicalRawArtifacts(input);
   const artifact = artifacts[0];
   return artifacts.length === 1 && artifact !== undefined && artifact.role !== "privacy_tombstone"
-    && artifact.sha256 === input.sha256 && artifact.byteSize === input.byteSize && artifact.mediaType === input.mimeType;
+    && artifact.sha256 === input.sha256 && artifact.byteSize === input.byteSize && artifact.mediaType === input.mimeType
+    && (input.mediaKind === undefined || artifact.mediaType.startsWith(`${input.mediaKind}/`));
 }
 
 /** Retirement remains authoritative after the hosted cleanup pointer is gone. */

@@ -4,9 +4,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assistantVaultFileMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
-import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
+import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath, type HostedMediaReference } from '@murphai/runtime-state/node'
 import { executeMurphDynamicToolRequest, readMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
 import { resolveMurphDynamicTools, MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, MURPH_SEND_VAULT_FILE_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+
+function imageDescriptor(relativePath: string): HostedMediaReference {
+  return { relativePath, mediaKind: 'image', mediaId: 'a'.repeat(64), sha256: 'b'.repeat(64),
+    byteSize: 10, expiresAt: null, mimeType: 'image/png', recordedAt: '2025-01-01T00:00:00.000Z' }
+}
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -57,7 +62,7 @@ describe('materialize vault media', () => {
     const refs = ['raw/inbox/a/expired.png', 'raw/meals/a/retired.jpg', 'raw/inbox/a/lost.png', 'raw/inbox/a/ok.png']
     const cataloguePath = resolveHostedMediaReferenceCataloguePath(root)
     await mkdir(path.dirname(cataloguePath), { recursive: true })
-    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: refs.map(relativePath => ({ mediaKind: 'image', relativePath, byteSize: 1 })) }))
+    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: refs.map(imageDescriptor) }))
     const port: AssistantWorkspaceArtifactMaterializer = vi.fn(async () => ({
       materializedArtifactPaths: new Set(['vault:raw/inbox/a/ok.png']),
       missingArtifactPaths: new Map([['vault:raw/inbox/a/expired.png', 'expired'], ['vault:raw/meals/a/retired.jpg', 'obsolete'],
@@ -93,7 +98,7 @@ describe('materialize vault media', () => {
     const catalogue = resolveHostedMediaReferenceCataloguePath(root)
     await mkdir(path.dirname(catalogue), { recursive: true })
     await writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA,
-      entries: Array.from({ length: 201 }, (_, i) => ({ mediaKind: 'image', relativePath: `raw/inbox/photo-${i}.png`, byteSize: 1 })) }))
+      entries: Array.from({ length: 201 }, (_, i) => imageDescriptor(`raw/inbox/photo-${i}.png`)) }))
     materialize.mockClear()
     const result = await run({ all: true }, { vaultRoot: root })
     expect(materialize).toHaveBeenCalledOnce()
@@ -105,7 +110,7 @@ describe('materialize vault media', () => {
     const catalogue = resolveHostedMediaReferenceCataloguePath(root)
     await mkdir(path.dirname(catalogue), { recursive: true })
     await writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [
-      { mediaKind: 'image', relativePath: 'raw/inbox/old/photo.png', byteSize: 1 },
+      imageDescriptor('raw/inbox/old/photo.png'),
       { mediaKind: 'integration-ingest', relativePath: 'ledger/integration-ingests/2025/2025-01.jsonl.br', byteSize: 10, expiresAt: null, mediaId: 'a'.repeat(64), sha256: 'b'.repeat(64) },
     ] }))
     materialize.mockClear()

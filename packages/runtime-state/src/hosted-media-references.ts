@@ -5,6 +5,98 @@ import { resolveAssistantStatePaths } from "./assistant-state.ts";
 export const HOSTED_MEDIA_REFS_SCHEMA = "murph.hosted-media-refs.v1";
 export const HOSTED_MEDIA_REFS_RELATIVE_PATH = ".runtime/operations/assistant/hosted-media-refs.json";
 
+export interface HostedMediaReference {
+  byteSize: number;
+  expiresAt: string | null;
+  mediaId: string;
+  mediaKind: "image" | "video" | "integration-ingest";
+  mimeType: string | null;
+  pendingUpload?: boolean;
+  recordedAt: string;
+  relativePath: string;
+  sha256: string;
+}
+
+export interface HostedMediaReferenceCatalogue {
+  schema: typeof HOSTED_MEDIA_REFS_SCHEMA;
+  entries: HostedMediaReference[];
+  mealUploadCursor?: string;
+}
+
+export class HostedMediaReferenceUnavailableError extends Error {
+  readonly code = "HOSTED_MEDIA_REFERENCE_UNAVAILABLE";
+  readonly retryable = true;
+  constructor() {
+    super("Hosted media catalogue is unavailable or contains an invalid descriptor.");
+    this.name = "HostedMediaReferenceUnavailableError";
+  }
+}
+
+export function isHostedMealMediaV2Path(relativePath: string): boolean {
+  return /^raw\/meals\/.+\/thumbnail-v2-[a-zA-Z0-9_-]+\.jpg$/u.test(relativePath);
+}
+
+// Legacy absence means settled, except for the deployed thumbnail-v2 retry seam.
+export function hostedMediaPendingUpload(relativePath: string, pendingUpload?: boolean): boolean | undefined {
+  return pendingUpload ?? (isHostedMealMediaV2Path(relativePath) ? true : undefined);
+}
+
+export function parseHostedMediaReference(value: unknown): HostedMediaReference {
+  if (!isRecord(value)) throw new HostedMediaReferenceUnavailableError();
+  const identity = parseHostedMediaIdentity(value);
+  if (value.pendingUpload !== undefined && typeof value.pendingUpload !== "boolean") {
+    throw new HostedMediaReferenceUnavailableError();
+  }
+  const pendingUpload = hostedMediaPendingUpload(identity.relativePath, value.pendingUpload as boolean | undefined);
+  return {
+    ...identity,
+    expiresAt: parseMediaExpiry(value.expiresAt),
+    mimeType: normalizeMediaMimeType(value.mimeType),
+    ...(pendingUpload === undefined ? {} : { pendingUpload }),
+    recordedAt: normalizeMediaRecordedAt(value.recordedAt),
+  };
+}
+
+function parseHostedMediaIdentity(value: Record<string, unknown>): Pick<HostedMediaReference,
+  "relativePath" | "mediaId" | "sha256" | "byteSize" | "mediaKind"> {
+  const cold = parseHostedColdIngestReference(value);
+  if (cold) return cold;
+  if (!isCanonicalMediaPath(value.relativePath)
+    || (value.mediaKind !== "image" && value.mediaKind !== "video")
+    || !isDigest(value.mediaId) || !isDigest(value.sha256)
+    || typeof value.byteSize !== "number" || !Number.isSafeInteger(value.byteSize) || value.byteSize < 0) {
+    throw new HostedMediaReferenceUnavailableError();
+  }
+  return { relativePath: value.relativePath, mediaId: value.mediaId, sha256: value.sha256,
+    byteSize: value.byteSize, mediaKind: value.mediaKind };
+}
+
+function normalizeMediaMimeType(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length <= 128
+    ? value.trim().toLowerCase() || null : null;
+}
+
+function normalizeMediaRecordedAt(value: unknown): string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value))
+    ? new Date(value).toISOString() : new Date(0).toISOString();
+}
+
+function isDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isCanonicalMediaPath(value: unknown): value is string {
+  return typeof value === "string" && /^raw\/(inbox|captures|meals|measurements)\/.+/u.test(value)
+    && !value.includes("\\") && !/[\x00-\x1f\x7f]/u.test(value)
+    && value.split("/").every(part => part.length > 0 && part !== "." && part !== "..");
+}
+
+function parseMediaExpiry(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new HostedMediaReferenceUnavailableError();
+  return new Date(value).toISOString();
+}
+
 export interface HostedColdIngestReference {
   byteSize: number;
   expiresAt: null;
@@ -34,11 +126,7 @@ export function resolveHostedMediaReferenceCataloguePath(vaultRoot: string): str
 
 // Missing catalogues are old, inline snapshots. Unreadable catalogues are never
 // equivalent to an empty history inventory.
-export async function readHostedMediaReferenceCatalogueValue(vaultRoot: string): Promise<{
-  schema: typeof HOSTED_MEDIA_REFS_SCHEMA;
-  entries: unknown[];
-  mealUploadCursor?: string;
-}> {
+export async function readHostedMediaReferenceCatalogueValue(vaultRoot: string): Promise<HostedMediaReferenceCatalogue> {
   let raw: string;
   try {
     raw = await readFile(resolveHostedMediaReferenceCataloguePath(vaultRoot), "utf8");
@@ -54,17 +142,18 @@ export async function readHostedMediaReferenceCatalogueValue(vaultRoot: string):
       throw new HostedColdHistoryUnavailableError();
     }
     const seen = new Set<string>();
-    for (const entry of value.entries) {
-      if (!isRecord(entry) || !["image", "video", "integration-ingest"].includes(String(entry.mediaKind))
-        || typeof entry.relativePath !== "string") throw new HostedColdHistoryUnavailableError();
-      const cold = parseHostedColdIngestReference(entry);
-      if (!cold) continue;
-      if (seen.has(cold.relativePath)) throw new HostedColdHistoryUnavailableError();
-      seen.add(cold.relativePath);
+    const entries = value.entries.map(parseHostedMediaReference);
+    for (const entry of entries) {
+      if (seen.has(entry.relativePath)) {
+        if (entry.mediaKind === "integration-ingest") throw new HostedColdHistoryUnavailableError();
+        throw new HostedMediaReferenceUnavailableError();
+      }
+      seen.add(entry.relativePath);
     }
-    return { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: value.entries,
+    return { schema: HOSTED_MEDIA_REFS_SCHEMA, entries,
       ...(typeof value.mealUploadCursor === "string" ? { mealUploadCursor: value.mealUploadCursor } : {}) };
-  } catch {
+  } catch (error) {
+    if (error instanceof HostedMediaReferenceUnavailableError) throw error;
     throw new HostedColdHistoryUnavailableError();
   }
 }

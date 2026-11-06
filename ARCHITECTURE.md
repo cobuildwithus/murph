@@ -2574,6 +2574,24 @@ That same canonical import ensures one ordinary Murph-managed automation for the
 
 Meal image bytes remain in encrypted vault snapshots and canonical receipts so ordinary CLI and model image reads work after cold restore. The existing media catalogue additionally owns thumbnail delivery. A new v2 descriptor starts pending before any remote effect. Its receipt-log status CAS durably publishes bytes, pointer and retry responsibility; restore replays all published receipts without uploading. Delivery belongs only to abortable idle maintenance after foreground work: select pending v2 entries from the catalogue/cursor, validate latest meal holders through interruptible event traversal, verify bytes, register the live meal lifetime, then PUT and mark complete. Each invocation shares ten attempts and a two-second delivery deadline starting before preparation. Foreground wakes, shutdown and projected assistant deadlines cancel discovery and every network continuation. An acknowledged status CAS retains the earliest real retention deadline or hourly retry before effects, including pending-only recovery. The ordinary full checkpoint saves completion and cursor. Exact-identity receipt replay preserves saved completion; legacy filenames without the marker stay settled. Old readers erase marker/cursor fields; only the v2 filename reconstructs pending on rollforward.
 
+The runtime-state catalogue reader owns validation for image, video and cold-ingest
+descriptors, including `raw/measurements/**`. Malformed descriptors fail closed;
+publication cannot rewrite them away. Explicit pending markers apply to every
+photo path. Legacy absence still means settled except for thumbnail-v2, whose
+filename implies pending. Receipt recovery carries that interpretation and does
+not regress an exact matching settled reference to pending.
+
+Photo preservation is independent of upload eligibility. Canonical raw manifests
+retain measurement evidence even after event deletion; meal photo retirement
+replaces that authority with a privacy tombstone. Core closeout and validation
+may resolve absent bytes through a settled, unexpired descriptor only when its
+path, hash, size, media kind and canonical owner match. Local bytes still undergo
+local integrity checks and cannot be overridden by a descriptor. The preserver
+adds no photo upload admission and keeps meal and measurement bytes inline in
+snapshots and receipts when present. Deploy this reader to every runner before
+any producer externalizes these photos; that producer establishes the preserver
+as the rollback floor.
+
 An obsolete pending v2 descriptor is handled outside the snapshot lock: register its exact metadata with an already-due finite expiry, then retire without PUT. An ordinary registration failure still permits retirement, while cancellation or owner loss stops further effects. Keep the pointer until retirement is acknowledged; finite registration alone is not completion. Existing finite-resource sweep covers a crash between registration and retirement. Snapshot reconciliation retains pending pointers and saves newly prepared plus existing cleanup pointers before pruning other media, so a failed deletion cannot forget another upload. Terminal retirement is never relaxed. Old-runner rollback restores the former precommit-upload and failed-prune bugs and is not a safe cleanup rollback floor. The owner-authorized Meals API derives the same path/hash/size/kind identity and mints five-minute thumbnail capabilities without waking a runner. A replica can expose a thumbnail URL before deferred bytes are ready; GET may return 404 until idle recovery. Full-photo expiry is independent of thumbnail delivery. Account deletion uses existing encrypted-object cleanup.
 
 Scheduled managed meal closeout checks that same canonical work queue before

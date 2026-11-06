@@ -59,6 +59,7 @@ import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
 import { normalizeRelativeVaultPath, normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
+import { resolveRetainedRawArtifact } from "./retained-raw-artifact.ts";
 import { safeStatAndHashVaultFile } from "./raw-artifact-integrity.ts";
 import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
@@ -743,7 +744,7 @@ async function validateExistingVaultFile(
   try {
     const resolved = resolveVaultPath(vaultRoot, relativePath);
 
-    if (!(await pathExists(resolved.absolutePath))) {
+    if (!(await pathExists(resolved.absolutePath)) && !await resolveRetainedRawArtifact(vaultRoot, relativePath)) {
       return [validationIssue(code, message, relativePath)];
     }
   } catch (error) {

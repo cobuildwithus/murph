@@ -1,4 +1,5 @@
 import path from "node:path";
+import { hostedMediaPendingUpload } from "@murphai/runtime-state/node";
 
 import { collectEventRawReferencePaths } from "@murphai/contracts";
 import {
@@ -19,7 +20,6 @@ import type {
 } from "./platform.ts";
 import {
   publishHostedWorkspaceMediaReferences,
-  isHostedMealMediaV2Path,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
   type HostedMediaReference,
@@ -45,7 +45,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   );
   let omittedPayloadCount = 0;
   const actions: HostedCanonicalWriteReceiptAction[] = input.persistence.receipt.actions.map((action) => {
-    if (action.kind !== "raw_upsert" || !action.contentRef || action.targetRelativePath.startsWith("raw/meals/")) {
+    if (action.kind !== "raw_upsert" || !action.contentRef || isRetainedPhotoPath(action.targetRelativePath)) {
       return action;
     }
     const mediaRef = mediaRefsByPath.get(action.targetRelativePath);
@@ -69,9 +69,9 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   const actionPaths = new Set(actions.map((action) => action.targetRelativePath));
   for (const relativePath of referencedPaths) {
     const entry = mediaRefsByPath.get(relativePath);
-    // Keep meal bytes in the receipt for cold CLI/native image reads, and also
+    // Keep photo bytes in the receipt for cold CLI/native image reads, and also
     // retain the delivery-object pointer for cleanup after receipt-only recovery.
-    if (entry && (!actionPaths.has(relativePath) || relativePath.startsWith("raw/meals/"))) {
+    if (entry && (!actionPaths.has(relativePath) || isRetainedPhotoPath(relativePath))) {
       actions.push(toHostedMediaReceiptAction(entry));
     }
   }
@@ -97,6 +97,10 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
       actions,
     },
   };
+}
+
+function isRetainedPhotoPath(relativePath: string): boolean {
+  return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
 }
 
 function readCanonicalEventMediaReferencePaths(
@@ -132,6 +136,7 @@ function readCanonicalEventMediaReferencePaths(
           normalized.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
           || normalized.startsWith(`${VAULT_LAYOUT.rawCapturesDirectory}/`)
           || normalized.startsWith(`${VAULT_LAYOUT.rawMealsDirectory}/`)
+          || normalized.startsWith(`${VAULT_LAYOUT.rawMeasurementsDirectory}/`)
         ) {
           paths.add(normalized);
         }
@@ -154,6 +159,7 @@ function toHostedMediaReceiptAction(
     originalFileName: path.posix.basename(entry.relativePath),
     effect: "reuse",
     mediaRef: {
+      ...(entry.pendingUpload === undefined ? {} : { pendingUpload: entry.pendingUpload }),
       id: entry.mediaId,
       mediaKind: entry.mediaKind,
       expiresAt: entry.expiresAt,
@@ -198,24 +204,24 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
   for (const action of input.receipt.actions) {
     if (action.kind === "raw_upsert" && action.mediaRef) {
       const previous = entries.get(action.targetRelativePath);
-      const completed = previous?.pendingUpload === false
+      const completed = previous && previous.pendingUpload !== true
         && previous.mediaId === action.mediaRef.id && previous.mediaKind === action.mediaRef.mediaKind
         && previous.sha256 === action.sha256 && previous.byteSize === action.byteLength;
+      const pendingUpload = hostedMediaPendingUpload(action.targetRelativePath, action.mediaRef.pendingUpload);
       entries.set(action.targetRelativePath, {
         byteSize: action.byteLength,
         expiresAt: action.mediaRef.expiresAt,
         mediaId: action.mediaRef.id,
         mediaKind: action.mediaRef.mediaKind,
         mimeType: action.mediaType,
-        // Meal receipts include the bytes. Delivery may not have happened yet;
-        // restore must retry even if a prior PUT lost its reply.
-        ...(isHostedMealMediaV2Path(action.targetRelativePath) ? { pendingUpload: !completed } : {}),
+        // A matching settled catalogue must not regress on replay of old intent.
+        ...(pendingUpload === undefined ? {} : { pendingUpload: completed ? false : pendingUpload }),
         recordedAt: action.mediaRef.recordedAt,
         relativePath: action.targetRelativePath,
         sha256: action.sha256,
       });
       changed = true;
-    } else if (action.kind !== "delete" && action.kind !== "delete_if_match" && !action.targetRelativePath.startsWith("raw/meals/")) {
+    } else if (action.kind !== "delete" && action.kind !== "delete_if_match" && !isRetainedPhotoPath(action.targetRelativePath)) {
       // Keep deleted media receipts until final snapshot reconciliation. Removing
       // the only catalogue pointer here would orphan the encrypted object; eager
       // deletion during replay could destroy media reused by a later receipt.
