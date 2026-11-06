@@ -1,6 +1,6 @@
 # Give Web delivery evidence one owner
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -78,3 +78,7 @@ Updated: 2026-11-06
   without member lookup. Focused Telegram units: 115 passed; PostgreSQL: 7 passed.
 - Complexity passes for all 14 changed source files. The planner reuses its
   existing model-admission predicate instead of repeating the condition.
+- Final head proof: `pnpm --dir apps/web typecheck:prepared` exit 0; 20 focused unit files, 1,194 tests, exit 0; 8 PostgreSQL files, 168 tests, exit 0, no skips.
+- `pnpm complexity:diff --base af52eca283 -- apps/web` passed. Source is net negative.
+- A read-only deep review traced first-turn interleavings, signup locks and atomicity, Telegram ambiguity and other delivery templates and found no serious bug. Its two optional simplifications were out of scope or against the leaf-helper decision.
+Completed: 2026-11-06
