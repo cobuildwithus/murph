@@ -296,6 +296,21 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('reports null for a foreground snapshot refresh the turn skipped', async () => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: { promptProfile: 'assistant-ask-continuation', threadScope: 'isolated-thread', toolProfile: 'output-only-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
+    expect(plan.planningDiagnostics?.assistantContextSnapshotRefreshElapsedMs).toBeNull()
+  })
+
   it('characterizes complete route-plan outputs across planner branch families', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

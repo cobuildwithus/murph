@@ -975,7 +975,6 @@ export async function resolveAssistantRouteTurnPlan(
     input.profile.toolProfile === 'provider-turn'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience && conversationProviderTurn
-  let followUpContextElapsedMs: number | null = null
   const followUp = await measureRoutePlanningAsync(
     routePlanningSpans,
     'followUpContextElapsedMs',
@@ -986,9 +985,6 @@ export async function resolveAssistantRouteTurnPlan(
       onboardingGoalCheckin: onboardingGoalCheckinTurn,
       supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
     }),
-    (elapsedMs) => {
-      followUpContextElapsedMs = elapsedMs
-    },
   )
   const followUpInvocation = followUp.invocation
   const followUpAttachmentAllowed = followUp.attachmentAllowed
@@ -1140,22 +1136,17 @@ export async function resolveAssistantRouteTurnPlan(
       })
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation' && privateInteractiveAudience
-  let cliBootstrapElapsedMs: number | null = null
   const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
         () => readAssistantCliSurfaceBootstrapContext(),
-        (elapsedMs) => {
-          cliBootstrapElapsedMs = elapsedMs
-        },
       )
     : null
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
   })
-  let assistantContextSnapshotRefreshElapsedMs: number | null = null
   if (privateInteractiveProviderTurn) {
     // A small vault can repair its navigation snapshot before provider start.
     // Larger vaults yield to the degraded prompt instead of delaying the turn.
@@ -1174,12 +1165,8 @@ export async function resolveAssistantRouteTurnPlan(
         },
         vaultRoot: input.input.vault,
       }),
-      (elapsedMs) => {
-        assistantContextSnapshotRefreshElapsedMs = elapsedMs
-      },
     )
   }
-  let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
       ? null
@@ -1189,9 +1176,6 @@ export async function resolveAssistantRouteTurnPlan(
         () => readAssistantCurrentStatePrompt({
           vaultRoot: input.input.vault,
         }),
-        (elapsedMs) => {
-          assistantContextSnapshotElapsedMs = elapsedMs
-        },
       )
   const currentAudienceDeliveryFields =
     resolveAssistantCurrentAudienceDeliveryFields({
@@ -1505,14 +1489,13 @@ export async function resolveAssistantRouteTurnPlan(
       resumeCodexThreadId,
     }),
     planningDiagnostics: {
-      assistantContextSnapshotElapsedMs,
-      assistantContextSnapshotRefreshElapsedMs,
-      followUpContextElapsedMs,
-      cliBootstrapElapsedMs,
+      assistantContextSnapshotElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'assistantContextSnapshotElapsedMs'),
+      assistantContextSnapshotRefreshElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'assistantContextSnapshotRefreshElapsedMs'),
+      followUpContextElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'followUpContextElapsedMs'),
+      cliBootstrapElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'cliBootstrapElapsedMs'),
       dynamicToolCount: dynamicTools.length,
       messageTargetingAvailable,
-      primarySystemPromptElapsedMs:
-        routePlanningSpans.primarySystemPromptElapsedMs ?? null,
+      primarySystemPromptElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'primarySystemPromptElapsedMs'),
       messageTargetDynamicToolsAvailable,
       routePlanningElapsedMs,
       routePlanningMeasuredElapsedMs,
@@ -1520,10 +1503,8 @@ export async function resolveAssistantRouteTurnPlan(
       routePlanningSlowestStageElapsedMs:
         routePlanningSlowestSpan?.elapsedMs ?? null,
       routePlanningUnaccountedElapsedMs,
-      routeResumeBindingElapsedMs:
-        routePlanningSpans.routeResumeBindingElapsedMs ?? null,
-      routeTargetCapabilitiesElapsedMs:
-        routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
+      routeResumeBindingElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'routeResumeBindingElapsedMs'),
+      routeTargetCapabilitiesElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'routeTargetCapabilitiesElapsedMs'),
       shouldPrepareBootstrapContext,
     },
     resume,
@@ -1816,15 +1797,12 @@ async function measureRoutePlanningAsync<TResult>(
   spans: AssistantRoutePlanningSpanMetrics,
   key: AssistantRoutePlanningSpanKey,
   work: () => Promise<TResult>,
-  record?: (elapsedMs: number) => void,
 ): Promise<TResult> {
   const startedAt = Date.now()
   try {
     return await work()
   } finally {
-    const elapsedMs = elapsedSince(startedAt)
-    spans[key] = elapsedMs
-    record?.(elapsedMs)
+    spans[key] = elapsedSince(startedAt)
   }
 }
 
@@ -1839,6 +1817,13 @@ function measureRoutePlanningSync<TResult>(
   } finally {
     spans[key] = elapsedSince(startedAt)
   }
+}
+
+function readRoutePlanningSpan(
+  spans: AssistantRoutePlanningSpanMetrics,
+  key: AssistantRoutePlanningSpanKey,
+): number | null {
+  return spans[key] ?? null
 }
 
 function sumRoutePlanningSpanMetrics(
