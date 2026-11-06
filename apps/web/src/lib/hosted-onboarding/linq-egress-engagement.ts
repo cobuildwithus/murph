@@ -59,7 +59,6 @@ import {
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 export type HostedLinqRuntimeEgressAssertionResult = {
-  laterMemberMessage?: true;
   linePhoneNumberLookupKey?: string;
   resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
   sourceEventId?: string;
@@ -304,7 +303,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         threadIsDirect: true,
       },
       sourceEventId: persistedDirectInbound.sourceEventId,
-      ...(persistedDirectInbound.laterMemberMessage ? { laterMemberMessage: true } : {}),
     };
   }
 
@@ -323,7 +321,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
 }
 
 interface MatchingPersistedHostedLinqDirectInbound {
-  laterMemberMessage?: true;
   accountLookupKey: string | null;
   directRecipient: string;
   sourceEventId: string;
@@ -359,8 +356,88 @@ async function readMatchingPersistedHostedLinqInbound(input: {
       prisma: input.prisma,
     });
 
+    for (const item of candidates) {
+      const matched = await readMatchingPersistedHostedLinqInboundMailboxItem({
+        item,
+        memberId: input.memberId,
+        payloadCiphertext:
+          payloadsByMailboxItemId.get(item.id)?.payloadCiphertext ?? null,
+        prisma: input.prisma,
+        replyToMessageId: requestReplyToMessageId,
+        target,
+        threadIsDirect: input.threadIsDirect ?? true,
+      });
+      if (matched) {
+        return matched;
+      }
+    }
+
+    return null;
+  });
+}
+
+async function readMatchingPersistedHostedLinqInboundMailboxItem(input: {
+  item: HostedLinqDirectInboundMailboxItem;
+  memberId: string;
+  payloadCiphertext: string | null;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string;
+  target: string;
+  threadIsDirect: boolean;
+}): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
+  const wake = await readPersistedHostedLinqInboundMailboxItem(input);
+  if (
+    !wake
+    || wake.message.channel !== "linq"
+    || wake.message.linqMessage.isFromMe !== false
+    || wake.message.linqMessage.threadIsDirect !== input.threadIsDirect
+    || wake.message.linqMessage.chatId !== input.target
+    || wake.message.linqMessage.messageId !== input.replyToMessageId
+  ) {
+    return null;
+  }
+
+  return {
+    accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
+    directRecipient: wake.message.linqMessage.from,
+    sourceEventId: input.item.dedupeKey,
+    target: wake.message.linqMessage.chatId,
+  };
+}
+
+export async function hasLaterHostedLinqMemberMessage(input: {
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string | null;
+  sourceEventId: string;
+  target: string;
+}): Promise<boolean> {
+  const target = normalizeNullable(input.target);
+  const replyToMessageId = normalizeNullable(input.replyToMessageId);
+  if (!target || !replyToMessageId) {
+    return false;
+  }
+
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const availableAt = new Date();
+    const candidates = await readHostedLinqDirectInboundCandidates({
+      answeredMailboxItemIds: [],
+      availableAt,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+    const payloadsByMailboxItemId = await readHostedLinqDirectInboundPayloads({
+      availableAt,
+      candidates,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+
     let laterMemberMessage = false;
     for (const item of candidates) {
+      if (item.dedupeKey === input.sourceEventId) {
+        return laterMemberMessage;
+      }
       const wake = await readPersistedHostedLinqInboundMailboxItem({
         item,
         memberId: input.memberId,
@@ -369,28 +446,16 @@ async function readMatchingPersistedHostedLinqInbound(input: {
         prisma: input.prisma,
       });
       if (
-        !wake
-        || wake.message.channel !== "linq"
-        || wake.message.linqMessage.isFromMe !== false
-        || wake.message.linqMessage.threadIsDirect !== (input.threadIsDirect ?? true)
-        || wake.message.linqMessage.chatId !== target
+        wake?.message.channel === "linq"
+        && wake.message.linqMessage.isFromMe === false
+        && wake.message.linqMessage.threadIsDirect === true
+        && wake.message.linqMessage.chatId === target
+        && wake.message.linqMessage.messageId !== replyToMessageId
       ) {
-        continue;
-      }
-      if (wake.message.linqMessage.messageId !== requestReplyToMessageId) {
         laterMemberMessage = true;
-        continue;
       }
-      return {
-        accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
-        directRecipient: wake.message.linqMessage.from,
-        sourceEventId: item.dedupeKey,
-        target: wake.message.linqMessage.chatId,
-        ...(laterMemberMessage ? { laterMemberMessage: true } : {}),
-      };
     }
-
-    return null;
+    return false;
   });
 }
 

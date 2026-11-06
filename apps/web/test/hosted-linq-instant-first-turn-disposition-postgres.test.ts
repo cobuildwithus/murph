@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
-import { assertHostedLinqRecentInboundEngagementForRuntime } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import { hasLaterHostedLinqMemberMessage } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
@@ -107,7 +107,7 @@ async function seed() {
 }
 
 describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
-  it.each(["none", "older", "edit", "echo", "other-chat", "later"])(
+  it.each(["none", "older", "edit", "echo", "other-chat", "held-absent", "later"])(
     "derives the later-member witness from real mailbox rows: %s",
     async (candidate) => withFixture(async (f) => {
       const append = async (suffix: string) => {
@@ -126,17 +126,12 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
         await f.prisma.$transaction(tx => appendHostedMailboxEnvelopeTx({ envelope, tx }));
       };
       if (candidate === "older") await append("other");
-      await append("first");
+      if (candidate !== "held-absent") await append("first");
       if (candidate !== "none" && candidate !== "older") await append("other");
-      const authority = await assertHostedLinqRecentInboundEngagementForRuntime({
-        authorityCheckOnly: true, memberId: f.memberId, prisma: f.prisma,
-        replyToMessageId: "message-first", target: f.chatId, targetKind: "thread",
-      });
-      expect(authority).toMatchObject({
-        sourceEventId: candidate === "edit" ? `other-${f.eventId}` : f.eventId,
-        resolvedRoute: { target: f.chatId, threadIsDirect: true },
-      });
-      expect("laterMemberMessage" in authority && authority.laterMemberMessage === true).toBe(candidate === "later");
+      expect(await hasLaterHostedLinqMemberMessage({
+        memberId: f.memberId, prisma: f.prisma, sourceEventId: f.eventId,
+        replyToMessageId: "message-first", target: f.chatId,
+      })).toBe(candidate === "later");
     }),
   );
 

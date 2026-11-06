@@ -11,6 +11,7 @@ import {
 import { isHostedGroupCurrentSenderPrivateLinqCompletionTx } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  hasLaterHostedLinqMemberMessage,
   isHostedLinqProactivityPaused,
   resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
@@ -173,7 +174,14 @@ export const POST = withJsonError(async (request: Request) => {
         });
       assertHostedLinqInstantFirstTurnEgress({
         disposition: instantFirstTurn,
-        laterMemberMessage: finalAuthority.laterMemberMessage === true,
+        deliveryPurpose: body.deliveryPurpose,
+        laterMemberMessage: instantFirstTurn === "held" && await hasLaterHostedLinqMemberMessage({
+          memberId: userId,
+          prisma: tx,
+          replyToMessageId,
+          sourceEventId: finalAuthority.sourceEventId,
+          target: finalAuthority.resolvedRoute.target,
+        }),
         turnCommitProbe: isHostedLinqTurnCommitProbe({
           authorityCheckOnly, idempotencyKey, intentId,
           deliveryPurpose: body.deliveryPurpose,
@@ -293,6 +301,7 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 function assertHostedLinqInstantFirstTurnEgress(input: {
+  deliveryPurpose: unknown;
   disposition: HostedLinqInstantFirstTurnRuntimeEgressDisposition;
   laterMemberMessage: boolean;
   turnCommitProbe: boolean;
@@ -305,15 +314,23 @@ function assertHostedLinqInstantFirstTurnEgress(input: {
   ) {
     return;
   }
+  // This reply can never send; terminal supersede ends it without retry, recovery input or wake.
+  // ALREADY_ANSWERED is imperfect, but is the only terminal contract older runners understand.
+  const superseded = input.disposition === "held"
+    && input.laterMemberMessage
+    && input.deliveryPurpose === undefined;
+  const terminal = input.disposition === "already_answered" || superseded;
   throw hostedOnboardingError({
-    code: input.disposition === "already_answered"
+    code: terminal
       ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
       : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
-    httpStatus: input.disposition === "already_answered" ? 409 : 503,
+    httpStatus: terminal ? 409 : 503,
     message: input.disposition === "already_answered"
       ? "The exact inbound already has a Web-owned reply."
-      : "The exact inbound remains owned by its Web reply.",
-    retryable: input.disposition !== "already_answered",
+      : superseded
+        ? "The exact inbound reply has been superseded by a later member message."
+        : "The exact inbound remains owned by its Web reply.",
+    retryable: !terminal,
   });
 }
 

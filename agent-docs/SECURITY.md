@@ -1190,10 +1190,14 @@ Existing product admission, delivery and runtime safety rules still apply.
   Only the winning first dispatch can atomically certify rejection and clear its
   payload with its exact attemptedAt version. Rejected retries retain the sealed
   body, but Web does not resend them. A held row keeps vetoing every real send
-  for its exact input and any turn with no later member message. A turn that
-  also holds a later member message commits and replies to that later message,
-  so the reply can repeat part of an earlier reply that landed. It is one reply
-  to a new message, never a second send for the held input.
+  for its exact input and any turn with no later member message. When a later
+  member message exists, a turn-commit probe may pass even if that message does
+  not join the held input's turn. A real send still aimed at the held input ends
+  as superseded, with no retry, failure-recovery input or recovery wake. Intent
+  or idempotency check-only requests use the same terminal contract; reaction
+  and progress purposes retain the retryable veto. A reply to the later message
+  can repeat part of an earlier reply that landed, but never sends again for
+  the held input.
   Legacy skipped payloads, uncertified empty
   failures, and incomplete tuples hold only their exact input. This template-specific
   rule does not change signup or notice retries.

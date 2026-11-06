@@ -849,8 +849,9 @@ export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
  *
  * Held covers rejected retries, legacy skipped + sealed and uncertified failed +
  * empty rows. Web never resumes them; runtime sends for the exact input stay
- * vetoed. Only a turn-commit probe with a later member message may pass, allowing
- * one reply to that later message even if an earlier ambiguous reply landed.
+ * vetoed. With a later member message, a turn-commit probe may pass; an exact
+ * reply with no delivery purpose ends as superseded, without retry or recovery.
+ * Reaction/progress purposes and lone held inputs retain the retryable veto.
  */
 function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   acceptedAt: Date | null;
@@ -924,8 +925,9 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
 }
 
 // This chat-wide filter excludes rejected retries and failed empty rows; callers
-// exclude skipped rows. Exact held-input sends remain vetoed, and a turn-commit
-// probe passes only with a later member message.
+// exclude skipped rows. A later member message lets a held turn-commit probe pass;
+// exact held-input replies without a delivery purpose then end as superseded.
+// Lone held inputs and reaction/progress purposes keep the retryable veto.
 const hostedLinqInstantFirstTurnUnresolvedWhere = {
   template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   OR: [
