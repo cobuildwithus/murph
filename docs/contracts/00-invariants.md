@@ -352,8 +352,8 @@ it has been explicitly elevated to a cross-cutting invariant.
   key, so freeze those inputs on the accepted receipt and never rebuild them
   from current source state.
 - Failure to observe an outcome does not prove rejection. Once a native game
-  write has read its request, a server failure is reported as retryable, never
-  as a final refusal of that request.
+  write or an account deletion has read its request, a server failure is
+  reported as retryable, never as a final refusal of that request.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate

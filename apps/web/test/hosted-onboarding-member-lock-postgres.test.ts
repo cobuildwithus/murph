@@ -91,6 +91,7 @@ const stripeProvider = vi.hoisted(() => ({
   customersCreate: vi.fn(),
   customersDelete: vi.fn(),
   eventsRetrieve: vi.fn(),
+  subscriptionsCancel: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
 
@@ -226,6 +227,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       retrieve: stripeProvider.eventsRetrieve,
     },
     subscriptions: {
+      cancel: stripeProvider.subscriptionsCancel,
       retrieve: stripeProvider.subscriptionsRetrieve,
     },
   };
@@ -2280,6 +2282,34 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted canonical account-deletion PostgreSQL concurrency",
   () => {
+    it("keeps a member suspended after Stripe cancellation fails and finishes on retry", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `deletion-stripe-${randomUUID()}`;
+      const subscriptionId = `sub_${randomUUID()}`;
+      installPassthroughHostedSecureBoxTestCodec();
+      stripeProvider.subscriptionsRetrieve.mockResolvedValue({ id: subscriptionId, status: "active" });
+      stripeProvider.subscriptionsCancel.mockRejectedValueOnce(new Error("Synthetic Stripe failure"))
+        .mockResolvedValueOnce({ id: subscriptionId, status: "canceled" });
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId, billingStatus: HostedBillingStatus.active,
+          billingRef: { create: { stripeSubscriptionIdEncrypted: subscriptionId,
+            stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(subscriptionId) } } } });
+        const attempt = () => deleteHostedAccountData({ memberId, prisma, request: new Request("https://app.example.test/settings") });
+        await expect(attempt()).rejects.toMatchObject({ code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED", retryable: true,
+          message: "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing." });
+        expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toMatchObject({ suspendedAt: expect.any(Date) });
+        await expect(attempt()).resolves.toMatchObject({ memberId });
+        expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
+        expect(stripeProvider.subscriptionsCancel).toHaveBeenCalledTimes(2);
+      } finally {
+        stripeProvider.subscriptionsCancel.mockReset();
+        stripeProvider.subscriptionsRetrieve.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([prisma]);
+      }
+    });
+
     it("keeps deletion authoritative over an existing Stripe suspension and terminalizes on retry", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
