@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { createServer, type Server } from "node:http";
 
 import type { Chat } from "@linqapp/sdk/resources/chats";
@@ -199,6 +200,7 @@ describe("getHostedLinqChatSummary", () => {
       ],
       handlesComplete: true,
       isGroup: true,
+      observedAt: expect.any(Date),
     });
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"),
@@ -248,6 +250,7 @@ describe("getHostedLinqChatSummary", () => {
       handles: [],
       handlesComplete: false,
       isGroup: null,
+      observedAt: expect.any(Date),
     });
   });
 
@@ -318,19 +321,19 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
   ];
 
   it("keeps a real group title", () => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
       handles,
       isGroup: true,
-    })).toBe("Weekend Warriors");
+    }))).toBe("Weekend Warriors");
   });
 
   it("sanitizes control characters in a real group title", () => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: " Weekend\u0000   Warriors ",
       handles,
       isGroup: true,
-    })).toBe("Weekend Warriors");
+    }))).toBe("Weekend Warriors");
   });
 
   it.each([
@@ -339,20 +342,20 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
     "Call +1 (415) 555-9876",
     "Email friend@example.test",
   ])("rejects Linq's synthesized handle-list title", (displayName) => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName,
       handles,
       isGroup: true,
-    })).toBeNull();
+    }))).toBeNull();
   });
 
   it("rejects provider titles when the roster was not parsed completely", () => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
       handles,
       handlesComplete: false,
       isGroup: true,
-    })).toBeNull();
+    }))).toBeNull();
   });
 });
 

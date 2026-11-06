@@ -89,8 +89,8 @@ import {
   shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
 import {
-  getHostedLinqChatHandles,
-  type HostedLinqChatHandleSummary,
+  getHostedLinqChatSummary,
+  type HostedLinqChatRosterObservation,
 } from "./linq-client";
 import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
@@ -103,6 +103,7 @@ import {
 } from "../hosted-mailbox/store";
 import {
   renewHostedThreadContainerParticipantAccessTx,
+  observeHostedThreadContainerRosterParticipantTx,
 } from "../hosted-groups/thread-container-participant-access";
 import {
   bindHostedMemberHomeLinqChat,
@@ -3407,7 +3408,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     await renewHostedThreadContainerParticipantAccessFromRosterTx({
       chatId: summary.chatId,
       containerMemberId: input.route.containerMemberId,
-      now: participantAccessNow,
       prisma: input.prisma,
       verifiedInboundParticipant,
     });
@@ -4001,13 +4001,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     pendingSetupParticipantMemberIds = [activeSenderMemberId];
   } else {
     if (input.rosterUnavailable) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
-        httpStatus: 502,
-        message:
-          "Linq group roster authority is temporarily unavailable.",
-        retryable: true,
-      });
+      throw hostedLinqGroupRosterUnavailable();
     }
     const recoveryParticipantMemberIds = activeSenderMemberId
       ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
@@ -4855,106 +4849,66 @@ async function resolveHostedThreadContainerInboundParticipantTx(input: {
   };
 }
 
+function hostedLinqGroupRosterUnavailable() {
+  return hostedOnboardingError({
+    code: "HOSTED_LINQ_GROUP_ROSTER_UNAVAILABLE",
+    httpStatus: 502,
+    message: "Linq group roster authority is temporarily unavailable.",
+    retryable: true,
+  });
+}
+
 async function renewHostedThreadContainerParticipantAccessFromRosterTx(input: {
   chatId: string;
   containerMemberId: string;
-  now: Date;
   prisma: Prisma.TransactionClient;
   verifiedInboundParticipant: VerifiedHostedLinqInboundParticipant | null;
 }): Promise<void> {
-  if (!input.verifiedInboundParticipant) {
-    return;
-  }
+  const participant = input.verifiedInboundParticipant;
+  if (!participant) return;
 
-  let handles: readonly HostedLinqChatHandleSummary[];
-  try {
-    handles = await getHostedLinqChatHandles({
-      chatId: input.chatId,
-      timeoutMs: 1_500,
-    });
-  } catch {
-    return;
-  }
-
-  const currentContactsByLookupKey = new Map<string, HostedLinqParticipantContact>();
-  for (const handle of handles) {
-    if (
-      handle.isMe
-      || (handle.status && handle.status.trim().toLowerCase() !== "active")
-    ) {
-      continue;
-    }
-    const contact = createHostedLinqParticipantContact({
-      kind: handle.handle.includes("@") ? "email" : "phone",
-      value: handle.handle,
-    });
-    if (!contact) {
-      continue;
-    }
-    for (const lookupKey of createHostedLinqParticipantContactLookupKeyReadCandidates(
-      contact,
-    )) {
-      if (!currentContactsByLookupKey.has(lookupKey)) {
-        currentContactsByLookupKey.set(lookupKey, contact);
-      }
-    }
-  }
-  if (currentContactsByLookupKey.size === 0) {
-    return;
-  }
-
-  const verifiedInboundContact =
-    createHostedLinqParticipantContactLookupKeyReadCandidates(
-      input.verifiedInboundParticipant.contact,
-    ).some((lookupKey) => currentContactsByLookupKey.has(lookupKey));
-  if (!verifiedInboundContact) {
-    return;
-  }
-
-  const lookup = input.verifiedInboundParticipant.contact.kind === "phone"
+  const lookup = participant.contact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
-        phoneNumber: input.verifiedInboundParticipant.contact.value,
+        phoneNumber: participant.contact.value,
         prisma: input.prisma,
       })
     : await lookupHostedMemberByVerifiedEmailAddress({
-        address: input.verifiedInboundParticipant.contact.value,
+        address: participant.contact.value,
         prisma: input.prisma,
       });
-  if (lookup?.core.id !== input.verifiedInboundParticipant.memberId) {
-    return;
-  }
-
+  if (lookup?.core.id !== participant.memberId) return;
   const activeParticipant = await input.prisma.hostedMember.findFirst({
     select: { id: true },
-    where: {
-      ...activeHostedMemberAccessWhere(),
-      id: input.verifiedInboundParticipant.memberId,
-    },
+    where: { ...activeHostedMemberAccessWhere(), id: participant.memberId },
   });
-  if (!activeParticipant) {
-    return;
-  }
+  if (!activeParticipant) return;
 
-  await input.prisma.hostedThreadContainerParticipant.upsert({
-    create: {
-      containerMemberId: input.containerMemberId,
-      firstSeenAt: input.now,
-      handleLookupKey: input.verifiedInboundParticipant.contact.lookupKey,
-      lastSeenAt: input.now,
-      participantMemberId: input.verifiedInboundParticipant.memberId,
-      removedAt: null,
-    },
-    update: {
-      handleLookupKey: input.verifiedInboundParticipant.contact.lookupKey,
-      lastSeenAt: input.now,
-      removedAt: null,
-    },
-    where: {
-      containerMemberId_participantMemberId: {
-        containerMemberId: input.containerMemberId,
-        participantMemberId: input.verifiedInboundParticipant.memberId,
-      },
-    },
+  let observation: HostedLinqChatRosterObservation;
+  try {
+    observation = await getHostedLinqChatSummary({ chatId: input.chatId, timeoutMs: 1_500 });
+  } catch {
+    throw hostedLinqGroupRosterUnavailable();
+  }
+  const senderLookupKeys = new Set(createHostedLinqParticipantContactLookupKeyReadCandidates(participant.contact));
+  const senderPresent = observation.handles.some(handle => {
+    if (handle.isMe || (handle.status && handle.status.trim().toLowerCase() !== "active")) return false;
+    const contact = createHostedLinqParticipantContact({
+      kind: handle.handle.includes("@") ? "email" : "phone", value: handle.handle,
+    });
+    return contact !== null && createHostedLinqParticipantContactLookupKeyReadCandidates(contact)
+      .some(key => senderLookupKeys.has(key));
+  });
+  if (!senderPresent) {
+    if (observation.handlesComplete && observation.handles.length > 0) return;
+    throw hostedLinqGroupRosterUnavailable();
+  }
+  await observeHostedThreadContainerRosterParticipantTx({
+    containerMemberId: input.containerMemberId,
+    handleLookupKey: participant.contact.lookupKey,
+    now: new Date(),
+    observedAt: observation.observedAt,
+    participantMemberId: participant.memberId,
+    prisma: input.prisma,
   });
 }
 

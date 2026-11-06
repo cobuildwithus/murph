@@ -520,6 +520,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   transaction, or returning control to a caller that may do either. Preserve the
   first observed failure while awaiting siblings; fail-fast observation must not
   leave detached work mutating scoped state after finalization.
+- A Linq roster observation carries its pre-read time and completeness. Partial
+  evidence establishes presence, never absence; removal and the complete-roster
+  watermark require a complete, nonempty, within-cap roster. Equal-time conflicts
+  resolve to removal. Required roster proof that is unavailable produces a
+  retryable response, never an acknowledgement.
 - Public Linq unbound-group pending-setup admission is bounded by the
   provider-proven 32-member roster. Before `BEGIN`, its owner performs one
   candidate projection, canonical batch runtime-access read, active-managed-line

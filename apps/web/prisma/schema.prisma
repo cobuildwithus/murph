@@ -2132,6 +2132,8 @@ model HostedThreadContainer {
   memberId                   String              @id @map("member_id")
   ownerMemberId              String              @map("owner_member_id")
   monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")
+  /// Latest complete Linq roster observation; null means none recorded since this column was added. History is never assigned one.
+  completeRosterObservedAt   DateTime?           @map("complete_roster_observed_at")
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)

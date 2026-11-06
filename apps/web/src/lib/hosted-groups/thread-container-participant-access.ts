@@ -3,6 +3,26 @@ import type { Prisma } from "@prisma/client";
 const DAY_MS = 86_400_000;
 
 /**
+ * Serializes participant evidence for one container and reports whether a positive at observedAt
+ * is newer than the last complete roster. A complete roster at or after that time already decided
+ * this participant, so an equal or older positive adds nothing.
+ */
+export async function lockHostedThreadContainerParticipantObservationTx(input: {
+  containerMemberId: string;
+  observedAt: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const [container] = await input.prisma.$queryRaw<Array<{ completeRosterObservedAt: Date | null }>>`
+    SELECT complete_roster_observed_at AS "completeRosterObservedAt"
+    FROM hosted_thread_container
+    WHERE member_id = ${input.containerMemberId}
+    FOR NO KEY UPDATE
+  `;
+  return Boolean(container && (container.completeRosterObservedAt === null
+    || input.observedAt > container.completeRosterObservedAt));
+}
+
+/**
  * Participant-derived runtime authority is a bounded lease over observed
  * provider membership. Owner-derived authority remains independent.
  */
@@ -101,6 +121,18 @@ export async function observeHostedThreadContainerParticipantAccessTx(input: {
     },
   });
   await renewHostedThreadContainerParticipantAccessTx(input);
+}
+
+/**
+ * A sender seen in a provider roster. Only Linq rosters advance the watermark,
+ * so Telegram observations stay outside this lock.
+ */
+export async function observeHostedThreadContainerRosterParticipantTx(
+  input: Parameters<typeof observeHostedThreadContainerParticipantAccessTx>[0],
+): Promise<void> {
+  if (await lockHostedThreadContainerParticipantObservationTx(input)) {
+    await observeHostedThreadContainerParticipantAccessTx(input);
+  }
 }
 
 function clampHostedThreadContainerParticipantObservation(input: {

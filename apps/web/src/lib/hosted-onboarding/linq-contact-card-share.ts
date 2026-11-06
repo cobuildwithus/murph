@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
 import {
-  getHostedLinqChatHandles,
+  getHostedLinqChatSummary,
   HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS,
   isHostedLinqAttachmentSendPrepareFailure,
   isHostedLinqIdempotencyKeyReuseFailure,
@@ -384,7 +384,7 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   }
 
   try {
-    const handles = await getHostedLinqChatHandles({
+    const { handles } = await getHostedLinqChatSummary({
       chatId: input.chatId,
       ...(input.signal ? { signal: input.signal } : {}),
     });
@@ -514,7 +514,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
   let linePhoneNumber: string | null = null;
   let rosterPresent = false;
   try {
-    const handles = await getHostedLinqChatHandles({
+    const { handles } = await getHostedLinqChatSummary({
       chatId: input.chatId,
       ...preSendSignalOption,
     });
