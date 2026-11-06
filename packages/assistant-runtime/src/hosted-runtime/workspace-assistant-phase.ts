@@ -25,6 +25,7 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecord,
   type HostedWorkspaceCheckpointReason,
+  type HostedWorkspaceState,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
@@ -2511,7 +2512,7 @@ export async function runHostedWorkspaceAssistantPhase(
         input.shouldYieldBackgroundMaintenance?.() !== true,
       messageVolumeReceiptPort: input.runtime.platform.effectsPort,
       preferredIntentIds: currentTurnDeliveryIntentIds,
-      workspaceCheckpointedAt: input.workspace?.checkpointedAt,
+      workspace: input.workspace,
       vaultRoot: input.restored.vaultRoot,
     });
     const deliveryEffectsPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
@@ -5264,7 +5265,7 @@ async function prepareSystemMailboxDelivery(input: {
           systemMailboxPreparation,
         ),
         vaultRoot: phaseInput.restored.vaultRoot,
-        workspaceCheckpointedAt: phaseInput.workspace?.checkpointedAt,
+        workspace: phaseInput.workspace,
       })
       : [];
   const systemMailboxDeliveryEffectsForDispatch =
@@ -6231,7 +6232,7 @@ async function collectForegroundDeliveryEffects(input: {
   messageVolumeReceiptPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"];
   preferredIntentIds: readonly string[];
   vaultRoot: string;
-  workspaceCheckpointedAt?: string | null;
+  workspace?: Pick<HostedWorkspaceState, "checkpointedAt"> | null;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
   const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
     platform: input.platform,
@@ -6240,7 +6241,7 @@ async function collectForegroundDeliveryEffects(input: {
     messageVolumeReceiptPort: input.messageVolumeReceiptPort,
     preferredIntentIds: input.preferredIntentIds,
     vaultRoot: input.vaultRoot,
-    workspaceCheckpointedAt: input.workspaceCheckpointedAt,
+    workspace: input.workspace,
   });
   const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
     platform: input.platform,
@@ -6279,7 +6280,7 @@ async function runForegroundAssistantReplyPhase(input: {
     signal: input.input.signal,
     messageVolumeReceiptPort: input.input.runtime.platform.effectsPort,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
-    workspaceCheckpointedAt: input.input.workspace?.checkpointedAt,
+    workspace: input.input.workspace,
     vaultRoot: input.input.restored.vaultRoot,
   });
   const deliveryEffects = preparedDeliveryEffects.effects;

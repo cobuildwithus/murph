@@ -1,4 +1,5 @@
 import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
+import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import { createHash } from "node:crypto";
 
@@ -212,7 +213,7 @@ export interface CollectHostedAssistantDeliverySideEffectsInput {
   preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
-  workspaceCheckpointedAt?: string | null;
+  workspace?: Pick<HostedWorkspaceState, "checkpointedAt"> | null;
 }
 
 export async function collectHostedAssistantDeliverySideEffects(
@@ -414,6 +415,25 @@ export async function collectHostedAssistantDeliverySideEffects(
       backgroundBacklogBudget -= 1;
     }
   }
+  return buildHostedAssistantDeliveryEffects({
+    foregroundCandidates,
+    cappedBackgroundCandidates,
+    intents,
+    workspace: input.workspace,
+  });
+}
+
+function buildHostedAssistantDeliveryEffects({
+  foregroundCandidates,
+  cappedBackgroundCandidates,
+  intents,
+  workspace,
+}: {
+  foregroundCandidates: readonly AssistantOutboxIntent[];
+  cappedBackgroundCandidates: readonly AssistantOutboxIntent[];
+  intents: readonly AssistantOutboxIntent[];
+  workspace: Pick<HostedWorkspaceState, "checkpointedAt"> | null | undefined;
+}): HostedAssistantDeliveryEffect[] {
   const obligationBoundaryKeys = new Set(
     intents.filter(hostedLinqIntentCarriesDurableObligation)
       .map(readHostedAssistantDeliveryBoundaryKey),
@@ -429,7 +449,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       if (claimedBoundaryKeys.has(boundaryKey)) continue;
       const effect = buildHostedAssistantDeliveryEffectFromIntent(intent, phase);
       if (
-        hostedAssistantIntentRetryNeedsPublishedClaim(intent, input.workspaceCheckpointedAt)
+        hostedAssistantIntentRetryNeedsPublishedClaim(intent, workspace?.checkpointedAt)
         || (hostedAssistantIntentOwesProviderSend(intent) && (
           (intent.channel === "telegram" && intent.media.some((media) => media.kind === "vault_file"))
           || obligationBoundaryKeys.has(boundaryKey)
@@ -3544,6 +3564,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       now,
+      preparedDispatch: input.preparedDispatch,
       userId: input.userId,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
@@ -3564,13 +3585,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     });
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
-    }
-    if (input.assistantDeliveryEffect.publishBeforeDispatch === true && !input.preparedDispatch) {
-      return buildHostedAssistantDeliveryOutcome({
-        deliveryStatus: "pending",
-        effect: input.assistantDeliveryEffect,
-        retryable: true,
-      });
     }
     assertHostedBackgroundDeliveryNotYielded(input);
     const telegramAuthorityBoundTarget =
@@ -6677,11 +6691,26 @@ function assertHostedDeliveryLiveness(signal: AbortSignal | null | undefined): v
   throw new Error("Hosted assistant delivery was aborted.");
 }
 
+function maybeDeferHostedAssistantDeliveryUntilPrepared(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
+}): HostedAssistantDeliveryOutcome | null {
+  if (input.assistantDeliveryEffect.publishBeforeDispatch === true && !input.preparedDispatch) {
+    return buildHostedAssistantDeliveryOutcome({
+      deliveryStatus: "pending",
+      effect: input.assistantDeliveryEffect,
+      retryable: true,
+    });
+  }
+  return null;
+}
+
 async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
   allowPreparedSending?: boolean;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   now: Date;
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   userId: string;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
@@ -6785,7 +6814,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
     }
     case "retryable": {
       if (shouldDispatchAssistantOutboxIntent(intent, input.now)) {
-        return null;
+        return maybeDeferHostedAssistantDeliveryUntilPrepared(input);
       }
       const retryableError = normalizeHostedAssistantDeliveryMirrorFailure({
         fallbackMessage: "The assistant outbox mirror scheduled the next retry attempt.",
@@ -6866,7 +6895,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
     }
     default:
-      return null;
+      return maybeDeferHostedAssistantDeliveryUntilPrepared(input);
   }
 }
 

@@ -834,12 +834,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     }
 
     if (input.preparedDispatch || (input.allowPreparedSending === true && intent.status === 'sending')) {
-      if (
-        input.allowPreparedSending !== true ||
-        intent.status !== 'sending' ||
-        !input.preparedDispatch ||
-        !assistantOutboxIntentMatchesPreparedDispatch(intent, input.preparedDispatch)
-      ) {
+      if (!canDispatchPreparedAssistantOutboxIntent(intent, input)) {
         return {
           action: 'skip' as const,
           intent,
@@ -1627,6 +1622,16 @@ async function finalizeAssistantOutboxTerminalDelivery(input: {
         vault: input.vault,
       })
     : pendingIntent
+}
+
+function canDispatchPreparedAssistantOutboxIntent(
+  intent: AssistantOutboxIntent,
+  input: Pick<DispatchAssistantOutboxIntentInput, 'allowPreparedSending' | 'preparedDispatch'>,
+): boolean {
+  return input.allowPreparedSending === true &&
+    intent.status === 'sending' &&
+    !!input.preparedDispatch &&
+    assistantOutboxIntentMatchesPreparedDispatch(intent, input.preparedDispatch)
 }
 
 function assistantOutboxIntentMatchesPreparedDispatch(

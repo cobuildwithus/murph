@@ -39,7 +39,6 @@ Updated: 2026-11-06
 
 - The outbox remains authoritative; the publication marker is local and derived at collection.
 - No live model journey: interpretation, prompt, tools and generated text are unchanged; deterministic provider-entry and restore evidence owns this change.
-- No PR/ReviewGPT or broad CI: the task explicitly requires a local-only commit.
 
 ## Verification
 
@@ -62,6 +61,7 @@ pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts -
 pnpm --dir packages/assistant-engine typecheck
 pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-delivery-publication.test.ts test/hosted-runtime-delivery-settlement.integration.test.ts test/hosted-runtime-telegram-file-checkpoint.test.ts test/hosted-runtime-callbacks.test.ts test/hosted-runtime-linq-outbox-regression.test.ts test/hosted-runtime-workspace-assistant-phase-delivery.test.ts test/hosted-runtime-workspace-assistant-phase-foreground.test.ts test/hosted-runtime-workspace-assistant-phase-outbox-starvation.test.ts test/hosted-runtime-system-mailbox-notification.test.ts test/hosted-runtime-workspace-entrypoint-checkpoint-wakes.test.ts test/hosted-runtime-workspace-entrypoint-checkpoint-races.test.ts test/hosted-runtime-idle-retirement.test.ts --maxWorkers=2
 pnpm --dir packages/assistant-runtime typecheck
+MURPH_COMPLEXITY_BASE_SHA=89a15d73f0 pnpm complexity:diff
 ```
 
 - Engine build: exit 0, including the rebuilt export before runtime execution.
@@ -69,6 +69,7 @@ pnpm --dir packages/assistant-runtime typecheck
 - Runtime focused files: 861 passed, 12 files, exit 0. This includes 26 new real-outbox publication cases and 8 new entrypoint deadline cases.
 - Engine typecheck: exit 0. Runtime typecheck: exit 0; its first run exited 2 because a new test returned a boolean instead of the result's literal discriminant. Fixed the fixture return branches without a cast.
 - Implementation iterations exited 1 while correcting test fixtures: 13 failed/20 passed/17 skipped; 5 failed/28 passed/17 skipped (two Ask expiry fixture errors); 4 failed/1 passed/45 skipped. Corrected approval/voice/Ask subset then passed 5 with 45 skipped, exit 0. The first full runtime run passed 855 and failed only 5 exact collection-argument assertions, exit 1. The first full engine run passed 180 and failed the text-versus-voice fixture described above, exit 1.
+- Follow-up argument migration: the first runtime run exited 1 (842 passed, 19 failed), all at collection-argument assertions. Fourteen assertion sites previously omitted an `undefined` checkpoint argument and now explicitly expect `workspace: null`; the five timestamp assertions now check `workspace.checkpointedAt`. The unchanged 12-file proof then passed all 861 tests, exit 0. The engine proof again passed all 181 tests, exit 0. The follow-up engine build and both package typechecks also exited 0.
 
 ### Existing test changes
 
@@ -76,7 +77,7 @@ pnpm --dir packages/assistant-runtime typecheck
 - `hosted-runtime-delivery-settlement.integration.test.ts`: its shared direct-drain fixture now prepares effects and passes `allowPreparedSending`/`preparedDispatches`, while preserving explicit test overrides. Due non-idempotent retries must follow the production prepared-claim path. No assertion was removed or relaxed.
 - `hosted-runtime-telegram-file-checkpoint.test.ts`: the shared drain for fresh/approval/retry file cases now prepares claims and supplies the exact dispatch tokens, matching production. Restore and ambiguous-terminal assertions remain unchanged.
 - `hosted-runtime-workspace-assistant-phase.harness.ts`: its callback mock forwards the real eight-minute constant so phase tests exercise the actual deadline.
-- `hosted-runtime-workspace-assistant-phase-delivery.test.ts`: the fresh-conversation/device-sync deferral test now asserts the exact committed `workspaceCheckpointedAt` collection argument.
+- `hosted-runtime-workspace-assistant-phase-delivery.test.ts`: the fresh-conversation/device-sync deferral test now asserts the committed `workspace` collection argument and its exact `checkpointedAt` value.
 - `hosted-runtime-workspace-assistant-phase-foreground.test.ts`: the causal-only zero-effect, exact approval ahead of older wake, queued cleanup during foreground input, and due cleanup rearm tests add that same exact argument. All existing assertions remain.
 - `hosted-runtime-workspace-entrypoint-checkpoint-wakes.test.ts`: added deadline/no-deadline, foreground and background rearm, active-Ask, and projection-offer ordering cases using the existing real entrypoint harness. Existing cases are unchanged.
 
@@ -86,9 +87,8 @@ pnpm --dir packages/assistant-runtime typecheck
 - The ordinary foreground Linq phase already has an `afterCheckpoint` maintenance hook from `withFreshHostedManagedAutomationsAfterCheckpoint`. Its absence would be an incorrect assertion. The proof checks inline provider entry and no durable continuation; the general fast path also has no local hook.
 - The requested stale Linq voice outcome exposed the additional engine classification bug described above. The fix reuses `ASSISTANT_DELIVERY_AMBIGUOUS`; it adds no status, error code, persisted field, Web/Worker change, or provider lookup.
 - Reviewed continuation preservation through route maintenance, managed automations, checkpoint composition and continuing system-mailbox merging. Existing durable effect function identities and their deadlines survive these wrappers. Existing foreground checkpoint preemption is unchanged.
-- No changelog file: this local implementation brief explicitly excludes Web changes; release publication and PR work are outside scope.
-- Production TypeScript: 158 lines added, 58 removed, net **+100**, across six files. The removed Telegram-only ambiguity workaround accounts for the engine reduction.
-- `MURPH_COMPLEXITY_BASE_SHA=89a15d73f0 pnpm complexity:diff` ran once and exited **1**. Debt above the threshold increased by 1 in engine outbox, 1 in the runtime entrypoint, 11 in callbacks, and 2 in the assistant phase. Maximum complexity decreased by 2 in engine outbox, stayed unchanged in callbacks, and increased by 1 in each of the entrypoint and assistant phase. Dispatch-state and workspace-runner passed. Reviewed the reported hotspots: the added branches are the requested selection predicates, strict claim guard, checkpoint metadata propagation and projection priority. Kept them at their existing owners rather than adding helpers solely to move the metric; completion guidance requires reviewing this metric, not treating it as a design verdict. This check remains red.
+- Production TypeScript against `89a15d73f0`: 211 lines added, 68 removed, net **+143**, across six files. The removed Telegram-only ambiguity workaround accounts for the engine reduction.
+- `MURPH_COMPLEXITY_BASE_SHA=89a15d73f0 pnpm complexity:diff` exits **0** after the follow-up refactor, with the guard and threshold unchanged. All six production files pass: engine outbox debt 82 → 80 and maximum 66 → 64; dispatch-state debt 48 → 48 and maximum 38 → 38; runtime entrypoint debt 420 → 419 and maximum 186 → 185; callbacks debt 154 → 154 and maximum 73 → 73; assistant phase debt 276 → 276 and maximum 114 → 114; workspace-runner debt 58 → 58 and maximum 70 → 70. The callbacks/assistant-phase deltas compare unmoved functions. The marker walk, prepared-dispatch predicate, missing-token outcome, deadline helpers and projection closure keep the existing decisions at their owners without increasing complexity debt.
 - `git diff --check`: exit 0. Changed-file privacy scan: pass. No new package, registry, state machine, wire or persisted format was introduced.
-- Remaining: no implementation or focused behavior proof left undone. The complexity check remains the explicit validation limitation above. No umbrella tests, live provider/model calls, push, PR, external review or deployment were run, as required by the local scope.
+- Remaining: no implementation or focused behavior proof left undone. The complexity guard now passes against the original production head. No umbrella tests, live provider/model calls, push, PR, external review or deployment were run, as required by the local scope.
 Completed: 2026-11-06

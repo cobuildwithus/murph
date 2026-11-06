@@ -97,7 +97,7 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
   let signal: AbortSignal | undefined;
   const collect = (preferredIntentIds: string[] = [], preferredEffectIds: string[] = []) => callbacks.collectHostedAssistantDeliverySideEffects({
     actionApprovalPort, includeBackgroundDueIntents: true, preferredIntentIds, preferredEffectIds, vaultRoot,
-    workspaceCheckpointedAt: checkpointedAt,
+    workspace: { checkpointedAt },
   });
   const drain = async (selected?: Awaited<ReturnType<typeof collect>>, prepare = true) => {
     const effects = selected ?? await collect();

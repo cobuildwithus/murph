@@ -259,15 +259,16 @@ it has been explicitly elevated to a cross-cutting invariant.
   advances the existing checkpoint deadline after foreground work, so waiting
   does not consume the request's ten-minute validity. An exact foreground reply
   prerequisite may also advance it; no later pass may rearm the deadline while
-  that reply waits. Internal assistant,
-  maintenance, retention, cleanup, projection, and scheduled wakes must not
-  shorten it. Only the exact assistant retry or follow-up wake projected
-  directly by the current foreground assistant phase may run as foreground
-  work inside that window without publishing a snapshot. The only other
-  exception is a server-identified, fixed-destination exact completion: a
-  generation-scoped phone-call-result or transport-idempotent
-  usage-referral-reward notification,
-  or a private Assistant Ask completion whose `aask_done_*` identity binds its
+  that reply waits. Internal assistant, maintenance, retention, cleanup,
+  projection, and scheduled wakes must not shorten it. A background delivery
+  claim waiting for publication keeps that window within eight minutes of the
+  claim, so stale-send recovery cannot judge a live, unsent claim. Only the exact
+  assistant retry or follow-up wake projected directly by the current foreground
+  assistant phase may run as foreground work inside that window without
+  publishing a snapshot. The only other exception is a server-identified,
+  fixed-destination exact completion: a generation-scoped phone-call-result or
+  transport-idempotent usage-referral-reward notification, or a private Assistant
+  Ask completion whose `aask_done_*` identity binds its
   exact text, personal member, current direct route, and expiry. After fresh
   conversation work has priority, the runtime may select only those durable
   mailbox families, compose them queue-only, and persist their causal outbox

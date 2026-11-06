@@ -3018,10 +3018,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         // another quiet window or weakening Ask authority.
         setIdleCheckpointStartBy(Date.now());
       }
-      const effectDeadline = Math.min(
-        ...[...pendingDurableCheckpointEffects, ...passResult.afterDurableCheckpoint]
-          .map((effect) => effect.checkpointStartByMs ?? Infinity),
-      );
+      const effectDeadline = readHostedDurableEffectsCheckpointStartByMs([
+        ...pendingDurableCheckpointEffects,
+        ...passResult.afterDurableCheckpoint,
+      ]);
       if (effectDeadline < (idleCheckpointStartByMs ?? Infinity)) {
         setIdleCheckpointStartBy(effectDeadline);
       }
@@ -3805,7 +3805,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   messageVolumeReceiptPort: foregroundRuntime.platform.effectsPort,
                   preferredIntentIds,
                   vaultRoot: restored.vaultRoot,
-                  workspaceCheckpointedAt: activeWorkspace?.checkpointedAt,
+                  workspace: activeWorkspace,
                 })).filter((effect) =>
                   preferredIntentIdSet.has(effect.effectId)
                 );
@@ -6947,9 +6947,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
-        if (pendingDurableCheckpointEffects.some((effect) =>
-          effect.checkpointStartByMs !== undefined && effect.checkpointStartByMs <= Date.now()
-        )) return null;
+        if (hostedDurableEffectsCheckpointIsDue(pendingDurableCheckpointEffects)) return null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
@@ -7571,6 +7569,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true
           && !runtimeOwnerHandoffRequested;
+        const mayOfferVaultShareProjection = (): boolean =>
+          mayRunPostCheckpointWork()
+          && !mailboxBudgetExhausted()
+          && !hostedDurableEffectsCheckpointIsDue(readyDurableCheckpointEffects);
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
@@ -7681,13 +7683,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           continue;
         }
         let vaultShareOpportunity: HostedVaultShareProjectionOpportunity | null = null;
-        if (
-          mayRunPostCheckpointWork()
-          && !mailboxBudgetExhausted()
-          && !readyDurableCheckpointEffects.some((effect) =>
-            effect.checkpointStartByMs !== undefined && effect.checkpointStartByMs <= Date.now()
-          )
-        ) {
+        if (mayOfferVaultShareProjection()) {
           vaultShareOpportunity = await runOptionalPostCheckpointWork(
             async () =>
               await offerHostedVaultShareProjectionDuringIdle({
@@ -9679,6 +9675,18 @@ function selectHostedIdleCheckpointWake(input: {
     nextWakeAt: input.projectedWakeAt,
     nextWakeReason: input.projectedWakeReason,
   };
+}
+
+function readHostedDurableEffectsCheckpointStartByMs(
+  effects: readonly HostedWorkspaceDurableCheckpointEffect[],
+): number {
+  return Math.min(...effects.map((effect) => effect.checkpointStartByMs ?? Number.POSITIVE_INFINITY));
+}
+
+function hostedDurableEffectsCheckpointIsDue(
+  effects: readonly HostedWorkspaceDurableCheckpointEffect[],
+): boolean {
+  return readHostedDurableEffectsCheckpointStartByMs(effects) <= Date.now();
 }
 
 function readHostedWorkspaceDurableCheckpointEffectResult(

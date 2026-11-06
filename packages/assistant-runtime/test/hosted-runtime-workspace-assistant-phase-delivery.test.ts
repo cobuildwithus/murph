@@ -4966,6 +4966,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     const postCheckpoint = await result.afterCheckpoint?.();
@@ -5113,6 +5114,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
@@ -5197,7 +5199,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
-      workspaceCheckpointedAt: "2026-04-27T00:00:00.000Z",
+      workspace: expect.objectContaining({ checkpointedAt: "2026-04-27T00:00:00.000Z" }),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(

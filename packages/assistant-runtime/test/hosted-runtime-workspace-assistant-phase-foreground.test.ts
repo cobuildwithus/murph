@@ -345,6 +345,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: expect.any(String),
     });
   });
@@ -522,6 +523,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
@@ -580,6 +582,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
@@ -649,6 +652,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
@@ -900,6 +904,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [deliveryIntentId],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
@@ -1047,6 +1052,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [deliveryIntentId],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
@@ -1117,6 +1123,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [pendingEffectsItem.wake.effectId],
         preferredIntentIds: [],
+        workspace: null,
         vaultRoot: "/tmp/murph-vault",
       },
     );
@@ -1272,7 +1279,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
-      workspaceCheckpointedAt: "2026-04-27T00:00:00.000Z",
+      workspace: expect.objectContaining({ checkpointedAt: "2026-04-27T00:00:00.000Z" }),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
@@ -1412,7 +1419,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [effectId],
         preferredIntentIds: [],
-        workspaceCheckpointedAt: "2026-04-27T00:00:00.000Z",
+        workspace: expect.objectContaining({ checkpointedAt: "2026-04-27T00:00:00.000Z" }),
         vaultRoot,
       });
       expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
@@ -1539,6 +1546,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [effectId],
         preferredIntentIds: [],
+        workspace: null,
         vaultRoot,
       });
       expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
@@ -2213,6 +2221,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
@@ -2287,6 +2296,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [scenario.effectId],
         preferredIntentIds: [],
+        workspace: null,
         vaultRoot: scenario.vaultRoot,
       });
       expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
@@ -2502,6 +2512,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: ["intent_fresh"],
+      workspace: null,
       vaultRoot: expect.any(String),
     });
   });
@@ -3000,7 +3011,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
-      workspaceCheckpointedAt: "2026-04-27T00:00:00.000Z",
+      workspace: expect.objectContaining({ checkpointedAt: "2026-04-27T00:00:00.000Z" }),
       vaultRoot: expect.any(String),
     });
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
@@ -3044,7 +3055,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
-      workspaceCheckpointedAt: "2026-04-27T00:00:00.000Z",
+      workspace: expect.objectContaining({ checkpointedAt: "2026-04-27T00:00:00.000Z" }),
       vaultRoot: expect.any(String),
     });
     // The due checkpoint re-arms durably into the cleanup owner state; the
@@ -3336,6 +3347,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: expect.any(String),
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
