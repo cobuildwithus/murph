@@ -38,6 +38,7 @@ import {
 import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
+  isAssistantOutboxRetryableError,
   listAssistantOutboxIntents,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -1777,3 +1778,29 @@ it('propagates secure-file materialization interruption through the dynamic tool
   await expect(dispatchVaultFile('raw/inbox/synthetic/photo.png', async () => { throw interrupted }))
     .rejects.toBe(interrupted)
 })
+
+it.each(['transport', 'expired', 'missing', 'integrity', 'obsolete', 'size'] as const)(
+  'preserves the outbox retry policy for a %s materialization outcome',
+  async (reason) => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-file-read-retry-')
+    tempRoots.push(parentRoot)
+    const ref = 'raw/inbox/synthetic/photo.png'
+    const error = await readVerifiedAssistantVaultFileBytes({
+      vaultRoot,
+      file: {
+        kind: 'vault_file', ref, filename: 'photo.png', contentType: 'image/png',
+        sha256: 'a'.repeat(64), sizeBytes: 42, approvalId: null, approvalGeneration: null,
+      },
+      materializeWorkspaceArtifacts: async () => ({
+        materializedArtifactPaths: new Set(),
+        missingArtifactPaths: new Map([[`vault:${ref}`, reason]]),
+      }),
+    }).catch((failure: unknown) => failure)
+    expect(error).toMatchObject({
+      code: 'ASSISTANT_VAULT_FILE_UNAVAILABLE',
+      deliveryMayHaveSucceeded: false,
+      retryable: reason === 'transport',
+    })
+    expect(isAssistantOutboxRetryableError(error)).toBe(reason === 'transport')
+  },
+)

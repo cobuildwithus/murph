@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { addMeal, initializeVault, VaultError, withCanonicalWriteLock } from "@murphai/core";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
 import { writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
@@ -17,6 +18,7 @@ vi.mock("@murphai/core", async (importOriginal) => ({
 }));
 
 const lock = vi.mocked(withCanonicalWriteLock);
+afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
   lock.mockReset();
   lock.mockRejectedValue(new VaultError("CANONICAL_WRITE_LOCKED", "Synthetic long canonical writer."));
@@ -72,5 +74,29 @@ test("lock failures other than a busy writer stay control flow", async () => {
     const ownerLost = new Error("Synthetic owner lost");
     lock.mockRejectedValue(ownerLost);
     await expect(materialize([photo])).rejects.toMatchObject({ cause: ownerLost });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a manifest replaced after directory listing leaves the photo retryable", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-media-manifest-race-"));
+  try {
+    const { inbox, materialize, photo } = await setup(root);
+    const photoDirectory = path.dirname(path.join(root, photo));
+    const manifest = (await fs.readdir(photoDirectory)).find(name => name.startsWith("manifest."));
+    expect(manifest).toBeDefined();
+    const manifestPath = path.join(photoDirectory, manifest!);
+    const read = fs.readFile.bind(fs);
+    const readSpy = vi.spyOn(fs, "readFile").mockImplementation(async (...args) => {
+      // The real directory listing has already selected this manifest. Model
+      // the canonical writer moving it aside before the reader opens it.
+      if (args[0] === manifestPath) await fs.rename(manifestPath, `${manifestPath}.backup`);
+      return read(...args);
+    });
+    const result = await materialize([photo, inbox]);
+    expect(readSpy).toHaveBeenCalledWith(manifestPath, "utf8");
+    expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${photo}`]: "transport" });
+    expect([...result.materializedArtifactPaths]).toEqual([`vault:${inbox}`]);
+    expect(lock).not.toHaveBeenCalled();
+    await expect(stat(path.join(root, photo))).rejects.toMatchObject({ code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -14,6 +14,7 @@ import {
 } from "@murphai/contracts";
 
 import type { WriteBatch } from "./write-batch.ts";
+import { VaultError } from "../errors.ts";
 import { normalizeOpaquePathSegment, normalizeRelativeVaultPath, resolveVaultPathOnDisk } from "../path-safety.ts";
 import { inferRawAssetOwnerFromDirectory, rawDirectoryMatchesOwner } from "../raw.ts";
 import { toIsoTimestamp } from "../time.ts";
@@ -303,7 +304,16 @@ export async function canonicalRawArtifactMatches(input: {
   let matches = 0;
   for (const name of names.filter(isRawManifestFileName)) {
     const resolved = await resolveVaultPathOnDisk(input.vaultRoot, path.posix.join(rawDirectory, name));
-    const manifest = rawImportManifestSchema.parse(JSON.parse(await fs.readFile(resolved.absolutePath, "utf8")));
+    let content: string;
+    try {
+      content = await fs.readFile(resolved.absolutePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new VaultError("CANONICAL_WRITE_LOCKED", "A canonical raw manifest is being replaced.");
+      }
+      throw error;
+    }
+    const manifest = rawImportManifestSchema.parse(JSON.parse(content));
     if (manifest.rawDirectory !== rawDirectory || manifest.owner.kind !== owner.kind || manifest.owner.id !== owner.id) continue;
     for (const artifact of manifest.artifacts) {
       if (artifact.relativePath !== input.relativePath) continue;

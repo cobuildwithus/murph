@@ -850,15 +850,19 @@ async function readAssistantVaultBytesSnapshot(input: {
     metadata = snapshot.metadata
     bytes = snapshot.bytes
   } else {
-    input.signal?.throwIfAborted()
     const materialized = await input.materializeWorkspaceArtifacts?.([`vault:${ref}`], {
       maxFileBytes: input.maxBytes,
       signal: input.signal,
     })
     if (materialized && !materialized.materializedArtifactPaths.has(`vault:${ref}`)) {
-      throw new VaultCliError('ASSISTANT_VAULT_FILE_UNAVAILABLE', 'The vault file is unavailable and was not sent.')
+      throw Object.assign(new VaultCliError(
+        'ASSISTANT_VAULT_FILE_UNAVAILABLE',
+        'The vault file is unavailable and was not sent.',
+      ), {
+        deliveryMayHaveSucceeded: false,
+        retryable: materialized.missingArtifactPaths.get(`vault:${ref}`) === 'transport',
+      })
     }
-    input.signal?.throwIfAborted()
     metadata = await stat(absolutePath)
     assertAssistantVaultFileMetadataSupported(metadata, input.maxBytes)
     bytes = await readFile(absolutePath)

@@ -310,8 +310,14 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       missingArtifactPaths.set(key, "size");
       continue;
     }
-    if (!await hostedMediaReferenceIsCurrent(input.vaultRoot, entry)) {
-      missingArtifactPaths.set(key, "obsolete");
+    try {
+      if (!await hostedMediaReferenceIsCurrent(input.vaultRoot, entry)) {
+        missingArtifactPaths.set(key, "obsolete");
+        continue;
+      }
+    } catch (error) {
+      if (!isHostedMediaCanonicalLockBusy(error)) throw error;
+      missingArtifactPaths.set(key, "transport");
       continue;
     }
     if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {

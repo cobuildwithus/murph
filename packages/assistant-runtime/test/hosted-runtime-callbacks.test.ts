@@ -20586,3 +20586,105 @@ it.each(["telegram", "linq"] as const)("hydrates approved %s files after a cold 
     } finally { await rm(root, { recursive: true, force: true }); }
   }
 });
+
+it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery through the real outbox dispatcher", async (channel) => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-outbox")>("@murphai/assistant-engine/assistant-outbox");
+  mocks.dispatchAssistantOutboxIntent.mockImplementation(actual.dispatchAssistantOutboxIntent);
+  mocks.readAssistantOutboxIntentMirrorState.mockImplementation(actual.readAssistantOutboxIntentMirrorState);
+  mocks.readAssistantOutboxIntent.mockImplementation(actual.readAssistantOutboxIntent);
+  mocks.readAssistantVaultFileMedia.mockImplementation(actual.readAssistantVaultFileMedia);
+  mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(actual.buildAssistantVaultFileSendApprovalRequest);
+  mocks.readVerifiedAssistantVaultFileBytes.mockImplementation(actual.readVerifiedAssistantVaultFileBytes);
+  mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(actual.applyAssistantVaultFileSendApprovalResult);
+  mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(actual.saveAssistantOutboxIntentIfUnchanged);
+  mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockImplementation(actual.beginAssistantOutboxIntentMirrorPreparedDispatch);
+  mocks.resetAssistantOutboxPreparedDispatchById.mockImplementation(actual.resetAssistantOutboxPreparedDispatchById);
+  mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(actual.shouldDispatchAssistantOutboxIntent);
+  for (const interruption of ["during-read", "before-read", "owner-loss"] as const) {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-file-interruption-"));
+    const ref = "raw/inbox/synthetic/photo.png";
+    const bytes = Buffer.from("synthetic approved photo");
+    const target = channel === "telegram" ? "123" : "chat_123";
+    const cancel = new AbortController();
+    const reason = new Error("Synthetic materialization interruption");
+    let interrupt = false;
+    const get = vi.fn(async () => {
+      if (interrupt) {
+        if (interruption === "during-read") cancel.abort(reason);
+        throw reason;
+      }
+      return bytes;
+    });
+    try {
+      await initializeVault({ vaultRoot: root, timezone: "UTC" });
+      await writeHostedMediaReferenceCatalogue({ vaultRoot: root, catalogue: { schema: "murph.hosted-media-refs.v1", entries: [{
+        relativePath: ref, mediaId: "c".repeat(64), mediaKind: "image", mimeType: "image/png", byteSize: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"), recordedAt: "2030-01-01T00:00:00Z", expiresAt: null,
+      }] } });
+      const materializeWorkspaceArtifacts = createHostedArtifactMaterializer({
+        vaultRoot: root, operatorHomeRoot: root, mediaStore: { put: async () => {}, get },
+      });
+      const pending = { approvalId: `haa_${"a".repeat(32)}`, approvalUrl: "https://murph.test/approve/synthetic", expiresAt: "2099-01-01T00:00:00.000Z", status: "pending" as const };
+      const approval = { approvalId: pending.approvalId, approvalGeneration: "b".repeat(64), status: "approved" as const };
+      const request = vi.fn(async () => pending);
+      const consume = vi.fn(async () => {
+        if (interrupt && interruption === "before-read") cancel.abort(reason);
+        return approval;
+      });
+      await actual.requestAssistantVaultFileSend({
+        actionApprovalPort: { request, read: vi.fn() }, channel, bindingDelivery: { kind: "thread", target },
+        ref, sessionId: "synthetic-session", threadId: "synthetic-thread", threadIsDirect: true, turnId: "synthetic-turn",
+        vault: root, materializeWorkspaceArtifacts,
+      });
+      const [pendingIntent] = await actual.listAssistantOutboxIntents(root);
+      assert.ok(pendingIntent);
+      const approved = actual.applyAssistantVaultFileSendApprovalResult({ intent: pendingIntent, approval, now: new Date() });
+      const file = actual.readAssistantVaultFileMedia(approved)!;
+      const effect = buildHostedAssistantDeliveryEffect({
+        effectId: approved.intentId, dedupeKey: approved.dedupeKey,
+        payload: createPayload({ channel, bindingDeliveryKind: "thread", bindingDeliveryTarget: target,
+          media: [file], transportIdempotent: channel === "linq", idempotencyKey: approved.deliveryIdempotencyKey ?? undefined }),
+      });
+      await actual.saveAssistantOutboxIntent(root, { ...approved, dedupeKey: effect.fingerprint });
+      await rm(path.join(root, ref));
+      const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }));
+      mocks.sendLinqMessage.mockImplementation(async (_request, dependencies) => {
+        expect(await dependencies.loadVaultFile(file)).toEqual(bytes);
+        return { providerMessageId: "synthetic-sent", providerThreadId: target, target, targetKind: "thread" };
+      });
+      const input = {
+        actionApprovalPort: { consume, request, read: vi.fn(async () => ({
+          ...approval, cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey(pending),
+        })) }, assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub(), providerFetch,
+        platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" }, materializeWorkspaceArtifacts,
+        vaultRoot: root, wake: HOSTED_WAKE.wake,
+      };
+      const prepared = await prepareHostedAssistantDeliveryEffectsForDispatch(input);
+      expect(prepared.preparedDispatches).toHaveLength(channel === "telegram" ? 1 : 0);
+      interrupt = true;
+      await expect(drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true, signal: cancel.signal }))
+        .rejects.toMatchObject({ name: "AssistantWorkspaceArtifactMaterializationError", cause: reason });
+      const interrupted = await actual.readAssistantOutboxIntent(root, approved.intentId);
+      expect(interrupted?.status).toBe(channel === "telegram" && interruption !== "owner-loss" ? "pending" : "sending");
+      expect(interrupted?.lastError).toBeNull();
+      expect(interrupted?.delivery).toBeNull();
+      expect(providerFetch).not.toHaveBeenCalled();
+      interrupt = false;
+      // Unprepared Linq sends recover through the existing stale-sending timer.
+      // Advance only Date; keep real filesystem and provider dispatch scheduling.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(Date.now() + 11 * 60 * 1000));
+      const retry = await drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true });
+      expect(retry).toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+      const delivered = await actual.readAssistantOutboxIntent(root, approved.intentId);
+      expect(delivered?.status).toBe("sent");
+      expect(delivered?.media).toEqual(approved.media);
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});

@@ -45,6 +45,7 @@ import {
 } from "@murphai/hosted-execution/phone-calls";
 import {
   ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
+  AssistantWorkspaceArtifactMaterializationError,
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
@@ -2797,6 +2798,14 @@ function isHostedBackgroundDeliveryDeferredError(error: unknown): boolean {
   ) === "fresh_foreground_input";
 }
 
+function shouldRethrowHostedAssistantDispatchError(
+  error: unknown,
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null,
+): boolean {
+  return error instanceof AssistantWorkspaceArtifactMaterializationError
+    || (preparedDispatch !== null && isHostedBackgroundDeliveryDeferredError(error));
+}
+
 function assertHostedBackgroundDeliveryNotYielded(input: {
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
 }): void {
@@ -3523,8 +3532,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             intent.deliveryIdempotencyKey,
           ) !== null,
         shouldRethrowDispatchError: ({ error }) =>
-          input.preparedDispatch !== null
-          && isHostedBackgroundDeliveryDeferredError(error),
+          shouldRethrowHostedAssistantDispatchError(error, input.preparedDispatch),
       },
       trackMessageVolumeReceipt:
         input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
