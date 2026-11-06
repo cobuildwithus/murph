@@ -8,11 +8,13 @@ import {
   type HostedFirstPartyAuthPanelView,
 } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
 import {
+  LINK_PAGE_FORM_CLASS,
   LINK_PAGE_NIGHT_TOKENS,
   LinkPageFrame,
   LinkPageLink,
   LinkPageScreen,
 } from "@/src/components/link-page/link-page-shell";
+import { cn } from "@/src/lib/utils";
 
 type LinkPageSignInProps = {
   children?: ReactNode;
@@ -43,7 +45,7 @@ export function LinkPageSignInScreen({ children, detail, title }: LinkPageSignIn
     <LinkPageScreen
       actions={
         <div
-          className="flex w-full flex-col items-center gap-1 [&_button[data-slot=button]]:rounded-full [&_input]:border-[#FFFCF6]/15 [&_input]:bg-[#2A2622] [&_input]:text-[#FFFCF6]"
+          className={cn("flex w-full flex-col items-center gap-1", LINK_PAGE_FORM_CLASS)}
           style={LINK_PAGE_NIGHT_TOKENS}
         >
           <div className="w-full">
