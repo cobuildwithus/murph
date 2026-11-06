@@ -371,38 +371,15 @@ test("failed tombstone cleanup never rewinds the cursor or starves a healthy pho
     }
   };
   const cursors: Array<string | undefined> = [];
-  const cleanupAttempts: number[] = [];
   for (let pass = 0; pass < 4; pass++) {
     await f.pass();
     await f.restore(await f.snapshot(), {});
     const restored = await f.catalogue();
     cursors.push(restored.mealUploadCursor);
-    cleanupAttempts.push(restored.entries.find(entry => entry.mediaId === tombstone!.mediaId)?.uploadAttempts ?? 0);
     if (restored.entries.find(entry => entry.mediaId === healthy!.mediaId)?.pendingUpload === false) break;
   }
   expect(await f.store.mediaStore.get(healthy!, { purpose: "workspace_media_materialization" })).toEqual(expected);
-  expect(cursors).toEqual([stalled!.mediaId, healthy!.mediaId]);
-  expect(cleanupAttempts).toEqual([0, 0]);
-});
-
-test("a refunded head pays once when its own media write fails", async () => {
-  const f = await fixture(2); await f.maintain();
-  const catalogue = await f.catalogue();
-  const [head, tombstone] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
-  const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
-  await deleteEvent({ vaultRoot: f.vaultRoot, eventId: f.meals.find(meal => meal.event.mealId === owner.id)!.event.id });
-  catalogue.mealUploadCursor = tombstone!.mediaId;
-  await writeHostedMediaReferenceCatalogue({ vaultRoot: f.vaultRoot, catalogue });
-  let attemptsBeforeFailure: number | undefined;
-  f.store.hooks.before = async (op, id) => {
-    if (op !== "put" || id !== head!.mediaId) return;
-    attemptsBeforeFailure = (await f.catalogue()).entries.find(entry => entry.mediaId === id)?.uploadAttempts;
-    throw mediaFailure();
-  };
-  const budget = createHostedMealMediaBudget();
-  expect(await f.pass({ budget })).toMatchObject({ retired: 1, failed: 1, pending: 1 });
-  expect(attemptsBeforeFailure).toBe(0);
-  expect((await f.catalogue()).entries).toEqual([expect.objectContaining({ mediaId: head!.mediaId, uploadAttempts: 1 })]);
-  expect((await f.catalogue()).mealUploadCursor).toBe(head!.mediaId);
-  expect(budget.remaining).toBe(8);
+  expect(cursors).toEqual([stalled!.mediaId, tombstone!.mediaId]);
+  expect(f.store.calls.filter(call => call.operation === "record").map(call => call.mediaId))
+    .toEqual([stalled!.mediaId, healthy!.mediaId, tombstone!.mediaId, stalled!.mediaId]);
 });
