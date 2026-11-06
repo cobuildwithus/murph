@@ -36,7 +36,6 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   if (!game || !["live", "negotiating"].includes(game.status) || isGameInviteExpired(game, now)
     || !proposal || proposal.id !== proposalId || !isPairRoster(game.players)) return false;
   if (!isGameOn(game)) return false;
-  if (proposal.deliveryStatus === "sent") return true;
   if (proposal.origin === "chat") return false;
   const { phones, message } = await prepareGameChatPlayers(game, proposal);
   const players = gameMemberIds(game.players);
@@ -56,7 +55,6 @@ async function deliverGroupChangeProposal(gameId: string, proposalId: string, no
   const game = current.row;
   const proposal = await readPendingGameChange(game);
   if (!proposal || proposal.origin === "chat") return false;
-  if (proposal.deliveryStatus === "sent") return true;
   if (!game.chatContainerMemberId) return false;
   const audience = await readGroupGameChatAuthority(game, game.chatContainerMemberId);
   if (!audience) return false;

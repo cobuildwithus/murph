@@ -312,15 +312,6 @@ async function finishBootstrap(input: ControlInput, receipt: FrozenReceipt, trus
     await authorizeBootstrapEffectTx(input, tx, trustedRecovery);
     await attachHostedThreadContainerBootstrapRouteTx({ gameId: input.request.gameId, prepared, prisma: tx });
     await tx.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { bootstrapRouteAttachedAt: new Date(), retryAfterAt: null } });
-    const proposalPrefix = `game-change:${input.request.gameId}:`;
-    if (input.request.eventId.startsWith(proposalPrefix)) {
-      const proposalId = input.request.eventId.slice(proposalPrefix.length);
-      // Delivery metadata must not replace the sealed canonical proposal envelope.
-      await tx.$executeRaw`UPDATE game
-        SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"sent"'::jsonb)
-        WHERE id = ${input.request.gameId} AND chat_container_member_id = ${input.memberId}
-          AND pending_change->>'id' = ${proposalId}`;
-    }
   });
   return { action: "game_chat_bootstrap", result: { status: "sent", message: payload.message, deliveryId: receipt.id, chatId, accountLookupKey: payload.accountLookupKey, providerMessageId: payload.messageId ?? null, acceptedAt: payload.acceptedAt! } };
 }
