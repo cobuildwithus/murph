@@ -25,6 +25,7 @@ export const POST = withJsonError(async (request: Request) => {
     }),
   );
   const result = await submitMemberAction({
+    assertCurrentAuthorityTx: tx => miniApp.assertCredentialCurrentTx(credential, tx),
     memberId: credential.userId,
     prisma,
     request: action,

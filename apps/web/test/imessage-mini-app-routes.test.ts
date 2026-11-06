@@ -602,6 +602,13 @@ describe("iMessage mini-app routes", () => {
       body,
     ));
     expect(first.status).toBe(202);
+    expect(mocks.updateAgentSessions).toHaveBeenCalledWith({
+      where: { id: ACTIVE_SESSION.id, userId: ACTIVE_SESSION.userId,
+        tokenHash: createHash("sha256").update(`murph:imessage-mini-app:v1\0${MESSAGES_TOKEN}`).digest("hex"),
+        revokedAt: null, expiresAt: { gt: expect.any(Date) } },
+      data: { lastSeenAt: expect.any(Date) },
+    });
+    expect(invocationOrder(mocks.updateAgentSessions)).toBeLessThan(invocationOrder(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx));
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
     const admitted = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0].envelope;
     expect(admitted.request).toMatchObject({

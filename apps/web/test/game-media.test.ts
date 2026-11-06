@@ -1,3 +1,4 @@
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -84,6 +85,47 @@ describe("game media when deployed (private Cloudflare Images)", () => {
     };
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); mocks.control = null; });
+
+  const key = `${PREFIX}${"a".repeat(64)}.jpg`;
+  const put = () => putGameMedia({ bytes: JPEG, contentType: "image/jpeg", prefix: PREFIX });
+  const hostedClient = (fetchImpl: typeof fetch) => createCloudflareHostedControlClient({
+    baseUrl: "https://control.example.test", getBearerToken: async () => "synthetic-token", fetchImpl,
+  });
+
+  it.each([new Error("outage"), new TypeError("fetch failed"), new SyntaxError("bad JSON"), new DOMException("timeout", "TimeoutError")])("makes hosted stat and put failures retryable: %s", async cause => {
+    for (const operation of ["statGameImage", "putGameImage"] as const) {
+      mocks.control![operation].mockRejectedValueOnce(cause);
+      await expect(operation === "statGameImage" ? statGameMedia(key) : put()).rejects.toMatchObject({
+        code: "GAME_MEDIA_UNAVAILABLE", httpStatus: 503, retryable: true, cause,
+      });
+    }
+  });
+
+  it.each([400, 401, 403, 413, 500, 503])("translates real Worker HTTP %s at stat and put", async status => {
+    const client = hostedClient(async () => Response.json({ error: "synthetic refusal" }, { status }));
+    mocks.control!.statGameImage.mockImplementation(client.statGameImage);
+    mocks.control!.putGameImage.mockImplementation(client.putGameImage);
+    await expect(statGameMedia(key)).rejects.toMatchObject({ code: "GAME_MEDIA_UNAVAILABLE", httpStatus: 503, retryable: true });
+    await expect(put()).rejects.toMatchObject(status === 400 || status === 413
+      ? { code: "INVALID_REQUEST", httpStatus: 400, retryable: false }
+      : { code: "GAME_MEDIA_UNAVAILABLE", httpStatus: 503, retryable: true });
+  });
+
+  it("keeps a real Worker 404 absent, including the legacy lookup", async () => {
+    const client = hostedClient(async () => new Response(null, { status: 404 }));
+    mocks.control!.statGameImage.mockImplementation(client.statGameImage);
+    mocks.control!.readGameMedia.mockImplementation(client.readGameMedia);
+    await expect(statGameMedia(key)).resolves.toBeNull();
+  });
+
+  it("makes legacy recovery and unavailable storage retryable", async () => {
+    mocks.control!.readGameMedia.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(statGameMedia(key)).rejects.toMatchObject({ code: "GAME_MEDIA_UNAVAILABLE", retryable: true });
+    mocks.control = null;
+    for (const operation of [() => statGameMedia(key), put]) {
+      await expect(operation()).rejects.toMatchObject({ code: "GAME_MEDIA_UNAVAILABLE", httpStatus: 503, retryable: true });
+    }
+  });
 
   it("uploads idempotently through the owner-bound Worker and returns a transient delivery capability", async () => {
     const key = await putGameMedia({ bytes: JPEG, contentType: "image/jpeg", prefix: PREFIX });
