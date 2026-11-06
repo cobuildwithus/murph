@@ -346,7 +346,7 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
-  fails.
+  fails. A moderated removal clears any stored recap story that may hold the content in the transaction that removes it, reads hide a story that predates that rule, and generated work may publish only from sources still permitted at commit.
 - A canonical group-join reaction accepted for reply-gated proactive outreach
   is Web-owned durable work. The eligible phone participant either has no member
   identity or is a verified, unsuspended member without active hosted access who

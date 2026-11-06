@@ -5,7 +5,7 @@ export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, H
 export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
 export type { GameNoticeRoom } from "./game-chat-notifications.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
-export { parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema } from "./game-tools.ts";
+export { GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema } from "./game-tools.ts";
 export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,

@@ -205,7 +205,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const players = await requireExactGameChat(input.memberId, input.multiplayer);
   if (!supportsGameChatRoster(input, players)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const audience = input.multiplayer ? await readGameChatAudience(input.memberId) : undefined;
-  const material = await readGameRecapMaterial(gameId, input.memberId, players);
+  const material = await readGameRecapMaterial(gameId, input.memberId, players, eventId);
   if (!material || (!input.multiplayer && material.validation.group) || !material.validation.group && audience && (audience.contacts.length !== 2 || await hasGameChatRestriction(prisma, audience.memberIds))) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   if (input.request.action === "read_game") return { action: "read_game", result: { status: "ok", recapGame: material.game } };
   const authorizeMutation = async (tx: Prisma.TransactionClient) => {

@@ -605,10 +605,21 @@ resulting avatar. No private photo is shared with the subject or other players.
   hosted `read_game` / `write_recap` turn. No second queue or direct send exists.
   The old recap is retained until validation accepts a replacement; acceptance
   atomically replaces its ciphertext and records a once-only acceptance event.
-  A failed or rejected turn leaves the old story visible. The normal outbox sends
-  the accepted chat line plus `https://www.withmurph.ai/recap/<gameId>` to the
+  A failed or rejected turn retains the old story under the same visibility rules.
+  The normal outbox sends the accepted chat line plus `https://www.withmurph.ai/recap/<gameId>` to the
   game's existing group. Game API readers see the replacement on their next read;
   the public URL remains a generic app handoff.
+  Removing a post for everyone clears any stored story that may hold it in the
+  removal transaction. Reads hide a stored story that may hold a post removed
+  for everyone from every viewer; its ciphertext stays until a separately
+  approved cleanup. No pass over existing stories runs at deploy time. The
+  settled result stays and `recap: null` uses the app's existing template.
+  The newest accepted generation's witness, or the original generation's witness
+  when none was accepted, determines what the story may hold. Missing or malformed
+  witnesses cannot rule out a removed post. Report-only suppression remains per
+  viewer; legacy stories without removals and withdrawn or retaken posts alone
+  do not trigger this rule. Already-sent chat lines and game lore are not cleared.
+  Regeneration can restore a clean story when the existing recap rules permit it.
   Pair and game locks, the roster re-read, no departed player, no block, settled
   status, rollout and room binding all apply. Runtime authority, fresh provider
   roster checks, recap validation and normal egress guards still apply downstream.
