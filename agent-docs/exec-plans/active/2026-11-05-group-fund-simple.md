@@ -45,17 +45,24 @@ Requested outcomes:
   an exact $5 charge at activation, then exact $5 refills up to the chosen
   maximum. The dial already sent the chosen cap to the server; only the button
   ignored it (it renders the fixed `usage_5_usd` offer) and the number updated
-  only on release. The fix is that the dial updates live, the button states the
-  chosen amount, and the page says plainly that today's charge is $5. Charging
-  the whole amount up front would be a billing change: no `$50` offer exists and
-  the refill and recovery rules assume exact $5 purchases. It stays out of scope
-  unless the owner asks for it.
+  only on release. The fix is that the dial updates live and the button states
+  the chosen amount. The owner confirmed that charging $5 at a time stays.
+  Charging the whole amount up front would be a billing change: no `$50` offer
+  exists and the refill and recovery rules assume exact $5 purchases.
+- **The page matches the app.** The owner picked the night design from the
+  Paper review: the app's night ground, a Fraunces headline per state, a gold
+  dial, one cream pill. It is the twin of the challenge invite link.
+- **No notes under the button.** The owner removed them. Only controls sit there,
+  such as `Give once instead`. The $5 charge is stated in the raise-limit drawer
+  and at Stripe Checkout, not on the page.
 - **The flow moves onto the page.** A full-height drawer currently opens over a
   nearly empty page. Group checkout renders inline, using the existing
   `useHostedUsageTopUpDialog` controller and reducer without changing their
   semantics. `HostedUsageTopUpDialog` keeps only personal and family scope.
-- **Canceled or failed checkout returns to the normal page** with a one-line
-  note. There is no separate terminal screen.
+- **Canceled or failed checkout returns to the normal page** with one sentence
+  under the headline. There is no separate terminal screen.
+- **The dial shows only while refills are running.** A paused or failed-payment
+  sponsor resolves that first, then changes the limit.
 
 ## Plan review outcomes
 

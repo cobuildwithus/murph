@@ -17,28 +17,26 @@ import {
   type HostedUsageTopUpSelectionScreen,
 } from "@/src/components/settings/hosted-usage-top-up-state";
 import { useHostedUsageTopUpDialog } from "@/src/components/settings/use-hosted-usage-top-up-dialog";
-import { Button, buttonVariants } from "@/src/components/ui/button";
-import { SegmentedControl } from "@/src/components/ui/segmented-control";
 import { Spinner } from "@/src/components/ui/spinner";
 import type {
   HostedGroupSponsorshipMonthlyCapMinor,
 } from "@/src/lib/hosted-groups/group-sponsorship-contract";
-import {
-  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
-} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
-import { cn } from "@/src/lib/utils";
 
 import {
   GroupFundingDial,
   type GroupFundingDialOption,
 } from "./group-funding-dial";
 import {
-  GroupFundingNotice,
-  GroupFundingStatusView,
-  type GroupFundingStatusTone,
+  GROUP_FUNDING_PILL_CLASS,
+  GroupFundingError,
+  GroupFundingLink,
+  GroupFundingPill,
+  GroupFundingScreen,
+  GroupFundingTicket,
 } from "./group-usage-funding-shell";
 
 type GroupFundingMode = "monthly" | "one_time";
+type GroupFundingFailure = "not_opened" | "unconfirmed";
 
 interface GroupFundingMonthlyPlan {
   capOptions: readonly GroupFundingMonthlyCapOption[];
@@ -51,53 +49,55 @@ interface GroupFundingMonthlyCapOption {
   monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor;
 }
 
-const MODE_OPTIONS = [
-  { label: "Monthly", value: "monthly" },
-  { label: "One time", value: "one_time" },
-] as const;
-
-const GROUP_FUNDING_FAILURE_COPY = {
-  not_opened: {
-    description: "Nothing was charged. Try again.",
-    title: "Checkout didn’t open",
-  },
-  unconfirmed: {
-    description: "Check it first so you aren’t charged twice.",
-    title: "We couldn’t confirm your payment",
-  },
-} as const;
+const MODE_SWITCH_LABELS: Record<GroupFundingMode, string> = {
+  monthly: "Give once instead",
+  one_time: "Sponsor monthly instead",
+};
 
 const ENDED_PURCHASE_NOTICES = {
   expired: "Checkout canceled. Nothing was charged.",
   payment_failed: "That payment didn’t go through. Nothing was charged.",
 } as const;
 
+const GROUP_FUNDING_FAILURE_COPY = {
+  not_opened: {
+    detail: "Nothing was charged. Try again.",
+    title: "Checkout didn’t open.",
+  },
+  unconfirmed: {
+    detail: "Check it first so you aren’t charged twice.",
+    title: "We couldn’t confirm that payment.",
+  },
+} as const;
+
 type GroupFundingController = ReturnType<typeof useHostedUsageTopUpDialog>;
-type GroupFundingScreen = GroupFundingController["state"]["screen"];
+type GroupFundingScreenState = GroupFundingController["state"]["screen"];
 
 function GroupFundingCheckout({
   activePurchase = null,
   checkoutUrl,
+  groupName,
   initialMode,
   initialMonthlyCapMinor,
   inert = false,
   monthly = null,
-  note,
   oneTimeOffers,
   payerMemberId,
   purchaseReturn = null,
+  sponsoredByAnother = false,
 }: {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
   checkoutUrl: string;
+  groupName: string;
   /** The mode of a purchase already in progress, when there is one. */
   initialMode?: GroupFundingMode;
   initialMonthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   inert?: boolean;
   monthly?: GroupFundingMonthlyPlan | null;
-  note?: ReactNode;
   oneTimeOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
+  sponsoredByAnother?: boolean;
 }) {
   const { refresh } = useRouter();
   const [requestedMode, setMode] = useState<GroupFundingMode>(
@@ -129,7 +129,7 @@ function GroupFundingCheckout({
   const { screen } = controller.state;
   const statusHeadingRef = useRef<HTMLHeadingElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
-  const statusVisible = screen.kind === "purchase" || screen.capacityConflict;
+  const statusVisible = readStatusVisible(screen);
   const purchaseEnded = hasOwnPurchaseEnded(screen);
   // The note only explains the page the person landed on. Starting again
   // replaces it.
@@ -168,6 +168,7 @@ function GroupFundingCheckout({
     return (
       <GroupFundingPurchaseScreen
         controller={controller}
+        groupName={groupName}
         headingRef={statusHeadingRef}
         onStartOver={() => {
           controller.handleOpenChange(true);
@@ -181,24 +182,13 @@ function GroupFundingCheckout({
 
   if (screen.capacityConflict) {
     return (
-      <GroupFundingStatusView
+      <GroupFundingCapacityConflict
         headingRef={statusHeadingRef}
-        message={HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE}
-        title="More credit can’t be added right now"
-        tone="attention"
-      >
-        <Button
-          className="w-full"
-          onClick={() => {
-            controller.changeAmount();
-            refresh();
-          }}
-          size="xl"
-          type="button"
-        >
-          Try again
-        </Button>
-      </GroupFundingStatusView>
+        onTryAgain={() => {
+          controller.changeAmount();
+          refresh();
+        }}
+      />
     );
   }
 
@@ -207,16 +197,35 @@ function GroupFundingCheckout({
       attempt={screen.attempt}
       controller={controller}
       endedPurchase={endedPurchase}
+      groupName={groupName}
+      headingRef={statusHeadingRef}
       mode={mode}
       monthly={monthly}
       monthlyCapMinor={monthlyCapMinor}
-      note={note}
       noteRef={noteRef}
       onModeChange={setMode}
       onMonthlyCapChange={setMonthlyCapMinor}
       onOneTimeOfferChange={setOneTimeOfferCode}
       oneTimeOfferCode={oneTimeOfferCode}
       oneTimeOffers={oneTimeOffers}
+      sponsoredByAnother={sponsoredByAnother}
+    />
+  );
+}
+
+function GroupFundingCapacityConflict({
+  headingRef,
+  onTryAgain,
+}: {
+  headingRef?: Ref<HTMLHeadingElement>;
+  onTryAgain?: () => void;
+}) {
+  return (
+    <GroupFundingScreen
+      actions={<GroupFundingPill onClick={onTryAgain}>Try again</GroupFundingPill>}
+      detail="Try again once the group has used some of it."
+      headingRef={headingRef}
+      title="The group’s topped up for now."
     />
   );
 }
@@ -225,30 +234,34 @@ function GroupFundingSelectionScreen({
   attempt,
   controller,
   endedPurchase,
+  groupName,
+  headingRef,
   mode,
   monthly,
   monthlyCapMinor,
-  note,
   noteRef,
   onModeChange,
   onMonthlyCapChange,
   onOneTimeOfferChange,
   oneTimeOfferCode,
   oneTimeOffers,
+  sponsoredByAnother,
 }: {
   attempt: HostedUsageTopUpSelectionScreen["attempt"];
   controller: GroupFundingController;
   endedPurchase: HostedUsageTopUpSelectionScreen["endedPurchaseStatus"];
+  groupName: string;
+  headingRef: Ref<HTMLHeadingElement>;
   mode: GroupFundingMode;
   monthly: GroupFundingMonthlyPlan | null;
   monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor;
-  note: ReactNode;
   noteRef: Ref<HTMLParagraphElement>;
   onModeChange: (mode: GroupFundingMode) => void;
   onMonthlyCapChange: (cap: HostedGroupSponsorshipMonthlyCapMinor) => void;
   onOneTimeOfferChange: (offerCode: string) => void;
   oneTimeOfferCode: string;
   oneTimeOffers: readonly HostedUsageTopUpOffer[];
+  sponsoredByAnother: boolean;
 }) {
   const oneTimeOffer =
     oneTimeOffers.find((offer) => offer.offerCode === oneTimeOfferCode) ??
@@ -263,28 +276,40 @@ function GroupFundingSelectionScreen({
 
   const failedAttempt =
     attempt.kind === "locked" && attempt.error !== null ? attempt : null;
+  if (failedAttempt) {
+    return (
+      <GroupFundingAttemptFailure
+        busy={controller.checkoutInFlight}
+        failure={readGroupFundingFailure(failedAttempt)}
+        headingRef={headingRef}
+        onChangeAmount={controller.changeAmount}
+        onRetry={() => void controller.startCheckout(failedAttempt.offerCode)}
+      />
+    );
+  }
+
   const selection = {
     busy: controller.checkoutInFlight,
     // Starting is a safe no-op until the request identity loads, so only a tab
     // that truly can't pay shows a disabled button.
     canSubmit: controller.requestIdentityError === null,
-    failure: readGroupFundingFailure(failedAttempt),
-    locked: attempt.kind !== "idle",
-    mode,
-    monthlyRefillLabel: monthly?.offer.amountLabel ?? null,
-    note:
+    detail:
       controller.requestIdentityError ??
       (endedPurchase ? ENDED_PURCHASE_NOTICES[endedPurchase] : null) ??
-      note,
-    noteRef,
-    onChangeAmount: controller.changeAmount,
+      (sponsoredByAnother ? "You can still chip in." : null),
+    detailRef: noteRef,
+    headingRef,
+    locked: attempt.kind !== "idle",
+    mode,
     // An unresolved attempt owns its terms, so its recovery must resend them.
     onModeChange:
       monthly && oneTimeOffers.length > 0 && attempt.kind === "idle"
         ? onModeChange
         : null,
-    onSubmit: () =>
-      void controller.startCheckout(failedAttempt?.offerCode ?? offerCode),
+    onSubmit: () => void controller.startCheckout(offerCode),
+    title: sponsoredByAnother
+      ? `${capitalizeFirst(groupName)} is sponsored.`
+      : `Keep Murph in ${groupName}.`,
   };
 
   return monthly && mode === "monthly" ? (
@@ -316,7 +341,19 @@ function GroupFundingSelectionScreen({
   );
 }
 
-function hasOwnPurchaseEnded(screen: GroupFundingScreen): boolean {
+function capitalizeFirst(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function readStatusVisible(screen: GroupFundingScreenState): boolean {
+  return (
+    screen.kind === "purchase" ||
+    screen.capacityConflict ||
+    (screen.attempt.kind === "locked" && screen.attempt.error !== null)
+  );
+}
+
+function hasOwnPurchaseEnded(screen: GroupFundingScreenState): boolean {
   return (
     screen.kind === "purchase" &&
     !screen.targetConflict &&
@@ -327,23 +364,64 @@ function hasOwnPurchaseEnded(screen: GroupFundingScreen): boolean {
 
 // A request key means the attempt may have reached Stripe, so its outcome is
 // unknown rather than failed.
-function readGroupFundingFailure(
-  failedAttempt: { requestKey: string | null } | null,
-): "not_opened" | "unconfirmed" | null {
-  if (!failedAttempt) {
-    return null;
-  }
+function readGroupFundingFailure(failedAttempt: {
+  requestKey: string | null;
+}): GroupFundingFailure {
   return failedAttempt.requestKey !== null ? "unconfirmed" : "not_opened";
+}
+
+function GroupFundingAttemptFailure({
+  busy = false,
+  failure,
+  headingRef,
+  onChangeAmount,
+  onRetry,
+}: {
+  busy?: boolean;
+  failure: GroupFundingFailure;
+  headingRef?: Ref<HTMLHeadingElement>;
+  onChangeAmount?: () => void;
+  onRetry?: () => void;
+}) {
+  const unconfirmed = failure === "unconfirmed";
+  return (
+    <GroupFundingScreen
+      actions={
+        <>
+          <GroupFundingPill aria-busy={busy} disabled={busy} onClick={onRetry}>
+            {busy ? <Spinner className="size-5" /> : null}
+            {unconfirmed
+              ? busy
+                ? "Checking payment"
+                : "Check payment"
+              : busy
+                ? "Opening checkout"
+                : "Try again"}
+          </GroupFundingPill>
+          {unconfirmed ? null : (
+            <GroupFundingLink onClick={onChangeAmount}>
+              Change amount
+            </GroupFundingLink>
+          )}
+        </>
+      }
+      detail={GROUP_FUNDING_FAILURE_COPY[failure].detail}
+      headingRef={headingRef}
+      title={GROUP_FUNDING_FAILURE_COPY[failure].title}
+    />
+  );
 }
 
 function GroupFundingPurchaseScreen({
   controller,
+  groupName,
   headingRef,
   onStartOver,
   purchase,
   purchaseReturn,
 }: {
   controller: GroupFundingController;
+  groupName: string;
   headingRef: Ref<HTMLHeadingElement>;
   onStartOver: () => void;
   purchase: HostedUsageTopUpPurchaseScreen;
@@ -365,6 +443,7 @@ function GroupFundingPurchaseScreen({
           : "Cancel checkout"
       }
       checkoutError={purchase.checkoutError}
+      groupName={groupName}
       headingRef={headingRef}
       operation={purchase.operation}
       onCancel={() => void controller.cancelRecoveredCheckout()}
@@ -387,15 +466,14 @@ function GroupFundingSelection<Value extends number | string>({
   amount,
   busy = false,
   canSubmit = true,
-  failure = null,
+  detail,
+  detailRef,
+  headingRef,
   locked = false,
   mode,
-  monthlyRefillLabel,
-  note,
-  noteRef,
-  onChangeAmount,
   onModeChange,
   onSubmit,
+  title,
 }: {
   amount: {
     caption: string;
@@ -405,130 +483,69 @@ function GroupFundingSelection<Value extends number | string>({
   };
   busy?: boolean;
   canSubmit?: boolean;
-  /** How the last attempt failed. `unconfirmed` means it may have reached Stripe. */
-  failure?: "not_opened" | "unconfirmed" | null;
+  detail?: ReactNode;
+  detailRef?: Ref<HTMLParagraphElement>;
+  headingRef?: Ref<HTMLHeadingElement>;
   locked?: boolean;
   mode: GroupFundingMode;
-  monthlyRefillLabel: string | null;
-  note?: ReactNode;
-  noteRef?: Ref<HTMLParagraphElement>;
-  onChangeAmount?: () => void;
   onModeChange?: ((mode: GroupFundingMode) => void) | null;
   onSubmit: () => void;
+  title: string;
 }) {
   const selectedLabel =
     amount.options.find((option) => option.value === amount.value)
       ?.amountLabel ?? "";
   return (
-    <div
-      className="flex flex-1 flex-col gap-6"
-      data-mode={mode}
-      data-slot="group-funding-selection"
+    <GroupFundingScreen
+      actions={
+        <>
+          <GroupFundingPill
+            aria-busy={busy}
+            disabled={!canSubmit || locked}
+            onClick={onSubmit}
+          >
+            {busy ? <Spinner className="size-5" /> : null}
+            {readGroupFundingActionLabel({ busy, mode, selectedLabel })}
+          </GroupFundingPill>
+          {onModeChange ? (
+            <GroupFundingLink
+              onClick={() =>
+                onModeChange(mode === "monthly" ? "one_time" : "monthly")
+              }
+            >
+              {MODE_SWITCH_LABELS[mode]}
+            </GroupFundingLink>
+          ) : null}
+        </>
+      }
+      detail={detail}
+      detailRef={detailRef}
+      headingRef={headingRef}
+      title={title}
     >
-      {onModeChange ? (
-        <SegmentedControl
-          aria-label="How often"
-          className="h-11 rounded-xl"
-          itemClassName="h-9 rounded-lg"
-          onValueChange={onModeChange}
-          options={MODE_OPTIONS}
-          value={mode}
-        />
-      ) : null}
-
-      <div className="flex flex-1 items-center">
-        <GroupFundingDial
-          caption={amount.caption}
-          disabled={locked}
-          label={mode === "monthly" ? "Monthly amount" : "Amount"}
-          onValueChange={amount.onValueChange}
-          options={amount.options}
-          value={amount.value}
-        />
-      </div>
-
-      <div className="flex flex-col gap-3">
-        {failure ? (
-          <GroupFundingNotice
-            {...GROUP_FUNDING_FAILURE_COPY[failure]}
-            role="alert"
-            tone="attention"
-          />
-        ) : note ? (
-          <p
-            className="text-center text-sm/5 text-pretty text-foreground outline-none"
-            ref={noteRef}
-            role="status"
-            tabIndex={-1}
-          >
-            {note}
-          </p>
-        ) : null}
-
-        <Button
-          aria-busy={busy}
-          className="w-full"
-          disabled={!canSubmit || (failure ? busy : locked)}
-          onClick={onSubmit}
-          size="xl"
-          type="button"
-        >
-          {busy ? <Spinner data-icon="inline-start" /> : null}
-          {readGroupFundingActionLabel({ busy, failure, mode, selectedLabel })}
-        </Button>
-
-        {failure === "not_opened" && onChangeAmount ? (
-          <Button
-            className="w-full"
-            onClick={onChangeAmount}
-            size="lg"
-            type="button"
-            variant="ghost"
-          >
-            Change amount
-          </Button>
-        ) : failure ? null : (
-          <p className="text-center text-sm/5 text-pretty text-muted-foreground">
-            {mode === "monthly"
-              ? readMonthlyChargeNote({
-                  capLabel: selectedLabel,
-                  refillLabel: monthlyRefillLabel ?? selectedLabel,
-                })
-              : "One payment. Nothing repeats."}
-          </p>
-        )}
-      </div>
-    </div>
+      <GroupFundingDial
+        caption={amount.caption}
+        disabled={locked}
+        label={mode === "monthly" ? "Monthly amount" : "Amount"}
+        onValueChange={amount.onValueChange}
+        options={amount.options}
+        value={amount.value}
+      />
+    </GroupFundingScreen>
   );
 }
 
 function readGroupFundingActionLabel(input: {
   busy: boolean;
-  failure: "not_opened" | "unconfirmed" | null;
   mode: GroupFundingMode;
   selectedLabel: string;
 }): string {
-  if (input.failure === "unconfirmed") {
-    return input.busy ? "Checking payment" : "Check payment";
-  }
   if (input.busy) {
     return "Opening checkout";
   }
-  if (input.failure === "not_opened") {
-    return "Try again";
-  }
   return input.mode === "monthly"
     ? `Sponsor up to ${input.selectedLabel} a month`
-    : `Contribute ${input.selectedLabel}`;
-}
-
-function readMonthlyChargeNote(input: {
-  capLabel: string;
-  refillLabel: string;
-}): string {
-  return input.capLabel === input.refillLabel
-    ? `${input.refillLabel} today, and never more than that in a month. Cancel anytime.`
-    : `${input.refillLabel} today, then ${input.refillLabel} at a time as the group uses Murph, up to ${input.capLabel} a month. Cancel anytime.`;
+    : `Give ${input.selectedLabel}`;
 }
 
 interface GroupFundingPurchaseStatusContent {
@@ -536,7 +553,7 @@ interface GroupFundingPurchaseStatusContent {
   /** The primary action once this purchase has nothing left to do. */
   next?: "messages" | "start_over";
   title: string;
-  tone: GroupFundingStatusTone;
+  working?: true;
 }
 
 function readGroupFundingPurchaseStatus({
@@ -552,8 +569,7 @@ function readGroupFundingPurchaseStatus({
   if (poll.kind === "failed") {
     return {
       message: "You won’t be charged again. Try checking once more.",
-      title: "We couldn’t check your payment",
-      tone: "attention",
+      title: "We couldn’t check your payment.",
     };
   }
   if (status === "checkout_open" && !returnedFromSuccessfulCheckout) {
@@ -576,15 +592,24 @@ function readOpenCheckoutStatus(
   actions: HostedUsageTopUpPurchaseActions,
   purchase: HostedUsageTopUpPurchaseScreen,
 ): GroupFundingPurchaseStatusContent {
-  let message = actions.canResume
-    ? "Pick up where you left off, or cancel it to start over."
-    : "It can’t be reopened from here. Retry it, or cancel it to start over.";
   if (purchase.targetConflict) {
-    message = "It’s for another chat. Finish or cancel it before starting this one.";
-  } else if (purchase.selectionConflict) {
-    message = "Finish or cancel it before choosing another amount.";
+    return {
+      message: "It’s for another chat. Finish or cancel it before starting this one.",
+      title: "You have a checkout open.",
+    };
   }
-  return { message, title: "You have a checkout open", tone: "attention" };
+  if (purchase.selectionConflict) {
+    return {
+      message: "Finish or cancel it before choosing another amount.",
+      title: "You have a checkout open.",
+    };
+  }
+  return {
+    message: actions.canResume
+      ? "Pick up where you left off, or cancel to start over."
+      : "It can’t be reopened from here. Retry it, or cancel to start over.",
+    title: "You left checkout open.",
+  };
 }
 
 function readStartingCheckoutStatus(
@@ -593,14 +618,13 @@ function readStartingCheckoutStatus(
   return actions.canRetry
     ? {
         message: "Nothing was charged. It’s safe to retry.",
-        title: "Checkout didn’t open",
-        tone: "attention",
+        title: "Checkout didn’t open.",
       }
     : {
         message:
           "Your payment is still being set up. This usually takes a few seconds.",
-        title: "Almost ready",
-        tone: "working",
+        title: "Almost ready.",
+        working: true,
       };
 }
 
@@ -611,15 +635,14 @@ function readConfirmingStatus(
     ? {
         message:
           "This is taking longer than usual. It’s safe to leave this page.",
-        title: "Still confirming your payment",
-        tone: "attention",
+        title: "Still confirming your payment.",
       }
     : {
         message: "This usually takes a few seconds.",
         title: isEarlierPurchase(purchase)
-          ? "Confirming your earlier payment"
-          : "Confirming your payment",
-        tone: "working",
+          ? "Confirming your earlier payment."
+          : "Confirming your payment.",
+        working: true,
       };
 }
 
@@ -630,22 +653,19 @@ function readFinishedStatus(
     return {
       message: "Open Messages and pick up where you left off.",
       next: "messages",
-      title: "This group has more Murph",
-      tone: "done",
+      title: "This group has more Murph.",
     };
   }
   return purchase.status === "fulfilled"
     ? {
         message: "It’s finished, so you can start a new one.",
         next: "start_over",
-        title: "Your earlier payment went through",
-        tone: "done",
+        title: "Your earlier payment went through.",
       }
     : {
         message: "It’s closed, so you can start a new one.",
         next: "start_over",
-        title: "Your earlier checkout ended",
-        tone: "done",
+        title: "Your earlier checkout ended.",
       };
 }
 
@@ -653,6 +673,7 @@ function GroupFundingPurchaseStatus({
   actions,
   cancelLabel = "Cancel checkout",
   checkoutError,
+  groupName,
   headingRef,
   onCancel,
   onCheckAgain,
@@ -665,6 +686,7 @@ function GroupFundingPurchaseStatus({
   actions: HostedUsageTopUpPurchaseActions;
   cancelLabel?: string;
   checkoutError?: string | null;
+  groupName: string;
   headingRef?: Ref<HTMLHeadingElement>;
   onCancel?: () => void;
   onCheckAgain?: () => void;
@@ -676,81 +698,72 @@ function GroupFundingPurchaseStatus({
 }) {
   const busy = operation !== "idle";
   return (
-    <GroupFundingStatusView
-      error={checkoutError}
+    <GroupFundingScreen
+      actions={
+        <>
+          {checkoutError ? (
+            <GroupFundingError>{checkoutError}</GroupFundingError>
+          ) : null}
+          {status.next === "messages" ? (
+            // Messages has no deep link into an existing group thread, so the
+            // group follow-up can only open the app itself.
+            <a className={GROUP_FUNDING_PILL_CLASS} href="sms:">
+              <MessageCircle aria-hidden="true" className="size-5" />
+              Open Messages
+            </a>
+          ) : null}
+          {status.next === "start_over" ? (
+            <GroupFundingPill onClick={onStartOver}>Start over</GroupFundingPill>
+          ) : null}
+          {actions.canResume ? (
+            <GroupFundingPill disabled={busy} onClick={onResume}>
+              Keep going
+            </GroupFundingPill>
+          ) : null}
+          {actions.canRetry ? (
+            <GroupFundingPill
+              aria-busy={operation === "opening_checkout"}
+              disabled={busy}
+              onClick={onRetry}
+            >
+              {operation === "opening_checkout"
+                ? "Checking payment"
+                : "Retry payment"}
+            </GroupFundingPill>
+          ) : null}
+          {actions.canCheckAgain ? (
+            <GroupFundingPill disabled={busy} onClick={onCheckAgain}>
+              Check again
+            </GroupFundingPill>
+          ) : null}
+          {actions.canCancel ? (
+            <GroupFundingLink
+              aria-busy={operation === "canceling_checkout"}
+              disabled={busy}
+              onClick={onCancel}
+            >
+              {operation === "canceling_checkout" ? "Canceling" : cancelLabel}
+            </GroupFundingLink>
+          ) : null}
+        </>
+      }
+      below={
+        status.working ? (
+          <Spinner className="mt-[22px] size-6 text-[#EBD18B]" />
+        ) : status.next === "messages" ? (
+          <GroupFundingTicket kicker={`For ${groupName}`} title="More Murph" />
+        ) : null
+      }
+      detail={status.message}
       headingRef={headingRef}
-      message={status.message}
       title={status.title}
-      tone={status.tone}
-    >
-      {status.next === "messages" ? (
-        // Messages has no deep link into an existing group thread, so the group
-        // follow-up can only open the app itself.
-        <a
-          className={cn(buttonVariants({ size: "xl" }), "w-full")}
-          href="sms:"
-        >
-          <MessageCircle aria-hidden="true" data-icon="inline-start" />
-          Open Messages
-        </a>
-      ) : null}
-      {status.next === "start_over" ? (
-        <Button className="w-full" onClick={onStartOver} size="xl" type="button">
-          Start over
-        </Button>
-      ) : null}
-      {actions.canResume ? (
-        <Button
-          className="w-full"
-          disabled={busy}
-          onClick={onResume}
-          size="xl"
-          type="button"
-        >
-          Continue to payment
-        </Button>
-      ) : null}
-      {actions.canRetry ? (
-        <Button
-          aria-busy={operation === "opening_checkout"}
-          className="w-full"
-          disabled={busy}
-          onClick={onRetry}
-          size="xl"
-          type="button"
-        >
-          {operation === "opening_checkout" ? "Checking payment" : "Retry payment"}
-        </Button>
-      ) : null}
-      {actions.canCheckAgain ? (
-        <Button
-          className="w-full"
-          disabled={busy}
-          onClick={onCheckAgain}
-          size="xl"
-          type="button"
-        >
-          Check again
-        </Button>
-      ) : null}
-      {actions.canCancel ? (
-        <Button
-          aria-busy={operation === "canceling_checkout"}
-          className="w-full"
-          disabled={busy}
-          onClick={onCancel}
-          size="lg"
-          type="button"
-          variant="ghost"
-        >
-          {operation === "canceling_checkout" ? "Canceling" : cancelLabel}
-        </Button>
-      ) : null}
-    </GroupFundingStatusView>
+    />
   );
 }
 
 export {
+  GroupFundingAttemptFailure,
+  GroupFundingCapacityConflict,
   GroupFundingCheckout,
   GroupFundingPurchaseStatus,
   GroupFundingSelection,

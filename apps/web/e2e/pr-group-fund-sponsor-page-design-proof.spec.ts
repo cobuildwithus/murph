@@ -6,14 +6,19 @@ const STUDY = '[data-design-study="group-usage-funding"]';
 const CAPTURED_STATES = [
   "monthly-activation",
   "one-time",
+  "ordinary-sponsored-one-time",
   "checkout-canceled",
   "checkout-unconfirmed",
   "checkout-open",
   "payment-confirming",
   "fulfilled-receipt",
+  "capacity-conflict",
   "monthly-active",
+  "monthly-raising",
+  "monthly-paused",
   "monthly-recovery",
   "monthly-canceled",
+  "signed-out",
   "unavailable",
 ];
 
@@ -139,7 +144,7 @@ test.describe("the dial on a touch screen", () => {
       await page.waitForTimeout(350);
 
       expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(scrolledFrom);
-      await expect(slider).toHaveAttribute("aria-valuetext", "$5 a month");
+      await expect(slider).toHaveAttribute("aria-valuetext", "$10 a month");
       await dial.scrollIntoViewIfNeeded();
     }
   });
@@ -149,12 +154,12 @@ test.describe("the dial on a touch screen", () => {
     const { cdp, cta, dial, slider } = await openDial(page);
     const scrolledFrom = await page.evaluate(() => window.scrollY);
 
-    await dragAlongRing(page, cdp, dial, 225, 318);
+    await dragAlongRing(page, cdp, dial, 315, 408);
 
-    await expect(slider).toHaveAttribute("aria-valuetext", "$10 a month");
-    await expect(cta).toHaveText("Sponsor up to $10 a month");
+    await expect(slider).toHaveAttribute("aria-valuetext", "$20 a month");
+    await expect(cta).toHaveText("Sponsor up to $20 a month");
     await touch(cdp, "touchEnd");
-    await expect(slider).toHaveAttribute("aria-valuetext", "$10 a month");
+    await expect(slider).toHaveAttribute("aria-valuetext", "$20 a month");
     expect(await page.evaluate(() => window.scrollY)).toBe(scrolledFrom);
   });
 
@@ -175,7 +180,7 @@ test.describe("the dial on a touch screen", () => {
       });
     });
 
-    await dragAlongRing(page, cdp, dial, 225, 225 + 270 + 80);
+    await dragAlongRing(page, cdp, dial, 315, 225 + 270 + 80);
     await expect(slider).toHaveAttribute("aria-valuetext", "$50 a month");
     await touch(cdp, "touchEnd");
 

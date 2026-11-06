@@ -91,10 +91,6 @@ test("sends the amount on the dial and says what it will do", async () => {
       sliderOf(rendered.container).getAttribute("aria-valuetext"),
       "$10 a month",
     );
-    assert.match(
-      rendered.container.textContent ?? "",
-      /\$5 today, then \$5 at a time as the group uses Murph, up to \$10 a month\./u,
-    );
     await clickButton(rendered, "Sponsor up to $10 a month");
 
     expect(postedPayloads()).toEqual([
@@ -162,10 +158,10 @@ test("switching modes keeps the fixed $5 activation offer and the chosen cap", a
 
   try {
     await tapStop(rendered, "$20 a month");
-    await clickButton(rendered, "One time");
+    await clickButton(rendered, "Give once instead");
     await tapStop(rendered, "$20 one time");
-    assert.ok(buttonByText(rendered.container, "Contribute $20"));
-    await clickButton(rendered, "Monthly");
+    assert.ok(buttonByText(rendered.container, "Give $20"));
+    await clickButton(rendered, "Sponsor monthly instead");
 
     await clickButton(rendered, "Sponsor up to $20 a month");
 
@@ -190,17 +186,17 @@ test("contributes the chosen one-time amount with no monthly terms", async () =>
   });
   const rendered = await renderCheckout({
     monthly: null,
-    note: "Murph is sponsored in this chat.",
+    sponsoredByAnother: true,
   });
 
   try {
     assert.match(
       rendered.container.textContent ?? "",
-      /Murph is sponsored in this chat\./u,
+      /Sunday sleep crew is sponsored\.You can still chip in\./u,
     );
-    assert.equal(hasButton(rendered.container, "Monthly"), false);
+    assert.equal(hasButton(rendered.container, "Sponsor monthly instead"), false);
     await tapStop(rendered, "$10 one time");
-    await clickButton(rendered, "Contribute $10");
+    await clickButton(rendered, "Give $10");
 
     expect(postedPayloads()).toEqual([
       {
@@ -224,7 +220,7 @@ test("falls back to one-time terms when the chat gets a sponsor mid-visit", asyn
 
   try {
     await rendered.rerender(await checkoutElement({ monthly: null }));
-    await clickButton(rendered, "Contribute $5");
+    await clickButton(rendered, "Give $5");
 
     expect(postedPayloads()).toEqual([
       {
@@ -364,14 +360,11 @@ test("locks an uncertain attempt to its amount and request key", async () => {
 
     assert.match(
       rendered.container.textContent ?? "",
-      /We couldn’t confirm your payment/u,
+      /We couldn’t confirm that payment\./u,
     );
     assert.equal(hasButton(rendered.container, "Change amount"), false);
-    assert.equal(hasButton(rendered.container, "One time"), false);
-    assert.equal(
-      sliderOf(rendered.container).getAttribute("aria-disabled"),
-      "true",
-    );
+    assert.equal(hasButton(rendered.container, "Give once instead"), false);
+    assert.equal(rendered.container.querySelector('[role="slider"]'), null);
 
     await clickButton(rendered, "Check payment");
 
@@ -417,9 +410,9 @@ test("resumes or cancels an open checkout", async () => {
   try {
     assert.match(
       rendered.container.textContent ?? "",
-      /You have a checkout open/u,
+      /You left checkout open\./u,
     );
-    await clickButton(rendered, "Continue to payment");
+    await clickButton(rendered, "Keep going");
     expect(rendered.assign).toHaveBeenCalledWith(
       "https://checkout.stripe.test/group-open",
     );
@@ -496,7 +489,7 @@ test("shows another chat's checkout without a way to pay for it here", async () 
     await settle();
 
     assert.match(rendered.container.textContent ?? "", /It’s for another chat/u);
-    assert.equal(hasButton(rendered.container, "Continue to payment"), false);
+    assert.equal(hasButton(rendered.container, "Keep going"), false);
     assert.equal(hasButton(rendered.container, "Retry payment"), false);
     assert.equal(
       buttonByText(rendered.container, "Cancel checkout").disabled,
@@ -560,7 +553,7 @@ test("never offers payment on a selection that doesn't match the open purchase",
       rendered.container.textContent ?? "",
       /Finish or cancel it before choosing another amount\./u,
     );
-    assert.equal(hasButton(rendered.container, "Continue to payment"), false);
+    assert.equal(hasButton(rendered.container, "Keep going"), false);
   } finally {
     await rendered.cleanup();
   }
@@ -581,7 +574,7 @@ test("explains a full group without a dead-end form", async () => {
 
     assert.match(
       rendered.container.textContent ?? "",
-      /More credit can’t be added right now/u,
+      /The group’s topped up for now\./u,
     );
     assert.equal(rendered.container.querySelector('[role="slider"]'), null);
 
@@ -630,10 +623,10 @@ test("moves focus to the new state when an outcome replaces the control", async 
   try {
     await clickButton(rendered, "Sponsor up to $5 a month");
 
-    const heading = rendered.container.querySelector("h2");
+    const heading = rendered.container.querySelector("h1");
     assert.ok(heading);
-    assert.match(heading.textContent ?? "", /Confirming your payment/u);
-    assert.equal(focused.at(-1)?.tagName, "H2");
+    assert.match(heading.textContent ?? "", /Confirming your payment\./u);
+    assert.equal(focused.at(-1)?.tagName, "H1");
   } finally {
     await rendered.cleanup();
   }
@@ -697,6 +690,7 @@ async function checkoutElement(overrides: Partial<CheckoutProps> = {}) {
   );
   return createElement(GroupFundingCheckout, {
     checkoutUrl: CHECKOUT_URL,
+    groupName: "Sunday sleep crew",
     monthly: MONTHLY_PLAN,
     oneTimeOffers: ONE_TIME_OFFERS,
     payerMemberId: "hbm_group_funding_payer",

@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
-import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
 import { stripSettingsQueryParams } from "@/src/components/settings/hosted-settings-utils";
 import {
@@ -11,12 +10,13 @@ import {
   parseHostedGroupSponsorshipMonthlyCapMinor,
   type HostedGroupSponsorshipMonthlyCapMinor,
 } from "@/src/lib/hosted-groups/group-sponsorship-contract";
-import { cn } from "@/src/lib/utils";
 
 import { GroupFundingDial } from "./group-funding-dial";
 import {
-  GroupFundingNotice,
-  GroupFundingStatusView,
+  GroupFundingError,
+  GroupFundingLink,
+  GroupFundingPill,
+  GroupFundingScreen,
 } from "./group-usage-funding-shell";
 
 const MONTHLY_CAP_DIAL_OPTIONS = HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map(
@@ -52,22 +52,22 @@ const GROUP_SPONSORSHIP_RECOVERY_POLL_DELAYS_MS = [1_000, 2_000, 4_000] as const
 
 const GROUP_SPONSORSHIP_RECOVERY_COPY = {
   fulfilled: {
-    description: "Automatic refills are on.",
-    title: "Payment confirmed",
+    detail: "Automatic refills are on.",
+    title: "Payment confirmed.",
   },
   payment_pending: {
-    description:
+    detail:
       "We’ll check this automatically. Refills start again once it’s confirmed.",
-    title: "Payment is processing",
+    title: "Payment is processing.",
   },
   recheck_required: {
-    description:
+    detail:
       "You don’t need to pay again. Check the status of your last payment.",
-    title: "Check payment status",
+    title: "Check your payment.",
   },
 } as const satisfies Record<
   GroupSponsorshipRecoveryProgress,
-  { description: string; title: string }
+  { detail: string; title: string }
 >;
 
 export type GroupSponsorshipManagementConfirmation =
@@ -82,6 +82,7 @@ export function GroupSponsorshipManagementCard({
   cancelOnly = false,
   checkoutReturned,
   endpoint,
+  groupName,
   inert = false,
   initialSelectedMonthlyCapMinor,
   management: initialManagement,
@@ -91,6 +92,7 @@ export function GroupSponsorshipManagementCard({
   /** The payer just returned from a successful Checkout for this sponsorship. */
   checkoutReturned?: boolean;
   endpoint: string;
+  groupName: string;
   inert?: boolean;
   initialSelectedMonthlyCapMinor?: MonthlyCapMinor;
   management: GroupSponsorshipManagementProjection;
@@ -112,7 +114,7 @@ export function GroupSponsorshipManagementCard({
     GroupSponsorshipManagementConfirmation | null
   >(null);
   const recoveryButtonRef = useRef<HTMLButtonElement>(null);
-  const recoveryStatusRef = useRef<HTMLDivElement>(null);
+  const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     if (
@@ -127,7 +129,7 @@ export function GroupSponsorshipManagementCard({
 
   useEffect(() => {
     if (recoveryProgress) {
-      recoveryStatusRef.current?.focus();
+      recoveryHeadingRef.current?.focus();
     }
   }, [recoveryProgress]);
 
@@ -351,98 +353,71 @@ export function GroupSponsorshipManagementCard({
     }
   };
 
+  const disabled = busy || inert;
+  const copy = readManagementCopy({
+    cancelOnly,
+    groupName,
+    management,
+    periodEndTimeZone,
+    recoveryProgress,
+  });
+  const showDial = !cancelOnly && management.status === "active";
+  const cancelLink = (
+    <GroupFundingLink
+      disabled={disabled}
+      onClick={() => {
+        setError(null);
+        setConfirmation({ kind: "cancel" });
+      }}
+    >
+      Cancel sponsorship
+    </GroupFundingLink>
+  );
+
   return (
     <section
-      className="flex flex-1 flex-col gap-6"
+      className="flex flex-1 flex-col"
       data-component="group-sponsorship-management"
     >
-      {cancelOnly ? null : (
-        <GroupSponsorshipStatusNotice
-          disabled={busy || inert}
-          onRecheck={() => void recheckRecoveryStatus()}
-          onReview={() => void submit({ action: "recover" })}
-          recoveryButtonRef={recoveryButtonRef}
-          recoveryProgress={recoveryProgress}
-          recoveryStatusRef={recoveryStatusRef}
-          status={management.status}
-        />
-      )}
-
-      {!cancelOnly && management.status !== "pending_activation" ? (
-        <div className="flex flex-1 items-center">
+      <GroupFundingScreen
+        actions={
+          <>
+            {error && confirmation === null ? (
+              <GroupFundingError>{error.message}</GroupFundingError>
+            ) : null}
+            <GroupSponsorshipActions
+              cancelLink={cancelLink}
+              capChanged={capChanged}
+              capIncrease={capIncrease}
+              cancelOnly={cancelOnly}
+              disabled={disabled}
+              onApplyCap={applyCap}
+              onPause={() => void submit({ action: "pause" })}
+              onRecheck={() => void recheckRecoveryStatus()}
+              onResume={() => void submit({ action: "resume" })}
+              onReview={() => void submit({ action: "recover" })}
+              recoveryButtonRef={recoveryButtonRef}
+              recoveryProgress={recoveryProgress}
+              selectedMonthlyCapMinor={selectedMonthlyCapMinor}
+              status={management.status}
+            />
+          </>
+        }
+        detail={copy.detail}
+        headingRef={recoveryHeadingRef}
+        title={copy.title}
+      >
+        {showDial ? (
           <GroupFundingDial
             caption="a month"
-            disabled={busy || inert}
+            disabled={disabled}
             label="Monthly limit"
             onValueChange={setSelectedMonthlyCapMinor}
             options={MONTHLY_CAP_DIAL_OPTIONS}
             value={selectedMonthlyCapMinor}
           />
-        </div>
-      ) : null}
-
-      <div
-        className={cn(
-          "flex flex-col gap-3",
-          (cancelOnly || management.status === "pending_activation") &&
-            "flex-1 justify-center",
-        )}
-      >
-        <p className="text-center text-sm/5 text-pretty text-muted-foreground">
-          {formatMoney(management.chargedThisPeriodMinor)} charged this month
-          {management.pendingThisPeriodMinor > 0
-            ? ` (+${formatMoney(management.pendingThisPeriodMinor)} processing)`
-            : null}
-          <span className="block">
-            Resets {formatPeriodEnd(management.periodEnd, periodEndTimeZone)}
-          </span>
-        </p>
-
-        {cancelOnly ? (
-          <p className="text-center text-sm/5 text-pretty text-muted-foreground">
-            You can’t change billing right now, but you can stop future refills.
-          </p>
-        ) : management.status === "pending_activation" ? (
-          <p className="text-center text-sm/5 text-pretty text-muted-foreground">
-            Your first $5 is being confirmed.
-          </p>
-        ) : management.pendingMonthlyCapMinor !== null && !capChanged ? (
-          <p className="text-center text-sm/5 text-pretty text-muted-foreground">
-            {formatMoney(management.pendingMonthlyCapMinor)} starts next month.
-          </p>
         ) : null}
-
-        {!cancelOnly && capChanged ? (
-          <Button
-            className="w-full"
-            disabled={busy || inert}
-            onClick={applyCap}
-            size="xl"
-            type="button"
-          >
-            {capIncrease
-              ? `Review ${formatMoney(selectedMonthlyCapMinor)} limit`
-              : `Save ${formatMoney(selectedMonthlyCapMinor)} limit`}
-          </Button>
-        ) : null}
-
-        {error && confirmation === null ? (
-          <p className="text-center text-sm/5 text-destructive" role="alert">
-            {error.message}
-          </p>
-        ) : null}
-      </div>
-
-      <GroupSponsorshipLinks
-        disabled={busy || inert}
-        onCancel={() => {
-          setError(null);
-          setConfirmation({ kind: "cancel" });
-        }}
-        onPause={() => void submit({ action: "pause" })}
-        onResume={() => void submit({ action: "resume" })}
-        status={cancelOnly ? null : management.status}
-      />
+      </GroupFundingScreen>
 
       <GroupSponsorshipManagementConfirmationDialog
         busy={busy}
@@ -470,115 +445,141 @@ export function GroupSponsorshipManagementCard({
   );
 }
 
-function GroupSponsorshipStatusNotice({
+function readManagementCopy(input: {
+  cancelOnly: boolean;
+  groupName: string;
+  management: GroupSponsorshipManagementProjection;
+  periodEndTimeZone?: string;
+  recoveryProgress: GroupSponsorshipRecoveryProgress | null;
+}): { detail: string; title: string } {
+  const { management } = input;
+  const sponsoring = `You sponsor ${input.groupName}.`;
+  if (input.cancelOnly) {
+    return {
+      detail: "You can’t change billing right now, but you can stop refills.",
+      title: sponsoring,
+    };
+  }
+  if (input.recoveryProgress) {
+    return GROUP_SPONSORSHIP_RECOVERY_COPY[input.recoveryProgress];
+  }
+  switch (management.status) {
+    case "recovery_required":
+      return {
+        detail: "Refills are paused until it’s fixed.",
+        title: "Your payment needs a look.",
+      };
+    case "paused":
+      return {
+        detail: "Murph won’t charge you until you resume.",
+        title: "Refills are paused.",
+      };
+    case "pending_activation":
+      return { detail: "Your first $5 is being confirmed.", title: sponsoring };
+    case "active":
+      return {
+        detail: readSponsorshipPeriodSummary(management, input.periodEndTimeZone),
+        title: sponsoring,
+      };
+  }
+}
+
+function readSponsorshipPeriodSummary(
+  management: GroupSponsorshipManagementProjection,
+  periodEndTimeZone?: string,
+): string {
+  const processing = management.pendingThisPeriodMinor > 0
+    ? `, ${formatMoney(management.pendingThisPeriodMinor)} processing`
+    : "";
+  const nextLimit = management.pendingMonthlyCapMinor === null
+    ? ""
+    : ` ${formatMoney(management.pendingMonthlyCapMinor)} limit next month.`;
+  return `${formatMoney(management.chargedThisPeriodMinor)} so far this month${processing}. Resets ${formatPeriodEnd(management.periodEnd, periodEndTimeZone)}.${nextLimit}`;
+}
+
+function GroupSponsorshipActions({
+  cancelLink,
+  cancelOnly,
+  capChanged,
+  capIncrease,
   disabled,
+  onApplyCap,
+  onPause,
   onRecheck,
+  onResume,
   onReview,
   recoveryButtonRef,
   recoveryProgress,
-  recoveryStatusRef,
+  selectedMonthlyCapMinor,
   status,
 }: {
+  cancelLink: ReactNode;
+  cancelOnly: boolean;
+  capChanged: boolean;
+  capIncrease: boolean;
   disabled: boolean;
+  onApplyCap: () => void;
+  onPause: () => void;
   onRecheck: () => void;
+  onResume: () => void;
   onReview: () => void;
   recoveryButtonRef: Ref<HTMLButtonElement>;
   recoveryProgress: GroupSponsorshipRecoveryProgress | null;
-  recoveryStatusRef: Ref<HTMLDivElement>;
+  selectedMonthlyCapMinor: MonthlyCapMinor;
   status: GroupSponsorshipManagementProjection["status"];
 }) {
-  if (recoveryProgress) {
-    const copy = GROUP_SPONSORSHIP_RECOVERY_COPY[recoveryProgress];
+  if (cancelOnly) {
+    return cancelLink;
+  }
+  if (recoveryProgress === "recheck_required") {
     return (
-      <GroupFundingNotice
-        action={
-          recoveryProgress === "recheck_required" ? (
-            <Button
-              className="w-full"
-              disabled={disabled}
-              onClick={onRecheck}
-              size="lg"
-              type="button"
-            >
-              Check payment status
-            </Button>
-          ) : null
-        }
-        description={copy.description}
-        ref={recoveryStatusRef}
-        role="status"
-        title={copy.title}
-      />
+      <GroupFundingPill disabled={disabled} onClick={onRecheck}>
+        Check payment status
+      </GroupFundingPill>
     );
+  }
+  if (recoveryProgress === "payment_pending") {
+    return null;
   }
   if (status === "recovery_required") {
     return (
-      <GroupFundingNotice
-        action={
-          <Button
-            className="w-full"
-            disabled={disabled}
-            onClick={onReview}
-            ref={recoveryButtonRef}
-            size="lg"
-            type="button"
-          >
-            Review payment
-          </Button>
-        }
-        description="Automatic refills are paused until payment is fixed."
-        title="Payment needs attention"
-        tone="attention"
-      />
+      <>
+        <GroupFundingPill
+          disabled={disabled}
+          onClick={onReview}
+          ref={recoveryButtonRef}
+        >
+          Review payment
+        </GroupFundingPill>
+        {cancelLink}
+      </>
     );
   }
-  return status === "paused" ? (
-    <GroupFundingNotice
-      description="Murph won’t charge you until you resume."
-      title="Automatic refills are paused"
-    />
-  ) : null;
-}
-
-function GroupSponsorshipLinks({
-  disabled,
-  onCancel,
-  onPause,
-  onResume,
-  status,
-}: {
-  disabled: boolean;
-  onCancel: () => void;
-  onPause: () => void;
-  onResume: () => void;
-  /** Null when billing changes are unavailable, leaving only cancellation. */
-  status: GroupSponsorshipManagementProjection["status"] | null;
-}) {
-  const quietLink = "h-11 px-0 text-muted-foreground";
+  if (status === "paused") {
+    return (
+      <>
+        <GroupFundingPill disabled={disabled} onClick={onResume}>
+          Resume refills
+        </GroupFundingPill>
+        {cancelLink}
+      </>
+    );
+  }
+  if (status === "active" && capChanged) {
+    return (
+      <GroupFundingPill disabled={disabled} onClick={onApplyCap}>
+        {`${capIncrease ? "Raise" : "Lower"} limit to ${formatMoney(selectedMonthlyCapMinor)}`}
+      </GroupFundingPill>
+    );
+  }
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
-      {status === "active" || status === "paused" ? (
-        <Button
-          className={`${quietLink} hover:text-foreground`}
-          disabled={disabled}
-          onClick={status === "active" ? onPause : onResume}
-          type="button"
-          variant="link"
-        >
-          {status === "active"
-            ? "Pause automatic refills"
-            : "Resume automatic refills"}
-        </Button>
+    <div className="flex flex-wrap items-center justify-center gap-x-4">
+      {status === "active" ? (
+        <GroupFundingLink disabled={disabled} onClick={onPause}>
+          Pause refills
+        </GroupFundingLink>
       ) : null}
-      <Button
-        className={`${quietLink} hover:text-destructive`}
-        disabled={disabled}
-        onClick={onCancel}
-        type="button"
-        variant="link"
-      >
-        Cancel sponsorship
-      </Button>
+      {cancelLink}
     </div>
   );
 }
@@ -616,30 +617,30 @@ export function GroupSponsorshipManagementConfirmationDialog({
     >
       <AlertDialogPrimitive.Portal>
         <AlertDialogPrimitive.Backdrop
-          className="fixed inset-0 isolate z-50 bg-foreground/25 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+          className="fixed inset-0 isolate z-50 bg-black/60 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
           data-slot="alert-dialog-overlay"
         />
         <AlertDialogPrimitive.Popup
-          className="fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] left-3 right-3 z-50 grid w-auto gap-5 rounded-2xl bg-popover p-5 text-popover-foreground ring-1 ring-border duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2"
+          className="fixed inset-x-0 bottom-0 z-50 grid w-auto gap-5 rounded-t-[28px] bg-[#1F1C19] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-7 text-[#FFFCF6] duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:fade-out-0 sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[28px] sm:pb-7"
           data-component="group-sponsorship-management-confirmation"
           data-slot="alert-dialog-content"
           inert={inert || undefined}
         >
           <header className="grid place-items-start gap-2 text-left">
-            <AlertDialogPrimitive.Title className="font-serif text-2xl/7 font-semibold text-balance tracking-normal">
+            <AlertDialogPrimitive.Title className="text-balance font-serif text-[30px] font-semibold leading-[34px] tracking-[-0.01em]">
               {isIncrease
-                ? `Increase your limit to ${nextLimit}?`
-                : "Cancel your monthly sponsorship?"}
+                ? `Raise your limit to ${nextLimit}?`
+                : "Cancel your sponsorship?"}
             </AlertDialogPrimitive.Title>
-            <AlertDialogPrimitive.Description className="max-w-[48ch] text-sm/6 text-pretty text-muted-foreground">
+            <AlertDialogPrimitive.Description className="text-pretty text-base font-medium leading-[22px] text-[#FFFCF6]/60">
               {isIncrease
                 ? `When refills are on, Murph charges $5 at a time as the group uses it, up to ${nextLimit} a month instead of ${currentLimit}.`
-                : "Automatic refills will stop. Credit you already bought stays with the group."}
+                : "Refills stop. Credit you already bought stays with the group."}
             </AlertDialogPrimitive.Description>
           </header>
 
           {error ? (
-            <p role="alert" className="text-sm/6 text-destructive">
+            <p className="text-[15px] leading-5 text-[#E27B6E]" role="alert">
               {authoritativeRejection
                 ? error.message
                 : isIncrease
@@ -648,11 +649,28 @@ export function GroupSponsorshipManagementConfirmationDialog({
             </p>
           ) : null}
 
-          <footer className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <footer className="flex flex-col items-center gap-1.5">
+            {authoritativeRejection ? null : (
+              <GroupFundingPill
+                className={isIncrease ? undefined : "bg-[#2A2622] text-[#E27B6E]"}
+                data-slot="alert-dialog-action"
+                disabled={busy}
+                onClick={onConfirm}
+              >
+                {busy ? <Spinner className="size-5" /> : null}
+                {busy
+                  ? isIncrease ? "Updating limit" : "Canceling sponsorship"
+                  : isIncrease
+                    ? `Raise to ${nextLimit}`
+                    : error
+                      ? "Check cancellation status"
+                      : "Cancel sponsorship"}
+              </GroupFundingPill>
+            )}
             {indeterminateCancellation ? null : (
               <AlertDialogPrimitive.Close
                 disabled={busy}
-                render={<Button size="lg" variant="outline" />}
+                render={<GroupFundingLink className="text-base" />}
               >
                 {authoritativeRejection
                   ? "Refresh current setup"
@@ -660,26 +678,8 @@ export function GroupSponsorshipManagementConfirmationDialog({
                     ? "Check current setup"
                     : isIncrease
                       ? `Keep ${currentLimit} limit`
-                      : "Keep sponsorship"}
+                      : "Keep it"}
               </AlertDialogPrimitive.Close>
-            )}
-            {authoritativeRejection ? null : (
-              <Button
-                data-slot="alert-dialog-action"
-                disabled={busy}
-                onClick={onConfirm}
-                size="lg"
-                variant={isIncrease ? "default" : "destructive"}
-              >
-                {busy ? <Spinner data-icon="inline-start" /> : null}
-                {busy
-                  ? isIncrease ? "Updating limit" : "Canceling sponsorship"
-                  : isIncrease
-                    ? `Increase to ${nextLimit}`
-                    : error
-                      ? "Check cancellation status"
-                      : "Cancel sponsorship"}
-              </Button>
             )}
           </footer>
         </AlertDialogPrimitive.Popup>
@@ -695,10 +695,9 @@ export function GroupSponsorshipCanceledReceipt() {
       data-component="group-sponsorship-management"
       data-state="canceled"
     >
-      <GroupFundingStatusView
-        message="Automatic refills have stopped. Credit you already bought stays with the group."
-        title="Sponsorship canceled"
-        tone="done"
+      <GroupFundingScreen
+        detail="Credit you already bought stays with the group."
+        title="Sponsorship canceled."
       />
     </section>
   );

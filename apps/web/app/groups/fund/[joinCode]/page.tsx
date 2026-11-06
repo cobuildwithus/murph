@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import {
   GroupFundingCheckout,
   type GroupFundingMonthlyCapOption,
@@ -10,8 +8,7 @@ import {
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
   GroupFundingFrame,
-  GroupFundingMessage,
-  GroupUsageFundingShell,
+  GroupFundingScreen,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
 import {
   GroupSponsorshipManagementCard,
@@ -21,7 +18,6 @@ import {
   type HostedUsageTopUpOffer,
   type HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
-import { buttonVariants } from "@/src/components/ui/button";
 import { readHostedGroupChatName } from "@/src/lib/hosted-groups/group-chat-name";
 import {
   readHostedGroupUsageFundingTargetByJoinCode,
@@ -51,7 +47,6 @@ import {
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
-import { cn } from "@/src/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -186,6 +181,7 @@ export default async function GroupFundingPage({
     <GroupFundingCheckout
       activePurchase={visibleActivePurchase}
       checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+      groupName={groupName}
       initialMode={
         activatingSponsorship
           ? "monthly"
@@ -204,45 +200,44 @@ export default async function GroupFundingPage({
               offer: projectHostedUsageTopUpOffer("usage_5_usd"),
             }
       }
-      note={sponsoredByAnother ? "Murph is sponsored in this chat." : undefined}
       oneTimeOffers={managingSponsorship ? [] : oneTimeOffers}
       payerMemberId={member.id}
       purchaseReturn={purchaseReturn}
+      sponsoredByAnother={sponsoredByAnother}
     />
   ) : null;
 
   return (
     <GroupFundingFrame>
-      <GroupUsageFundingShell groupName={groupName}>
-        {!member ? (
-          <div className="flex flex-1 flex-col justify-center gap-8">
-            <p className="text-center text-base/6 text-pretty text-muted-foreground">
-              Sign in to keep Murph going in this chat.
-            </p>
-            <GroupFundingSignInButton />
-          </div>
-        ) : managingSponsorship ? (
-          <>
-            <GroupSponsorshipManagementCard
-              cancelOnly={managementOnly || Boolean(member.suspendedAt)}
-              checkoutReturned={sponsorshipCheckoutReturned}
-              endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
-              management={sponsorshipManagement}
-            />
-            {/* Monthly sponsors raise their limit instead; only an open
-                one-time payment stays reachable here. */}
-            {visibleActivePurchase ? checkout : null}
-          </>
-        ) : visibleActivePurchase || oneTimeOffers.length > 0 ? (
-          checkout
-        ) : (
-          <p className="flex flex-1 items-center justify-center text-center text-base/6 text-pretty text-muted-foreground">
-            {sponsoredByAnother
+      {!member ? (
+        <GroupFundingScreen
+          actions={<GroupFundingSignInButton />}
+          title={`Keep Murph in ${groupName}.`}
+        />
+      ) : managingSponsorship ? (
+        <>
+          <GroupSponsorshipManagementCard
+            cancelOnly={managementOnly || Boolean(member.suspendedAt)}
+            checkoutReturned={sponsorshipCheckoutReturned}
+            endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
+            groupName={groupName}
+            management={sponsorshipManagement}
+          />
+          {/* Monthly sponsors raise their limit instead; only an open
+              one-time payment stays reachable here. */}
+          {visibleActivePurchase ? checkout : null}
+        </>
+      ) : visibleActivePurchase || oneTimeOffers.length > 0 ? (
+        checkout
+      ) : (
+        <GroupFundingScreen
+          title={
+            sponsoredByAnother
               ? "Murph is sponsored in this chat."
-              : "Sponsorship isn’t available from this account right now."}
-          </p>
-        )}
-      </GroupUsageFundingShell>
+              : "Sponsoring isn’t available from this account."
+          }
+        />
+      )}
     </GroupFundingFrame>
   );
 }
@@ -257,17 +252,9 @@ function projectHostedMonthlyCapOptions(): GroupFundingMonthlyCapOption[] {
 function GroupFundingUnavailable() {
   return (
     <GroupFundingFrame>
-      <GroupFundingMessage
-        action={
-          <Link
-            className={cn(buttonVariants({ size: "xl" }), "w-full")}
-            href="/home"
-          >
-            Open Murph
-          </Link>
-        }
-        description="Ask the group for its current link."
-        title="This link isn’t available"
+      <GroupFundingScreen
+        detail="Ask the group for a new one."
+        title="This link isn’t working."
       />
     </GroupFundingFrame>
   );
@@ -388,11 +375,11 @@ async function readGroupChatNameWithin(
 
 function describeUnnamedGroup(kind: string): string {
   switch (kind) {
-    case "couple": return "Your couple chat";
-    case "family": return "Your family chat";
-    case "friends": return "Your friends chat";
-    case "household": return "Your household chat";
-    case "team": return "Your team chat";
-    default: return "Your group chat";
+    case "couple": return "your couple chat";
+    case "family": return "your family chat";
+    case "friends": return "your friends chat";
+    case "household": return "your household chat";
+    case "team": return "your team chat";
+    default: return "your group chat";
   }
 }

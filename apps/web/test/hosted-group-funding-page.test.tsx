@@ -153,12 +153,6 @@ describe("hosted group funding page", () => {
       }),
     }));
 
-    assert.match(markup, /Sunday sleep crew/u);
-    assert.match(
-      markup,
-      /<h1[^>]*><span[^>]*>Support Murph in<\/span><span[^>]*>Sunday sleep crew<\/span><\/h1>/u,
-    );
-    assert.doesNotMatch(markup, /Keep Murph going/u);
     assert.doesNotMatch(markup, /Group usage|Running low/u);
     assert.doesNotMatch(markup, /Supporters|Personalize/u);
     assert.match(markup, /funding-checkout/u);
@@ -170,6 +164,7 @@ describe("hosted group funding page", () => {
     });
     expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
+        groupName: "Sunday sleep crew",
         payerMemberId: "member_payer",
         purchaseReturn: { kind: "success", purchaseId: PURCHASE_ID },
       }),
@@ -440,7 +435,10 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(sponsorMarkup, /<span[^>]*>Saturday long run<\/span><\/h1>/u);
+    expect(mocks.GroupSponsorshipManagementCard).toHaveBeenCalledWith(
+      expect.objectContaining({ groupName: "Saturday long run" }),
+      undefined,
+    );
     // A monthly sponsor raises the limit instead of starting a one-time payment.
     assert.doesNotMatch(sponsorMarkup, /funding-checkout/u);
     expect(mocks.readHostedGroupChatName).toHaveBeenCalledWith({
@@ -452,7 +450,10 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(participantMarkup, /<span[^>]*>Your group chat<\/span><\/h1>/u);
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ groupName: "your group chat" }),
+      undefined,
+    );
     assert.doesNotMatch(participantMarkup, /Saturday long run/u);
     expect(mocks.readHostedGroupChatName).not.toHaveBeenCalled();
   });
@@ -538,6 +539,20 @@ describe("hosted group funding page", () => {
     expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
   });
 
+  it("names the group for a signed-out visitor on a public link", async () => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticatedMember: null,
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /<h1[^>]*>Keep Murph in Sunday sleep crew\.<\/h1>/u);
+    assert.match(markup, /Sign in/u);
+    expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
+  });
+
   it("offers a private sign-in handoff before resolving inactive sponsorship management", async () => {
     mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
       authenticatedMember: null,
@@ -549,7 +564,7 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /Sign in/u);
-    assert.doesNotMatch(markup, /This link isn’t available/u);
+    assert.doesNotMatch(markup, /This link isn’t working\./u);
     expect(mocks.readHostedGroupUsageFundingManagementTargetByLocator)
       .not.toHaveBeenCalled();
     expect(mocks.readHostedGroupSponsorshipManagementProjection)
@@ -570,7 +585,7 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(markup, /This link isn’t available/u);
+    assert.match(markup, /This link isn’t working\./u);
     assert.doesNotMatch(markup, /management:/u);
     expect(mocks.readHostedGroupSponsorshipManagementProjection)
       .toHaveBeenCalledWith({
@@ -595,7 +610,7 @@ describe("hosted group funding page", () => {
       expect.objectContaining({
         activePurchase: null,
         monthly: null,
-        note: "Murph is sponsored in this chat.",
+        sponsoredByAnother: true,
       }),
       undefined,
     );
@@ -665,7 +680,7 @@ describe("hosted group funding page", () => {
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
     }));
 
-    assert.match(markup, /<h1[^>]*>This link isn’t available<\/h1>/u);
+    assert.match(markup, /<h1[^>]*>This link isn’t working\.<\/h1>/u);
     expect(mocks.GroupFundingCheckout).not.toHaveBeenCalled();
   });
 });

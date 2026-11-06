@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useId,
   useRef,
   useState,
   type KeyboardEvent,
@@ -17,7 +18,7 @@ const DIAL_RADIUS = 110;
 const DIAL_STOP_LABEL_RADIUS = 150;
 const DIAL_START_DEGREES = 225;
 const DIAL_SWEEP_DEGREES = 270;
-const DIAL_STROKE_WIDTH = 10;
+const DIAL_STROKE_WIDTH = 12;
 const DIAL_SETTLE_TRANSITION =
   "duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none";
 
@@ -49,7 +50,7 @@ function GroupFundingDial<Value extends number | string>({
   const dialRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<GroupFundingDialDrag | null>(null);
   const [dragSweepDegrees, setDragSweepDegrees] = useState<number | null>(null);
-  const [turned, setTurned] = useState(false);
+  const goldId = useId();
   const selectedIndex = Math.max(
     0,
     options.findIndex((option) => option.value === value),
@@ -92,7 +93,6 @@ function GroupFundingDial<Value extends number | string>({
       unclampedSweepDegrees: sweepDegrees,
     };
     setDragSweepDegrees(sweepDegrees);
-    setTurned(true);
   }
 
   // Following the change in angle, not the absolute angle, keeps the knob under
@@ -130,7 +130,6 @@ function GroupFundingDial<Value extends number | string>({
       return;
     }
     event.preventDefault();
-    setTurned(true);
     selectIndex(nextIndex);
   }
 
@@ -138,7 +137,9 @@ function GroupFundingDial<Value extends number | string>({
     <div
       ref={dialRef}
       className={cn(
-        "@container relative mx-auto aspect-square w-full max-w-80 select-none",
+        // Safari's bars leave a phone far less height than its screen. Shrinking
+        // the dial keeps the button in view.
+        "@container relative mx-auto aspect-square w-full max-w-[clamp(13rem,100dvh_-_26rem,20rem)] select-none",
         disabled && "opacity-60",
       )}
       data-slot="group-funding-dial"
@@ -148,22 +149,28 @@ function GroupFundingDial<Value extends number | string>({
         className="absolute inset-0 size-full"
         viewBox={`0 0 ${DIAL_SIZE} ${DIAL_SIZE}`}
       >
+        <defs>
+          <linearGradient id={goldId} x1="0" x2="1" y1="1" y2="0">
+            <stop offset="0" stopColor="#C59D4E" />
+            <stop offset="1" stopColor="#EBD18B" />
+          </linearGradient>
+        </defs>
         <path
-          className="stroke-muted"
           d={DIAL_ARC_PATH}
           fill="none"
+          stroke="#3A3631"
           strokeLinecap="round"
           strokeWidth={DIAL_STROKE_WIDTH}
         />
         <path
           className={cn(
-            "stroke-primary",
             !dragging &&
               cn("transition-[stroke-dasharray]", DIAL_SETTLE_TRANSITION),
           )}
           d={DIAL_ARC_PATH}
           fill="none"
           pathLength={DIAL_SWEEP_DEGREES}
+          stroke={`url(#${goldId})`}
           strokeDasharray={`${sweepDegrees} ${DIAL_SWEEP_DEGREES + 1}`}
           strokeLinecap="round"
           strokeWidth={DIAL_STROKE_WIDTH}
@@ -171,10 +178,10 @@ function GroupFundingDial<Value extends number | string>({
       </svg>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className="font-serif text-[24cqw] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
+        <span className="font-serif text-[25cqw] font-semibold leading-none tracking-[-0.03em] tabular-nums">
           {selectedOption.amountLabel}
         </span>
-        <span className="mt-2 text-sm font-medium text-muted-foreground">
+        <span className="mt-1 text-base font-medium leading-[22px] text-[#FFFCF6]/60">
           {caption}
         </span>
       </div>
@@ -189,8 +196,8 @@ function GroupFundingDial<Value extends number | string>({
             key={option.value}
             aria-label={`${option.amountLabel} ${caption}`}
             className={cn(
-              "absolute flex size-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-sm font-medium tabular-nums text-muted-foreground transition-colors duration-150 disabled:pointer-events-none",
-              index === selectedIndex && "font-semibold text-foreground",
+              "absolute flex size-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[15px] font-semibold tabular-nums text-[#FFFCF6]/60 transition-colors duration-150 disabled:pointer-events-none",
+              index === selectedIndex && "font-bold text-[#FFFCF6]",
             )}
             disabled={disabled}
             onClick={() => selectIndex(index)}
@@ -205,16 +212,6 @@ function GroupFundingDial<Value extends number | string>({
           </button>
         );
       })}
-
-      <span
-        aria-hidden="true"
-        className={cn(
-          "absolute inset-x-0 bottom-[9%] text-center text-xs text-muted-foreground transition-opacity duration-200",
-          (turned || disabled) && "opacity-0",
-        )}
-      >
-        Drag the dot
-      </span>
 
       {/* The knob orbits a zero-size point: rotating anything larger would push
           its corners past the dial and make the page scroll sideways. */}
@@ -250,9 +247,7 @@ function GroupFundingDial<Value extends number | string>({
           }}
           tabIndex={disabled ? -1 : 0}
         >
-          <span className="flex size-8 items-center justify-center rounded-full bg-primary ring-4 ring-background transition-[scale] duration-150 group-focus-visible/knob:outline-2 group-focus-visible/knob:outline-offset-4 group-focus-visible/knob:outline-ring group-data-[dragging=true]/knob:scale-110 motion-reduce:transition-none">
-            <span className="size-2 rounded-full bg-primary-foreground" />
-          </span>
+          <span className="size-[clamp(1.25rem,8.75cqw,1.75rem)] rounded-full bg-[#FFFCF6] ring-[6px] ring-[#1C1915] transition-[scale] duration-150 group-focus-visible/knob:outline-2 group-focus-visible/knob:outline-offset-8 group-focus-visible/knob:outline-[#FFFCF6] group-data-[dragging=true]/knob:scale-110 motion-reduce:transition-none" />
         </div>
       </div>
     </div>

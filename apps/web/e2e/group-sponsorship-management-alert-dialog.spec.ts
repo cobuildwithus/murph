@@ -136,11 +136,11 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   let study = await enableStudy();
 
   const reviewButton = study.getByRole("button", {
-    name: "Review $50 limit",
+    name: "Raise limit to $50",
   });
   await reviewButton.click();
   let dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $50?",
+    name: "Raise your limit to $50?",
   });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(
@@ -156,7 +156,7 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   await reviewButton.click();
   dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $50?",
+    name: "Raise your limit to $50?",
   });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
@@ -166,9 +166,9 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   await reviewButton.click();
   dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $50?",
+    name: "Raise your limit to $50?",
   });
-  await dialog.getByRole("button", { name: "Increase to $50" }).click();
+  await dialog.getByRole("button", { name: "Raise to $50" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
     "We’re not sure whether your limit changed",
   );
@@ -176,17 +176,17 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
     dialog.getByRole("button", { name: "Check current setup" }),
   ).toBeVisible();
   await expect(
-    dialog.getByRole("button", { name: "Increase to $50" }),
+    dialog.getByRole("button", { name: "Raise to $50" }),
   ).toBeEnabled();
   expect(limitRequests).toBe(1);
 
-  await dialog.getByRole("button", { name: "Increase to $50" }).click();
+  await dialog.getByRole("button", { name: "Raise to $50" }).click();
   await expect(dialog).toBeHidden();
   expect(limitRequests).toBe(2);
 
   await study.getByRole("button", { name: "Cancel sponsorship" }).click();
   dialog = page.getByRole("alertdialog", {
-    name: "Cancel your monthly sponsorship?",
+    name: "Cancel your sponsorship?",
   });
   await dialog.getByRole("button", { name: "Cancel sponsorship" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
@@ -205,9 +205,11 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
     dialog.getByRole("button", { name: "Refresh current setup" }).click(),
   ]);
   study = await enableStudy();
+  // The study reloads with the dial on $50; the links return with the dial on $10.
+  await study.getByRole("button", { name: "$10 a month" }).click();
   await study.getByRole("button", { name: "Cancel sponsorship" }).click();
   dialog = page.getByRole("alertdialog", {
-    name: "Cancel your monthly sponsorship?",
+    name: "Cancel your sponsorship?",
   });
   await dialog.getByRole("button", { name: "Cancel sponsorship" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Sign in to continue.");
@@ -224,9 +226,11 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
     page.keyboard.press("Escape"),
   ]);
   study = await enableStudy();
+  // The study reloads with the dial on $50; the links return with the dial on $10.
+  await study.getByRole("button", { name: "$10 a month" }).click();
   await study.getByRole("button", { name: "Cancel sponsorship" }).click();
   dialog = page.getByRole("alertdialog", {
-    name: "Cancel your monthly sponsorship?",
+    name: "Cancel your sponsorship?",
   });
   await dialog.getByRole("button", { name: "Cancel sponsorship" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
@@ -244,7 +248,7 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Check cancellation status" }).click();
   await expect(dialog).toBeHidden();
-  await expect(study.getByRole("status")).toContainText(
+  await expect(study.getByRole("heading", { level: 1 })).toContainText(
     "Sponsorship canceled",
   );
   expect(cancellationRequests).toBe(4);
@@ -335,7 +339,7 @@ test("payment recovery reports retry, processing, and completion at responsive w
         await expect(reviewButton).toBeEnabled();
         await expect(reviewButton).toBeFocused();
       } else if (status === "payment_pending") {
-        const recoveryStatusRegion = recoveryStudy.getByRole("status");
+        const recoveryStatusRegion = recoveryStudy.getByRole("heading", { level: 1 });
         await expect(recoveryStatusRegion).toContainText(
           "Payment is processing",
         );
@@ -352,17 +356,17 @@ test("payment recovery reports retry, processing, and completion at responsive w
         await expect(recoveryStatusRegion).toBeFocused();
         await expect(
           recoveryStudy.getByRole("button", {
-            name: "Pause automatic refills",
+            name: "Pause refills",
           }),
         ).toBeVisible();
         expect(managementReadCount).toBe(1);
       } else {
-        const recoveryStatusRegion = recoveryStudy.getByRole("status");
+        const recoveryStatusRegion = recoveryStudy.getByRole("heading", { level: 1 });
         await expect(recoveryStatusRegion).toContainText("Payment confirmed");
         await expect(recoveryStatusRegion).toBeFocused();
         await expect(
           recoveryStudy.getByRole("button", {
-            name: "Pause automatic refills",
+            name: "Pause refills",
           }),
         ).toBeVisible();
         await expect(reviewButton).toHaveCount(0);

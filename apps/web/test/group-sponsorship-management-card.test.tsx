@@ -106,13 +106,13 @@ afterEach(() => {
 test.each([
   {
     action: "pause",
-    button: "Pause automatic refills",
+    button: "Pause refills",
     initialStatus: "active" as const,
     responseStatus: "paused" as const,
   },
   {
     action: "resume",
-    button: "Resume automatic refills",
+    button: "Resume refills",
     initialStatus: "paused" as const,
     responseStatus: "active" as const,
   },
@@ -146,6 +146,7 @@ test.each([
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: initialStatus },
     },
   ));
@@ -187,6 +188,7 @@ test("keeps payment recovery actionable when the server returns no Checkout URL"
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: "recovery_required" },
     },
   ));
@@ -243,6 +245,7 @@ test.each([
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: "recovery_required" },
     },
   ));
@@ -298,6 +301,7 @@ test("carries one no-navigation recovery from pending to an explicit focused com
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: "recovery_required" },
     },
   ));
@@ -311,7 +315,7 @@ test("carries one no-navigation recovery from pending to an explicit focused com
     });
 
     const recoveryStatus = rendered.container.querySelector<HTMLElement>(
-      "[role='status']",
+      "h1",
     );
     assert.ok(recoveryStatus);
     expect(recoveryStatus.textContent).toContain("Payment is processing");
@@ -322,7 +326,7 @@ test("carries one no-navigation recovery from pending to an explicit focused com
     });
 
     expect(recoveryStatus.textContent).toContain("Payment confirmed");
-    expect(rendered.container.textContent).toContain("Pause automatic refills");
+    expect(rendered.container.textContent).toContain("Pause refills");
     expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual([
       "POST",
       "GET",
@@ -364,16 +368,18 @@ test.each([
     {
       checkoutReturned: true,
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: initialStatus },
     },
   ), {
     location: {
       href: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop",
     },
+    requireButton: false,
   });
   try {
     const recoveryStatus = rendered.container.querySelector<HTMLElement>(
-      "[role='status']",
+      "h1",
     );
     assert.ok(recoveryStatus);
     expect(rendered.container.textContent).not.toContain("Payment needs attention");
@@ -432,6 +438,7 @@ test("offers a read-only recheck after bounded pending polls without starting an
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: "recovery_required" },
     },
   ));
@@ -484,6 +491,7 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: baseManagement,
     },
   ));
@@ -499,14 +507,14 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Review $50 limit");
+      .find((candidate) => candidate.textContent === "Raise limit to $50");
     assert.ok(applyButton);
     await act(async () => {
       applyButton.click();
     });
 
     expect(rendered.container.textContent).toContain(
-      "Increase your limit to $50?",
+      "Raise your limit to $50?",
     );
     expect(rendered.container.textContent).toContain(
       "up to $50 a month instead of $10",
@@ -521,7 +529,7 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       "[data-slot='alert-dialog-action']",
     );
     assert.ok(confirmButton);
-    expect(confirmButton.textContent).toBe("Increase to $50");
+    expect(confirmButton.textContent).toBe("Raise to $50");
     await act(async () => {
       confirmButton.click();
     });
@@ -540,27 +548,9 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
 });
 
 test.each([
-  {
-    remainingCopy: "Resume automatic refills",
-    status: "paused" as const,
-  },
-  {
-    remainingCopy: "Automatic refills are paused until payment is fixed",
-    status: "recovery_required" as const,
-  },
-])("keeps a confirmed cap increase in the existing $status state", async ({
-  remainingCopy,
-  status,
-}) => {
-  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
-    json: async () => ({
-      management: { ...baseManagement, monthlyCapMinor: 2_000, status },
-    }),
-    ok: true,
-    init,
-  }));
-  vi.stubGlobal("fetch", fetchMock);
-
+  { button: "Resume refills", status: "paused" as const },
+  { button: "Review payment", status: "recovery_required" as const },
+])("sets the dial aside while refills are $status", async ({ button, status }) => {
   const { GroupSponsorshipManagementCard } = await import(
     "@/src/components/hosted-groups/group-sponsorship-management-card"
   );
@@ -568,45 +558,15 @@ test.each([
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status },
     },
   ));
   try {
-    const capButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "$20");
-    assert.ok(capButton);
-    await act(async () => {
-      capButton.click();
-    });
-
-    const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Review $20 limit");
-    assert.ok(applyButton);
-    await act(async () => {
-      applyButton.click();
-    });
-
-    assert.equal(fetchMock.mock.calls.length, 0);
-    expect(rendered.container.textContent).toContain(
-      "When refills are on, Murph charges $5 at a time",
-    );
-
-    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
-      "[data-slot='alert-dialog-action']",
-    );
-    assert.ok(confirmButton);
-    await act(async () => {
-      confirmButton.click();
-    });
-
-    assert.equal(fetchMock.mock.calls.length, 1);
-    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
-      action: "change_cap",
-      authorizationId: AUTHORIZATION_ID,
-      confirmed: true,
-      monthlyCapMinor: 2_000,
-    });
-    expect(rendered.container.textContent).toContain(remainingCopy);
+    assert.equal(rendered.container.querySelector("[role='slider']"), null);
+    const labels = [...rendered.container.querySelectorAll("button")]
+      .map((candidate) => candidate.textContent);
+    expect(labels).toEqual([button, "Cancel sponsorship"]);
   } finally {
     await rendered.cleanup();
   }
@@ -626,6 +586,7 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: baseManagement,
     },
   ));
@@ -638,7 +599,7 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
     });
 
     const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Review $20 limit");
+      .find((candidate) => candidate.textContent === "Raise limit to $20");
     assert.ok(applyButton);
     await act(async () => {
       applyButton.click();
@@ -653,11 +614,11 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
     });
 
     assert.equal(fetchMock.mock.calls.length, 1);
-    expect(rendered.container.textContent).toContain("Increase your limit to $20?");
+    expect(rendered.container.textContent).toContain("Raise your limit to $20?");
     expect(rendered.container.textContent).toContain(
       "We’re not sure whether your limit changed",
     );
-    expect(confirmButton.textContent).toBe("Increase to $20");
+    expect(confirmButton.textContent).toBe("Raise to $20");
 
     await act(async () => {
       confirmButton.click();
@@ -685,6 +646,7 @@ test("offers only cancellation when billing changes are unavailable", async () =
     {
       cancelOnly: true,
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: baseManagement,
     },
   ));
@@ -693,12 +655,12 @@ test("offers only cancellation when billing changes are unavailable", async () =
     const labels = [...rendered.container.querySelectorAll("button")]
       .map((button) => button.textContent);
     expect(labels).toContain("Cancel sponsorship");
-    expect(labels).not.toContain("Pause automatic refills");
-    expect(labels).not.toContain("Resume automatic refills");
+    expect(labels).not.toContain("Pause refills");
+    expect(labels).not.toContain("Resume refills");
     expect(labels).not.toContain("Review payment");
     expect(labels).not.toContain("$20");
     expect(rendered.container.textContent).toContain(
-      "you can stop future refills",
+      "you can stop refills",
     );
   } finally {
     await rendered.cleanup();
@@ -720,6 +682,7 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
     {
       cancelOnly: true,
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       management: baseManagement,
     },
   ));
@@ -733,7 +696,7 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
 
     assert.equal(fetchMock.mock.calls.length, 0);
     expect(rendered.container.textContent).toContain(
-      "Cancel your monthly sponsorship?",
+      "Cancel your sponsorship?",
     );
     expect(rendered.container.textContent).toContain(
       "Credit you already bought stays with the group",
@@ -752,7 +715,7 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
       "Sponsorship canceled",
     );
     expect(rendered.container.textContent).toContain(
-      "Automatic refills have stopped",
+      "Credit you already bought stays with the group",
     );
     expect(
       [...rendered.container.querySelectorAll("button")]
@@ -785,6 +748,7 @@ test.each([false, true])(
       {
         cancelOnly,
         endpoint: "/api/groups/fund/example/sponsorship",
+        groupName: "Sunday sleep crew",
         management: baseManagement,
       },
     ));
@@ -857,6 +821,7 @@ test.each([
       {
         cancelOnly: true,
         endpoint: "/api/groups/fund/example/sponsorship",
+        groupName: "Sunday sleep crew",
         management: baseManagement,
       },
     ));
@@ -917,6 +882,7 @@ test.each([
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
       inert: true,
       management: { ...baseManagement, periodEnd: "2026-08-30T16:00:00.000Z" },
       periodEndTimeZone,

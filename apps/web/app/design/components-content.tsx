@@ -10,7 +10,7 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import {
-  GroupUsageFundingShell,
+  GroupFundingSurface,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupFundingCheckout } from "@/src/components/hosted-groups/group-funding-checkout";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
@@ -1171,9 +1171,10 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingShell groupName="Sunday sleep crew">
+              <GroupFundingSurface>
                 <GroupFundingCheckout
                   checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
+                  groupName="Sunday sleep crew"
                   inert
                   initialMonthlyCapMinor={1_000}
                   monthly={{
@@ -1183,16 +1184,18 @@ export function ComponentsContent() {
                   oneTimeOffers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                 />
-              </GroupUsageFundingShell>
+              </GroupFundingSurface>
             </div>
             <div
               data-design-component="group-sponsorship-management"
               id="group-sponsorship-management-component"
               inert
             >
+<GroupFundingSurface>
               <GroupSponsorshipManagementCard
                 periodEndTimeZone="UTC"
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
+                groupName="Sunday sleep crew"
                 initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1204,6 +1207,7 @@ export function ComponentsContent() {
                   status: "active",
                 }}
               />
+              </GroupFundingSurface>
             </div>
             <GroupSponsorshipManagementConfirmationStudy />
             <div

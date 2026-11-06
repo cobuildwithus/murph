@@ -10,6 +10,8 @@ import type {
 } from "@murphai/hosted-execution/plan-usage";
 
 import {
+  GroupFundingAttemptFailure,
+  GroupFundingCapacityConflict,
   GroupFundingCheckout,
   GroupFundingPurchaseStatus,
   GroupFundingSelection,
@@ -20,9 +22,8 @@ import {
   GroupFundingSignInButton,
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
-  GroupFundingMessage,
-  GroupFundingStatusView,
-  GroupUsageFundingShell,
+  GroupFundingScreen,
+  GroupFundingSurface,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
 import {
   GroupSponsorshipCanceledReceipt,
@@ -41,9 +42,6 @@ import type { HostedAiUsageActivitySnapshot } from "@/src/lib/hosted-execution/u
 import {
   HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR,
 } from "@/src/lib/hosted-groups/group-sponsorship-contract";
-import {
-  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
-} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import {
   buildMurphSmsHref,
   type MurphContactOption,
@@ -296,10 +294,28 @@ const DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const endpoint = "/api/design/group-sponsorship-management";
-  const designCheckoutSelection = {
-    mode: "monthly" as const,
-    monthlyRefillLabel: "$5",
+  const headline = `Keep Murph in ${DESIGN_GROUP_NAME}.`;
+  const selection = {
     onSubmit: () => undefined,
+    title: headline,
+  };
+  const monthly = {
+    ...selection,
+    amount: DESIGN_GROUP_MONTHLY_DIAL,
+    mode: "monthly" as const,
+    onModeChange: () => undefined,
+  };
+  const management = {
+    chargedThisPeriodMinor: 500,
+    monthlyCapMinor: 2_000,
+    pendingMonthlyCapMinor: null,
+    pendingThisPeriodMinor: 0,
+    periodEnd: "2026-08-30T16:00:00.000Z",
+  } as const;
+  const card = {
+    endpoint,
+    groupName: DESIGN_GROUP_NAME,
+    periodEndTimeZone: "UTC",
   };
 
   return (
@@ -313,9 +329,8 @@ function GroupUsageFundingStudy() {
           Production components · inert synthetic states
         </p>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          One page, one dial. Monthly sponsorship is the default and a one-time
-          contribution is one tap away. Every checkout outcome stays on this
-          page, in this frame.
+          One page on the app&apos;s night ground, the twin of a challenge invite
+          link. Each state has one headline and one action.
         </p>
       </div>
 
@@ -323,6 +338,8 @@ function GroupUsageFundingStudy() {
         <DesignSponsorshipState label="Monthly sponsorship" state="monthly-activation">
           <GroupFundingCheckout
             checkoutUrl="/api/design/usage-credit-preview"
+            groupName={DESIGN_GROUP_NAME}
+            initialMonthlyCapMinor={1_000}
             monthly={DESIGN_GROUP_MONTHLY_PLAN}
             oneTimeOffers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
             payerMemberId={DESIGN_PAYER_MEMBER_ID}
@@ -331,7 +348,7 @@ function GroupUsageFundingStudy() {
 
         <DesignSponsorshipState label="One-time contribution" state="one-time">
           <GroupFundingSelection
-            {...designCheckoutSelection}
+            {...selection}
             amount={DESIGN_GROUP_ONE_TIME_DIAL}
             mode="one_time"
             onModeChange={() => undefined}
@@ -343,60 +360,41 @@ function GroupUsageFundingStudy() {
           state="ordinary-sponsored-one-time"
         >
           <GroupFundingSelection
-            {...designCheckoutSelection}
+            {...selection}
             amount={DESIGN_GROUP_ONE_TIME_DIAL}
+            detail="You can still chip in."
             mode="one_time"
-            note="Murph is sponsored in this chat."
+            title={`${DESIGN_GROUP_NAME} is sponsored.`}
           />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Canceled at checkout" state="checkout-canceled">
           <GroupFundingSelection
-            {...designCheckoutSelection}
-            amount={DESIGN_GROUP_MONTHLY_DIAL}
-            note="Checkout canceled. Nothing was charged."
-            onModeChange={() => undefined}
+            {...monthly}
+            detail="Checkout canceled. Nothing was charged."
           />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Payment failed" state="payment-failed">
           <GroupFundingSelection
-            {...designCheckoutSelection}
-            amount={DESIGN_GROUP_MONTHLY_DIAL}
-            note="That payment didn’t go through. Nothing was charged."
-            onModeChange={() => undefined}
+            {...monthly}
+            detail="That payment didn’t go through. Nothing was charged."
           />
         </DesignSponsorshipState>
 
+        <DesignSponsorshipState label="Opening checkout" state="checkout-opening">
+          <GroupFundingSelection {...monthly} busy locked onModeChange={null} />
+        </DesignSponsorshipState>
+
         <DesignSponsorshipState label="Checkout didn’t open" state="checkout-not-opened">
-          <GroupFundingSelection
-            {...designCheckoutSelection}
-            amount={DESIGN_GROUP_MONTHLY_DIAL}
-            failure="not_opened"
-            locked
-            onChangeAmount={() => undefined}
-          />
+          <GroupFundingAttemptFailure failure="not_opened" />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
           label="Attempt may have reached payment"
           state="checkout-unconfirmed"
         >
-          <GroupFundingSelection
-            {...designCheckoutSelection}
-            amount={DESIGN_GROUP_MONTHLY_DIAL}
-            failure="unconfirmed"
-            locked
-          />
-        </DesignSponsorshipState>
-
-        <DesignSponsorshipState label="Opening checkout" state="checkout-opening">
-          <GroupFundingSelection
-            {...designCheckoutSelection}
-            amount={DESIGN_GROUP_MONTHLY_DIAL}
-            busy
-            locked
-          />
+          <GroupFundingAttemptFailure failure="unconfirmed" />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Checkout left open" state="checkout-open">
@@ -445,26 +443,16 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Group credit is full" state="capacity-conflict">
-          <GroupFundingStatusView
-            message={HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE}
-            title="More credit can’t be added right now"
-            tone="attention"
-          >
-            <Button className="w-full" size="xl">Try again</Button>
-          </GroupFundingStatusView>
+          <GroupFundingCapacityConflict />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Active sponsor" state="monthly-active">
           <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            endpoint={endpoint}
+            {...card}
             management={{
+              ...management,
               authorizationId: "hgsa_design_active",
-              chargedThisPeriodMinor: 500,
-              monthlyCapMinor: 1_000,
-              pendingMonthlyCapMinor: null,
               pendingThisPeriodMinor: 500,
-              periodEnd: "2026-08-30T16:00:00.000Z",
               status: "active",
             }}
           />
@@ -472,32 +460,22 @@ function GroupUsageFundingStudy() {
 
         <DesignSponsorshipState label="Raising the limit" state="monthly-raising">
           <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            endpoint={endpoint}
+            {...card}
             initialSelectedMonthlyCapMinor={5_000}
             management={{
+              ...management,
               authorizationId: "hgsa_design_raising",
-              chargedThisPeriodMinor: 500,
-              monthlyCapMinor: 1_000,
-              pendingMonthlyCapMinor: null,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
               status: "active",
             }}
           />
         </DesignSponsorshipState>
 
-        <DesignSponsorshipState label="Paused, lower limit next month" state="monthly-paused">
+        <DesignSponsorshipState label="Paused" state="monthly-paused">
           <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            endpoint={endpoint}
+            {...card}
             management={{
+              ...management,
               authorizationId: "hgsa_design_paused",
-              chargedThisPeriodMinor: 1_000,
-              monthlyCapMinor: 2_000,
-              pendingMonthlyCapMinor: 500,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
               status: "paused",
             }}
           />
@@ -505,15 +483,11 @@ function GroupUsageFundingStudy() {
 
         <DesignSponsorshipState label="Payment needs attention" state="monthly-recovery">
           <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            endpoint={endpoint}
+            {...card}
             management={{
+              ...management,
               authorizationId: "hgsa_design_recovery",
               chargedThisPeriodMinor: 0,
-              monthlyCapMinor: 2_000,
-              pendingMonthlyCapMinor: null,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
               status: "recovery_required",
             }}
           />
@@ -521,16 +495,12 @@ function GroupUsageFundingStudy() {
 
         <DesignSponsorshipState label="Billing locked, cancel only" state="monthly-cancel-only">
           <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
+            {...card}
             cancelOnly
             endpoint="/api/groups/fund/design/sponsorship"
             management={{
+              ...management,
               authorizationId: "hgsa_design_cancel_only",
-              chargedThisPeriodMinor: 500,
-              monthlyCapMinor: 1_000,
-              pendingMonthlyCapMinor: null,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
               status: "active",
             }}
           />
@@ -541,31 +511,26 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Signed out, group known" state="signed-out">
-          <div className="flex flex-1 flex-col justify-center gap-8">
-            <p className="text-center text-base/6 text-pretty text-muted-foreground">
-              Sign in to keep Murph going in this chat.
-            </p>
-            <GroupFundingSignInButton initiallyOpen={false} />
-          </div>
-        </DesignSponsorshipState>
-
-        <DesignSponsorshipState
-          bare
-          label="Signed out, link not public"
-          state="monthly-management-sign-in"
-        >
-          <GroupFundingMessage
-            action={<GroupFundingSignInButton initiallyOpen={false} />}
-            description="We’ll bring you straight back here."
-            title="Sign in to continue"
+          <GroupFundingScreen
+            actions={<GroupFundingSignInButton initiallyOpen={false} />}
+            title={headline}
           />
         </DesignSponsorshipState>
 
-        <DesignSponsorshipState bare label="Link unavailable" state="unavailable">
-          <GroupFundingMessage
-            action={<Button className="w-full" size="xl">Open Murph</Button>}
-            description="Ask the group for its current link."
-            title="This link isn’t available"
+        <DesignSponsorshipState
+          label="Signed out, link not public"
+          state="monthly-management-sign-in"
+        >
+          <GroupFundingScreen
+            actions={<GroupFundingSignInButton initiallyOpen={false} />}
+            title="Sign in to continue."
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Link unavailable" state="unavailable">
+          <GroupFundingScreen
+            detail="Ask the group for a new one."
+            title="This link isn’t working."
           />
         </DesignSponsorshipState>
       </div>
@@ -605,6 +570,7 @@ function GroupFundingPurchaseStudy({
   return (
     <GroupFundingPurchaseStatus
       actions={actions}
+      groupName={DESIGN_GROUP_NAME}
       operation={purchase.operation}
       status={readGroupFundingPurchaseStatus({
         actions,
@@ -647,8 +613,6 @@ export function GroupSponsorshipManagementConfirmationStudy() {
 }
 
 function DesignSponsorshipState(props: {
-  /** Render without the group heading, as the page does for its own messages. */
-  bare?: boolean;
   children: ReactNode;
   label: string;
   state: string;
@@ -663,16 +627,10 @@ function DesignSponsorshipState(props: {
         {props.label}
       </p>
       <div
-        className="mx-auto flex min-h-[42rem] w-full max-w-sm flex-col rounded-3xl border border-border bg-background px-6 py-8"
+        className="mx-auto flex min-h-[44rem] w-full max-w-sm flex-col overflow-hidden rounded-3xl"
         data-design-surface
       >
-        {props.bare ? (
-          props.children
-        ) : (
-          <GroupUsageFundingShell groupName={DESIGN_GROUP_NAME}>
-            {props.children}
-          </GroupUsageFundingShell>
-        )}
+        <GroupFundingSurface>{props.children}</GroupFundingSurface>
       </div>
     </section>
   );
