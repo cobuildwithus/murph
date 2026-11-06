@@ -54,18 +54,18 @@ export async function materializeVaultMedia(input: {
   signal?: AbortSignal | null
 }) {
   input.signal?.throwIfAborted()
-  const { paths, admitted, overBudget } = await selectVaultMediaPaths(input)
+  const paths = await selectVaultMediaPaths(input)
   const unavailable: { path: string; reason: string }[] = []
   let available = 0
   let removed = 0
   // The port already processes media sequentially and reads the catalogue once.
   // Keep a bulk request together rather than re-reading it for every batch.
-  const result = await input.materialize(admitted.map(ref => `vault:${ref}`), {
-    maxFileBytes: assistantVaultFileMaxBytes, signal: input.signal,
+  const result = await input.materialize(paths.map(ref => `vault:${ref}`), {
+    maxFileBytes: assistantVaultFileMaxBytes, maxTotalDownloadBytes: assistantVaultFileMaxBytes, signal: input.signal,
   })
   for (const ref of paths) {
     const key = `vault:${ref}`
-    const reason = overBudget.has(ref) ? 'size' : result.missingArtifactPaths.get(key)
+    const reason = result.missingArtifactPaths.get(key)
     if (!reason && result.materializedArtifactPaths.has(key)) available += 1
     else if (input.args.all && await wasVaultMediaRemoved(input.vaultRoot, ref, reason)) removed += 1
     else unavailable.push({ path: ref, reason: reason ?? 'missing' })
@@ -75,23 +75,11 @@ export async function materializeVaultMedia(input: {
 }
 
 async function selectVaultMediaPaths(input: { args: z.infer<typeof argumentsSchema>; vaultRoot: string }) {
+  if (!input.args.all) return [...new Set(input.args.paths)]
   const catalogue = await readHostedMediaReferenceCatalogueValue(input.vaultRoot)
-  const entries = catalogue.entries.map(entry => z.object({
-    relativePath: vaultRelativePath, byteSize: z.number().int().nonnegative(),
-  }).parse(entry))
-  const requested = new Set(input.args.paths)
-  const selected = entries.filter(entry => input.args.all || requested.has(entry.relativePath))
-  const paths = [...new Set([...selected.map(entry => entry.relativePath), ...requested])]
-  const sizes = new Map(selected.map(entry => [entry.relativePath, entry.byteSize]))
-  const admitted: string[] = []
-  const overBudget = new Set<string>()
-  let totalBytes = 0
-  for (const ref of paths) {
-    totalBytes += sizes.get(ref) ?? 0
-    if (totalBytes > assistantVaultFileMaxBytes) overBudget.add(ref)
-    else admitted.push(ref)
-  }
-  return { paths, admitted, overBudget }
+  // The catalogue reader owns descriptor interpretation; only vault scope is
+  // checked here. Do not silently skip an invalid catalogue path.
+  return [...new Set(catalogue.entries.map(entry => z.object({ relativePath: vaultRelativePath }).parse(entry).relativePath))]
 }
 
 async function wasVaultMediaRemoved(vaultRoot: string, relativePath: string, reason: string | undefined) {

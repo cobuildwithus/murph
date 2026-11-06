@@ -1,3 +1,4 @@
+import { assistantVaultFileMaxBytes } from "@murphai/operator-config/assistant-cli-contracts";
 import { readVerifiedAssistantVaultImageBytes, resolveAssistantVaultFileResponseMedia, resolveAssistantVaultImageResponseMedia } from "@murphai/assistant-engine/assistant-outbox";
 import { materializeVaultMedia, resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
 import { HostedRuntimeMediaReadError } from "../src/hosted-runtime/platform.ts";
@@ -1453,6 +1454,51 @@ test("image sends hydrate absent bytes for preparation and delivery, and refuse 
     get.mockResolvedValueOnce(null);
     await expect(readVerifiedAssistantVaultImageBytes({ image, vaultRoot, materializeWorkspaceArtifacts }))
       .rejects.toMatchObject({ code: "ASSISTANT_VAULT_FILE_UNAVAILABLE" });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("the restore budget charges only real downloads, so expired media cannot block a deliverable export", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-restore-budget-"));
+  const photo = Buffer.from("retained photo");
+  const cached = Buffer.from("cached expired copy");
+  const descriptor = (name: string, bytes: Buffer, byteSize: number, expiresAt: string | null) => ({
+    relativePath: `raw/inbox/synthetic/${name}`, mediaId: createHash("sha256").update(name).digest("hex"), byteSize,
+    sha256: createHash("sha256").update(bytes).digest("hex"), mediaKind: "video" as const, mimeType: "video/mp4",
+    recordedAt: "2030-01-01T00:00:00.000Z", expiresAt });
+  try {
+    const entries = [
+      // Together these reach the cap, and neither needs a download.
+      descriptor("a-expired.mp4", photo, assistantVaultFileMaxBytes, "2000-01-01T00:00:00.000Z"),
+      descriptor("b-expired.mp4", photo, assistantVaultFileMaxBytes, "2000-01-01T00:00:00.000Z"),
+      descriptor("c-cached-expired.mp4", cached, cached.length, "2000-01-01T00:00:00.000Z"),
+      { ...descriptor("d-retained.png", photo, photo.length, null), mediaKind: "image" as const, mimeType: "image/png" },
+    ];
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
+    await mkdir(path.join(vaultRoot, "raw/inbox/synthetic"), { recursive: true });
+    await writeFile(path.join(vaultRoot, entries[2]!.relativePath), cached);
+    const get = vi.fn(async () => photo);
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { put: async () => {}, get } });
+    const report = await materializeVaultMedia({ args: { all: true }, vaultRoot, materialize });
+    expect(report).toEqual({ requested: 4, available: 1, removed: 3, unavailable: [] });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(await readFile(path.join(vaultRoot, entries[3]!.relativePath))).toEqual(photo);
+    await expect(stat(path.join(vaultRoot, entries[2]!.relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("downloads past the restore budget are reported, not attempted", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-restore-over-budget-"));
+  const bytes = Buffer.from("synthetic media");
+  try {
+    const entries = ["a", "b", "c"].map(name => ({ relativePath: `raw/inbox/synthetic/${name}.png`, mediaId: createHash("sha256").update(name).digest("hex"),
+      byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), mediaKind: "image" as const, mimeType: "image/png",
+      recordedAt: "2030-01-01T00:00:00.000Z", expiresAt: null }));
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
+    const get = vi.fn(async () => bytes);
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { put: async () => {}, get } });
+    const result = await materialize(entries.map(entry => entry.relativePath), { maxTotalDownloadBytes: bytes.length * 2 });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${entries[2]!.relativePath}`]: "size" });
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
 

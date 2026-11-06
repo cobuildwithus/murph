@@ -74,7 +74,7 @@ describe('materialize vault media', () => {
     materialize.mockClear()
     const signal = new AbortController().signal
     const result = await run({ paths: ['raw/inbox/a:photo.png', 'vault/literal.txt', 'operator-home/literal.txt', 'photo:tag.png'] }, { signal })
-    expect(materialize).toHaveBeenCalledExactlyOnceWith(['vault:raw/inbox/a:photo.png', 'vault:vault/literal.txt', 'vault:operator-home/literal.txt', 'vault:photo:tag.png'], { maxFileBytes: assistantVaultFileMaxBytes, signal })
+    expect(materialize).toHaveBeenCalledExactlyOnceWith(['vault:raw/inbox/a:photo.png', 'vault:vault/literal.txt', 'vault:operator-home/literal.txt', 'vault:photo:tag.png'], { maxFileBytes: assistantVaultFileMaxBytes, maxTotalDownloadBytes: assistantVaultFileMaxBytes, signal })
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({ requested: 4, available: 4, removed: 0, unavailable: [] })
   })
   it('preserves interruption and never infers success from an omitted outcome', async () => {

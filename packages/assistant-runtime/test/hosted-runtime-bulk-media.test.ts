@@ -23,7 +23,7 @@ function descriptor(name: string, bytes: Uint8Array) {
     mediaKind: "video" as const, mimeType: "video/mp4", recordedAt: "2030-01-01T00:00:00.000Z", expiresAt: null as string | null };
 }
 
-test.each(["all", "paths"] as const)("%s admits only a catalogue-ordered prefix within the aggregate budget", async mode => {
+test.each(["all", "paths"] as const)("%s reports a file past the budget without blocking the files after it", async mode => {
   const vaultRoot = await setup();
   const bytes = Buffer.from("synthetic video");
   const entries = [descriptor("first", bytes), { ...descriptor("over-budget", bytes), byteSize: assistantVaultFileMaxBytes }, descriptor("last", bytes)];
@@ -32,11 +32,11 @@ test.each(["all", "paths"] as const)("%s admits only a catalogue-ordered prefix 
   const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { get, put: async () => {} } });
   const report = await materializeVaultMedia({ vaultRoot, materialize,
     args: mode === "all" ? { all: true } : { paths: entries.map(entry => entry.relativePath).reverse() } });
-  expect(report).toEqual({ requested: 3, available: 1, removed: 0, unavailable: entries.slice(1).map(entry => ({ path: entry.relativePath, reason: "size" })) });
-  expect(get).toHaveBeenCalledOnce();
-  expect(get.mock.calls[0]?.[0]).toMatchObject({ mediaId: entries[0]!.mediaId });
-  expect(await readFile(path.join(vaultRoot, entries[0]!.relativePath))).toEqual(bytes);
-  for (const entry of entries.slice(1)) await expect(readFile(path.join(vaultRoot, entry.relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+  expect(report).toEqual({ requested: 3, available: 2, removed: 0, unavailable: [{ path: entries[1]!.relativePath, reason: "size" }] });
+  expect(get).toHaveBeenCalledTimes(2);
+  expect(get.mock.calls.map(call => call[0].mediaId)).toEqual([entries[0]!.mediaId, entries[2]!.mediaId]);
+  for (const entry of [entries[0]!, entries[2]!]) expect(await readFile(path.join(vaultRoot, entry.relativePath))).toEqual(bytes);
+  await expect(readFile(path.join(vaultRoot, entries[1]!.relativePath))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("a partial bulk download reports transport and budget gaps and preserves cancellation", async () => {

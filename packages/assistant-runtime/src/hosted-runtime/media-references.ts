@@ -282,8 +282,9 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
   relativePaths: readonly string[];
   signal?: AbortSignal | null;
   vaultRoot: string;
-  options?: { maxFileBytes?: number };
+  options?: { maxFileBytes?: number; maxTotalDownloadBytes?: number };
 }): Promise<AssistantWorkspaceArtifactMaterializationResult> {
+  let downloadedBytes = 0;
   const materializedArtifactPaths = new Set<string>();
   const missingArtifactPaths = new Map<string, AssistantWorkspaceArtifactUnavailableReason>();
   if (input.relativePaths.length === 0) {
@@ -321,6 +322,12 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       missingArtifactPaths.set(key, "transport");
       continue;
     }
+    // Policy and the local cache already ran, so only a real download is charged.
+    if (downloadedBytes + entry.byteSize > (input.options?.maxTotalDownloadBytes ?? Infinity)) {
+      missingArtifactPaths.set(key, "size");
+      continue;
+    }
+    downloadedBytes += entry.byteSize;
     let bytes: Uint8Array | null;
     try {
       bytes = await input.mediaStore.get(
