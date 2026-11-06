@@ -2243,7 +2243,7 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `device-sync.wake` mailbox handoffs for the Temporal global reconciler.
   Webhook freshness is not scheduler input: Web persists dirty state, appends
   one bounded wake on a clean-to-dirty transition (routine Junction daily totals
-  defer it up to fifteen minutes for the scheduled sweep), and the runner drains and
+  defer it up to thirty minutes for the scheduled sweep), and the runner drains and
   acknowledges dirty-pending rows through signed callbacks. Web classifies,
   compresses, and seals dirty payloads and prepares clean-to-dirty mailbox
   crypto outside consent/member/connection locks through request-local

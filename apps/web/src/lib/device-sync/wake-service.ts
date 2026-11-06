@@ -3749,7 +3749,7 @@ const HOSTED_JUNCTION_ROUTINE_DAILY_RESOURCES = new Set([
   "stress_level",
   "vo2_max",
 ]);
-export const HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS = 15 * 60_000;
+export const HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS = 30 * 60_000;
 
 /**
  * Applies routine batching to a webhook's dirty-transition wake and returns

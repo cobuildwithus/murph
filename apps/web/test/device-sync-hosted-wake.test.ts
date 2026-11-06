@@ -2715,12 +2715,12 @@ describe("hosted device-sync wakes", () => {
       });
     }
 
-    it("defers a routine clean-to-dirty transition for fifteen minutes from receipt", async () => {
+    it("defers a routine clean-to-dirty transition for thirty minutes from receipt", async () => {
       await admitJunctionDailyWebhook("daily.data.steps.updated");
 
       expect(mocks.deferDirtyConnectionWakeTx).toHaveBeenCalledWith({
         connectionId: "dsc_123",
-        deferredUntil: new Date("2026-03-26T12:15:00.000Z"),
+        deferredUntil: new Date("2026-03-26T12:30:00.000Z"),
         tx: mocks.prismaTx,
         userId: "user-123",
       });
