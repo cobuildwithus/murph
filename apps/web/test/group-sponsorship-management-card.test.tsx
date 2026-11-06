@@ -320,6 +320,7 @@ test("carries one no-navigation recovery from pending to an explicit focused com
     assert.ok(recoveryStatus);
     expect(recoveryStatus.textContent).toContain("Payment is processing");
     expect(recoveryStatus.tabIndex).toBe(-1);
+    expect(buttonLabels(rendered.container)).toContain("Cancel sponsorship");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
@@ -375,7 +376,6 @@ test.each([
     location: {
       href: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop",
     },
-    requireButton: false,
   });
   try {
     const recoveryStatus = rendered.container.querySelector<HTMLElement>(
@@ -455,6 +455,7 @@ test("offers a read-only recheck after bounded pending polls without starting an
     });
 
     expect(rendered.container.textContent).toContain("You don’t need to pay again");
+    expect(buttonLabels(rendered.container)).toContain("Cancel sponsorship");
     const recheckButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Check payment status");
     assert.ok(recheckButton);
@@ -637,6 +638,88 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
   }
 });
 
+test("says when a lower limit starts, even right after a confirmed payment", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      management: {
+        ...baseManagement,
+        monthlyCapMinor: 5_000,
+        pendingMonthlyCapMinor: 500,
+      },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      checkoutReturned: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
+      management: { ...baseManagement, monthlyCapMinor: 5_000 },
+    },
+  ), {
+    location: {
+      href: "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop",
+    },
+  });
+  const focused = recordFocus(rendered);
+  try {
+    expect(rendered.container.textContent).toContain("Payment confirmed");
+    await clickLabel(rendered.container, "$5 a month");
+    await clickLabel(rendered.container, "Lower limit to $5");
+
+    expect(rendered.container.textContent).toContain("$5 limit next month.");
+    expect(rendered.container.textContent).not.toContain("Payment confirmed");
+    expect(focused.at(-1)).toBe("You sponsor Sunday sleep crew.");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  {
+    action: "Pause refills",
+    from: "active" as const,
+    title: "Refills are paused.",
+    to: "paused" as const,
+  },
+  {
+    action: "Resume refills",
+    from: "paused" as const,
+    title: "You sponsor Sunday sleep crew.",
+    to: "active" as const,
+  },
+])("moves focus to the headline after $action", async ({ action, from, title, to }) => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({
+    json: async () => ({ management: { ...baseManagement, status: to } }),
+    ok: true,
+  })));
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
+      management: { ...baseManagement, status: from },
+    },
+  ));
+  const focused = recordFocus(rendered);
+  try {
+    await clickLabel(rendered.container, action);
+    expect(focused).toEqual([title]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("offers only cancellation when billing changes are unavailable", async () => {
   const { GroupSponsorshipManagementCard } = await import(
     "@/src/components/hosted-groups/group-sponsorship-management-card"
@@ -686,6 +769,7 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
       management: baseManagement,
     },
   ));
+  const focused = recordFocus(rendered);
   try {
     const cancelButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Cancel sponsorship");
@@ -717,6 +801,7 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
     expect(rendered.container.textContent).toContain(
       "Credit you already bought stays with the group",
     );
+    expect(focused.at(-1)).toBe("Sponsorship canceled.");
     expect(
       [...rendered.container.querySelectorAll("button")]
         .map((button) => button.textContent),
@@ -894,3 +979,31 @@ test.each([
     await rendered.cleanup();
   }
 });
+
+function buttonLabels(container: HTMLElement): Array<string | null> {
+  return [...container.querySelectorAll("button")].map(
+    (button) => button.getAttribute("aria-label") ?? button.textContent,
+  );
+}
+
+async function clickLabel(container: HTMLElement, label: string) {
+  const button = [...container.querySelectorAll("button")].find(
+    (candidate) =>
+      (candidate.getAttribute("aria-label") ?? candidate.textContent) === label,
+  );
+  assert.ok(button, label);
+  await act(async () => {
+    button.click();
+  });
+}
+
+// The test DOM has no focus model, so record what each call would read out.
+function recordFocus(rendered: { window: Window & typeof globalThis }) {
+  const focused: Array<string | null> = [];
+  vi.spyOn(rendered.window.HTMLElement.prototype, "focus").mockImplementation(
+    function record(this: HTMLElement) {
+      focused.push(this.textContent);
+    },
+  );
+  return focused;
+}

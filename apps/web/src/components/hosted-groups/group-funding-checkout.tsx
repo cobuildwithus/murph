@@ -129,7 +129,7 @@ function GroupFundingCheckout({
   const { screen } = controller.state;
   const statusHeadingRef = useRef<HTMLHeadingElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
-  const statusVisible = readStatusVisible(screen);
+  const statusKey = readStatusKey(screen);
   const purchaseEnded = hasOwnPurchaseEnded(screen);
   // The note only explains the page the person landed on. Starting again
   // replaces it.
@@ -153,10 +153,10 @@ function GroupFundingCheckout({
   // it. This also gets the new state read out, which a live region alone can
   // miss when it mounts with its content.
   useEffect(() => {
-    if (statusVisible) {
+    if (statusKey) {
       statusHeadingRef.current?.focus({ preventScroll: true });
     }
-  }, [statusVisible]);
+  }, [statusKey]);
 
   useEffect(() => {
     if (endedPurchase) {
@@ -279,6 +279,7 @@ function GroupFundingSelectionScreen({
   if (failedAttempt) {
     return (
       <GroupFundingAttemptFailure
+        blockedReason={controller.requestIdentityError}
         busy={controller.checkoutInFlight}
         failure={readGroupFundingFailure(failedAttempt)}
         headingRef={headingRef}
@@ -345,12 +346,19 @@ function capitalizeFirst(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function readStatusVisible(screen: GroupFundingScreenState): boolean {
-  return (
-    screen.kind === "purchase" ||
-    screen.capacityConflict ||
-    (screen.attempt.kind === "locked" && screen.attempt.error !== null)
-  );
+// Changes whenever a new outcome takes over the page.
+function readStatusKey(screen: GroupFundingScreenState): string | null {
+  if (screen.kind === "purchase") {
+    const { kind } = screen.poll;
+    const stopped = kind === "exhausted" || kind === "failed";
+    return `${screen.status}:${stopped ? kind : "polling"}`;
+  }
+  if (screen.capacityConflict) {
+    return "capacity";
+  }
+  return screen.attempt.kind === "locked" && screen.attempt.error !== null
+    ? "attempt"
+    : null;
 }
 
 function hasOwnPurchaseEnded(screen: GroupFundingScreenState): boolean {
@@ -371,12 +379,15 @@ function readGroupFundingFailure(failedAttempt: {
 }
 
 function GroupFundingAttemptFailure({
+  blockedReason = null,
   busy = false,
   failure,
   headingRef,
   onChangeAmount,
   onRetry,
 }: {
+  /** Why this tab can't retry, when it can't. */
+  blockedReason?: string | null;
   busy?: boolean;
   failure: GroupFundingFailure;
   headingRef?: Ref<HTMLHeadingElement>;
@@ -388,7 +399,11 @@ function GroupFundingAttemptFailure({
     <GroupFundingScreen
       actions={
         <>
-          <GroupFundingPill aria-busy={busy} disabled={busy} onClick={onRetry}>
+          <GroupFundingPill
+            aria-busy={busy}
+            disabled={busy || blockedReason !== null}
+            onClick={onRetry}
+          >
             {busy ? <Spinner className="size-5" /> : null}
             {unconfirmed
               ? busy
@@ -405,7 +420,7 @@ function GroupFundingAttemptFailure({
           )}
         </>
       }
-      detail={GROUP_FUNDING_FAILURE_COPY[failure].detail}
+      detail={blockedReason ?? GROUP_FUNDING_FAILURE_COPY[failure].detail}
       headingRef={headingRef}
       title={GROUP_FUNDING_FAILURE_COPY[failure].title}
     />

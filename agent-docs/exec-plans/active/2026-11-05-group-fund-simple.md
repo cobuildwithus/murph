@@ -78,6 +78,12 @@ source before it was accepted.
 | Replace the limit-increase confirmation with an inline action | Rejected for now. It is explicit payer confirmation of a higher billing limit, with a tested uncertain-state path. Reworking it adds risk without fixing anything the owner raised. |
 | Use the contract-migration lane for the table drop | Accepted. The lane runs automatically after each production deploy, so the drop stays in its own PR to keep a rollback window. |
 
+A second pass reviewed the night rebuild on 2026-11-05 and found six regressions, all
+accepted and fixed with tests: Cancel hidden while a payment settles, a confirmed
+recovery hiding a deferred limit, three focus or announcement losses, and a retry
+that could not work in a tab with no request identity. It found no wrong-charge or
+double-payment path.
+
 ## Backend removal
 
 Removal happens in three revisions so no running version sees a shape it cannot

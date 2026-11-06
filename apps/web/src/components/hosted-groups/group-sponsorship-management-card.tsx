@@ -114,7 +114,13 @@ export function GroupSponsorshipManagementCard({
     GroupSponsorshipManagementConfirmation | null
   >(null);
   const recoveryButtonRef = useRef<HTMLButtonElement>(null);
-  const recoveryHeadingRef = useRef<HTMLHeadingElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const appliedMonthlyCapMinor =
+    management.pendingMonthlyCapMinor ?? management.monthlyCapMinor;
+  const outcome = canceled
+    ? "canceled"
+    : `${management.status}:${appliedMonthlyCapMinor}`;
+  const focusedOutcomeRef = useRef(outcome);
 
   useEffect(() => {
     if (
@@ -127,11 +133,14 @@ export function GroupSponsorshipManagementCard({
     }
   }, [busy, error, management.status, recoveryProgress]);
 
+  // An outcome replaces the control the person just used, so focus moves to its
+  // headline, which also gets the headline read out.
   useEffect(() => {
-    if (recoveryProgress) {
-      recoveryHeadingRef.current?.focus();
+    if (recoveryProgress || outcome !== focusedOutcomeRef.current) {
+      focusedOutcomeRef.current = outcome;
+      headingRef.current?.focus();
     }
-  }, [recoveryProgress]);
+  }, [outcome, recoveryProgress]);
 
   useEffect(() => {
     if (checkoutReturned) {
@@ -261,6 +270,8 @@ export function GroupSponsorshipManagementCard({
       setSelectedMonthlyCapMinor(
         next.pendingMonthlyCapMinor ?? next.monthlyCapMinor,
       );
+      // A newer change takes over from the recovery message.
+      setRecoveryProgress(null);
       return true;
     } catch (cause) {
       setError({
@@ -275,13 +286,11 @@ export function GroupSponsorshipManagementCard({
     }
   };
 
-  const appliedMonthlyCapMinor =
-    management.pendingMonthlyCapMinor ?? management.monthlyCapMinor;
   const capChanged = selectedMonthlyCapMinor !== appliedMonthlyCapMinor;
   const capIncrease = selectedMonthlyCapMinor > management.monthlyCapMinor;
 
   if (canceled) {
-    return <GroupSponsorshipCanceledReceipt />;
+    return <GroupSponsorshipCanceledReceipt headingRef={headingRef} />;
   }
 
   const applyCap = () => {
@@ -404,7 +413,7 @@ export function GroupSponsorshipManagementCard({
           </>
         }
         detail={copy.detail}
-        headingRef={recoveryHeadingRef}
+        headingRef={headingRef}
         title={copy.title}
       >
         {showDial ? (
@@ -533,13 +542,16 @@ function GroupSponsorshipActions({
   }
   if (recoveryProgress === "recheck_required") {
     return (
-      <GroupFundingPill disabled={disabled} onClick={onRecheck}>
-        Check payment status
-      </GroupFundingPill>
+      <>
+        <GroupFundingPill disabled={disabled} onClick={onRecheck}>
+          Check payment status
+        </GroupFundingPill>
+        {cancelLink}
+      </>
     );
   }
   if (recoveryProgress === "payment_pending") {
-    return null;
+    return cancelLink;
   }
   if (status === "recovery_required") {
     return (
@@ -688,7 +700,11 @@ export function GroupSponsorshipManagementConfirmationDialog({
   );
 }
 
-export function GroupSponsorshipCanceledReceipt() {
+export function GroupSponsorshipCanceledReceipt({
+  headingRef,
+}: {
+  headingRef?: Ref<HTMLHeadingElement>;
+}) {
   return (
     <section
       className="flex flex-1 flex-col"
@@ -697,6 +713,7 @@ export function GroupSponsorshipCanceledReceipt() {
     >
       <GroupFundingScreen
         detail="Credit you already bought stays with the group."
+        headingRef={headingRef}
         title="Sponsorship canceled."
       />
     </section>

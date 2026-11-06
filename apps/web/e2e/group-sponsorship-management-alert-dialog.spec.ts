@@ -251,6 +251,7 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   await expect(study.getByRole("heading", { level: 1 })).toContainText(
     "Sponsorship canceled",
   );
+  await expect(study.getByRole("heading", { level: 1 })).toBeFocused();
   expect(cancellationRequests).toBe(4);
 });
 

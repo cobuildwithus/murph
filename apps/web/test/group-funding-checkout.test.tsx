@@ -632,6 +632,68 @@ test("moves focus to the new state when an outcome replaces the control", async 
   }
 });
 
+test("moves focus again when a status screen reaches a new outcome", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_group_paid",
+      status: "payment_pending",
+    })
+    .mockResolvedValue({
+      purchaseId: "hucp_group_paid",
+      status: "fulfilled",
+    });
+  const rendered = await renderClientComponent(createElement("div"), {
+    location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+    requireButton: false,
+  });
+  const focused = recordFocus(rendered);
+
+  try {
+    await rendered.rerender(await checkoutElement({
+      purchaseReturn: { kind: "cancel", purchaseId: "hucp_group_paid" },
+    }));
+    await settle();
+
+    expect(focused.length).toBeGreaterThan(1);
+    assert.equal(focused.at(-1)?.tagName, "H1");
+    assert.match(focused.at(-1)?.textContent ?? "", /This group has more Murph/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("leaves focus alone while a payment keeps confirming", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    purchaseId: "hucp_group_pending",
+    status: "payment_pending",
+  });
+  const rendered = await renderClientComponent(createElement("div"), {
+    location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+    requireButton: false,
+  });
+  const focused = recordFocus(rendered);
+  vi.useFakeTimers();
+
+  try {
+    await rendered.rerender(await checkoutElement({
+      purchaseReturn: { kind: "success", purchaseId: "hucp_group_pending" },
+    }));
+    await settle();
+    const settled = focused.length;
+    const reads = mocks.requestHostedOnboardingJson.mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+
+    expect(mocks.requestHostedOnboardingJson.mock.calls.length).toBeGreaterThan(reads);
+    expect(focused.length).toBe(settled);
+  } finally {
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
+
 test("moves focus to the note after a canceled checkout", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     purchaseId: "hucp_group_canceled",
@@ -677,6 +739,29 @@ test("keeps the amount but blocks paying when the tab can't hold a request key",
     );
     await tapStop(rendered, "$10 a month");
     assert.ok(buttonByText(rendered.container, "Sponsor up to $10 a month"));
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("explains and blocks a retry when the tab can't save the request key", async () => {
+  const sessionStorage = createMemoryStorage();
+  sessionStorage.setItem = () => {
+    throw new Error("Storage is full.");
+  };
+  const rendered = await renderCheckout({}, { sessionStorage });
+
+  try {
+    await clickButton(rendered, "Sponsor up to $5 a month");
+
+    assert.match(rendered.container.textContent ?? "", /Checkout didn’t open\./u);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /can’t safely start a payment/u,
+    );
+    assert.equal(buttonByText(rendered.container, "Try again").disabled, true);
+    assert.equal(hasButton(rendered.container, "Change amount"), true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
   }
