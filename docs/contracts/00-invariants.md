@@ -557,6 +557,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent
   transactions against the request's concurrency bound.
+- The hosted Web Prisma pool returns a connection for reuse only when PostgreSQL
+  reports it outside a transaction. Any other release closes the connection, so
+  a later write can never join an unfinished transaction.
 - The fanout bound composes across the whole request, render, or job: parallel
   helpers that each fan out internally multiply, so evaluate peak concurrent
   datastore work for the composed path and keep one request's peak well below

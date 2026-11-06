@@ -21,7 +21,10 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 const HOSTED_LINQ_ACK_REACTION_MAX_TEXT_LENGTH = 1_000;
 const HOSTED_LINQ_ACK_REACTION_MAX_IMAGES = 2;
 
-/** The whole optional task, classifier through tapback, ends by this budget. */
+/**
+ * Classification through the tapback send fits this budget; database work has
+ * its own limits.
+ */
 export const HOSTED_LINQ_ACK_REACTION_DEADLINE_MS = 4_000;
 const HOSTED_LINQ_ACK_REACTION_MIN_SEND_MS = 250;
 
@@ -146,9 +149,9 @@ export function maybeScheduleHostedLinqAckReaction(input: HostedLinqAckReactionG
 
 /**
  * Runs after the webhook response, after the mailbox wake was handed off.
- * One deadline bounds the whole task; database work is bounded by its own
- * short transaction limits. Never throws: every outcome ends with one
- * diagnostic line.
+ * One deadline bounds classification and the send; database work is bounded by
+ * pool checkout and its own transaction limits. Never throws: every outcome
+ * ends with one diagnostic line.
  */
 export async function runHostedLinqAckReactionBestEffort(input: {
   addReaction?: typeof addHostedLinqMessageReaction;

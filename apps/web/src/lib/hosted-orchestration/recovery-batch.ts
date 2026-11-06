@@ -4,9 +4,7 @@ import { createHash } from "node:crypto";
 // its cold start and network time and for the bounded settling below.
 export const HOSTED_RECOVERY_BUDGET_MS = 22_000;
 // A sweep joins started work after cancellation; these bound how far past the
-// deadline a started transaction can run. Never set maxWait here: a start that
-// outlives a maxWait below the pool checkout limit returns its connection to
-// the pool inside an open transaction.
+// deadline a started transaction can run.
 export const HOSTED_RECOVERY_LOCK_TIMEOUT_MS = 1_000;
 export const HOSTED_RECOVERY_TRANSACTION_OPTIONS = { timeout: 3_000 } as const;
 

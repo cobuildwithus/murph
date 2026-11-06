@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { attachDatabasePool } from "@vercel/functions";
-import pg, { type Pool as PgPool } from "pg";
+import pg, { type Pool as PgPool, type PoolClient } from "pg";
 
 import { assertHostedWebDatabaseUrlConfigured } from "./hosted-web/database-env";
 import {
@@ -74,6 +74,7 @@ type DatabasePoolFailureCategory =
   | "idle_connection_error"
   | "pool_checkout_timeout"
   | "tls_error"
+  | "transaction_left_open"
   | "transaction_start_timeout"
   | "unreachable";
 
@@ -249,6 +250,28 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
     });
   });
 
+  // Only the backend's own status proves a connection left its transaction.
+  // Prisma's discarded transaction start releases one without SQL ROLLBACK, and
+  // an ordinary write on it would report success and then vanish. Closing the
+  // connection ends the transaction. pg-pool sets release on every checkout.
+  const closeOpenTransactionOnRelease = (client: PoolClient): PoolClient => {
+    const release = client.release;
+    client.release = (error) => {
+      const leftOpen = !error && client.getTransactionStatus() !== "I";
+      if (leftOpen) {
+        reportDatabasePoolFailure(readDatabasePoolSnapshot(pool), "transaction_left_open", {
+          attempt: null,
+          disposition: "signal",
+          operation: "adapter.release",
+          poolMax,
+          source: "adapter_connection",
+        });
+      }
+      release(error || leftOpen);
+    };
+    return client;
+  };
+
   // Transaction statements reuse their acquired client. Sample only real
   // checkouts so those statements cannot masquerade as prospective waiters.
   // Forward both pg callback and promise forms without changing their lifetime.
@@ -261,17 +284,23 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
       if (typeof callback === "function") {
         // A queued checkout may be fulfilled by another request's release.
         // Restore the requesting scope, including the absence of a collector.
-        return Reflect.apply(connect, receiver, [AsyncLocalStorage.bind(function (this: unknown, ...result: unknown[]) {
+        return Reflect.apply(connect, receiver, [AsyncLocalStorage.bind(function (
+          this: unknown,
+          error: Error | undefined,
+          client: PoolClient | undefined,
+          done: PoolClient["release"],
+        ) {
           record?.();
-          return Reflect.apply(callback, this, result);
+          if (client) closeOpenTransactionOnRelease(client);
+          return Reflect.apply(callback, this, [error, client, client?.release ?? done]);
         })]);
       }
-      if (!record) return Reflect.apply(connect, receiver, args);
       try {
-        const pending: Promise<unknown> = Reflect.apply(connect, receiver, args);
-        return pending.finally(record);
+        const pending: Promise<PoolClient> = Reflect.apply(connect, receiver, args);
+        const guarded = pending.then(closeOpenTransactionOnRelease);
+        return record ? guarded.finally(record) : guarded;
       } catch (error) {
-        record();
+        record?.();
         throw error;
       }
     },

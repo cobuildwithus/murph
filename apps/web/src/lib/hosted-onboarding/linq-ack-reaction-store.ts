@@ -46,7 +46,7 @@ type HostedLinqAckReactionTx = Pick<Prisma.TransactionClient, "$executeRaw" | "$
 
 export const HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS = 120_000;
 
-const HOSTED_LINQ_ACK_REACTION_TX_OPTIONS = { maxWait: 500, timeout: 1_500 } as const;
+const HOSTED_LINQ_ACK_REACTION_TX_OPTIONS = { timeout: 1_500 } as const;
 const HOSTED_LINQ_ACK_REACTION_LOCK_TIMEOUT = "300ms";
 const HOSTED_LINQ_ACK_REACTION_STATEMENT_TIMEOUT = "500ms";
 

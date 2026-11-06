@@ -83,30 +83,97 @@ describe.skipIf(!runPostgresRetryProof)(
       }
     });
 
-    it("does not retry a real transaction-start timeout under local saturation", async () => {
+    it("does not retry a real transaction-start timeout or lose a later write", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const reader = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const table = `murph_retry_proof_${randomUUID().replace(/-/g, "")}`;
+      await reader.$executeRawUnsafe(
+        `create table "${table}" (id text primary key)`,
+      );
 
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       try {
         const { holding, release } = await holdTheOnlyConnection(prisma);
         let callbackRuns = 0;
-
         try {
           await expect(prisma.$transaction(async (tx) => {
             callbackRuns += 1;
             await tx.$queryRaw`select 1`;
-          }, { maxWait: 900, timeout: 10_000 })).rejects.toMatchObject({
-            code: "P2028",
-          });
+          }, {
+            maxWait: 300,
+            timeout: 10_000,
+          })).rejects.toMatchObject({ code: "P2028" });
         } finally {
           release();
           await holding;
         }
 
+        // Prisma has given up, but the discarded start is still first in the
+        // pool queue. It takes the connection and runs BEGIN before this write.
+        const rowId = randomUUID();
+        await expect(prisma.$executeRawUnsafe(
+          `insert into "${table}" (id) values ($1)`,
+          rowId,
+        )).resolves.toBe(1);
+
+        await expect(reader.$queryRawUnsafe(`select id from "${table}"`))
+          .resolves.toEqual([{ id: rowId }]);
         expect(callbackRuns).toBe(0);
-        expect(loggedCategories(warn)).toEqual(["transaction_start_timeout"]);
+        expect(loggedCategories(warn)).toEqual(["transaction_start_timeout", "transaction_left_open"]);
       } finally {
         await prisma.$disconnect();
+        await reader.$executeRawUnsafe(`drop table if exists "${table}"`);
+        await reader.$disconnect();
+        warn.mockRestore();
+      }
+    }, 60_000);
+
+    it("keeps the same connection after a healthy commit and rollback", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      try {
+        const before = await prisma.$queryRaw<{ pid: number }[]>`select pg_backend_pid() as pid`;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`select 1`;
+        });
+        const failure = new Error("synthetic rollback");
+        await expect(prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`select 1`;
+          throw failure;
+        })).rejects.toBe(failure);
+        const after = await prisma.$queryRaw<{ pid: number }[]>`select pg_backend_pid() as pid`;
+        expect(after).toEqual(before);
+        expect(loggedCategories(warn)).not.toContain("transaction_left_open");
+      } finally {
+        await prisma.$disconnect();
+        warn.mockRestore();
+      }
+    }, 60_000);
+
+    it("loses no ordinary write after a transaction opens through a pool query", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const reader = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const table = `murph_retry_proof_${randomUUID().replace(/-/g, "")}`;
+      await reader.$executeRawUnsafe(
+        `create table "${table}" (id text primary key)`,
+      );
+
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      try {
+        await prisma.$executeRawUnsafe("BEGIN");
+        const rowId = randomUUID();
+        await expect(prisma.$executeRawUnsafe(
+          `insert into "${table}" (id) values ($1)`,
+          rowId,
+        )).resolves.toBe(1);
+
+        await expect(reader.$queryRawUnsafe(`select id from "${table}"`))
+          .resolves.toEqual([{ id: rowId }]);
+        expect(loggedCategories(warn)).toEqual(["transaction_left_open"]);
+      } finally {
+        await prisma.$disconnect();
+        await reader.$executeRawUnsafe(`drop table if exists "${table}"`);
+        await reader.$disconnect();
         warn.mockRestore();
       }
     }, 60_000);
