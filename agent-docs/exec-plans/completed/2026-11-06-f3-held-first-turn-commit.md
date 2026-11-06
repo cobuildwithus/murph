@@ -1,6 +1,6 @@
 # Let a later message commit past a held first turn
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -34,3 +34,6 @@ Existing candidate ordering and message-edit handling remain unchanged. Live-mod
 - Follow-up green: route 201/201, PostgreSQL 38/38, prepared Web typecheck and complexity diff all exit 0. Normal absent/sealed real sends retain two candidate queries, zero sidecar queries, one decode and one unwrap-cache scope for the inline fixture. The edit route selects its own source and passes without inheriting E1's held row.
 - Follow-up Product UX: Ready for the Web boundary. Exact held replies with a later message are terminal before provider dispatch; lone held inputs and reaction/progress purposes remain retryable. Existing outbox code classifies the terminal code as abandoned and excludes it from failure recovery; no runner or live-provider proof was added in this Web-only follow-up.
 - Follow-up completion remains local and scoped; keep this plan active for the existing full-stack/PR lane.
+- Full stack, `linq-first-turn-held`: exit 1 without the fix (the later-message test timed out with no reply, the lone-message test passed), exit 0 with it, 3 of 3.
+- Final head: 201 route, 38 PostgreSQL, 201 neighbouring unit and 11 harness tests, Web and Cloudflare typecheck, and complexity diff all exit 0.
+Completed: 2026-11-06
