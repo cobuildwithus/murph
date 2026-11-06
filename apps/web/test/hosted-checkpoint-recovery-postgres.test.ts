@@ -12,6 +12,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 import { claimHostedRuntime, requireHostedRuntimeOwnerTx, releaseHostedRuntimeAfterRetirement,
   prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted } from "@/src/lib/hosted-execution/runtime-owner";
 import { recoverHostedWorkspaceCheckpoint } from "@/src/lib/hosted-workspace/checkpoint-recovery";
+import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -98,6 +99,26 @@ describe.skipIf(!enabled)("protected checkpoint recovery PostgreSQL publication"
     expect((await db.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: f.userId } })).phase).toBe("starting");
     expect((await db.hostedRuntimeOrphan.findMany({ where: { userId: f.userId } })).map(row => row.resourceId).sort())
       .toEqual([f.source.snapshotId, f.replacement.snapshotId].sort());
+  });
+
+  it("makes a warm owner cold when protected recovery publishes", async () => {
+    const f = await fixture();
+    const runnerContainerName = "synthetic-recovery-warm-target";
+    await prepareHostedRuntimeLaunch({ prisma: db, identity: f.identity, runnerContainerName,
+      workspaceVersion: "7", providerEgressTokenHash: null, platformAiUsageAllowed: true });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: db, userId: f.userId, command: {
+      operation: "complete", ...f.identity, settledRunnerContainerName: null, immediateRecheckRequested: false,
+    } })).toMatchObject({ status: "updated" });
+    expect(await db.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: f.userId } }))
+      .toMatchObject({ phase: "retiring", completedAt: expect.any(Date) });
+    expect(await f.run("stage")).toEqual({ status: "staged", workspaceVersion: "7" });
+    expect(await f.run("publish")).toEqual({ status: "published", workspaceVersion: "8" });
+    const cold = await db.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: f.userId } });
+    expect(cold).toMatchObject({ phase: "retiring", completedAt: null, runnerContainerName });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: db, userId: f.userId, command: {
+      operation: "release_completed", ...f.identity, runnerContainerName,
+    } })).toMatchObject({ status: "stale" });
+    expect(await db.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: f.userId } })).toEqual(cold);
   });
 
   it("rejects unstaged publication and stale source, replica, version or member without revoking the owner", async () => {

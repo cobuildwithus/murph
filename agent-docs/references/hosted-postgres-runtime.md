@@ -303,6 +303,18 @@ fresh canonical observation on a later lifecycle pass.
 Without a future local receipt deadline, remote denial retains the existing
 short lifecycle recheck.
 
+A retiring owner is warm when `completedAt` is non-null and cold when it is
+null. Read phase first because idle rows retain historical completion timestamps.
+Destructive retirement clears `completedAt`, including on a warm row, and
+completion cannot make a cold retirement reusable. This prevents a delayed stop
+from interrupting a successor on the reused slot. Warm completion cannot veto
+destruction: a completed child with a lost outer response can leave a
+`transport_uncertain` operation that only stop or destroy clears. A row cannot
+show a stop authorized by an older writer. Before trusting warm reuse across
+this change, old Web writers and outstanding destructive authorizations must
+drain, or affected assignments must drain cold. A request timeout does not prove
+that a stop was cancelled.
+
 The runtime completion callback and outer invocation result share the same
 native receipt and Web `complete` command. Each stage uses one HTTP request for
 conditional retirement and optional exact native-settlement release. Only the

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const edges = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
-  authenticate: vi.fn(), retire: vi.fn(), release: vi.fn(),
+  authenticate: vi.fn(), complete: vi.fn(), retire: vi.fn(), release: vi.fn(),
   authorize: vi.fn(), claim: vi.fn(), notify: vi.fn(), loaded: vi.fn(),
 }));
 vi.mock("next/server", async (original) => ({
@@ -13,6 +13,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackJsonRequest: edges.authenticate,
 }));
 vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
+  completeHostedRuntime: edges.complete,
   retireHostedRuntime: edges.retire,
   releaseHostedRuntimeAfterCompletion: edges.release,
   releaseHostedRuntimeAfterRetirement: edges.release,
@@ -49,6 +50,7 @@ beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
   edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: command });
+  edges.complete.mockResolvedValue(true);
   edges.retire.mockResolvedValue(true);
   edges.release.mockResolvedValue(true);
   edges.authorize.mockResolvedValue({ cutover: "postgres", owner: null });
@@ -59,11 +61,11 @@ describe("runtime ownership response", () => {
   it("waits for committed release, then responds before loading or waiting for the advisory hint", async () => {
     const release = createDeferred<boolean>();
     const releasing = createDeferred<void>();
-    edges.release.mockImplementationOnce(() => { releasing.resolve(); return release.promise; });
+    // Completion and its final release now commit in one owner transaction.
+    edges.complete.mockImplementationOnce(() => { releasing.resolve(); return release.promise; });
     const response = post();
     await releasing.promise;
-    expect(edges.retire).toHaveBeenCalledExactlyOnceWith({ prisma: {}, identity, completed: true });
-    expect(edges.release).toHaveBeenCalledExactlyOnceWith({ prisma: {}, identity, runnerContainerName: command.settledRunnerContainerName });
+    expect(edges.complete).toHaveBeenCalledExactlyOnceWith({ prisma: {}, identity, settledRunnerContainerName: command.settledRunnerContainerName });
     expect(edges.after).not.toHaveBeenCalled();
     expect(edges.loaded).not.toHaveBeenCalled();
 
@@ -88,7 +90,7 @@ describe("runtime ownership response", () => {
       ...command, settledRunnerContainerName: null, immediateRecheckRequested: true,
     } });
     expect((await post()).status).toBe(200);
-    expect(edges.retire).toHaveBeenCalledOnce();
+    expect(edges.complete).toHaveBeenCalledExactlyOnceWith({ prisma: {}, identity, settledRunnerContainerName: null });
     expect(edges.release).not.toHaveBeenCalled();
     expect(edges.after).not.toHaveBeenCalled();
     expect(edges.loaded).not.toHaveBeenCalled();
@@ -97,7 +99,7 @@ describe("runtime ownership response", () => {
       ...command, immediateRecheckRequested: false,
     } });
     await expect((await post()).json()).resolves.toMatchObject({ status: "updated" });
-    edges.retire.mockResolvedValueOnce(false);
+    edges.complete.mockResolvedValueOnce(false);
     await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
     expect(edges.after).toHaveBeenCalledOnce();
     await edges.after.mock.calls[0]![0]();
@@ -121,7 +123,11 @@ describe("runtime ownership response", () => {
     });
   });
 
-  it.each(["retire", "release"] as const)("never schedules a hint for stale %s", async (stage) => {
+  it.each(["complete", "retire", "release"] as const)("never schedules a hint for stale %s", async (stage) => {
+    if (stage !== "complete") edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
+      operation: stage, attemptId: command.attemptId, generation: command.generation,
+      ...(stage === "retire" ? { completed: false } : { runnerContainerName: "synthetic-slot" }),
+    } });
     edges[stage].mockResolvedValueOnce(false);
     await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
     expect(edges.after).not.toHaveBeenCalled();
@@ -129,7 +135,11 @@ describe("runtime ownership response", () => {
     if (stage === "retire") expect(edges.release).not.toHaveBeenCalled();
   });
 
-  it.each(["authenticate", "retire", "release"] as const)("never schedules a hint when %s fails", async (stage) => {
+  it.each(["authenticate", "complete", "retire", "release"] as const)("never schedules a hint when %s fails", async (stage) => {
+    if (stage === "retire" || stage === "release") edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
+      operation: stage, attemptId: command.attemptId, generation: command.generation,
+      ...(stage === "retire" ? { completed: false } : { runnerContainerName: "synthetic-slot" }),
+    } });
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     edges[stage].mockRejectedValueOnce(new Error("synthetic failure"));
     expect((await post()).status).toBe(500);
@@ -142,6 +152,7 @@ describe("runtime ownership response", () => {
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: { ...command, generation: "invalid" } });
     expect((await post()).ok).toBe(false);
     expect(edges.retire).not.toHaveBeenCalled();
+    expect(edges.complete).not.toHaveBeenCalled();
     expect(edges.after).not.toHaveBeenCalled();
   });
 
