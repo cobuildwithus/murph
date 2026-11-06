@@ -755,3 +755,16 @@ it("validates display-name actions with the memory name contract", () => {
     kind: "display-name.set", version: 1, displayName: "Avery", extra: true,
   } }).success).toBe(false);
 });
+
+
+it("accepts only bounded typed VO2 readings in the closed measurement action", () => {
+  const action = { kind: "measurement.add", version: 1, metric: "estimated-vo2-max", value: 42.5 };
+  for (const value of [10, 42.5, 90]) {
+    expect(parseMemberActionRequestV1({ ...validRequest(), action: { ...action, value } }).action)
+      .toEqual({ ...action, value });
+  }
+  for (const patch of [{ value: 9.9 }, { value: 90.1 }, { value: Infinity }, { value: NaN },
+    { metric: "weight" }, { unit: "ml/kg/min" }, { occurredAt: "2026-11-06" }, { version: 2 }]) {
+    expect(memberActionRequestV1Schema.safeParse({ ...validRequest(), action: { ...action, ...patch } }).success).toBe(false);
+  }
+});

@@ -4223,6 +4223,22 @@ editor extends the closed action union and delegates to its
 existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
 instead of adding another queue, state store, or generic mutation engine.
 
+The closed `measurement.add` V1 action admits `estimated-vo2-max` values from
+10 through 90, including tenths. Runtime writes a manual measurement with the
+catalog unit, envelope `requestedAt` as `occurredAt`, and an event id derived
+from the action id. Its opt-in keep-existing measurement write holds the existing
+canonical lock and returns without a revision or audit write when the id already
+exists, including a corrected record or tombstone. Ordinary same-id measurement
+upserts retain their existing behavior. Created actions report `applied`; kept
+actions report `unchanged`. Neither outcome proves replica publication.
+
+Ship this decoder, canonical writer and runtime handler before enabling the
+companion measurement producer. Deploy and verify the Worker and runner first,
+including replacement of warm older bundles; deploy Web second and the native
+app last. Once a producer can enqueue `measurement.add`, both the decoder and
+handler are the rollback floor until all producers and retained requests drain.
+There is no measurement generation gate or feature flag.
+
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data
 lane. After one explicit in-app enrollment, the iPhone keeps one continuous

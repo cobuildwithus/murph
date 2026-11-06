@@ -3832,6 +3832,15 @@ it does not decrypt a retired payload or create a second handoff owner.
 
 ## Deterministic member action delivery
 
+`measurement.add` writes a manual VO2 reading through the canonical measurement
+owner using the envelope's `requestedAt` and an action-derived event id. Under
+the canonical lock, keep-existing replay returns without writing a revision or
+audit entry, even after a correction or deletion. Existing upserts are unchanged.
+Deploy and verify the compatible Worker decoder and runner handler before Web
+can produce this action; both are the rollback floor while producers or retained
+requests remain. No replica generation gate or feature flag substitutes for
+that consumer-first release boundary.
+
 The companion Meals API uses this same owner for `meal.delete`: native session,
 current launch consent and active access are revalidated under admission locks.
 It requires a saved generation-17 Meals projection before sending the new action;
