@@ -1,6 +1,6 @@
 # Type a VO2 max reading in the companion app
 
-Status: active
+Status: completed
 Created: 2026-11-06
 
 ## Question for review
@@ -219,3 +219,13 @@ Native implementation/tests and public release notes belong to the later app
 release; this backend preparation ships no native UI. No model behavior changes
 or provider turns are involved. No push, PR, merge or deployment was performed.
 The plan remains active for that later work and rollout verification.
+
+## Release record
+
+The owner opted out of the final ReviewGPT gate for these PRs on 2026-11-06, after
+Apollo and Vonneumann hit their caps, Eragon offered no GPT-6 Pro and Mountain was
+signed out. The plan's architecture review and read-only Codex deep reviews stand
+in for it. PR 4692 carried the consumer. This plan closes with the Web producer.
+The native field ships from the iOS repo after both.
+Updated: 2026-11-06
+Completed: 2026-11-06
