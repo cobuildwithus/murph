@@ -127,7 +127,12 @@ Runtime-owner PostgreSQL suites retain exact claim/generation, provider authorit
 callback identity, deletion, workspace CAS and bounded resource cleanup proof.
 Finished census/import/activation tests are retired. The member-resource and
 account-cleanup cases preserve deleted-member ownership and ordinary cleanup
-without enrollment. Enable `MURPH_TEST_POSTGRES_CONCURRENCY=1` against an isolated
+without enrollment. `hosted-runtime-ledger-retention-postgres.test.ts` proves each
+delete and keep rule for finished PUT receipts, that stale writers stay rejected
+after their receipts age out, that a snapshot purge drops only the ref, and that a
+cleared row still fences publication and session creation and can repeat its
+purge. `hosted-checkpoint-recovery-postgres.test.ts` proves recovery rejects one.
+Enable `MURPH_TEST_POSTGRES_CONCURRENCY=1` against an isolated
 loopback database; run database suites with file parallelism disabled. Full Web
 and Cloudflare Node suites plus hosted-execution, assistant-engine,
 assistant-runtime and hosted-local-harness coverage protect the removal of
