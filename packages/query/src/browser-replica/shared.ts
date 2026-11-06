@@ -245,6 +245,8 @@ export interface BrowserVaultReplica {
   /** Absent before generation 18, or when memory could not be read: unknown.
    * No canonical memory text is exported. */
   demographics?: MemoryDemographics;
+  /** Resolved vault name; absent on older replicas or when unreadable. */
+  displayName?: string;
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
   /** Absent only on replicas produced before canonical outcome projection shipped. */
@@ -274,6 +276,7 @@ export interface BrowserVaultReplica {
 type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   BrowserVaultReplica,
   | "demographics"
+  | "displayName"
   | "assistantSummary"
   | "entities"
   | "generatedAt"
@@ -324,6 +327,8 @@ export type BrowserVaultLabsReplica = BrowserVaultCoreReplica & Pick<
 
 export interface CreateBrowserVaultReplicaInput {
   demographics?: MemoryDemographics;
+  /** Resolved vault name; absent on older replicas or when unreadable. */
+  displayName?: string;
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];

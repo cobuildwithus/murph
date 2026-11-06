@@ -11,7 +11,7 @@ import type {
 } from "../journal-view.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts/experiment-outcome";
 import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
-import { memoryDemographicsSchema, companionMealsProjectionSchema } from "@murphai/contracts";
+import { memoryDisplayNameSchema, memoryDemographicsSchema, companionMealsProjectionSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -92,6 +92,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
       ? {}
       : { journal: parseJournalView(record.journal, `${label}.journal`) }),
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
+    ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
@@ -133,6 +134,7 @@ export function parseBrowserVaultCoreShard(
       ? {}
       : { journal: parseJournalView(record.journal, `${label}.journal`) }),
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
+    ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,

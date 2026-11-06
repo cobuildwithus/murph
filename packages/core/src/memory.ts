@@ -149,6 +149,7 @@ export async function setMemoryDisplayName(
   vaultRoot: string,
   input: SetMemoryDisplayNameInput,
 ): Promise<{
+  changed: boolean;
   created: boolean;
   document: MemoryDocumentSnapshot;
   record: MemoryRecord;
@@ -158,6 +159,7 @@ export async function setMemoryDisplayName(
     const next = setMemoryDocumentDisplayName(snapshot, input);
     if (next.document === snapshot) {
       return {
+        changed: false,
         created: false,
         document: snapshot,
         record: next.record,
@@ -188,6 +190,7 @@ export async function setMemoryDisplayName(
     );
 
     return {
+      changed: true,
       created: next.created,
       document: persisted.document,
       record: persisted.record,
