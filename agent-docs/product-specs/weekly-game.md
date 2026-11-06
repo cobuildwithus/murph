@@ -476,10 +476,10 @@ resulting avatar. No private photo is shared with the subject or other players.
   and the retake stay as they are. The field names no day, so capture-age
   placement is unchanged. A client that omits it keeps the older rule: a new
   entry ID replaces the live post.
-- **Write outcomes.** Every native game command rechecks its exact session
-  inside the transaction that commits it. A session revoked after admission
-  returns 401 `UNAUTHENTICATED` and writes nothing. Once a command or upload has
-  read its request, a server failure is not a refusal: it returns
+- **Write outcomes.** Every native game command and board sharing save rechecks
+  its exact session inside the transaction that commits it. A session revoked
+  after admission returns 401 `UNAUTHENTICATED` and writes nothing. Once a
+  command or upload has read its request, a server failure is not a refusal: it returns
   `retryable: true`, as `INTERNAL_ERROR` (500) or `GAME_MEDIA_UNAVAILABLE` (503),
   and the app keeps its unsent shot or reply. Same-ID replay makes that retry
   safe after a commit whose response failed. Malformed input, a foreign or

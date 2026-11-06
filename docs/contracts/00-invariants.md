@@ -380,9 +380,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
-- A native game command or Messages member action admitted before request
-  reading or preparation rechecks its exact session inside the transaction that
-  commits its effect. A failed recheck writes nothing.
+- A native game command, board sharing save or Messages member action admitted
+  before request reading or preparation rechecks its exact session inside the
+  transaction that commits its effect. A failed recheck writes nothing.
 - Participant-target phone egress is denied unless its exact send kind has a
   narrow durable authority binding the idempotency key, participant identity,
   and source line. Adding one allowed first-contact kind must not widen another

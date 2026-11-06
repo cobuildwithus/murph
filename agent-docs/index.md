@@ -1,3 +1,5 @@
+The board sharing session recheck and its group, member, game lock order are owned by [Weekly Game](product-specs/weekly-game.md) and [the invariants](../docs/contracts/00-invariants.md).
+
 Meal fiber reader compatibility and deployment boundaries are owned by
 [iOS Meals](product-specs/ios-meals.md#release-order-and-compatibility); focused
 proof is recorded in [the reader plan](exec-plans/completed/2026-11-06-meals-fiber-reader.md).
