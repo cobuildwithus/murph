@@ -309,7 +309,11 @@ describe("post-send failure recovery", () => {
     f.providerFetch.mockImplementation(providerFetch);
     const retryAt = await callbacks.resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: f.vaultRoot });
     expect(retryAt).not.toBeNull();
-    vi.setSystemTime(new Date(retryAt!));
+    vi.setSystemTime(new Date(result.nextWakeAt!));
+    const recovery = await f.phase();
+    expect(f.sends()).toBe(1);
+    expect(recovery.post.nextWakeAt).toBe(retryAt);
+    vi.setSystemTime(new Date(recovery.post.nextWakeAt!));
     await f.phase();
     expect(f.sends()).toBe(2);
     expect(await f.read()).toMatchObject({ status: "sent", attemptCount: 1 });
@@ -351,21 +355,33 @@ describe("post-send failure recovery", () => {
     expect(f.sends()).toBe(yielded ? 3 : 2);
   });
 
-  it("keeps an accepted receipt and recovery wake when mixed-batch terminal staging fails", async () => {
-    const f = await fixture("telegram");
+  it.each([false, true])("keeps Linq cleanup, receipt and recovery wake when terminal staging fails (yielded: %s)", async (yielded) => {
+    const f = await fixture("linq");
     const terminal = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "terminal-second", sessionId: "session_terminal", turnId: "turn_terminal" });
-    f.providerFetch.mockResolvedValueOnce(Response.json({ ok: true, result: { message_id: 7, chat: { id: 123 } } }))
-      .mockResolvedValueOnce(Response.json({ ok: false, error_code: 400, description: "Synthetic terminal rejection" }, { status: 400 }));
+    const remaining = yielded
+      ? await createAssistantOutboxIntent({ ...f.base, dedupeToken: "terminal-remaining", sessionId: "session_remaining", turnId: "turn_remaining" })
+      : null;
+    const ids = [f.intent.intentId, terminal.intentId, ...(remaining ? [remaining.intentId] : [])];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce(await f.collect(ids));
+    let yieldNow = false;
+    const providerFetch = f.providerFetch.getMockImplementation()!;
+    f.providerFetch.mockImplementationOnce(providerFetch).mockImplementationOnce(async () => {
+      yieldNow = yielded;
+      return Response.json({ error: "Synthetic terminal rejection" }, { status: 400 });
+    });
     mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async (input) => {
       const outcomes = await callbacks.drainHostedPreparedAssistantDeliveries(input);
       mocks.readAssistantOutboxIntent.mockRejectedValueOnce(new Error("Synthetic terminal staging unavailable"));
       return outcomes;
     });
+    const cleanup = await vi.importActual<typeof import("../src/hosted-runtime/provider-cleanup.ts")>("../src/hosted-runtime/provider-cleanup.ts");
+    mocks.recordHostedProviderCleanupAfterDelivery.mockImplementation(cleanup.recordHostedProviderCleanupAfterDelivery);
 
-    const { result } = await f.phase("foreground", [f.intent.intentId, terminal.intentId]);
+    const { result } = await f.phase("general", ids, () => yieldNow);
     expect(f.sends()).toBe(2);
     expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
     expect(await f.read(terminal.intentId)).toMatchObject({ status: "failed" });
+    if (remaining) expect(await f.read(remaining.intentId)).toMatchObject({ status: "pending" });
     expect(result).toMatchObject({
       progressed: true, checkpointReason: "outbox_receipt",
       nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
@@ -374,6 +390,47 @@ describe("post-send failure recovery", () => {
     expect(result.nextWakeReason ?? "assistant").toBe("assistant");
     expect(f.logRequests.flatMap((request) => request.entries)
       .filter((entry) => entry.errorCode === "assistant_after_checkpoint_failed")).toHaveLength(1);
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledOnce();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    const checkpoint = await cleanup.readHostedProviderCleanupCheckpoint(f.vaultRoot);
+    expect(checkpoint?.nextWakeAt).toEqual(expect.any(String));
+    await f.publish();
+    await f.restore();
+    vi.setSystemTime(new Date(checkpoint!.nextWakeAt!));
+    const deleteFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    expect(await cleanup.drainHostedProviderCleanupAfterCommit({
+      checkpoint: checkpoint!, env: { LINQ_API_TOKEN: "synthetic-token" }, fetchImplementation: deleteFetch,
+      vaultRoot: f.vaultRoot,
+      wake: buildHostedExecutionRuntimeTimerWake({ eventId: "evt_cleanup", occurredAt: new Date().toISOString(), triggerKind: "runtime_timer", userId: "member_synthetic_phase" }),
+    })).toMatchObject({ attemptedLinqMessageCount: 1, deletedLinqMessageCount: 1 });
+    expect(deleteFetch).toHaveBeenCalledWith(expect.stringContaining("linq_message_publication"), expect.objectContaining({ method: "DELETE" }));
+    expect(await f.read()).toMatchObject({ status: "sent", attemptCount: 1 });
+  });
+
+  it("recovers a drain failure before provider acceptance without marking the effect sent", async () => {
+    const f = await fixture("linq");
+    mocks.drainHostedPreparedAssistantDeliveries.mockRejectedValueOnce(new Error("Synthetic drain unavailable before provider entry"));
+
+    const { result } = await f.phase("general", [f.intent.intentId]);
+    expect(f.sends()).toBe(0);
+    expect(await f.read()).toMatchObject({ status: "sending", delivery: null, preparedDispatchToken: expect.any(String) });
+    expect(result).toMatchObject({ progressed: true, nextWakeAt: new Date(Date.now() + 30_000).toISOString() });
+    expect(result.nextWakeReason ?? "assistant").toBe("assistant");
+    expect(result.redactedStatus?.hostedOutboxDeliverySent ?? 0).toBe(0);
+    expect(f.logRequests.flatMap((request) => request.entries)
+      .filter((entry) => entry.errorCode === "assistant_after_checkpoint_failed")).toHaveLength(1);
+
+    vi.setSystemTime(new Date(result.nextWakeAt!));
+    const recovery = await f.phase();
+    expect(f.sends()).toBe(0);
+    expect(await f.read()).toMatchObject({ status: "sending", delivery: null });
+    expect(recovery.post.nextWakeAt).toBe(await callbacks.resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: f.vaultRoot }));
+    expect(Date.parse(recovery.post.nextWakeAt!)).toBeGreaterThan(Date.now());
+    vi.setSystemTime(new Date(recovery.post.nextWakeAt!));
+    await f.phase();
+    expect(f.sends()).toBe(1);
+    expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    expect(f.visibleReplies.size).toBe(1);
   });
 
   it("keeps an accepted receipt and recovery wake when the yielded branch cannot read cleanup state", async () => {

@@ -6764,19 +6764,22 @@ async function drainHostedPostCheckpointDelivery(input: {
       outcomes,
       port: input.input.runtime.platform.productFeedbackPort ?? null,
     });
-    const stagedTerminalFailureInputCount =
-      await stageHostedTerminalOutboxFailureInputs({
-        deliveryEffects: input.assistantDeliveryEffects,
-        outcomes,
-        vaultRoot: input.input.restored.vaultRoot,
-      });
+    let stagedTerminalFailureInputCount: number;
     if (backgroundDeliveryDrainYielded) {
-      await recordHostedProviderCleanupAfterDelivery({
-        runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
-        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
-        outcomes,
-        vaultRoot: input.input.restored.vaultRoot,
-      });
+      try {
+        stagedTerminalFailureInputCount = await stageHostedTerminalOutboxFailureInputs({
+          deliveryEffects: input.assistantDeliveryEffects,
+          outcomes,
+          vaultRoot: input.input.restored.vaultRoot,
+        });
+      } finally {
+        await recordHostedProviderCleanupAfterDelivery({
+          runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
+          nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+          outcomes,
+          vaultRoot: input.input.restored.vaultRoot,
+        });
+      }
       const yielded = await yieldHostedBackgroundPostCheckpointDrain(input, {
         resetPreparedDelivery: false,
         stagedTerminalFailureInputCount,
@@ -6784,13 +6787,22 @@ async function drainHostedPostCheckpointDelivery(input: {
       });
       return { ...yielded, redactedStatus: { ...deliveryRedactedStatus, ...yielded.redactedStatus } };
     }
-    const providerCleanup = await runHostedProviderCleanupPostCheckpointStep({
-      assistantDeliveryOutcomes: outcomes,
-      phaseInput: input.input,
-      providerCleanupPlan: input.providerCleanupPlan,
-      shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
-      wake: input.wake,
-    });
+    let providerCleanup;
+    try {
+      stagedTerminalFailureInputCount = await stageHostedTerminalOutboxFailureInputs({
+        deliveryEffects: input.assistantDeliveryEffects,
+        outcomes,
+        vaultRoot: input.input.restored.vaultRoot,
+      });
+    } finally {
+      providerCleanup = await runHostedProviderCleanupPostCheckpointStep({
+        assistantDeliveryOutcomes: outcomes,
+        phaseInput: input.input,
+        providerCleanupPlan: input.providerCleanupPlan,
+        shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
+        wake: input.wake,
+      });
+    }
     const postNextWake = await resolveHostedPostDeliveryNextWake(input, outcomes, providerCleanup.wake);
     const postNextWakeAt = postNextWake.at;
     if (input.assistantDeliveryEffects.length > 0) {
