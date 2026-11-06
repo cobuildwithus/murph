@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ container: vi.fn(), games: vi.fn(), identity: vi.fn(), route: vi.fn(), chat: vi.fn() }));
@@ -12,10 +13,10 @@ import { addressedGameRematchWhere, gamePairWhere, readGameChatCandidateIds, req
 
 const players = ["player-a", "player-b"];
 const phones = ["+15555550101", "+15555550102"];
-const chat = { isGroup: true, handlesComplete: true, handles: [
+const chat = linqRoster({ isGroup: true, handlesComplete: true, handles: [
   ...phones.map((handle) => ({ handle, isMe: false, status: "active" })),
   { handle: "+15555550100", isMe: true, status: "active" },
-] };
+] });
 
 describe("game pair discovery", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -84,10 +85,10 @@ describe("exact multi-person provider audiences", () => {
     const { isExactGameChat, gameChatNames } = await import("../src/lib/game/chat-membership");
     for (const size of [2, 3, 10]) {
       const people = Array.from({ length: size }, (_, i) => `+1555555${String(i + 101).padStart(4, "0")}`);
-      const room = { isGroup: true, handlesComplete: true, handles: [
+      const room = linqRoster({ isGroup: true, handlesComplete: true, handles: [
         { handle: "+15555550100", isMe: true, status: "active" },
         ...people.map(handle => ({ handle, isMe: false, status: "active" })),
-      ] };
+      ] });
       expect(isExactGameChat(room, [...people].reverse())).toBe(true);
       expect(isExactGameChat({ ...room, handlesComplete: false }, people)).toBe(false);
       expect(isExactGameChat({ ...room, handles: room.handles.slice(1) }, people)).toBe(false);

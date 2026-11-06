@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -95,10 +96,10 @@ import {
 describe("hosted Linq read receipt route authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
       api_version: "2026-01-01",

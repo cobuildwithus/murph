@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -94,7 +95,7 @@ function route(
 }
 
 function summary(otherHandles: string[]) {
-  return {
+  return linqRoster({
     handleCount: otherHandles.length + 2,
     handles: [
       { handle: PROVIDER_PHONE, isMe: true, status: "active" },
@@ -107,7 +108,7 @@ function summary(otherHandles: string[]) {
     ],
     handlesComplete: true,
     isGroup: true,
-  };
+  });
 }
 
 beforeEach(() => {
@@ -384,12 +385,12 @@ describe("joined-group participant inventory", () => {
         nonLinqContainerMemberIds: new Set(),
         unavailableContainerMemberIds: new Set(),
       });
-    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue({
+    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handleCount: handles.length,
       handles,
       handlesComplete: true,
       isGroup: true,
-    });
+    }));
 
     const result = await readHostedGroupMembershipInventory({
       memberId: REQUESTER_MEMBER_ID,

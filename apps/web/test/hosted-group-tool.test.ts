@@ -1,3 +1,6 @@
+import { parseHostedRuntimeGroupToolResponse } from "@murphai/hosted-execution/parsers";
+import * as participantOwner from "@/src/lib/hosted-groups/thread-container-participants";
+import { linqRoster } from "./helpers/linq-roster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -19,13 +22,13 @@ const mocks = vi.hoisted(() => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   finishHostedOnboardingTiming: vi.fn(),
-  getHostedLinqChatHandles: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getHostedTelegramGroupTitle: vi.fn(),
   hasHostedMemberActivationProof: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadContainerParticipantExecuteRaw: vi.fn(),
+  removeParticipants: vi.fn().mockResolvedValue({ count: 0 }),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
   issueHostedSignupReferralLink: vi.fn(),
@@ -149,7 +152,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("@/src/lib/hosted-onboarding/linq-client")
   >()),
-  getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
@@ -313,20 +315,18 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 }));
 
 const fakeTx = {
+  $executeRaw: mocks.hostedThreadContainerParticipantExecuteRaw,
+  $queryRaw: vi.fn().mockResolvedValue([{ completeRosterObservedAt: null }]),
   hostedMember: { findUnique: mocks.hostedMemberFindUnique },
-  hostedThreadContainer: { findUnique: mocks.hostedThreadContainerFindUnique },
+  hostedThreadContainer: { findUnique: mocks.hostedThreadContainerFindUnique, update: vi.fn() },
+  hostedThreadContainerParticipant: { updateMany: mocks.removeParticipants },
 };
 const fakePrisma = {
   ...fakeTx,
-  $executeRaw: mocks.hostedThreadContainerParticipantExecuteRaw,
+  $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
 };
 
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: () => ({
-    ...fakePrisma,
-    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
-  }),
-}));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => fakePrisma }));
 
 import {
   buildHostedGroupJoinOfferMessage,
@@ -443,11 +443,11 @@ function addressBookLookupResult(
   };
 }
 
-function readParticipantReconcileQuery(): {
+function readParticipantReconcileQuery(index = -1): {
   sql: string;
   values: readonly unknown[];
 } {
-  const query = mocks.hostedThreadContainerParticipantExecuteRaw.mock.calls.at(-1)?.[0] as
+  const query = mocks.hostedThreadContainerParticipantExecuteRaw.mock.calls.at(index)?.[0] as
     | { sql?: unknown; values?: unknown }
     | undefined;
   if (
@@ -557,11 +557,11 @@ describe("handleHostedRuntimeGroupTool", () => {
       expiresAt: new Date("2026-08-06T22:30:00.000Z"),
       signupUrl: "https://www.withmurph.ai/join/signup_invite",
     });
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       displayName: "Weekend Warriors",
       handles: [],
       isGroup: true,
-    });
+    }));
     mocks.getHostedTelegramGroupTitle.mockResolvedValue("Weekend Warriors");
     mocks.leaveHostedGroupMemberTx.mockResolvedValue({ kind: "left" });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
@@ -2418,11 +2418,11 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("reads the current Linq group title on demand from the durable route", async () => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
       displayName: "  Weekend   Warriors  ",
       handles: [],
       isGroup: true,
-    });
+    }));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -2483,7 +2483,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     displayName,
     handles,
   }) => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
       displayName,
       handles: handles ?? [
         { handle: "+15550000001", isMe: true, status: "active" },
@@ -2491,7 +2491,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         { handle: "departed@example.test", isMe: false, status: "left" },
       ],
       isGroup: true,
-    });
+    }));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -2542,11 +2542,11 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("reports no current group title without inventing one", async () => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
       displayName: null,
       handles: [],
       isGroup: true,
-    });
+    }));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -3374,12 +3374,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     mocks.buildMurphHostedLinqContactCardVcf.mockReturnValue("BEGIN:VCARD\r\nEND:VCARD\r\n");
     mocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue(null);
-    mocks.getHostedLinqChatHandles.mockResolvedValue([
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [
       { handle: "+15557770000", isMe: true, status: "active" },
       { handle: "+15550000001", isMe: false, status: "active" },
       { handle: "person@example.com", isMe: false, status: null },
       { handle: "+15550000002", isMe: false, status: "left" },
-    ]);
+    ] }));
     mocks.hostedThreadContainerFindUnique.mockResolvedValue({
       member: { suspendedAt: null },
       ownerMemberId: "member_owner",
@@ -3451,7 +3451,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
-    expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
   });
 
@@ -5026,7 +5026,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
-    expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
@@ -5069,7 +5069,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: { status: "ok" },
     });
 
-    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledWith({
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_1",
     });
   });
@@ -5094,9 +5094,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(
       mocks.assertHostedLinqRouteEgressAuthority.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.getHostedLinqChatHandles.mock.invocationCallOrder[0]!);
+    ).toBeLessThan(mocks.getHostedLinqChatSummary.mock.invocationCallOrder[0]!);
     expect(
-      mocks.getHostedLinqChatHandles.mock.invocationCallOrder[0],
+      mocks.getHostedLinqChatSummary.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.lookupHostedGroupParticipantMemberIdsByHandles.mock
         .invocationCallOrder[0]!,
@@ -5121,36 +5121,25 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         prisma: expect.anything(),
       });
     expect(mocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
-    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(2);
     expect(
       mocks.readHostedMemberActivationProofMemberIds.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.hostedThreadContainerParticipantExecuteRaw.mock.invocationCallOrder[0]!,
     );
+    const attributionQuery = readParticipantReconcileQuery(0);
+    expect(attributionQuery.sql).toContain("INSERT INTO hosted_group_participant_observation");
+    expect(attributionQuery.sql).toContain("ORDER BY input_observation.contact_lookup_key");
     const reconcileQuery = readParticipantReconcileQuery();
-    expect(reconcileQuery.sql).toContain(
-      "WITH input_observation(contact_lookup_key)",
-    );
-    expect(reconcileQuery.sql).toContain(
-      "INSERT INTO hosted_group_participant_observation",
-    );
-    expect(reconcileQuery.sql).toContain(
-      "ORDER BY input_observation.contact_lookup_key",
-    );
-    expect(reconcileQuery.sql).toContain(
-      "input_participant(participant_member_id, handle_lookup_key)",
-    );
-    expect(reconcileQuery.sql).toContain(
-      "ON CONFLICT (container_member_id, participant_member_id)",
-    );
-    expect(reconcileQuery.sql).toContain(
-      "UPDATE hosted_thread_container_participant AS participant",
-    );
+    expect(reconcileQuery.sql).toContain("ON CONFLICT (container_member_id, participant_member_id)");
     expect(reconcileQuery.values).toEqual(expect.arrayContaining([
-      "member_container",
-      "member_participant",
-      true,
+      "member_container", "member_participant",
     ]));
+    expect(mocks.removeParticipants).toHaveBeenCalledWith({
+      where: { containerMemberId: "member_container", removedAt: null,
+        lastSeenAt: { lte: expect.any(Date) }, participantMemberId: { notIn: ["member_participant"] } },
+      data: { removedAt: expect.any(Date) },
+    });
     expect(reconcileQuery.values.some((value) =>
       typeof value === "string" && /^hbidx:phone:/u.test(value)
     )).toBe(true);
@@ -5159,7 +5148,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       value: "person@example.com",
     });
     expect(silentEmailLookupKey).not.toBeNull();
-    expect(reconcileQuery.values).toContain(silentEmailLookupKey);
+    expect(attributionQuery.values).toContain(silentEmailLookupKey);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5172,8 +5161,24 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
-    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledTimes(1);
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
     expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("preserves the participant response and observation time, complete=%s", async handlesComplete => {
+    const observation = linqRoster({
+      handlesComplete, observedAt: new Date("2026-11-01T10:00:00.000Z"),
+      handles: [{ handle: "+15550000001", isMe: false, status: "active" }],
+    });
+    mocks.getHostedLinqChatSummary.mockResolvedValue(observation);
+    const reconcile = vi.spyOn(participantOwner, "reconcileHostedThreadContainerParticipants");
+    try {
+      const response = await handleHostedRuntimeGroupTool({ memberId: "member_container", request: { action: "read_chat_participants", linqThread: LINQ_THREAD } });
+      expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+      expect(response).toMatchObject({ action: "read_chat_participants", result: { status: "ok" } });
+      expect(response.result).not.toHaveProperty("observation");
+      expect(reconcile.mock.calls[0]?.[0].observation).toBe(observation);
+    } finally { reconcile.mockRestore(); }
   });
 
   it("adds owner-only advisory names independently of Murph activation", async () => {
@@ -5184,11 +5189,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         ["+15550000002", "Alex R."],
       ])),
     );
-    mocks.getHostedLinqChatHandles.mockResolvedValue([
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [
       { handle: "+15557770000", isMe: true, status: "active" },
       { handle: "+15550000001", isMe: false, status: "active" },
       { handle: "+15550000002", isMe: false, status: "active" },
-    ]);
+    ] }));
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
       async ({ phoneNumber }) => phoneNumber === "+15550000001"
         ? { core: { id: "member_participant", suspendedAt: null } }
@@ -5243,11 +5248,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
       new Error("sensitive provider detail"),
     );
-    mocks.getHostedLinqChatHandles.mockResolvedValue([
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [
       { handle: "+15557770000", isMe: true, status: "active" },
       { handle: "+15550000001", isMe: false, status: "active" },
       { handle: "+15550000002", isMe: false, status: "active" },
-    ]);
+    ] }));
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
       async ({ phoneNumber }) => phoneNumber === "+15550000001"
         ? { core: { id: "member_participant", suspendedAt: null } }
@@ -5296,11 +5301,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
             rejectLookup = reject;
           }),
         );
-        mocks.getHostedLinqChatHandles.mockResolvedValue([
+        mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [
           { handle: "+15557770000", isMe: true, status: "active" },
           { handle: "+15550000001", isMe: false, status: "active" },
           { handle: "+15550000002", isMe: false, status: "active" },
-        ]);
+        ] }));
         mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
           async ({ phoneNumber }) => phoneNumber === "+15550000001"
             ? { core: { id: "member_participant", suspendedAt: null } }
@@ -5356,10 +5361,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "active",
       }),
     );
-    mocks.getHostedLinqChatHandles.mockResolvedValue([
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [
       { handle: "+15557770000", isMe: true, status: "active" },
       ...activeHandles,
-    ]);
+    ] }));
     const response = await handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
@@ -5395,8 +5400,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       });
     expect(mocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
     expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
-    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
-    expect(readParticipantReconcileQuery().values).toContain(false);
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(2);
+    expect(mocks.removeParticipants).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile capped.",
       expect.objectContaining({
@@ -5448,17 +5453,17 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "active",
       }),
     );
-    mocks.getHostedLinqChatHandles.mockResolvedValue([
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [
       { handle: "+15557770000", isMe: true, status: "active" },
       ...activeHandles,
-    ]);
+    ] }));
     await reconcileHostedThreadContainerParticipants({
       chatId: "chat_group_1",
       containerMemberId: "member_container",
       prisma: fakePrisma as never,
     });
 
-    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledWith({
+    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_1",
     });
     expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles)
@@ -5472,8 +5477,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
     expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
-    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
-    expect(readParticipantReconcileQuery().values).toContain(false);
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(2);
+    expect(mocks.removeParticipants).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile capped.",
       expect.objectContaining({
@@ -5492,7 +5497,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("treats an unrecognized empty roster as provider trouble, not an empty room", async () => {
-    mocks.getHostedLinqChatHandles.mockResolvedValue([]);
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({ handles: [] }));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5512,7 +5517,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("reports provider trouble as unavailable instead of throwing", async () => {
-    mocks.getHostedLinqChatHandles.mockRejectedValue(new Error("linq down"));
+    mocks.getHostedLinqChatSummary.mockRejectedValue(new Error("linq down"));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5531,7 +5536,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
   });
 
-  it("dedupes member authority while observing every current handle in one statement", async () => {
+  it("dedupes member authority while observing every current handle in one transaction", async () => {
     const firstHandle = "+15550000001";
     const laterHandle = "+15550000002";
     const firstLookupKey = createHostedLinqParticipantContactLookupKey({
@@ -5549,10 +5554,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     await reconcileHostedThreadContainerParticipants({
       chatId: "chat_group_1",
       containerMemberId: "member_container",
-      handles: [
+      observation: linqRoster({ handles: [
         { handle: firstHandle, isMe: false, status: "active" },
         { handle: laterHandle, isMe: false, status: "active" },
-      ],
+      ] }),
       prisma: fakePrisma as never,
       resolvedParticipants: [
         { handle: firstHandle, participantMemberId: "member_participant" },
@@ -5560,10 +5565,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       ],
     });
 
-    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(2);
     const reconcileQuery = readParticipantReconcileQuery();
-    expect(reconcileQuery.values).toContain(firstLookupKey);
-    expect(reconcileQuery.values).toContain(laterLookupKey);
+    expect(readParticipantReconcileQuery(0).values).toContain(firstLookupKey);
+    expect(readParticipantReconcileQuery(0).values).toContain(laterLookupKey);
     expect(reconcileQuery.values.filter((value) => value === "member_participant"))
       .toHaveLength(1);
   });
@@ -5572,26 +5577,27 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     await reconcileHostedThreadContainerParticipants({
       chatId: "chat_group_1",
       containerMemberId: "member_container",
-      handles: [
+      observation: linqRoster({ handles: [
         { handle: "+15550000001", isMe: false, status: "left" },
-      ],
+      ] }),
       prisma: fakePrisma as never,
       resolvedParticipants: [],
     });
 
-    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(2);
     const reconcileQuery = readParticipantReconcileQuery();
     expect(reconcileQuery.sql).toContain("SELECT NULL::text, NULL::text");
     expect(reconcileQuery.sql).toContain("WHERE FALSE");
-    expect(reconcileQuery.values).toEqual(expect.arrayContaining([
-      "member_container",
-      true,
-    ]));
+    expect(mocks.removeParticipants).toHaveBeenCalledWith({
+      where: { containerMemberId: "member_container", removedAt: null,
+        lastSeenAt: { lte: expect.any(Date) }, participantMemberId: { notIn: [] } },
+      data: { removedAt: expect.any(Date) },
+    });
   });
 
   it("keeps the existing roster projection when the provider fetch fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.getHostedLinqChatHandles.mockRejectedValueOnce(new Error("linq unavailable"));
+    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(new Error("linq unavailable"));
 
     await reconcileHostedThreadContainerParticipants({
       chatId: "chat_group_1",
@@ -5619,9 +5625,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     await expect(reconcileHostedThreadContainerParticipants({
       chatId: "chat_group_1",
       containerMemberId: "member_container",
-      handles: [
+      observation: linqRoster({ handles: [
         { handle: "+15550000001", isMe: false, status: "active" },
-      ],
+      ] }),
       prisma: fakePrisma as never,
       resolvedParticipants: [
         {

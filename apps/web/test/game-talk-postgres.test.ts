@@ -1,3 +1,5 @@
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { linqRoster } from "./helpers/linq-roster";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -30,7 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async (original) => ({ ..
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-onboarding/linq-client")>(),
   createHostedLinqChat: m.create,
-  getHostedLinqChatSummary: async () => ({ isGroup: true, handlesComplete: true, handles: [
+  getHostedLinqChatSummary: async () => linqRoster({ isGroup: true, handlesComplete: true, handles: [
     { handle: "+15555550100", isMe: true, status: "active" },
     { handle: "+15555550101", isMe: false, status: "active" },
     { handle: "+15555550102", isMe: false, status: "active" },
@@ -48,6 +50,7 @@ async function fixture(existingRoom = false) {
   m.first = first; m.lineKey = `synthetic-line-${randomUUID()}`;
   members.push(first, second, ...(existingRoom ? [room] : [])); games.push(gameId); lines.push(m.lineKey);
   await db.hostedMember.createMany({ data: [first, second, ...(existingRoom ? [room] : [])].map(id => ({ id, billingStatus: "not_started" })) });
+  await db.hostedMemberIdentity.createMany({ data: [first, second].map((memberId, index) => ({ memberId, phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
   await db.hostedLinqLine.create({ data: { phoneNumberLookupKey: m.lineKey, phoneNumberHint: "0100", healthStatus: "healthy" } });
   if (existingRoom) await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
     participants: { create: [first, second].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: new Date(), lastSeenAt: new Date() })) } } });
@@ -100,6 +103,7 @@ describe.skipIf(!enabled)("talk it over PostgreSQL", () => {
     await db.hostedGroup.deleteMany({ where: { ownerMemberId: { in: members } } });
     await db.hostedMember.deleteMany({ where: { id: { in: members } } });
     await db.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: { in: lines } } });
+    await db.hostedGroupParticipantObservation.deleteMany({ where: { contactLookupKey: { in: ["+15555550101", "+15555550102", "+15555550103"].map(phone => createHostedPhoneLookupKey(phone)!) } } });
     members.length = 0; games.length = 0; lines.length = 0;
   });
   it("claims without accepting, seals the author-bound note and replays one effect", async () => {

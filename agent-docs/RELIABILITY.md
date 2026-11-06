@@ -1395,12 +1395,16 @@ Current product admission, delivery and native runtime safety rules remain.
   leave a participant authoritative forever: stale relationships age out.
   Authenticated Linq inbound can renew only an existing non-removed relationship
   for the currently resolved identity, and future provider timestamps are
-  clamped to server time. Before denying a quiet route, Web makes one bounded
-  provider read and scans the full returned roster. It may create or reinstate
-  exactly the authenticated current sender after the roster handle re-resolves
-  to the same active hosted identity; otherwise it may renew only an existing
-  active participant whose current identity still matches the stored
-  relationship. Provider order and the assistant participant projection cap do
+  clamped to server time. Before denying a quiet route for an eligible verified
+  sender, Web makes one bounded provider read and scans the full returned roster.
+  Missing required roster proof is retryable; a partial roster establishes only
+  presence. Complete verified game-room reads renew the same participant leases.
+  Pre-read observation times and the complete-roster watermark prevent stale
+  evidence from restoring removed access; removal wins equal-time conflicts.
+  Web may create or reinstate exactly the authenticated current sender after
+  the roster handle re-resolves to the same active hosted identity; otherwise it
+  may renew only an existing active participant whose current identity still
+  matches the stored relationship. Provider order and the assistant participant projection cap do
   not decide access.
 - Linq participant add/remove context is a bounded optional sidecar on the
   existing routed group, not another work owner. Provider-event deduplication

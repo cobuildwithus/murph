@@ -293,10 +293,12 @@ async function recoverGameNotificationWake(receiptId: string, gameId: string, ev
   }
   if (!game.chatContainerMemberId) return false;
   if (game.maxPlayers === 10 && !await revalidateGroupNotificationWake(game, eventId, now)) return false;
-  return recoverGameNotificationPointer(receiptId, game.chatContainerMemberId, eventId);
+  const room = game.chatContainerMemberId;
+  return recoverGameNotificationPointer(receiptId, room, eventId, game.maxPlayers === 10 ? undefined
+    : async () => requireExactChat(room, await readPairGamePhones(lifecyclePlayerMemberIds(game, kind), prisma)));
 }
 
-async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string): Promise<boolean> {
+async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string, verifyRoster?: () => Promise<unknown>): Promise<boolean> {
   const prisma = getPrisma();
   const mailbox = await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: roomId, prisma });
   if (!mailbox) return false;
@@ -305,6 +307,8 @@ async function recoverGameNotificationPointer(receiptId: string, roomId: string,
     // provider truth intact and stop this pre-generation wake sweep.
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { retryAfterAt: null } });
   } else {
+    // A bootstrap wake precedes its route, so its fresh container has no provider roster to read yet.
+    if (verifyRoster && await prisma.hostedThreadRoute.findFirst({ where: { containerMemberId: roomId }, select: { containerMemberId: true } })) await verifyRoster();
     await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: mailbox.id });
   }
   return true;
@@ -336,7 +340,7 @@ function lifecycleStatuses(kind: GameChatLifecycleKind | "proposal", maxPlayers 
 
 type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string | null; seat: number; leftAt: Date | null }>; invitees: Array<{ memberId: string | null; recipientLookupKey: string | null }> };
 
-function lifecyclePlayerMemberIds(game: GameChatLifecycleRecord | null, kind: GameChatLifecycleKind): string[] {
+function lifecyclePlayerMemberIds(game: GameChatLifecycleRecord | null, kind: GameChatLifecycleKind | "proposal"): string[] {
   if (game?.maxPlayers === 10) return game.players.flatMap(player => player.memberId && !player.leftAt ? [player.memberId] : []);
   if (kind !== "rematch") return game?.players.flatMap(player => player.memberId ? [player.memberId] : []) ?? [];
   if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1 || game.players[0]?.memberId !== game.createdBy) return [];
@@ -475,7 +479,9 @@ async function deliverGroupMissedDayLifecycle(roomId: string, firstMissedDate: s
   // Publication may have committed before its signal failed. Never replace frozen evidence.
   const existing = await readHostedMailboxItemByDedupeKey({ userId: roomId, dedupeKey: eventId });
   if (existing) {
-    if (existing.consumedAt === null) await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: existing.id });
+    if (existing.consumedAt === null && await readGroupMissedDayDeliveryAuthority(eventId, roomId)) {
+      await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: existing.id });
+    }
     return true;
   }
   const prepared = await prepareGroupMissedDay(roomId, firstMissedDate, now);
@@ -503,6 +509,14 @@ async function deliverGroupMissedDayLifecycle(roomId: string, firstMissedDate: s
   return queued || supersedeMissedDay(eventId, now);
 }
 
+/** The game names the pair. Stored participant rows can be the stale evidence a roster read must repair. */
+async function readPairGamePhones(players: readonly string[], prisma: PrismaClient): Promise<string[]> {
+  const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
+  const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
+  if (!isPairRoster(phones) || new Set(phones).size !== phones.length) throw new Error("Game chat requires verified players.");
+  return phones;
+}
+
 async function deliverCurrentGameChatLifecycle(input: {
   boundOnly: boolean;
   eventId: string;
@@ -527,9 +541,7 @@ async function deliverCurrentGameChatLifecycle(input: {
     if (!destination || destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") return false;
     return enqueueGameLifecycle({ audience, game, containerMemberId: game.chatContainerMemberId, gameId, kind, eventId, instructions, destination, players, termsVersion: input.termsVersion });
   }
-  const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
-  const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
-  if (!isPairRoster(phones) || new Set(phones).size !== phones.length) throw new Error("Game chat requires verified players.");
+  const phones = await readPairGamePhones(players, prisma);
   let containerMemberId = game.chatContainerMemberId;
   if (!containerMemberId) {
     containerMemberId = await bindPairGameChat(gameId, players, await findExistingGameChat(players, phones));

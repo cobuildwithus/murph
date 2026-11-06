@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameChange, GamePendingChange } from "../src/lib/game/contract";
 const m = vi.hoisted(() => ({
@@ -32,7 +33,7 @@ vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
 import { deliverGameChangeProposal, isExactGameChat, buildGameProposalInstructions, readGameProposalDeliveryPlayers, requireExactGameChat } from "../src/lib/game/chat-delivery";
 const phones = ["+15555550101", "+15555550102"];
 const proposal: GamePendingChange = { id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] }, lengthDays: 14 }, effectiveFromDay: 2, deliveryStatus: "pending", startsOn: null };
-const chat = { isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] };
+const chat = linqRoster({ isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] });
 const game = (container: string | null = null) => ({ id: "game", lengthDays: 7, status: "live", pendingChange: { v: 1, ...proposal }, chatContainerMemberId: container, players: [{ memberId: "person-a", seat: 0, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }, { memberId: "person-b", seat: 1, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }] });
 const candidate = (memberId: string, name: string | null = null, activity: string | null = "2030-03-04T12:00:00Z", created = "2030-03-01T12:00:00Z") => ({
   memberId, createdAt: new Date(created), member: {

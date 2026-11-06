@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -319,8 +320,8 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     const linq = await import("@/src/lib/hosted-onboarding/linq-client");
     const route = vi.spyOn(routes, "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({ nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(), authorities: new Map([[room,
       { channel: "linq", threadId: room, containerMemberId: room, accountLookupKey: "synthetic-line" }]]) });
-    const summary = vi.spyOn(linq, "getHostedLinqChatSummary").mockResolvedValue({ isGroup: true, handlesComplete: true,
-      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...people.map(id => ({ handle: `${id}@example.test`, isMe: false, status: "active" }))] });
+    const summary = vi.spyOn(linq, "getHostedLinqChatSummary").mockResolvedValue(linqRoster({ isGroup: true, handlesComplete: true,
+      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...people.map(id => ({ handle: `${id}@example.test`, isMe: false, status: "active" }))] }));
     const line = vi.spyOn(lines, "readHostedLinqIncomingLineState").mockResolvedValue({ kind: "assignable", phoneNumberLookupKey: "synthetic-line" });
     try {
       const context = { params: Promise.resolve({ token: created.inviteToken! }) };

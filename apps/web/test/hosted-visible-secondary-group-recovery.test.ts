@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -58,7 +59,7 @@ describe("Linq group-chat visible access recovery", () => {
     }));
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -137,7 +138,7 @@ describe("Linq group-chat visible access recovery", () => {
       );
       const dependencies = buildLinqDependencies({
         event,
-        getHostedLinqChatSummary: vi.fn(async () => ({
+        getHostedLinqChatSummary: vi.fn(async () => linqRoster({
           handles: MATCHING_PRIVATE_HANDLES,
           isGroup: false,
         })),
@@ -225,7 +226,7 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -324,7 +325,7 @@ describe("Linq group-chat visible access recovery", () => {
     }));
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -379,7 +380,7 @@ describe("Linq group-chat visible access recovery", () => {
     }));
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -435,7 +436,7 @@ describe("Linq group-chat visible access recovery", () => {
     };
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: [{
           handle: GROUP_SENDER_EMAIL,
           isMe: false,
@@ -488,7 +489,7 @@ describe("Linq group-chat visible access recovery", () => {
     }));
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -567,7 +568,7 @@ describe("Linq group-chat visible access recovery", () => {
     const resolveHostedRecognizedInboundAccess = vi.fn();
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: true,
       })),
@@ -606,7 +607,7 @@ describe("Linq group-chat visible access recovery", () => {
     const resolveHostedRecognizedInboundAccess = vi.fn();
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -663,7 +664,7 @@ describe("Linq group-chat visible access recovery", () => {
     };
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -754,7 +755,7 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -807,7 +808,7 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -846,14 +847,14 @@ describe("Linq group-chat visible access recovery", () => {
       messageId: "msg_group_fallback",
     }));
     const getHostedLinqChatSummary = vi.fn()
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: true,
-      });
+      }));
     const dependencies = buildLinqDependencies({
       event,
       getHostedLinqChatSummary,
@@ -896,18 +897,18 @@ describe("Linq group-chat visible access recovery", () => {
       messageId: "msg_group_fallback",
     }));
     const getHostedLinqChatSummary = vi.fn()
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(linqRoster({
         handles: [{
           handle: OTHER_PHONE_CONTACT.value,
           isMe: false,
           status: null,
         }],
         isGroup: false,
-      });
+      }));
     const dependencies = buildLinqDependencies({
       event,
       getHostedLinqChatSummary,
@@ -993,7 +994,7 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -1089,7 +1090,7 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),
@@ -1149,7 +1150,7 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const dependencies = buildLinqDependencies({
       event,
-      getHostedLinqChatSummary: vi.fn(async () => ({
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
         handles: MATCHING_PRIVATE_HANDLES,
         isGroup: false,
       })),

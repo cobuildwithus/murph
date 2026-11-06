@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { buildHostedExecutionAssistantNotificationRequestedWake, createHostedExecutionPrivateAssistantAskCompletionDeliveryKey, buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import {
@@ -2091,7 +2092,7 @@ describe("hosted Linq egress authority", () => {
     Object.assign(prisma, { hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue({ participants: people.map(participantMemberId => ({ participantMemberId })) }) } });
     const roster = scenario === "extra" ? [...handles, "outsider@example.test"] : scenario === "missing" || shrunk ? handles.slice(0, 2) : handles;
     vi.spyOn(await import("@/src/lib/hosted-routing/assistant-notification-destination"), "readHostedThreadContainerLinqRouteAuthorities").mockImplementation(vi.fn().mockResolvedValue({ authorities: new Map([["member-1", { threadId: "chat-authorized-group", containerMemberId: "member-1", channel: "linq" }]]) }));
-    vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-client"), "getHostedLinqChatSummary").mockImplementation(async () => ({ isGroup: true, handlesComplete: scenario !== "provider-stale", handles: [
+    vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-client"), "getHostedLinqChatSummary").mockImplementation(async () => linqRoster({ isGroup: true, handlesComplete: scenario !== "provider-stale", handles: [
       { handle: "+15555550100", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" })),
     ] }));
     vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-line-store"), "readHostedLinqIncomingLineState").mockImplementation(vi.fn().mockResolvedValue({ kind: "assignable" }));

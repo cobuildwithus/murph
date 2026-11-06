@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
@@ -421,10 +422,10 @@ describe("hosted Linq usage reset e2e", () => {
     vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
     vi.clearAllMocks();
 
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
 
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({

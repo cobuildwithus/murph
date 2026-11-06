@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
@@ -30,8 +31,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => {
     proof.audienceReads.push(`chat:${input.chatId}`);
     if (proof.chatFailures.has(input.chatId)) throw proof.chatFailures.get(input.chatId);
     if (proof.parsedChats.has(input.chatId)) return actual.getHostedLinqChatSummary(input);
-    return { isGroup: true, handlesComplete: true,
-      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(input.chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] };
+    return linqRoster({ isGroup: true, handlesComplete: true,
+      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(input.chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] });
   } };
 });
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async original => { const actual = await original<typeof import("@/src/lib/hosted-routing/assistant-notification-destination")>(); return { ...actual,
@@ -490,14 +491,16 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await receipt(eventId)).status).toBe(status);
   });
 
-  it("does not drop an unpublished-status receipt whose mailbox item exists", async () => {
+  it.each([false, true])("keeps an existing pointer and checks authority before signalling; audience changed=%s", async changed => {
     const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]), eventId = authority.policy.eventId;
     await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { status: "awaiting_generation", retryAfterAt: justLate } });
     proof.audienceReads.length = 0; proof.signal.mockClear();
+    if (changed) proof.rooms.set(f.roomId, f.people.slice(0, 2).map(person => person.email));
     expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 1 });
     expect(await receipt(eventId)).toMatchObject({ status: "awaiting_generation", skippedAt: null });
     expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(1);
-    expect(proof.audienceReads).toEqual([]);
+    expect(proof.audienceReads).toEqual([`route:${f.roomId}`, `chat:${f.roomId}`]);
+    expect(proof.signal).toHaveBeenCalledTimes(changed ? 0 : 1);
   });
 
   it.each([["unconsumed", null], ["consumed", now]] as const)("takes a published %s check-in out of the sweep past its deadline without dropping it", async (_state, consumedAt) => {

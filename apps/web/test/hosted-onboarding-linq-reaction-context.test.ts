@@ -1,3 +1,4 @@
+import { linqRoster } from "./helpers/linq-roster";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   parseHostedExecutionGroupReactionEventText,
@@ -148,13 +149,13 @@ beforeEach(() => {
       ? state.activeRootKeyIds.shift()
       : "root_ingress_1";
   });
-  mocks.getHostedLinqChatSummary.mockResolvedValue({
+  mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
     handles: [
       { handle: "+15550000000", isMe: true, status: "active" },
       { handle: "+15551234567", isMe: false, status: "active" },
     ],
     isGroup: true,
-  });
+  }));
   mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mockImplementation(
     async (input: {
       envelope: { userId: string };
