@@ -1891,6 +1891,11 @@ Canonical publication uncertainty and operational receipt replay proof are track
 [`canonical evidence preservation`](exec-plans/completed/2026-11-06-preserve-canonical-evidence.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.
 
+Photo producer checkpoint retirement, directory ownership, tolerant admission and
+bounded wake corrections are recorded in
+[`photo producer review fixes`](exec-plans/completed/2026-11-06-photos-producer-review-fixes.md).
+The current contract remains in `../ARCHITECTURE.md` under Meal-photo capture.
+
 Hosted delivery uncertainty, accepted confirmation, approval consume retries, and
 accounting deadline proofs are recorded in the [delivery settlement execution record](exec-plans/completed/2026-11-06-delivery-settlement.md).
 

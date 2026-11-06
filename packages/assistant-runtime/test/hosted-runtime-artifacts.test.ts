@@ -69,6 +69,7 @@ import type {
 } from "../src/hosted-runtime/platform.ts";
 import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
+  releaseHostedPhotoIntents,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
 } from "../src/hosted-runtime/media-references.ts";
@@ -988,12 +989,13 @@ test.each(["warm", "restored"].flatMap(workspaceKind => ["receipt", "receipt_res
   const now = new Date("2030-04-01T12:00:00.000Z");
   const accepted: { snapshot?: { bytes: Uint8Array; hash: string } } = {};
   const checkpoint = async () => {
-    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
     const bytes = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
     assert.ok(bytes);
     const hash = sha256HostedBundleHex(bytes);
     await artifactStore.put({ bytes, sha256: hash });
     accepted.snapshot = { bytes, hash };
+    releaseHostedPhotoIntents(vaultRoot, [...publication.pendingPhotoMediaIds, ...publication.retirementPendingMediaIds]);
     await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore });
   };
   try {
@@ -1069,10 +1071,14 @@ test.each(["warm", "restored"].flatMap(workspaceKind => ["receipt", "receipt_res
     await expect(maintain(false)).resolves.toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, nextEligibleAt: null });
     expect(store.storedBytesByMediaId.size).toBe(2);
     for (const meal of [first, second]) await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    await checkpoint(); // First accept the tombstones and their cleanup pointers.
     failDelete = true;
-    await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Synthetic media deletion failure");
-    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toHaveLength(2);
-    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 2 });
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 1 });
+    const remaining = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.retirementPending).toBe(true);
+    expect(store.storedBytesByMediaId.has(remaining[0]!.mediaId)).toBe(true);
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 1 });
     await checkpoint();
     expect(store.storedBytesByMediaId.size).toBe(0);
     expect(lifetimes.size).toBe(0);
@@ -1181,6 +1187,8 @@ test.each(["before_registration", "partial_put", "old_catalogue"])("cold receipt
     });
     expect(store.putCalls).toHaveLength(putCount);
     await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    const retirement = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    releaseHostedPhotoIntents(vaultRoot, retirement.retirementPendingMediaIds);
     await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
     expect(store.storedBytesByMediaId.size).toBe(0);
     expect(lifetimes.size).toBe(0);
@@ -1413,6 +1421,9 @@ test("canonical reads, maintenance and reconciliation agree on shard tie-breaks 
     expect(store.deleteCalls).not.toContain(thumbnail.mediaId);
     expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-02T00:00:00Z"), materializeCandidatePaths })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 2 });
     expect(materializeCandidatePaths).not.toHaveBeenCalled();
+    const retirement = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    expect(retirement.prunedMediaCount).toBe(0);
+    releaseHostedPhotoIntents(vaultRoot, retirement.retirementPendingMediaIds);
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore })).prunedMediaCount).toBe(1);
     expect(store.deleteCalls).toContain(thumbnail.mediaId);
     // A losing note revision still preserves durable inbox evidence.

@@ -1,3 +1,6 @@
+import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
+import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { createHostedMealMediaBudget, runHostedMealMediaMaintenance } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -26,6 +29,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   addCaptureWithLookup,
+  addMeasurement,
   appendJsonlRecord,
   CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
@@ -2080,12 +2084,23 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
   test("does not run deferred durable checkpoint effects when idle checkpoint fails", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
+    const media = createMealMediaStore();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
     });
 
     try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(Date.now() - 8 * 86_400_000));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const sourcePath = path.join(vaultRoot, "fixture.jpg");
+      await writeFile(sourcePath, "synthetic retained image");
+      const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic pending photo", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      vi.useRealTimers();
+      const baseline = (await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] }))!;
+      const hash = sha256HostedBundleHex(baseline);
+      const snapshotRef = createSnapshotFixtureRef({ hash, size: baseline.byteLength });
 
       await expect(runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -2100,6 +2115,9 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
+            const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: media.mediaStore });
+            expect(publication.pendingPhotoMediaIds).toHaveLength(1);
+            expect(publication.excludedVaultPaths).toEqual([]);
             return {
               snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
@@ -2111,6 +2129,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[hash, baseline]]),
             mailboxPort: createMailboxPort({
               events,
               items: [createMailboxItem({ laneSeq: "1" })],
@@ -2120,7 +2139,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
                 events.push("workspace.read");
                 return {
                   fetchedAt: TEST_NOW,
-                  workspace: createWorkspaceState({ version: "0" }),
+                  workspace: createWorkspaceState({ snapshotRef, version: "0" }),
                 };
               },
               async checkpoint() {
@@ -2143,9 +2162,17 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         },
       )).rejects.toThrow("checkpoint failed before durable effects");
 
+      const pending = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ pendingUpload: true, relativePath: measurement.event.attachments![0]!.relativePath });
+      expect(await runHostedMealMediaMaintenance({ vaultRoot, mediaStore: media.mediaStore,
+        budget: createHostedMealMediaBudget(), signal: new AbortController().signal, persistRetry: async () => {} }))
+        .toMatchObject({ uploaded: 0, pending: 1 });
+      expect(media.calls).toEqual([]);
       assert.equal(durableEffect.mock.calls.length, 0);
       assert.deepEqual(events.includes("durable-effect"), false);
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });

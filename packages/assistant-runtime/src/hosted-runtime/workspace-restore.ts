@@ -1,4 +1,5 @@
 import { withIntegrationIngestMaterializer } from "@murphai/core";
+import { resetHostedPhotoIntentsAfterColdRestore } from "./media-references.ts";
 import { resolveWorkspaceDurableRoot } from "./workspace-paths.ts";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -221,6 +222,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       ref: snapshotRef,
       signal: input.signal ?? null,
     });
+    resetHostedPhotoIntentsAfterColdRestore(restored.vaultRoot);
     await Promise.all([
       createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
       createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
@@ -1062,6 +1064,7 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
       recursive: true,
     }),
   ]);
+  resetHostedPhotoIntentsAfterColdRestore(restored.vaultRoot);
   await Promise.all([
     createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
     createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),

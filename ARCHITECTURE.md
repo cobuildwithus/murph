@@ -2577,7 +2577,7 @@ The post-drain credential-shape constraint is itself a database rollback floor b
 
 That same canonical import ensures one ordinary Murph-managed automation for the member at 9:00pm local time; meal capture has no second automation opt-in and no meal-specific scheduler. Enrollment requires an existing active private iMessage or Telegram thread or a verified email target so that postcondition is deliverable, and each accepted upload carries that Web-resolved direct route in its private mailbox envelope. The first import uses the envelope route to create the automation, while later imports idempotently reuse the same automation record without another service lookup. A direct email occurrence re-resolves the bound member's current verified address through the existing signed Web-control boundary immediately before provider work, so replacement or revocation never leaves the saved address as delivery authority. Reconciliation authorizes runnable conversation or model work normally even when system lag is also present; a blocked model wake can still admit the existing import-only system mode. System-only import checkpoints the ordinary cron wake created by canonical import and then runs the ordinary post-checkpoint staging cleanup. An accepted meal capture qualifies as engagement under the existing 28-day iMessage outreach policy, equivalent to a direct inbound interaction; other channels are never paused by Linq inactivity. AI-usage authorization remains unchanged. At runtime the ordinary automation agent reads one bounded batch of same-occurrence retry evidence followed by the oldest captures that still have pending `photo` attachments. Every selected capture requires inspection. An inspected non-food, unconsumed-food, or pending repeat device stub without a member-written note is deleted through `meal delete` and its absence confirmed; surviving meals follow enrichment or observation, read-back, and review completion. A pending repeat of a meal with no attachment or `externalRef` merges instead: `meal edit` copies that meal's details onto the capture and `meal delete` removes the saved meal. `externalRef` is the capture identity and survives edits; `source` is host-owned, and any edit makes the meal `manual`. Member-written notes are preserved. Failed deletion fails closeout; retry refreshes canonical work and skips absent meals. Only captures from the scheduled occurrence local date may contribute to member-visible output; historical-only work ends silently after review, and mixed work excludes every historical capture from the current-date result. Eligible current-date work includes supported calorie and macro totals by default while still suppressing numbers in eating-disorder-risk, intuitive-eating, or number-sensitive contexts, and invokes the automatic-capture-only `meal remove-photo` command. An eligible closeout uses the same complete logged-so-far totals-only card when accepted targets are missing. Scheduled work never derives, proposes, changes, repeats, or activates goals; explicit interactive target-setting remains the sole proposal owner. Pending `photo` attachments are the work queue; reviewed full photos use `reviewed_photo`. `photoReviewedAt` supplies same-occurrence retry evidence without allowing a later thumbnail maintenance revision to requeue a meal. Legacy removed-photo revisions retain their existing fallback. `packages/core` owns the audited review mutation and the bounded `runMealPhotoMaintenance` job: it creates oriented, metadata-stripped JPEG thumbnails at most 640px on the long edge, retires full photos after the shared 90-day inbox-image window, and preserves thumbnail attachments while the meal exists. Immutable capture metadata controls expiry; historical records without it use original import time, never editable meal time. Media retirement writes metadata-only privacy tombstones and updates manifests atomically, preserving append-only history while removing image bytes. New thumbnail paths use `thumbnail-v2-<operationId>.jpg`: retries after rollback avoid previously retired identities, while receipt replay keeps the committed path. Meal deletion retires both variants. Runtime idle maintenance resumes backfill and expiry through existing retention wakes; missing original images remain unavailable.
 
-Meal image bytes remain in encrypted vault snapshots and canonical receipts so ordinary CLI and model image reads work after cold restore. The existing media catalogue additionally owns thumbnail delivery. A new v2 descriptor starts pending before any remote effect. Its receipt-log status CAS durably publishes bytes, pointer and retry responsibility; restore replays all published receipts without uploading. Delivery belongs only to abortable idle maintenance after foreground work: select pending v2 entries from the catalogue/cursor, validate latest meal holders through interruptible event traversal, verify bytes, register the live meal lifetime, then PUT and mark complete. Each invocation shares ten attempts and a two-second delivery deadline starting before preparation. Foreground wakes, shutdown and projected assistant deadlines cancel discovery and every network continuation. An acknowledged status CAS retains the earliest real retention deadline or hourly retry before effects, including pending-only recovery. The ordinary full checkpoint saves completion and cursor. Exact-identity receipt replay preserves saved completion; legacy filenames without the marker stay settled. Old readers erase marker/cursor fields; only the v2 filename reconstructs pending on rollforward.
+Meal image bytes remain in encrypted vault snapshots and canonical receipts so ordinary CLI and model image reads work after cold restore. The existing media catalogue additionally owns thumbnail delivery. A new v2 descriptor starts pending before any remote effect. Its receipt-log status CAS durably publishes bytes, pointer and retry responsibility; restore replays all published receipts without uploading. Delivery belongs only to abortable idle maintenance after foreground work: select committed pending photo entries from the catalogue/cursor, validate canonical holders through interruptible event traversal, verify bytes, register the descriptor lifetime, then PUT and mark complete. Failed attempts consume the same budget and advance the persisted cursor, so a failing or stalled oldest item cannot monopolize later passes. Each invocation shares ten attempts and a two-second delivery deadline starting before preparation. Foreground wakes, shutdown and future projected assistant deadlines cancel discovery and every network continuation. An already-elapsed default wake does not shorten an admitted maintenance pass. An acknowledged status CAS retains the earliest real retention deadline or hourly retry before effects, including pending-only recovery. The ordinary full checkpoint saves completion and cursor. Exact-identity receipt replay preserves saved completion; legacy filenames without the marker stay settled. The shared descriptor reader preserves explicit pending markers for every photo family; thumbnail-v2 filenames also reconstruct legacy pending intent.
 
 The runtime-state catalogue reader owns validation for image, video and cold-ingest
 descriptors, including `raw/measurements/**`. Malformed descriptors fail closed;
@@ -2595,13 +2595,55 @@ Read authorization accepts one or more agreeing manifests, but rejects any
 tombstone or identity disagreement. Core closeout and validation
 may resolve absent bytes through a settled, unexpired descriptor only when its
 path, hash, size, media kind and canonical owner match. Local bytes still undergo
-local integrity checks and cannot be overridden by a descriptor. The preserver
-adds no photo upload admission and keeps meal and measurement bytes inline in
-snapshots and receipts when present. Deploy this reader to every runner before
-any producer externalizes these photos; that producer establishes the preserver
-as the rollback floor.
+local integrity checks and cannot be overridden by a descriptor.
 
-An obsolete pending v2 descriptor is handled outside the snapshot lock: register its exact metadata with an already-due finite expiry, then retire without PUT. An ordinary registration failure still permits retirement, while cancellation or owner loss stops further effects. Keep the pointer until retirement is acknowledged; finite registration alone is not completion. Existing finite-resource sweep covers a crash between registration and retirement. Snapshot reconciliation retains pending pointers and saves newly prepared plus existing cleanup pointers before pruning other media, so a failed deletion cannot forget another upload. Terminal retirement is never relaxed. Old-runner rollback restores the former precommit-upload and failed-prune bugs and is not a safe cleanup rollback floor. The owner-authorized Meals API derives the same path/hash/size/kind identity and mints five-minute thumbnail capabilities without waking a runner. A replica can expose a thumbnail URL before deferred bytes are ready; GET may return 404 until idle recovery. Full-photo expiry is independent of thumbnail delivery. Account deletion uses existing encrypted-object cleanup.
+During checkpoints, the producer discovers verified local image attachments on
+live meal and measurement events after seven days. The raw directory owner must
+match the event supplying the lifetime; secondary references cannot extend it
+or recreate detached upload intent. Unprovable manifests leave bytes inline
+without blocking the checkpoint; cancellation still propagates. Meals require
+a thumbnail and an established `photoCapturedAt`; full-photo expiry remains that capture
+instant plus 90 days. Measurement age uses `recordedAt` and objects do not expire.
+Discovery writes pending descriptors with bytes still inline and performs no
+photo registration or PUT. Newly discovered IDs are denied to the warm uploader
+until the exact checkpoint is accepted; a rejected or ambiguous checkpoint does
+not release them. Cold restore derives eligibility from the committed catalogue.
+The accepted checkpoint retains an hourly idle retry while pending entries have
+fewer than five persisted `uploadAttempts`. Only the first selected entry of a
+fresh delivery window increments that counter with the cursor up front, so
+stalled preparation pays. Selected entries run in plain rotation order. Later
+entries are charged and rotate the cursor only after a recorded media write
+failure; window cutoff costs them no attempt. Proven canonical tombstones skip
+lazy shared holder discovery and take their turn in rotation, with pointer
+removal still requiring DELETE acknowledgement. Their cleanup wake does not
+depend on the attempt counter. Measurement paths and
+identity read doubt still require discovery. Exact-identity receipt replay
+preserves the counter. Exhausted entries remain pending and inline and can still
+run on ordinary idle passes, but do not arm dedicated retry wakes unless a canonical
+privacy tombstone proves cleanup is owed. Media write and raw-manifest identity
+failures retain the bounded retry policy; other maintenance errors, including
+stale authority, propagate and stop the pass.
+Existing thumbnail-v2 intents continue to use canonical receipt durability.
+
+The bounded idle owner settles uploads; a later checkpoint records settlement
+and excludes only settled descriptors matching current canonical artifact
+identity, including delivered thumbnails. A cleanup pointer cannot exclude a
+retirement tombstone or replacement file; uncertain identity keeps bytes inline.
+On first observing retirement, reconciliation retains the photo cleanup pointer
+with `retirementPending: true` and fences its ID until that exact checkpoint is
+accepted. Outstanding retirements schedule an hourly cleanup wake; its later
+publication deletes the object and drops the pointer. A media write failure
+during that DELETE retains the pointer and wake while unrelated changes still
+checkpoint; cancellation and authority rejection propagate. Cold restore preserves the marker as evidence that the tombstone was accepted;
+rejected checkpoints cannot release retirement. Marked identities never exclude
+vault bytes. Inbox, capture and cold-ingest pruning retain their own policy.
+Receipt payloads still include local meal and measurement bytes. Deploy the PR 3
+preserver reader to every runner before enabling this producer. After the producer
+has run, a rollback to #4641 loses the acceptance fence: a meal photo the member
+deleted in a checkpoint that is then rejected may not return with the restored
+meal. Prefer fixing forward.
+
+An obsolete pending photo descriptor is handled outside the snapshot lock: register its exact metadata with an already-due finite expiry, then retire without PUT. An ordinary registration failure still permits retirement, while cancellation or owner loss stops further effects. Keep the pointer until retirement is acknowledged; finite registration alone is not completion. Existing finite-resource sweep covers a crash between registration and retirement. Snapshot reconciliation retains pending pointers and saves newly prepared plus existing cleanup pointers before pruning other media, so a failed deletion cannot forget another upload. Terminal retirement is never relaxed. Old-runner rollback restores the former precommit-upload and failed-prune bugs and is not a safe cleanup rollback floor. The owner-authorized Meals API derives the same path/hash/size/kind identity and mints five-minute thumbnail capabilities without waking a runner. A replica can expose a thumbnail URL before deferred bytes are ready; GET may return 404 until idle recovery. Full-photo expiry is independent of thumbnail delivery. Account deletion uses existing encrypted-object cleanup.
 
 Scheduled managed meal closeout checks that same canonical work queue before
 model entry, requesting one item with the occurrence instant and occurrence

@@ -10,7 +10,7 @@ import { createPlatform, createSnapshotFixtureRef, createWorkspaceState } from "
 import { externalizeHostedCanonicalWriteMediaPayloads } from "../src/hosted-runtime/canonical-write-media.ts";
 import { appendHostedCanonicalWriteReceiptToArtifactLog, hostedCanonicalWriteReceiptLogStatusFields } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import { restoreHostedWorkspaceRuntimeJobWorkspace } from "../src/hosted-runtime/workspace-restore.ts";
-import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue, HOSTED_MEDIA_REFS_RELATIVE_PATH } from "../src/hosted-runtime/media-references.ts";
+import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue, HOSTED_MEDIA_REFS_RELATIVE_PATH, releaseHostedPhotoIntents } from "../src/hosted-runtime/media-references.ts";
 import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import { createMealMediaStore, mediaFailure, type MediaOperation } from "./hosted-meal-media.harness.ts";
 
@@ -39,9 +39,10 @@ async function fixture(count = 1) {
     await hooks.published?.();
   } };
   const snapshot = async () => {
-    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
     const bytes = (await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] }))!;
     const hash = sha256HostedBundleHex(bytes); await artifactStore.put({ bytes, sha256: hash });
+    releaseHostedPhotoIntents(vaultRoot, [...publication.pendingPhotoMediaIds, ...publication.retirementPendingMediaIds]);
     return createSnapshotFixtureRef({ hash, size: bytes.byteLength });
   };
   const baseline = await snapshot();
@@ -64,7 +65,7 @@ async function fixture(count = 1) {
   };
 }
 async function assertGone(f: Awaited<ReturnType<typeof fixture>>) {
-  await f.pass(); await f.snapshot();
+  await f.pass(); await f.snapshot(); await f.snapshot();
   expect(f.store.bytes.size).toBe(0); expect(f.store.activeUnlimited()).toBe(0);
   expect((await f.catalogue()).entries).toHaveLength(0);
 }
@@ -167,7 +168,7 @@ test("owner loss after finite registration forbids retirement", async () => {
   expect(f.store.calls.map(call => call.operation)).toEqual(["record"]);
 });
 
-test("bounded discovery yields through unrelated history and never trusts a partial holder inventory", async () => {
+test("read doubt keeps bounded discovery from trusting a partial holder inventory", async () => {
   const f = await fixture(); await f.maintain();
   const cancel = new AbortController();
   const shard = path.join(f.vaultRoot, "ledger/events/2030/2030-12.jsonl");
@@ -188,6 +189,7 @@ test("bounded discovery yields through unrelated history and never trusts a part
   const later = path.join(f.vaultRoot, "ledger/events/2031/2031-01.jsonl");
   if (!deletedLine) throw new Error("Expected a canonical deletion revision.");
   await mkdir(path.dirname(later), { recursive: true }); await writeFile(later, deletedLine + "\n");
+  vi.spyOn(core, "canonicalRawArtifactIsPrivacyTombstone").mockRejectedValue(new Error("Synthetic identity read doubt"));
   const visit = core.visitEventLedgerShardRecordsInterruptible;
   vi.spyOn(core, "visitEventLedgerShardRecordsInterruptible").mockImplementation(async input => visit({ ...input, visit: async (row, line) => {
     if (line === 256) setImmediate(() => cancel.abort(new Error("Foreground during discovery")));
@@ -301,4 +303,83 @@ test("foreground cancellation during integrity checking starts no registration",
   await expect(f.pass({ signal: cancel.signal })).rejects.toThrow("Foreground during integrity");
   expect(f.store.calls).toEqual([]); expect((await f.catalogue()).entries[0]?.pendingUpload).toBe(true);
   release(); await new Promise(resolve => setImmediate(resolve)); expect(f.store.calls).toEqual([]);
+});
+
+
+test("receipt replay preserves checkpointed upload attempts for an unchanged pending thumbnail", async () => {
+  const f = await fixture(); await f.maintain(new Date(CAPTURED));
+  f.store.hooks.before = async op => { if (op === "put") throw mediaFailure(); };
+  for (let attempt = 0; attempt < 5; attempt++) expect(await f.pass()).toMatchObject({ failed: 1, pending: 1 });
+  const snapshot = await f.snapshot();
+  await f.maintain(EXPIRED); // Publishes another receipt with the same thumbnail identity.
+  await f.restore(snapshot);
+  expect((await f.catalogue()).entries[0]).toMatchObject({ pendingUpload: true, uploadAttempts: 5 });
+  expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: f.vaultRoot, mediaStore: f.store.mediaStore })).hasRetryablePendingPhotos).toBe(false);
+});
+
+
+test.each(["media", "unexpected", "window"] as const)("a later entry is charged and rotated only for a recorded media error: %s", async failure => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const f = await fixture(3); await f.maintain();
+  const entries = (await f.catalogue()).entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+  const error = failure === "media" ? mediaFailure() : new Error("Synthetic unexpected failure");
+  f.store.hooks.before = async (op, id) => {
+    if (op !== "record" || id !== entries[1]!.mediaId) return;
+    if (failure === "window") vi.setSystemTime(Date.now() + 2_000);
+    throw error;
+  };
+  const budget = createHostedMealMediaBudget();
+  if (failure === "unexpected") await expect(f.pass({ budget })).rejects.toBe(error);
+  else expect(await f.pass({ budget })).toMatchObject({ uploaded: failure === "media" ? 2 : 1, failed: failure === "media" ? 1 : 0 });
+  const catalogue = await f.catalogue();
+  expect(catalogue.mealUploadCursor).toBe(entries[failure === "media" ? 1 : 0]!.mediaId);
+  expect(catalogue.entries.find(entry => entry.mediaId === entries[1]!.mediaId)?.uploadAttempts ?? 0).toBe(failure === "media" ? 1 : 0);
+  expect(budget.remaining).toBe(failure === "media" ? 7 : 8);
+  f.store.hooks.before = undefined;
+  f.store.calls.length = 0;
+  await f.pass();
+  expect(f.store.calls.find(call => call.operation === "record")?.mediaId).toBe(entries[1]!.mediaId);
+});
+
+test("a later slice of the same window does not charge a new head up front", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const f = await fixture(3); await f.maintain();
+  const budget = createHostedMealMediaBudget();
+  f.store.hooks.before = async op => { if (op === "record" || op === "put") vi.setSystemTime(Date.now() + 400); };
+  expect(await f.pass({ budget, projectedDeadlineMs: Date.now() + 1_000 })).toMatchObject({ uploaded: 1, pending: 2 });
+  f.store.hooks.before = undefined;
+  expect(await f.pass({ budget })).toMatchObject({ uploaded: 2, pending: 0 });
+  expect((await f.catalogue()).entries.map(entry => entry.uploadAttempts ?? 0).sort()).toEqual([0, 0, 1]);
+  expect(budget.remaining).toBe(6);
+});
+
+test("failed tombstone cleanup never rewinds the cursor or starves a healthy photo behind a stalled PUT", async () => {
+  const f = await fixture(3); await f.maintain();
+  const catalogue = await f.catalogue();
+  const [tombstone, stalled, healthy] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+  const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
+  await deleteEvent({ vaultRoot: f.vaultRoot, eventId: f.meals.find(meal => meal.event.mealId === owner.id)!.event.id });
+  catalogue.mealUploadCursor = tombstone!.mediaId;
+  await writeHostedMediaReferenceCatalogue({ vaultRoot: f.vaultRoot, catalogue });
+  const expected = await readFile(path.join(f.vaultRoot, healthy!.relativePath));
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  f.store.hooks.before = async (op, id) => {
+    if (op === "delete" && id === tombstone!.mediaId) throw mediaFailure();
+    if (op === "put" && id === stalled!.mediaId) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await new Promise(() => {});
+    }
+  };
+  const cursors: Array<string | undefined> = [];
+  for (let pass = 0; pass < 4; pass++) {
+    await f.pass();
+    await f.restore(await f.snapshot(), {});
+    const restored = await f.catalogue();
+    cursors.push(restored.mealUploadCursor);
+    if (restored.entries.find(entry => entry.mediaId === healthy!.mediaId)?.pendingUpload === false) break;
+  }
+  expect(await f.store.mediaStore.get(healthy!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+  expect(cursors).toEqual([stalled!.mediaId, tombstone!.mediaId]);
+  expect(f.store.calls.filter(call => call.operation === "record").map(call => call.mediaId))
+    .toEqual([stalled!.mediaId, healthy!.mediaId, tombstone!.mediaId, stalled!.mediaId]);
 });

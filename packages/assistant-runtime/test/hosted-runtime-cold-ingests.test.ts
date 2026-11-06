@@ -13,6 +13,7 @@ import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts"
 import {
   type HostedMediaReferenceCatalogue,
   publishHostedWorkspaceMediaReferencesForSnapshot,
+  releaseHostedPhotoIntents,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
   publishHostedWorkspaceMediaReferences,
@@ -108,6 +109,8 @@ test("failed media pruning retains newly uploaded cold history and the cleanup p
     // Pruning requires the canonical retirement evidence written by meal deletion.
     await deleteEvent({ vaultRoot, eventId: meal.event.id });
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [stale] } });
+    const retirement = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    releaseHostedPhotoIntents(vaultRoot, retirement.retirementPendingMediaIds);
     await mkdir(path.dirname(path.join(vaultRoot, closedPath)), { recursive: true });
     await writeFile(path.join(vaultRoot, closedPath), brotliCompressSync(Buffer.from('{"synthetic":true}\n')));
     await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Synthetic prune failure");
@@ -320,7 +323,7 @@ test("cold catalogue survives restore, media merge, checkpoint and another resto
       attachments: [{ role: "media_1", sourcePath: photoPath }] });
     for (const attachment of [meal.photo!, measurement.event.attachments![0]!]) {
       const bytes = await readFile(path.join(source, attachment.relativePath));
-      catalogue.entries.push({ relativePath: attachment.relativePath, mediaKind: "image",
+      catalogue.entries.push({ relativePath: attachment.relativePath, mediaKind: "image", pendingUpload: false,
         mediaId: createHash("sha256").update(attachment.relativePath).digest("hex"),
         sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,
         mimeType: "image/jpeg", recordedAt: entry.recordedAt, expiresAt: null });
@@ -340,7 +343,7 @@ test("cold catalogue survives restore, media merge, checkpoint and another resto
     // Receipt/media reconciliation must preserve the same entry too.
     await publishHostedWorkspaceMediaReferences({ vaultRoot: restored, mediaStore });
     const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
-    expect(publication.excludedVaultPaths).toEqual([closedPath]);
+    expect(publication.excludedVaultPaths).toEqual(catalogue.entries.map(entry => entry.relativePath));
     expect(publication.prunedMediaCount).toBe(0);
     expect(await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).toEqual(catalogue);
     const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: restored, vaultRoot: restored,

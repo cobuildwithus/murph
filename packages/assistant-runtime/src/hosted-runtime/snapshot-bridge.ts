@@ -1,4 +1,5 @@
 import { rm } from "node:fs/promises";
+import { HOSTED_MEAL_MEDIA_RETRY_MS } from "./meal-media-maintenance.ts";
 import path from "node:path";
 import { resolveWorkspaceDurableRoot, resolveWorkspaceScratchRoot } from "./workspace-paths.ts";
 
@@ -79,6 +80,7 @@ import {
 } from "./snapshot-cleanup.ts";
 import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
+  releaseHostedPhotoIntents,
   type PublishHostedWorkspaceMediaReferencesResult,
 } from "./media-references.ts";
 import type {
@@ -729,7 +731,7 @@ async function createHostedWorkspaceV2Snapshot(
       userId: input.userId,
     };
     checkpointAttempted = true;
-    const checkpointRequest = { ...input.request };
+    const checkpointRequest = withPhotoMaintenanceWake(input.request, mediaReferences);
     delete checkpointRequest.handledConversationFrontierSelected;
     const completed = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotSessionCompleteElapsedMs",
@@ -744,6 +746,7 @@ async function createHostedWorkspaceV2Snapshot(
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
+    releaseHostedPhotoIntents(input.vaultRoot, [...mediaReferences.pendingPhotoMediaIds, ...mediaReferences.retirementPendingMediaIds], checkpoint.checkpointed);
     localWorkspaceCleanForWarmReuse = true;
   } catch (error) {
     snapshotFailureObserved = true;
@@ -1404,6 +1407,19 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
     prunedAssistantRuntimeResidueFileCount:
       result.generatedDeliveryFilesPruned,
   };
+}
+
+function withPhotoMaintenanceWake(request: HostedWorkspaceSnapshotCheckpointRequest,
+  mediaReferences: Pick<PublishHostedWorkspaceMediaReferencesResult, "hasRetryablePendingPhotos" | "retirementPendingMediaIds">) {
+  const next = { ...request };
+  if (!mediaReferences.hasRetryablePendingPhotos && mediaReferences.retirementPendingMediaIds.length === 0) return next;
+  const retryAt = new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString();
+  if (!next.inboxMediaRetentionWakeAt || next.inboxMediaRetentionWakeAt > retryAt) next.inboxMediaRetentionWakeAt = retryAt;
+  if (!next.nextWakeAt || next.nextWakeAt > retryAt) {
+    next.nextWakeAt = retryAt;
+    next.nextWakeReason = "inbox_media_retention";
+  }
+  return next;
 }
 
 async function publishHostedWorkspaceMediaReferencesForLoggedSnapshot(input: {

@@ -213,11 +213,13 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
   for (const action of input.receipt.actions) {
     if (action.kind === "raw_upsert" && action.mediaRef) {
       const previous = entries.get(action.targetRelativePath);
-      const completed = previous && previous.pendingUpload !== true
+      const matching = previous
         && previous.mediaId === action.mediaRef.id && previous.mediaKind === action.mediaRef.mediaKind
         && previous.sha256 === action.sha256 && previous.byteSize === action.byteLength;
+      const completed = matching && previous.pendingUpload !== true;
       const pendingUpload = hostedMediaPendingUpload(action.targetRelativePath, action.mediaRef.pendingUpload);
       entries.set(action.targetRelativePath, {
+        ...(matching ? previous : {}),
         byteSize: action.byteLength,
         expiresAt: action.mediaRef.expiresAt,
         mediaId: action.mediaRef.id,

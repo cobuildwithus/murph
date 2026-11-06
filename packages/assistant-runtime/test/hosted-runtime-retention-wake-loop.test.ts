@@ -1,11 +1,11 @@
-import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
-import { publishHostedWorkspaceMediaReferences, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { createMealMediaStore, mediaFailure } from "./hosted-meal-media.harness.ts";
+import { publishHostedWorkspaceMediaReferencesForSnapshot, publishHostedWorkspaceMediaReferences, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as realDelay } from "node:timers/promises";
-import { addCaptureWithLookup, addMeal, runMealPhotoMaintenance, initializeVault } from "@murphai/core";
+import { addCaptureWithLookup, addMeal, addMeasurement, runMealPhotoMaintenance, initializeVault } from "@murphai/core";
 import { persistCanonicalInboxCapture } from "@murphai/inboxd";
 import * as inboxRetention from "@murphai/inboxd/retention";
 import {
@@ -40,7 +40,7 @@ const WINDOW = 10 * 60 * 1000;
 
 async function createRetentionFixture(
   groups: Array<{ offset: number; count: number }>,
-  { defaultWakeOffset = 24 * 60 * 60 * 1000, generatedImages = 0, receiptCount = 0, pendingMeal = false, retentionDue = false } = {},
+  { defaultWakeOffset = 24 * 60 * 60 * 1000, generatedImages = 0, receiptCount = 0, pendingMeal = false, pendingMeasurement = false, retentionDue = false } = {},
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "murph-retention-wakes-"));
   const source = path.join(root, "source");
@@ -96,6 +96,14 @@ async function createRetentionFixture(
     await publishHostedWorkspaceMediaReferences({ vaultRoot: source, mediaStore: mealMedia.mediaStore });
     expect(mealMedia.calls).toEqual([]);
   }
+  if (pendingMeasurement) {
+    const sourcePath = path.join(root, "measurement.jpg");
+    await writeFile(sourcePath, "synthetic measurement photo");
+    await addMeasurement({ vaultRoot: source, attachments: [{ role: "media_1", sourcePath }],
+      draft: { title: "Synthetic measurement", occurredAt: new Date(START).toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+    vi.setSystemTime(START);
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: source, mediaStore: mealMedia.mediaStore });
+  }
   const snapshot = async (vaultRoot: string) => {
     const bundle = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
     assert.ok(bundle);
@@ -140,7 +148,7 @@ async function createRetentionFixture(
           version: String(BigInt(request.expectedWorkspaceVersion) + 1n) };
         return workspace;
       },
-    }) }), ...(pendingMeal ? { mediaStore: mealMedia.mediaStore } : {}) },
+    }) }), ...(pendingMeal || pendingMeasurement ? { mediaStore: mealMedia.mediaStore } : {}) },
     async createCheckpointSnapshot() {
       snapshotTimes.push(Date.now());
       for (const item of media.filter((item) => item.expiresAt > Date.now())) {
@@ -152,7 +160,7 @@ async function createRetentionFixture(
     async runAssistantPhase() { throw new Error("Retention must not enter the assistant."); },
     ...options,
   });
-  return { root, live, media, mealMedia, generatedPaths, checkpoints, snapshotTimes, invoke };
+  return { root, live, media, mealMedia, generatedPaths, checkpoints, snapshotTimes, invoke, get workspace() { return workspace; } };
 }
 
 async function completeInvocation(
@@ -423,5 +431,29 @@ test("foreground wake releases pending delivery without joining its never-settli
     expect(fixture.mealMedia.calls.map(call => call.operation)).toEqual(["record"]);
     expect(fixture.snapshotTimes).toEqual([]);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.live })).entries[0]?.pendingUpload).toBe(true);
+  } finally { vi.useRealTimers(); await removeTempRoot(fixture.root); }
+});
+
+
+test("paused retention invocations settle a photo despite an overdue default wake across cold restores", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(START - 8 * 24 * 60 * 60_000);
+  const fixture = await createRetentionFixture([], { pendingMeasurement: true, defaultWakeOffset: -60_000 });
+  const invoke = () => withRealTimeout(fixture.invoke(), 10_000, () => "Paused retention did not settle.");
+  try {
+    vi.setSystemTime(START);
+    fixture.mealMedia.hooks.before = async () => { throw mediaFailure("Synthetic temporary outage"); };
+    for (const failing of [true, false]) {
+      const wake = fixture.workspace.inboxMediaRetentionWakeAt;
+      expect(wake).not.toBeNull();
+      vi.setSystemTime(new Date(wake!));
+      await rm(fixture.live, { recursive: true, force: true });
+      if (!failing) fixture.mealMedia.hooks.before = undefined;
+      await invoke();
+      expect(fixture.workspace.nextDefaultProcessingWakeAt).toBe(new Date(START - 60_000).toISOString());
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.live })).entries[0])
+        .toMatchObject({ uploadAttempts: failing ? 1 : 2, pendingUpload: failing });
+    }
+    expect(fixture.workspace.inboxMediaRetentionWakeAt).toBeNull();
+    expect([...fixture.mealMedia.bytes.values()].map(bytes => Buffer.from(bytes).toString())).toEqual(["synthetic measurement photo"]);
   } finally { vi.useRealTimers(); await removeTempRoot(fixture.root); }
 });

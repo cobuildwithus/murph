@@ -12,6 +12,8 @@ export interface HostedMediaReference {
   mediaKind: "image" | "video" | "integration-ingest";
   mimeType: string | null;
   pendingUpload?: boolean;
+  retirementPending?: boolean;
+  uploadAttempts?: number;
   recordedAt: string;
   relativePath: string;
   sha256: string;
@@ -47,12 +49,21 @@ export function parseHostedMediaReference(value: unknown): HostedMediaReference 
   if (value.pendingUpload !== undefined && typeof value.pendingUpload !== "boolean") {
     throw new HostedMediaReferenceUnavailableError();
   }
+  if (value.retirementPending !== undefined && typeof value.retirementPending !== "boolean") {
+    throw new HostedMediaReferenceUnavailableError();
+  }
+  if (value.uploadAttempts !== undefined && (typeof value.uploadAttempts !== "number"
+    || !Number.isSafeInteger(value.uploadAttempts) || value.uploadAttempts < 0)) {
+    throw new HostedMediaReferenceUnavailableError();
+  }
   const pendingUpload = hostedMediaPendingUpload(identity.relativePath, value.pendingUpload as boolean | undefined);
   return {
     ...identity,
     expiresAt: parseMediaExpiry(value.expiresAt),
     mimeType: normalizeMediaMimeType(value.mimeType),
     ...(pendingUpload === undefined ? {} : { pendingUpload }),
+    ...(value.retirementPending === undefined ? {} : { retirementPending: value.retirementPending as boolean }),
+    ...(value.uploadAttempts === undefined ? {} : { uploadAttempts: value.uploadAttempts as number }),
     recordedAt: normalizeMediaRecordedAt(value.recordedAt),
   };
 }

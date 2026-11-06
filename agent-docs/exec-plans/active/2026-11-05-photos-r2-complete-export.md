@@ -541,3 +541,145 @@ Final review: shared parsing, canonical ownership, pending recovery, local-byte
 integrity, explicit retirement, receipt payload retention and unchanged archive
 exclusion policy all have composed proof. No new photo upload admission, prompt,
 tool, push, PR, deployment or production access. The plan remains **active**.
+
+## PR 4 local producer implementation — 2026-11-06
+
+Status: active. One local scoped commit; no push, PR, merge or deploy.
+
+Outcome: eligible full photos move to the existing encrypted media store after
+checkpoint acknowledgement; the following checkpoint omits settled photo bytes.
+Reaches: live meal photos with thumbnails, both measurement families, delivered
+thumbnails, retained measurement evidence and canonical meal retirement.
+Proof: checkpoint rejection and warm retry, accepted exact intent release, bounded
+failed/stalled uploads, ambiguous PUT recovery, sparse checkpoints, canonical
+identity exclusion and a synthetic photo-heavy encrypted archive restore.
+
+The existing catalogue remains the durable intent owner. A process-local deny set
+tracks newly discovered intents until their exact archive is accepted; failed
+checkpoints leave those IDs denied across warm passes. A true cold restore clears
+the deny set only after clearing the uncommitted local workspace. Restored pending
+entries therefore derive authority from committed state. Existing thumbnail-v2
+receipt durability remains unchanged. The accepted checkpoint schedules the
+existing hourly idle retry; no foreground PUT is added.
+
+### Per-outcome changes and proof
+
+1. Checkpoint-only discovery admits live canonical image attachments after seven
+   days and verifies local digest, size and manifest identity. Meals require a
+   thumbnail and capture time, with capture + 90-day expiry; measurements use
+   recorded time and no expiry. MIME-based admission covers canonical GIF images
+   as well as the existing JPEG/PNG/WebP families. Foreground publication,
+   missing thumbnails, young/deleted records, expired meals and changed bytes
+   do not create full-photo intents.
+2. The bridge releases the exact archive's pending IDs only when completion says
+   `checkpointed: true`. Tests run a warm idle pass inside completion and again
+   after rejection/lost acknowledgement: neither registers nor uploads. An
+   accepted retry releases the intent. The existing deferred-checkpoint-effect
+   failure test also proves a failed runtime checkpoint leaves pending photos
+   blocked on a later warm maintenance pass. Real encrypted cold restore at the same
+   local root clears the process-local denial after replacing the workspace,
+   recovering an accepted checkpoint whose acknowledgement was lost.
+3. The existing uploader now resolves meal and both measurement holders and uses
+   each descriptor's expiry. Its ten-attempt/two-second invocation budget,
+   hourly retry CAS and persisted cursor remain shared. Tests cover five immediate
+   failures, stalled-head deadline/cursor recovery, cancellation after registration
+   and after PUT, lost PUT acknowledgement followed by retry/deletion/cold recovery,
+   and measurement deletion retaining committed raw evidence.
+4. Pending bytes remain inline. A later checkpoint records settlement and excludes
+   settled current identities, including thumbnails. Tests cover sparse settled
+   entries with an exhausted budget, retirement tombstones and uncertain manifests.
+   Local receipt payload retention is unchanged. The existing preserver and
+   cold-ingest assertions now expect settled canonical photos to be excluded.
+5. Architecture now documents discovery, acknowledgement, expiry, retry fairness,
+   archive exclusion and the reader-first rollback floor. No prompt or tool
+   surface changes; no provider-input change for individual or group runtimes.
+
+### Synthetic archive and hosted-local proof
+
+`apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts` composes the
+public runtime entrypoint, actual retention-only invocations, production snapshot
+bridge, Cloudflare tar/zstd/AES-GCM builder and production cold restore/materializer.
+It uses synthetic control-plane and in-memory object-store ports, with no production
+credentials, remote deployment or live member data. This is native local composed
+runtime proof, not a claim of a Docker/MinIO full-stack or deployed-runner test.
+
+Measured fixture: 16 synthetic image attachments, 262,144 bytes each (4,194,304
+photo bytes). Pending checkpoint: **4,212,643 encrypted bytes**, **4,236,239 plain
+file bytes**. Settled checkpoint: **10,147 encrypted bytes**, **42,041 plain file
+bytes**. The encrypted archive shrank by **4,202,496 bytes (99.76%)**. Random
+synthetic payloads and generated record IDs can slightly change compressed size
+between runs; these numbers are from the dedicated final measurement lane.
+
+The first completion acknowledgement is deliberately lost after acceptance.
+The same root then cold-restores the committed pending catalogue. Two actual
+retention invocations upload ten then six objects. A final cold restore proves
+all 16 files absent from the archive; on-demand materialization returns every
+original byte exactly. A separate restore of the pending checkpoint proves all
+16 payloads remain inline before settlement.
+
+Product walkthrough: **Ready** for local producer behavior. Storage moves without
+changing photo lifetime, canonical deletion, approval or export permissions.
+The full-runtime retry and archive boundaries preserve reads after recovery.
+Changelog: internal storage implementation only; no new member-facing action or
+release promise. No ReviewGPT or CI is claimed because push/PR work is prohibited.
+Deployment remains blocked until PR 3 is confirmed on every runner; PR 3 is the
+producer rollback floor. The plan remains active.
+
+### Verification
+
+Hydration: `pnpm install --prefer-offline`, `pnpm build:workspace:incremental`,
+`pnpm --dir packages/health-commons generate`, `pnpm --dir apps/web prisma:generate`:
+all **exit 0**. Focused lifecycle/bridge/preserver/cold-ingest proof: **198 passed,
+exit 0**. Encrypted hosted-local proof: **2 passed, exit 0**. Workspace
+`pnpm typecheck`: **exit 0**. Full-suite and final review results follow below.
+
+
+Full-suite scope follows the workspace dependency graph: assistant-runtime plus
+its Web and Cloudflare consumers. Cloudflare includes its Node workspace,
+containers-helper and Workers configurations. No other package source or
+configuration changed. Test logs redact the local home prefix before writing;
+each verification shell captures `EXIT=$?` directly and records that real code.
+
+Earlier unsuccessful attempts remain evidence, not passes: the first focused run
+exited 1 (three old-exclusion assertions and missing uncertain-identity fallback), initial
+runtime typechecks exited 2 for the attachment-size type and missing synthetic
+fixture fields, and initial complexity exited 1 before splitting eligibility
+and retry projection into their existing policy boundaries. New fixture runs
+exited 1 until required measurement fields and the synthetic status-CAS port were
+supplied. An app-relative Cloudflare invocation exited 1 with no tests found;
+the root-relative config command ran the intended suite. The first full runtime
+run exited 1 on the GIF case while implementation/test edits overlapped the run.
+The fresh second full run exited 1 on two unchanged background-share cases;
+the entire five-case background-share suite then passed in isolation (exit 0).
+No unrelated production change was made for those failures. Final serialized
+suite results are recorded below.
+
+Frog: reused the existing Web SWC-cache entry and removed only the cache created
+by this session after the Web suite finished. Cloudflare's temporary Wrangler
+files were cleaned by its own tests. No new actionable repository workaround.
+
+
+Final full suites (all use `MURPH_VITEST_MAX_WORKERS=2`):
+
+| Command | Passed | Skipped | Exit |
+| --- | ---: | ---: | ---: |
+| `pnpm --dir packages/assistant-runtime test` (serialized final run) | 4,138 | 7 | 0 |
+| `pnpm --dir apps/web test` | 14,103 | 1,797 | 0 |
+| `pnpm --dir apps/cloudflare test` (Node workspace + containers helper) | 4,656 | 5 | 0 |
+| `pnpm --dir apps/cloudflare test:workers` | 19 | 0 | 0 |
+
+Final focused proofs: lifecycle/bridge/preserver/cold-ingest **198 passed, exit 0**;
+updated retention-entrypoint file **18 passed, exit 0**; native local encrypted
+archive proof **2 passed, exit 0**. `pnpm typecheck`,
+`pnpm build:workspace:incremental`, `pnpm complexity:diff`, `pnpm docs:drift`,
+`git diff --check` and authored-content/privacy scans all passed with **exit 0**.
+The known concurrent-device-import test passed in the final full runtime suite;
+no failure in that test was treated as a product finding.
+
+Parent final review: admission and preservation remain separate; no new photo
+PUT or registration precedes acknowledged durability; cancellation and owner loss
+retain control flow; all attempts consume the shared budget; pending/cleanup
+pointers survive ambiguous outcomes; canonical identity controls archive exclusion;
+actual same-root encrypted cold restore recovers acknowledged-but-unobserved state.
+No production access, push, PR, deployment or plan closure. One scoped local commit
+includes the implementation, tests and this active execution record.

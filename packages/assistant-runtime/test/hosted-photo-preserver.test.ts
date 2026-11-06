@@ -14,7 +14,7 @@ import { HOSTED_MEDIA_REFS_SCHEMA, HOSTED_MEDIA_REFS_RELATIVE_PATH } from "@murp
 import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
 import { applyHostedCanonicalWriteReceiptWithMedia, externalizeHostedCanonicalWriteMediaPayloads } from "../src/hosted-runtime/canonical-write-media.ts";
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
-import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { publishHostedWorkspaceMediaReferencesForSnapshot, releaseHostedPhotoIntents, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
 import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
@@ -186,6 +186,9 @@ test.each(["delete", "retention"])("absent meal bytes support review, %s and rec
     expect(JSON.parse(tombstone).reason).toBe(operation === "delete" ? "meal_deleted" : "meal_photo_retention");
     expect(await readFile(path.join(source, paths[0]!), "utf8")).toBe(tombstone);
     expect((await validateVault({ vaultRoot: restored })).valid).toBe(true);
+    const retirement = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
+    expect(objects.has(entries[0]!.mediaId)).toBe(true);
+    releaseHostedPhotoIntents(restored, retirement.retirementPendingMediaIds);
     await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
     expect(objects.has(entries[0]!.mediaId)).toBe(false);
     if (entries[1]) expect(objects.has(entries[1].mediaId)).toBe(true);
@@ -209,7 +212,7 @@ test("malformed sole-copy catalogue blocks checkpoint without writes or pruning"
 });
 
 
-test.each([true, false, undefined])("preserved photos keep inline checkpoint and receipt bytes with pending=%s", async pendingUpload => {
+test.each([true, false, undefined])("only explicitly settled photos leave checkpoints, and they retain receipt bytes (pending=%s)", async pendingUpload => {
   const root = await mkdtemp(path.join(tmpdir(), "inline-photo-preserver-"));
   const vaultRoot = path.join(root, "vault");
   const { objects, mediaStore } = storeFixture();
@@ -230,7 +233,7 @@ test.each([true, false, undefined])("preserved photos keep inline checkpoint and
     const originalRaw = receipts[0]!.receipt.actions.find(action => action.targetRelativePath === paths[1]);
     expect(rewritten.receipt.actions).toContainEqual(originalRaw);
     expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore }))
-      .toMatchObject({ excludedVaultPaths: [], uploadedMediaCount: 0, prunedMediaCount: 0 });
+      .toMatchObject({ excludedVaultPaths: pendingUpload === false ? paths : [], uploadedMediaCount: 0, prunedMediaCount: 0 });
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(entries);
     expect(mediaStore.put).not.toHaveBeenCalled();
     expect(mediaStore.get).not.toHaveBeenCalled();

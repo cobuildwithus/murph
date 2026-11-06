@@ -1,5 +1,5 @@
 import type { AssistantWorkspaceArtifactUnavailableReason, AssistantWorkspaceArtifactMaterializationResult } from "@murphai/assistant-engine";
-import { HostedRuntimeMediaReadError } from "./platform.ts";
+import { HostedRuntimeMediaReadError, HostedRuntimeMediaWriteError } from "./platform.ts";
 import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -26,6 +26,7 @@ import {
   resolveVaultPathOnDisk,
   statAndHashVaultFileInterruptible,
   canonicalRawArtifactMatches,
+  inferRawAssetOwnerFromDirectory,
   canonicalRawArtifactIsPrivacyTombstone,
   isVaultError,
   withCanonicalWriteLock,
@@ -60,7 +61,33 @@ export { HOSTED_MEDIA_REFS_RELATIVE_PATH, HOSTED_MEDIA_REFS_SCHEMA } from "@murp
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RAW_MEALS_PREFIX = `${VAULT_LAYOUT.rawMealsDirectory}/`;
 export function isHostedPendingMealMedia(entry: HostedMediaReference): boolean {
-  return isHostedMealMediaV2Path(entry.relativePath) && entry.pendingUpload === true;
+  return isHostedCanonicalPhotoPath(entry.relativePath) && entry.pendingUpload === true;
+}
+
+export function hostedPhotoNeedsRetry(entry: HostedMediaReference): boolean {
+  return isHostedPendingMealMedia(entry) && (entry.uploadAttempts ?? 0) < 5;
+}
+
+function blockHostedPhotoIntent(vaultRoot: string, mediaId: string): void {
+  const blocked = uncommittedPhotoIntents.get(vaultRoot) ?? new Set<string>();
+  blocked.add(mediaId);
+  uncommittedPhotoIntents.set(vaultRoot, blocked);
+}
+
+// A warm workspace can retain a failed checkpoint's local catalogue. Only the
+// exact accepted archive (or a cold restore) releases upload and retirement intents.
+const uncommittedPhotoIntents = new Map<string, Set<string>>();
+export function hostedPhotoIntentIsCommitted(vaultRoot: string, mediaId: string): boolean {
+  return !uncommittedPhotoIntents.get(vaultRoot)?.has(mediaId);
+}
+export function releaseHostedPhotoIntents(vaultRoot: string, mediaIds: readonly string[], accepted = true): void {
+  if (!accepted) return;
+  const blocked = uncommittedPhotoIntents.get(vaultRoot);
+  for (const id of mediaIds) blocked?.delete(id);
+  if (!blocked?.size) uncommittedPhotoIntents.delete(vaultRoot);
+}
+export function resetHostedPhotoIntentsAfterColdRestore(vaultRoot: string): void {
+  uncommittedPhotoIntents.delete(vaultRoot);
 }
 
 export { isHostedMealMediaV2Path } from "@murphai/runtime-state/node";
@@ -69,6 +96,9 @@ export type { HostedMediaReference, HostedMediaReferenceCatalogue } from "@murph
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
 
 export interface PublishHostedWorkspaceMediaReferencesResult {
+  pendingPhotoMediaIds: string[];
+  retirementPendingMediaIds: string[];
+  hasRetryablePendingPhotos: boolean;
   excludedVaultPaths: string[];
   prunedMediaCount: number;
   referenceCount: number;
@@ -93,6 +123,9 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   if (!input.mediaStore) {
     if ((await readHostedColdIngestReferences(input.vaultRoot)).length > 0) throw new HostedColdHistoryUnavailableError();
     return {
+      pendingPhotoMediaIds: [],
+      retirementPendingMediaIds: [],
+      hasRetryablePendingPhotos: false,
       excludedVaultPaths: [],
       prunedMediaCount: 0,
       referenceCount: 0,
@@ -126,7 +159,22 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
     if (nextMediaIds.has(entry.mediaId) || entry.pendingUpload === true) {
       continue;
     }
-    await input.mediaStore.delete?.({ mediaId: entry.mediaId });
+    // The accepted archive must hold the tombstone before its sole remote copy is deleted.
+    if (isHostedCanonicalPhotoPath(entry.relativePath)
+      && (!entry.retirementPending || !hostedPhotoIntentIsCommitted(input.vaultRoot, entry.mediaId))) {
+      if (!entry.retirementPending) blockHostedPhotoIntent(input.vaultRoot, entry.mediaId);
+      entries.push({ ...entry, retirementPending: true });
+      continue;
+    }
+    try {
+      await input.mediaStore.delete?.({ mediaId: entry.mediaId });
+    } catch (error) {
+      assertHostedMediaReferenceLive(input.signal);
+      if (!entry.retirementPending || !isHostedCanonicalPhotoPath(entry.relativePath)
+        || !(error instanceof HostedRuntimeMediaWriteError)) throw error;
+      entries.push(entry);
+      continue;
+    }
     prunedMediaCount += 1;
   }
 
@@ -141,10 +189,21 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
     vaultRoot: input.vaultRoot,
   });
 
+  const excludedVaultPaths: string[] = [];
+  let hasRetryablePendingPhotos = entries.some(hostedPhotoNeedsRetry);
+  for (const entry of entries) {
+    if (isHostedPendingMealMedia(entry) && !await hostedPhotoReferenceMayBeLive(input.vaultRoot, entry)) {
+      hasRetryablePendingPhotos = true;
+    }
+    if (hostedMediaReferenceIsSettled(entry) && await hostedMediaReferenceDenialReason(input.vaultRoot, entry) === null) {
+      excludedVaultPaths.push(entry.relativePath);
+    }
+  }
   return {
-    // Preserving future photo descriptors must not expand archive exclusions.
-    // Meal and measurement bytes stay inline whenever they are present.
-    excludedVaultPaths: entries.filter(entry => !isHostedCanonicalPhotoPath(entry.relativePath)).map(entry => entry.relativePath),
+    pendingPhotoMediaIds: entries.filter(isHostedPendingMealMedia).map(entry => entry.mediaId),
+    retirementPendingMediaIds: entries.filter(entry => entry.retirementPending).map(entry => entry.mediaId),
+    hasRetryablePendingPhotos,
+    excludedVaultPaths,
     prunedMediaCount,
     referenceCount: entries.length,
     uploadedMediaCount,
@@ -184,7 +243,7 @@ async function prepareHostedWorkspaceMediaReferences(input: {
   const existingByPath = new Map(
     existingCatalogue.entries.map((entry) => [entry.relativePath, entry]),
   );
-  const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal);
+  const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal, input.includeColdIngests === true);
   const currentMonth = new Date().toISOString().slice(0, 7);
   const ingestPaths = input.includeColdIngests
     ? new Set(await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory))
@@ -222,6 +281,7 @@ async function prepareHostedWorkspaceMediaReferences(input: {
     }
     if (
       existing
+      && !existing.retirementPending
       && existing.mediaKind === candidate.mediaKind
       && (
         candidate.sha256 === null
@@ -272,7 +332,7 @@ async function collectRetainedPhotoReferences(
   const retained: HostedMediaReference[] = [];
   for (const entry of entries) {
     assertHostedMediaReferenceLive(input.signal);
-    if (isHostedCanonicalPhotoPath(entry.relativePath)
+    if (!entry.retirementPending && isHostedCanonicalPhotoPath(entry.relativePath)
       && await hostedPhotoReferenceMayBeLive(input.vaultRoot, entry)) retained.push(entry);
   }
   return retained;
@@ -280,7 +340,7 @@ async function collectRetainedPhotoReferences(
 
 // Dropping an entry deletes its object, which may be the only copy. Prove a
 // reference obsolete before pruning, and let doubt keep the object.
-async function hostedPhotoReferenceMayBeLive(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
+export async function hostedPhotoReferenceMayBeLive(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
   if (entry.relativePath.startsWith("raw/measurements/")) return true;
   try {
     return !await canonicalRawArtifactIsPrivacyTombstone({ vaultRoot, relativePath: entry.relativePath });
@@ -413,7 +473,14 @@ function isHostedCanonicalPhotoPath(relativePath: string): boolean {
   return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
 }
 
+// Leaving the archive makes the store the only copy. A photo needs positive proof
+// of delivery: an absent marker only means "do not bulk upload this legacy entry".
+function hostedMediaReferenceIsSettled(entry: HostedMediaReference): boolean {
+  return isHostedCanonicalPhotoPath(entry.relativePath) ? entry.pendingUpload === false : entry.pendingUpload !== true;
+}
+
 async function hostedMediaReferenceDenialReason(vaultRoot: string, entry: HostedMediaReference): Promise<AssistantWorkspaceArtifactUnavailableReason | null> {
+  if (entry.retirementPending) return "obsolete";
   if (!isHostedCanonicalPhotoPath(entry.relativePath)) return null;
   try {
     return await canonicalRawArtifactMatches({ vaultRoot, ...entry }) ? null : "obsolete";
@@ -473,6 +540,7 @@ export async function readHostedMediaReferenceCatalogue(input: {
 async function collectHostedMediaCandidates(
   vaultRoot: string,
   signal: AbortSignal | null | undefined,
+  discoverPhotos: boolean,
 ): Promise<HostedMediaCandidate[]> {
   const eventInventory = await collectHostedMediaEventInventory(vaultRoot, signal);
   return dedupeHostedMediaCandidates([
@@ -482,7 +550,39 @@ async function collectHostedMediaCandidates(
       vaultRoot,
     }),
     ...collectCaptureHostedMediaCandidates(eventInventory.latestEvents),
+    ...(discoverPhotos ? collectPhotoCandidates(eventInventory.latestEvents) : []),
   ]);
+}
+
+function collectPhotoCandidates(records: readonly EventRecord[]): HostedMediaCandidate[] {
+  const candidates: HostedMediaCandidate[] = [];
+  for (const record of records) {
+    const lifetime = photoUploadLifetime(record);
+    if (!lifetime) continue;
+    const { capturedAt, expiresAt } = lifetime;
+    for (const attachment of record.attachments ?? []) {
+      const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(attachment.relativePath));
+      if (owner?.kind !== (record.kind === "meal" ? "meal" : "measurement") || owner.id !== (record.kind === "meal" ? record.mealId : record.id)) continue;
+      if (!isHostedCanonicalPhotoPath(attachment.relativePath)
+        || !attachment.mediaType.startsWith("image/")
+        || (record.kind === "meal" && attachment.relativePath === record.photoThumbnail?.relativePath)) continue;
+      candidates.push({ relativePath: attachment.relativePath, mediaKind: "image",
+        byteSize: null, sha256: attachment.sha256,
+        mimeType: attachment.mediaType, recordedAt: capturedAt, expiresAt });
+    }
+  }
+  return candidates;
+}
+
+function photoUploadLifetime(record: EventRecord): { capturedAt: string; expiresAt: string | null } | null {
+  if (record.lifecycle?.state === "deleted") return null;
+  if (record.kind !== "meal" && record.kind !== "measurement" && record.kind !== "body_measurement") return null;
+  if (record.kind === "meal" && (!record.photoThumbnail || !record.photoCapturedAt)) return null;
+  const capturedAt = record.kind === "meal" ? record.photoCapturedAt! : record.recordedAt;
+  if (Date.now() - Date.parse(capturedAt) < 7 * 86_400_000) return null;
+  const expiresAt = record.kind === "meal"
+    ? new Date(Date.parse(capturedAt) + INBOX_IMAGE_RETENTION_WINDOW_MS).toISOString() : null;
+  return expiresAt && Date.parse(expiresAt) <= Date.now() ? null : { capturedAt, expiresAt };
 }
 
 async function collectInboxHostedMediaCandidates(input: {
@@ -635,6 +735,7 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
   signal: AbortSignal | null | undefined;
   vaultRoot: string;
 }): Promise<{ entry: HostedMediaReference; uploaded: boolean } | null> {
+  if (input.existing?.retirementPending) return null;
   const integrity = await statAndHashVaultFileInterruptible(
     input.vaultRoot,
     input.candidate.relativePath,
@@ -684,8 +785,8 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
     && input.existing.sha256 === entry.sha256
   ) {
     const mergedEntry = {
+      ...input.existing,
       ...entry,
-      ...(input.existing.pendingUpload === undefined ? {} : { pendingUpload: input.existing.pendingUpload }),
       expiresAt: resolveUpdatedHostedMediaExpiresAt(
         input.existing.expiresAt,
         entry.expiresAt,
@@ -709,9 +810,15 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
       uploaded: false,
     };
   }
-  // Meal bytes remain in receipts and snapshots. Persist their delivery intent
-  // before the first PUT: a response can be lost after remote registration.
-  if (isHostedMealMediaV2Path(entry.relativePath)) {
+  // Full photos need an accepted checkpoint before any remote registration.
+  // Thumbnail-v2 intent already has the canonical receipt durability boundary.
+  if (isHostedCanonicalPhotoPath(entry.relativePath)) {
+    const denial = await hostedMediaReferenceDenialReason(input.vaultRoot, entry);
+    assertHostedMediaReferenceLive(input.signal);
+    if (denial) return null;
+    if (!isHostedMealMediaV2Path(entry.relativePath)) {
+      blockHostedPhotoIntent(input.vaultRoot, entry.mediaId);
+    }
     return { entry: { ...entry, pendingUpload: true }, uploaded: false };
   }
   const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);

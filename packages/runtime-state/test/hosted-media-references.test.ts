@@ -16,6 +16,8 @@ test.each(["raw/measurements/check/photo.jpg", "raw/meals/check/photo.jpg", "raw
   "shared reader preserves explicit pending and legacy settled semantics for %s", relativePath => {
     const value = { ...reference, relativePath, mediaKind: "image" };
     expect(parseHostedMediaReference(value).pendingUpload).toBeUndefined();
+    expect(parseHostedMediaReference({ ...value, retirementPending: true, uploadAttempts: 5 }))
+      .toMatchObject({ retirementPending: true, uploadAttempts: 5 });
     for (const pendingUpload of [true, false]) {
       expect(parseHostedMediaReference({ ...value, pendingUpload }).pendingUpload).toBe(pendingUpload);
     }
@@ -30,7 +32,8 @@ test("malformed sole-copy image descriptors fail closed instead of disappearing"
     await mkdir(path.dirname(cataloguePath), { recursive: true });
     const valid = { ...reference, relativePath: "raw/measurements/check/photo.jpg", mediaKind: "image" };
     for (const change of [{ relativePath: "raw/measurements/../outside.jpg" }, { byteSize: -1 },
-      { sha256: "bad" }, { pendingUpload: "true" }, { expiresAt: "invalid" }, { mediaKind: "audio" }]) {
+      { sha256: "bad" }, { pendingUpload: "true" }, { retirementPending: "true" },
+      { uploadAttempts: -1 }, { uploadAttempts: 1.5 }, { uploadAttempts: "5" }, { expiresAt: "invalid" }, { mediaKind: "audio" }]) {
       const raw = JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{ ...valid, ...change }] });
       await writeFile(cataloguePath, raw);
       await expect(readHostedMediaReferenceCatalogueValue(root)).rejects.toMatchObject({ code: "HOSTED_MEDIA_REFERENCE_UNAVAILABLE" });
