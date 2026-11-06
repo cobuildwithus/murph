@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -116,8 +117,7 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");
   });
   afterAll(async () => {
-    await getPrisma().hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", payloadOwnerMemberId: { in: memberIds } } });
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     await rm(mediaDir, { recursive: true, force: true });

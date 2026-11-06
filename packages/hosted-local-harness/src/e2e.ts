@@ -114,6 +114,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-reminder-device-sync-non-starvation"
   | "linq-scheduled-reminder"
   | "linq-same-wake-batching"
+  | "linq-first-turn-held"
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
@@ -395,6 +396,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
     name: "linq-same-wake-batching",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-linq-first-turn-held-e2e.test.ts",
+    manualOnly: true,
+    name: "linq-first-turn-held",
   },
   {
     file: "apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts",

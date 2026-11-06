@@ -1,6 +1,6 @@
 import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { buildHostedExecutionAssistantNotificationRequestedWake, createHostedExecutionPrivateAssistantAskCompletionDeliveryKey, buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
+import { buildHostedExecutionLinqConversationMessageWake, buildHostedExecutionAssistantNotificationRequestedWake, createHostedExecutionPrivateAssistantAskCompletionDeliveryKey, buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -90,6 +90,7 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
+import { HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
@@ -1091,6 +1092,112 @@ describe("hosted Linq egress authority", () => {
     });
     expect(prisma.hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "held commit with later member message", status: 200 },
+    { label: "held commit with answered E1 first", status: 200, body: { answeredMailboxItemIds: ["mailbox-first"] } },
+    { label: "held commit with null keys", status: 200, body: { intentId: null, idempotencyKey: null } },
+    { label: "held commit with empty keys", status: 200, body: { intentId: "", idempotencyKey: "" } },
+    { label: "lone held input", candidate: "none", status: 503 },
+    { label: "held real send with answered E1 first", status: 409, body: { authorityCheckOnly: false, answeredMailboxItemIds: ["mailbox-first"], intentId: "intent-held", idempotencyKey: "assistant-outbox:held" } },
+    { label: "lone held real send", candidate: "none", status: 503, body: { authorityCheckOnly: false, answeredMailboxItemIds: ["mailbox-first"], intentId: "intent-held", idempotencyKey: "assistant-outbox:held" } },
+    { label: "held send without keys", status: 409, body: { authorityCheckOnly: false } },
+    { label: "held check with intent", status: 409, body: { intentId: "intent-held" } },
+    { label: "held check with idempotency", status: 409, body: { idempotencyKey: "assistant-outbox:held" } },
+    { label: "held reaction check", status: 503, body: { deliveryPurpose: "reaction" } },
+    { label: "held progress check", status: 503, body: { deliveryPurpose: "progress_update" } },
+    { label: "held reaction send", status: 503, body: { authorityCheckOnly: false, answeredMailboxItemIds: ["mailbox-first"], intentId: "intent-held", idempotencyKey: "assistant-outbox:held", deliveryPurpose: "reaction" } },
+    { label: "held progress send", status: 503, body: { authorityCheckOnly: false, answeredMailboxItemIds: ["mailbox-first"], intentId: "intent-held", idempotencyKey: "assistant-outbox:held", deliveryPurpose: "progress_update" } },
+    { label: "held check with null purpose", status: 503, body: { deliveryPurpose: null } },
+    { label: "sealed ambiguous commit", rowKind: "sealed", status: 503 },
+    { label: "sealed real send keeps base scan cost", rowKind: "sealed", status: 503, body: { authorityCheckOnly: false, answeredMailboxItemIds: ["mailbox-first"], intentId: "intent-held", idempotencyKey: "assistant-outbox:held" } },
+    { label: "absent row real send keeps base scan cost", rowKind: "absent", status: 200, body: { authorityCheckOnly: false, answeredMailboxItemIds: ["mailbox-first"], intentId: "intent-held", idempotencyKey: "assistant-outbox:held" } },
+    { label: "fresh reserved commit", rowKind: "reserved", status: 503 },
+    { label: "answered commit", rowKind: "answered", status: 409 },
+    { label: "fallback commit", rowKind: "fallback", status: 200 },
+    { label: "edit resolves its own source with no held row", candidate: "edit", status: 200 },
+    { label: "self-authored echo", candidate: "echo", status: 503 },
+    { label: "another chat", candidate: "other-chat", status: 503 },
+    { label: "different directness", candidate: "group", status: 503 },
+    { label: "older member message", candidate: "older", status: 503 },
+  ])("first-turn commit boundary: $label", async ({ body, candidate = "later", rowKind = "held", status }) => {
+    const prisma = createPrismaStub({ homeChatId: "chat-inbound" });
+    const inbound = (suffix: string, laneSeq: bigint) => {
+      const isCandidate = suffix !== "first";
+      const eventId = `linq-event-${suffix}`;
+      const occurredAt = new Date(Date.UTC(2026, 6, 14, 0, Number(laneSeq))).toISOString();
+      const chatId = isCandidate && candidate === "other-chat" ? "chat-other" : "chat-inbound";
+      const threadIsDirect = !(isCandidate && candidate === "group");
+      return {
+        item: { ...buildPersistedLinqMailboxItem({ dedupeKey: eventId, mailboxItemId: `mailbox-${suffix}`, occurredAt }), laneSeq },
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId, occurredAt, userId: "member-1", phoneLookupKey: "synthetic-contact",
+          ...(!threadIsDirect ? { routeAuthority: { channel: "linq" as const, containerMemberId: "member-1", threadId: chatId } } : {}),
+          linqMessage: {
+            chatId, from: "+15550100001", isFromMe: isCandidate && candidate === "echo",
+            messageId: isCandidate && candidate !== "edit" ? "message-other" : "message-first",
+            parts: [{ type: "text", value: "Synthetic member message" }], threadIsDirect,
+          },
+        }),
+      };
+    };
+    const first = inbound("first", 2n);
+    const other = inbound("other", candidate === "older" ? 1n : 3n);
+    const rows = candidate === "none" ? [first]
+      : candidate === "older" ? [first, other] : [other, first];
+    prisma.hostedMailboxItem.findMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) =>
+      rows.filter(row => !where.id || where.id.in.includes(row.item.id)).map(row => row.item));
+    mocks.decodeHostedMailboxStoredPayload.mockImplementation(async ({ mailboxItemId }: { mailboxItemId: string }) =>
+      rows.find(row => row.item.id === mailboxItemId)?.wake ?? null);
+    const delivery = {
+      acceptedAt: rowKind === "answered" ? new Date() : null,
+      attemptedAt: new Date(), deliveredAt: null, lastReceiptAt: null, messageLookupKey: null,
+      failedAt: rowKind === "held" || rowKind === "sealed" ? new Date() : null,
+      failureCode: rowKind === "held" ? HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE : null,
+      payloadCiphertext: rowKind === "reserved" || rowKind === "fallback" ? null : "sealed-reply",
+      payloadOwnerMemberId: rowKind === "reserved" || rowKind === "fallback" ? null : "member-1",
+      payloadSchema: rowKind === "reserved" || rowKind === "fallback" ? null : "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+      skippedAt: rowKind === "fallback" ? new Date() : null,
+      status: rowKind === "reserved" ? "attempted" : rowKind === "fallback" ? "skipped" : rowKind === "answered" ? "accepted" : "failed",
+    };
+    prisma.hostedLinqDelivery.findFirst.mockImplementation(async ({ where }: { where: { sourceRef?: string } }) =>
+      rowKind !== "absent" && where.sourceRef === createHostedLinqDeliverySourceRefLookupKey(first.item.dedupeKey)
+        ? delivery : null);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorityCheckOnly: true, replyToMessageId: "message-first", target: "chat-inbound", targetKind: "thread", ...body }),
+    }));
+
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toMatchObject(status === 200 ? { ok: true } : {
+      error: {
+        code: status === 409 ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED" : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
+        retryable: status === 503,
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledTimes(rowKind === "absent" ? 1 : 0);
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    const answeredFirst = (body?.answeredMailboxItemIds?.length ?? 0) > 0;
+    const scansHeldRow = rowKind === "held" && candidate !== "edit";
+    expect(prisma.hostedMailboxItem.findMany).toHaveBeenCalledTimes(
+      (answeredFirst ? 2 : 1) + (scansHeldRow ? 1 : 0),
+    );
+    expect(prisma.hostedMailboxPayload.findMany).not.toHaveBeenCalled();
+    expect(mocks.runWithHostedDomainRootUnwrapCache).toHaveBeenCalledTimes(scansHeldRow ? 2 : 1);
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(
+      (answeredFirst || candidate === "none" || candidate === "older" || candidate === "edit" ? 1 : 2)
+        + (scansHeldRow && candidate !== "none" && candidate !== "older" ? 1 : 0),
+    );
+    if (candidate === "edit") {
+      // Matching the provider message ID selects the newest edit event; E1's
+      // held delivery cannot veto an event with a different source reference.
+      expect(prisma.hostedLinqDelivery.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ sourceRef: createHostedLinqDeliverySourceRefLookupKey(other.item.dedupeKey) }),
+      }));
+    }
   });
 
   it.each([

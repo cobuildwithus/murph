@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -92,7 +93,7 @@ describe.skipIf(!enabled)("Message on a live pair game texts the other player", 
   });
   afterAll(async () => {
     await getPrisma().gameBlock.deleteMany({ where: { blockerMemberId: { in: memberIds } } });
-    await getPrisma().game.deleteMany({ where: { players: { some: { memberId: { in: memberIds } } } } });
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     vi.unstubAllEnvs();
   });

@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -71,7 +72,7 @@ async function latePush(gameId: string, entryId: string, replyId: string, member
 
 describe.skipIf(!enabled)("post reply PostgreSQL contract", () => {
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
   });
 
@@ -258,7 +259,7 @@ describe.skipIf(!enabled)("post reply PostgreSQL contract", () => {
     await ok(owner, textReply(gameId, peerEntry));
     await getPrisma().gameEntry.delete({ where: { id: entryId } });
     expect(await getPrisma().gameReply.count({ where: { entryId } })).toBe(0);
-    await getPrisma().game.delete({ where: { id: gameId } });
+    await cleanupGameFixtures(getPrisma(), [owner]);
     expect(await getPrisma().gameReply.count({ where: { entryId: peerEntry } })).toBe(0);
   });
 });

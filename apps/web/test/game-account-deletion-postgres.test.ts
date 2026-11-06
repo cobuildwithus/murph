@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +45,14 @@ const TERMS: GameTermsInput = {
   tasks: [{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }],
 };
 const memberIds: string[] = [];
+const deletedGameIds = new Set<string>();
+afterAll(async () => {
+  if (deletedGameIds.size === 0) return;
+  await getPrisma().hostedLinqDelivery.deleteMany({ where: {
+    source: "game_lifecycle",
+    OR: [...deletedGameIds].flatMap(id => [{ sourceRef: id }, { sourceRef: { startsWith: `${id}:` } }]),
+  } });
+});
 
 let realCrypto = false;
 async function member(firstName: string): Promise<string> {
@@ -92,6 +101,8 @@ async function words(actor: string, gameId: string, text: string) {
 /** The deletion flow's game step: seal before, then apply and remove the member in one transaction. */
 async function deleteAccount(memberId: string) {
   const prepared = await prepareGameAccountDeletion({ memberIds: [memberId], prisma: getPrisma() });
+  // Deleting the last player can remove the game before fixture cleanup can find its receipts.
+  for (const game of prepared.games) deletedGameIds.add(game.id);
   return getPrisma().$transaction(async (tx) => {
     const applied = await applyGameAccountDeletionTx({ memberIds: [memberId], now: new Date(), prepared, tx });
     await tx.hostedMember.delete({ where: { id: memberId } });
@@ -115,7 +126,7 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(JSON.stringify(plan)).toContain('"Index Name":"game_event_actor_type_idx"');
   });
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
   });
 
@@ -423,8 +434,7 @@ describe.skipIf(!runPostgresProof)("residual account deletion pages", () => {
   beforeEach(() => { realCrypto = true; codec = holder.__murphHostedSecureBoxStringTestCodec ?? null; setHostedSecureBoxStringTestCodecForTests(null); });
   afterEach(() => { realCrypto = false; setHostedSecureBoxStringTestCodecForTests(codec); });
   afterAll(async () => {
-    await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { startsWith: "deletion-note-proof-" } } });
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
   });
 
