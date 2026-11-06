@@ -13,7 +13,6 @@ import type {
 
 import type {
   HostedRuntimeMailboxPort,
-  RuntimeLivenessPort,
   HostedRuntimeWorkspacePort,
   HostedRuntimeWorkspaceSnapshotPort,
   HostedRuntimePlatform,
@@ -23,7 +22,6 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   assertPrivateDirectoryMode,
-  continueRuntimeLiveness,
   createSnapshotFixtureRef,
   createVaultSnapshotBundle,
   createDeferred,
@@ -510,13 +508,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const createCheckpointSnapshot = async () => ({
       snapshotRef: null,
     });
-    let livenessTouches = 0;
-    const runtimeLivenessPort: RuntimeLivenessPort = {
-      async touch() {
-        livenessTouches += 1;
-        return continueRuntimeLiveness();
-      },
-    };
 
     await expect(
       runHostedWorkspaceRuntimeJobInProcess(input, {
@@ -524,7 +515,6 @@ describe("hosted workspace runtime entrypoint", () => {
         importItem,
         platform: createPlatform({
           mailboxPort: null,
-          runtimeLivenessPort,
           workspacePort: createWorkspacePort({
             checkpointRequests: [],
             events: [],
@@ -541,7 +531,6 @@ describe("hosted workspace runtime entrypoint", () => {
         importItem,
         platform: createPlatform({
           mailboxPort: createMailboxPort({ events: [], items: [] }),
-          runtimeLivenessPort,
           workspacePort: null,
         }),
         vaultRoot,
@@ -554,7 +543,6 @@ describe("hosted workspace runtime entrypoint", () => {
         importItem,
         platform: createPlatform({
           mailboxPort: createMailboxPort({ events: [], items: [] }),
-          runtimeLivenessPort,
           workspacePort: {
             async checkpoint(): Promise<HostedWorkspaceCheckpointResponse> {
               throw new Error("Checkpoint should not run without workspace read.");
@@ -564,7 +552,6 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       }),
     ).rejects.toThrow(/workspace port must support read/u);
-    assert.equal(livenessTouches, 0);
   });
 
   test("dirty foreground turns fail closed when the idle checkpoint request cannot be built", async () => {
