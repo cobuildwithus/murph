@@ -1344,6 +1344,56 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       error: { code: "ALREADY_IN_A_GAME", message: "This game already has an open rematch." } });
   });
 
+  async function waitForPairLockRequests(holderPid: number, expected: bigint) {
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      // The holder owns only this pair's advisory lock, so unrelated waiters cannot count.
+      const [waiting] = await getPrisma().$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*) AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND ${holderPid} = ANY(pg_blocking_pids(pid))`;
+      if (waiting.count === expected) return;
+      if (Date.now() >= deadline) throw new Error(`Expected ${expected} rematch requests waiting on the pair lock; saw ${waiting.count}.`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+
+  it("replays the same creator's same-id rematch under the pair lock", async () => {
+    const challenger = await member("Challenger", "UTC"), opponent = await member("Opponent", "UTC");
+    const previous = await startGame(challenger, opponent);
+    await devSettleNow(previous.gameId, challenger);
+    const request: GameCommand = { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: previous.gameId, terms: TERMS };
+    const db = getPrisma();
+    let markLocked!: () => void, release!: () => void, holderPid = 0;
+    const locked = new Promise<void>(resolve => { markLocked = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const holding = db.$transaction(async tx => {
+      await lockGamePair(tx, challenger, opponent);
+      const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      holderPid = backend.pid;
+      markLocked();
+      await held;
+    }, { timeout: 20_000 });
+    const asks: Array<ReturnType<typeof run>> = [];
+    try {
+      await Promise.race([locked, holding]);
+      for (const waitingFor of [1n, 2n]) {
+        asks.push(run(challenger, request));
+        await waitForPairLockRequests(holderPid, waitingFor);
+      }
+      expect(await db.game.count({ where: { id: request.gameId } })).toBe(0);
+    } finally {
+      release();
+      await Promise.allSettled([holding, ...asks]);
+    }
+    await holding;
+    for (const result of await Promise.all(asks)) {
+      expect(result, result.ok ? undefined : JSON.stringify(result.error)).toMatchObject({ ok: true, game: { id: request.gameId, status: "invited" } });
+    }
+    expect(await db.game.count({ where: { id: request.gameId } })).toBe(1);
+    expect(await db.gameEvent.count({ where: { gameId: request.gameId, type: "created" } })).toBe(1);
+  });
+
   it.each(["challenger", "opponent"] as const)("refuses the second rematch ask under the pair lock (first: %s)", async firstAsker => {
     const challenger = await member("Challenger", "UTC"), opponent = await member("Opponent", "UTC");
     const previous = await startGame(challenger, opponent);
@@ -1367,17 +1417,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await Promise.race([locked, holding]);
       for (const waitingFor of [1n, 2n]) {
         asks.push(waitingFor === 1n ? run(asker, firstRequest) : run(answerer, secondRequest));
-        const deadline = Date.now() + 5_000;
-        for (;;) {
-          // This transaction holds only this pair's advisory lock, so unrelated waiters cannot count.
-          const [waiting] = await db.$queryRaw<Array<{ count: bigint }>>`
-            SELECT count(*) AS count FROM pg_stat_activity
-            WHERE datname = current_database() AND wait_event_type = 'Lock'
-              AND ${holderPid} = ANY(pg_blocking_pids(pid))`;
-          if (waiting.count === waitingFor) break;
-          if (Date.now() >= deadline) throw new Error(`Expected ${waitingFor} rematch requests waiting on the pair lock; saw ${waiting.count}.`);
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
+        await waitForPairLockRequests(holderPid, waitingFor);
       }
       // Both asks reached the pair lock after reading a chain with no rematch.
       expect(await db.game.count({ where: { previousGameId: previous.gameId } })).toBe(0);
