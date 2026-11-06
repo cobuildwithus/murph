@@ -639,17 +639,35 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
 });
 
 test.each([
-  { selected: "$50 a month", label: "$50" },
-  { selected: "$20 a month", label: "$20" },
-])("confirms undoing a scheduled lower limit at $label", async ({ label, selected }) => {
+  {
+    case: "restoring this month's $50",
+    label: "$50",
+    lowersThisMonth: false,
+    server: { monthlyCapMinor: 5_000, pendingMonthlyCapMinor: null },
+    showsNextMonth: false,
+  },
+  {
+    case: "$20 applied now, with no more than $20 committed",
+    label: "$20",
+    lowersThisMonth: true,
+    server: { monthlyCapMinor: 2_000, pendingMonthlyCapMinor: null },
+    showsNextMonth: false,
+  },
+  {
+    case: "$20 deferred, with more than $20 committed",
+    label: "$20",
+    lowersThisMonth: true,
+    server: { monthlyCapMinor: 5_000, pendingMonthlyCapMinor: 2_000 },
+    showsNextMonth: true,
+  },
+])("confirms undoing a scheduled lower limit: $case", async ({
+  label,
+  lowersThisMonth,
+  server,
+  showsNextMonth,
+}) => {
   const fetchMock = vi.fn(async () => ({
-    json: async () => ({
-      management: {
-        ...baseManagement,
-        monthlyCapMinor: 5_000,
-        pendingMonthlyCapMinor: null,
-      },
-    }),
+    json: async () => ({ management: { ...baseManagement, ...server } }),
     ok: true,
   }));
   vi.stubGlobal("fetch", fetchMock);
@@ -670,16 +688,16 @@ test.each([
     },
   ));
   try {
-    await clickLabel(rendered.container, selected);
+    await clickLabel(rendered.container, `${label} a month`);
     expect(buttonLabels(rendered.container)).not.toContain(`Lower limit to ${label}`);
 
     await clickLabel(rendered.container, `Raise limit to ${label}`);
-    expect(rendered.container.textContent).toContain(
-      `Raise next month’s limit to ${label}?`,
-    );
-    expect(rendered.container.textContent).toContain(
-      `up to ${label} a month instead of $5, starting next month.`,
-    );
+    const drawer = rendered.container.textContent ?? "";
+    expect(drawer).toContain(`Raise next month’s limit to ${label}?`);
+    expect(drawer).toContain(`up to ${label} a month instead of $5, starting next month.`);
+    expect(drawer.includes(
+      `This month’s $50 limit also drops to ${label}, unless you’ve already passed that.`,
+    )).toBe(lowersThisMonth);
 
     await clickLabel(rendered.container, "Keep $5 limit");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -687,6 +705,9 @@ test.each([
     await clickLabel(rendered.container, `Raise limit to ${label}`);
     await clickLabel(rendered.container, `Raise to ${label}`);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rendered.container.textContent?.includes(
+      `${label} limit next month.`,
+    )).toBe(showsNextMonth);
   } finally {
     await rendered.cleanup();
   }

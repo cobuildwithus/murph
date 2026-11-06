@@ -75,8 +75,8 @@ export type GroupSponsorshipManagementConfirmation =
     currentMonthlyCapMinor: MonthlyCapMinor;
     kind: "increase";
     nextMonthlyCapMinor: MonthlyCapMinor;
-    /** This only undoes part of a lower limit already set for next month. */
-    startsNextMonth?: boolean;
+    /** This month's limit, when a lower limit is already set for next month. */
+    thisMonthCapMinor?: MonthlyCapMinor | null;
   }
   | { kind: "cancel" };
 
@@ -306,9 +306,11 @@ export function GroupSponsorshipManagementCard({
         currentMonthlyCapMinor: appliedMonthlyCapMinor,
         kind: "increase",
         nextMonthlyCapMinor: selectedMonthlyCapMinor,
-        startsNextMonth:
+        thisMonthCapMinor:
           management.pendingMonthlyCapMinor !== null &&
-          selectedMonthlyCapMinor <= management.monthlyCapMinor,
+          selectedMonthlyCapMinor <= management.monthlyCapMinor
+            ? management.monthlyCapMinor
+            : null,
       });
       return;
     }
@@ -624,7 +626,12 @@ export function GroupSponsorshipManagementConfirmationDialog({
   const nextLimit = isIncrease
     ? formatMoney(confirmation.nextMonthlyCapMinor)
     : null;
-  const startsNextMonth = isIncrease && confirmation.startsNextMonth === true;
+  const copy = isIncrease
+    ? readLimitIncreaseCopy(confirmation)
+    : {
+        detail: "Refills stop. Credit you already bought stays with the group.",
+        title: "Cancel your sponsorship?",
+      };
   const authoritativeRejection = error?.certainty === "authoritative";
   const indeterminateCancellation =
     error?.certainty === "indeterminate" && !isIncrease;
@@ -647,14 +654,10 @@ export function GroupSponsorshipManagementConfirmationDialog({
         >
           <header className="grid place-items-start gap-2 text-left">
             <AlertDialogPrimitive.Title className="text-balance font-serif text-[30px] font-semibold leading-[34px] tracking-[-0.01em]">
-              {isIncrease
-                ? `Raise ${startsNextMonth ? "next month’s" : "your"} limit to ${nextLimit}?`
-                : "Cancel your sponsorship?"}
+              {copy.title}
             </AlertDialogPrimitive.Title>
             <AlertDialogPrimitive.Description className="text-pretty text-base font-medium leading-[22px] text-[#FFFCF6]/60">
-              {isIncrease
-                ? `When refills are on, Murph charges $5 at a time as the group uses it, up to ${nextLimit} a month instead of ${currentLimit}${startsNextMonth ? ", starting next month" : ""}.`
-                : "Refills stop. Credit you already bought stays with the group."}
+              {copy.detail}
             </AlertDialogPrimitive.Description>
           </header>
 
@@ -705,6 +708,28 @@ export function GroupSponsorshipManagementConfirmationDialog({
       </AlertDialogPrimitive.Portal>
     </AlertDialogPrimitive.Root>
   );
+}
+
+// With a lower limit set for next month, the server applies a new limit now
+// unless it is below what this month has already committed.
+function readLimitIncreaseCopy(
+  confirmation: Extract<
+    GroupSponsorshipManagementConfirmation,
+    { kind: "increase" }
+  >,
+): { detail: string; title: string } {
+  const next = formatMoney(confirmation.nextMonthlyCapMinor);
+  const charges = `When refills are on, Murph charges $5 at a time as the group uses it, up to ${next} a month instead of ${formatMoney(confirmation.currentMonthlyCapMinor)}`;
+  const thisMonth = confirmation.thisMonthCapMinor ?? null;
+  if (thisMonth === null) {
+    return { detail: `${charges}.`, title: `Raise your limit to ${next}?` };
+  }
+  return {
+    detail: thisMonth > confirmation.nextMonthlyCapMinor
+      ? `${charges}, starting next month. This month’s ${formatMoney(thisMonth)} limit also drops to ${next}, unless you’ve already passed that.`
+      : `${charges}, starting next month.`,
+    title: `Raise next month’s limit to ${next}?`,
+  };
 }
 
 export function GroupSponsorshipCanceledReceipt({

@@ -90,6 +90,11 @@ as `Lower limit` and skipped confirmation. Accepted and fixed: every real increa
 now confirms, and names next month when that is all it changes. It also found the
 form's draft builder dead after the dialog deletion. Accepted and deleted.
 
+Round 2 found that the next-month wording understated a limit between the scheduled
+and current ones: the server applies it now unless it is below what is committed, so
+this month's limit can drop too. Accepted. Billing is unchanged and the drawer states
+that effect.
+
 ## Backend removal
 
 Removal happens in three revisions so no running version sees a shape it cannot
