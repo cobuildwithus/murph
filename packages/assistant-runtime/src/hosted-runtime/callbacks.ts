@@ -4743,7 +4743,7 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 }
 
 function createHostedProviderFetchBoundary(input: {
-  assertProviderEntryLive?: () => Promise<void>;
+  assertProviderEntryLive: () => Promise<void>;
   onProviderDispatchEntered?: () => Promise<void> | void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
@@ -4761,7 +4761,7 @@ function createHostedProviderFetchBoundary(input: {
   };
 
   return (async (request, init) => {
-    await input.assertProviderEntryLive?.();
+    await input.assertProviderEntryLive();
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,
