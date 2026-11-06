@@ -15,8 +15,8 @@ Updated: 2026-11-06
 
 1. Add deterministic proofs and capture the unchanged-source failures.
 2. Make the three Web edits and update the four requested documentation owners.
-3. Review scope and assertions; record commands, exits and line counts in [the result](../../../f3-held-first-turn-result.md).
-4. Make one scoped local commit; no push or PR. Keep this plan active as explicitly requested.
+3. Review scope and assertions, and record commands and exit codes in the PR evidence.
+4. Add the full-stack `linq-first-turn-held` proof, then PR, review and CI.
 
 The runner's current commit probe supplies check-only with no intent, idempotency key or purpose. Changed probe shape must restore the veto. Existing candidate ordering and message-edit handling remain unchanged. Live-model or full-stack changes are outside the requested Web-only proof; the deterministic boundary is the acceptance target.
 
@@ -26,4 +26,3 @@ The runner's current commit probe supplies check-only with no intent, idempotenc
 - Green: route 195/195 and PostgreSQL 37/37; prepared Web typecheck and complexity diff exit 0.
 - Product UX: Ready for this Web boundary. Later-message commit probes pass; exact sends and all protected vetoes remain blocked. No model or provider delivery claim is made.
 - Parent review: no extra query or decode; ordering, proactivity, state transitions, chat blockers, claim/abandonment and edit paths unchanged. No new persisted state.
-- Plan intentionally remains active for the local-only handoff. See the result for the initial fixture correction and complexity refactor.

@@ -22,11 +22,6 @@ Delivery publication fences and reply deadlines are owned by [the invariants](..
 
 Native game write outcomes, the empty-slot post guard and the Messages member-action session recheck are owned by [Weekly Game](product-specs/weekly-game.md) and [Security](SECURITY.md).
 
-Held first-turn commit authority is owned by [Security](SECURITY.md) and
-[the external-effects invariants](../docs/contracts/00-invariants.md);
-[the active plan](exec-plans/active/2026-11-06-f3-held-first-turn-commit.md) and
-[the local proof result](../f3-held-first-turn-result.md) record the Web-only change.
-
 The two-lane production Web admission, the Cloudflare predeploy gates, and the private nightly proof that owns reminder, foreground, and Codex cache-prefix journeys are owned by [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md) and `../apps/cloudflare/DEPLOY.md`.
 
 Vault display-name replication and deterministic actions are owned by

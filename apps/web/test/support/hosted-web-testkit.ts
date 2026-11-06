@@ -119,6 +119,14 @@ const hostedRuntimeLogTestMigrationsRoot = new URL(
   import.meta.url,
 );
 const hostedPrismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
+const hostedLinqDeliveryStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-delivery-store.ts",
+  import.meta.url,
+).href;
+const hostedLinqObservabilityIdentifiersModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-observability-identifiers.ts",
+  import.meta.url,
+).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-mailbox/store.ts",
   import.meta.url,
@@ -456,6 +464,8 @@ interface HostedUsageLimitForTestPrismaClient {
   };
   hostedLinqDelivery: {
     findMany(args: unknown): Promise<HostedLinqDeliveryForTest[]>;
+    findUnique(args: unknown): Promise<HostedLinqDeliveryForTest | null>;
+    update(args: unknown): Promise<unknown>;
   };
 }
 
@@ -607,6 +617,30 @@ interface HostedTestPrismaModule {
     databaseUrl: string;
     poolMax?: number;
   }): HostedTestPrismaClient;
+}
+
+interface HostedLinqFirstTurnSeedStoreModule {
+  HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA: string;
+  HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE: string;
+  HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE: string;
+  claimHostedLinqDeliveryProviderDispatchTx(input: {
+    expectedAttemptedAt?: Date;
+    idempotencyKey: string;
+    linqChatId: string;
+    prisma: unknown;
+    source: string;
+    sourceRef: string;
+    status: string;
+    targetKind: string;
+    template: string;
+  }): Promise<{ attemptedAt?: Date; claimed: boolean; id: string | null }>;
+  markHostedLinqDeliverySendFailedTx(input: {
+    expectedAttemptedAt: Date;
+    failureCode: string;
+    idempotencyKey: string;
+    linqChatId: string;
+    prisma: unknown;
+  }): Promise<void>;
 }
 
 interface HostedMailboxAppendForTestStoreModule {
@@ -1644,6 +1678,71 @@ export async function seedHostedWorkspaceWakeForTest(input: {
         "Hosted-local workspace wake seed requires exactly one compatible existing workspace.",
       );
     }
+  });
+}
+
+/** Seeds a rejected first-turn retry through the delivery owners, for held-row journeys. */
+export async function seedHostedLinqHeldFirstTurnForTest(input: {
+  chatId: string;
+  environment?: NodeJS.ProcessEnv;
+  eventId: string;
+  idempotencyKey: string;
+  memberId: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async ({ prisma }) => {
+    const store = await import(hostedLinqDeliveryStoreModuleSpecifier) as HostedLinqFirstTurnSeedStoreModule;
+    const claimInput = {
+      idempotencyKey: input.idempotencyKey,
+      linqChatId: input.chatId,
+      prisma,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: input.eventId,
+      targetKind: "thread",
+      template: store.HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    };
+    const reserved = await store.claimHostedLinqDeliveryProviderDispatchTx({
+      ...claimInput, status: "attempted",
+    });
+    const dispatched = await store.claimHostedLinqDeliveryProviderDispatchTx({
+      ...claimInput,
+      expectedAttemptedAt: reserved.attemptedAt,
+      status: "provider_dispatch_started",
+    });
+    if (!dispatched.claimed || !dispatched.id || !dispatched.attemptedAt) {
+      throw new Error("Hosted Linq held first-turn seed could not claim dispatch.");
+    }
+    await prisma.hostedLinqDelivery.update({
+      data: {
+        payloadCiphertext: "synthetic-sealed-reply",
+        payloadOwnerMemberId: input.memberId,
+        payloadSchema: store.HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
+      },
+      where: { id: dispatched.id },
+    });
+    await store.markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: dispatched.attemptedAt,
+      failureCode: store.HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
+      idempotencyKey: input.idempotencyKey,
+      linqChatId: input.chatId,
+      prisma,
+    });
+  });
+}
+
+export async function readHostedLinqFirstTurnDeliveryForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  idempotencyKey: string;
+}): Promise<Pick<HostedLinqDeliveryForTest, "acceptedAt" | "failureCode" | "status"> | null> {
+  return withHostedWebTestkitDeps(input.environment, async ({ prisma }) => {
+    const identifiers = await import(hostedLinqObservabilityIdentifiersModuleSpecifier) as {
+      createHostedLinqDeliveryIdempotencyLookupKey(value: string): string | null;
+    };
+    return await prisma.hostedLinqDelivery.findUnique({
+      select: { acceptedAt: true, failureCode: true, status: true },
+      where: {
+        idempotencyKey: identifiers.createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey) ?? "",
+      },
+    });
   });
 }
 
