@@ -11058,6 +11058,106 @@ await tools.murph__subscription({ action: "change_plan", targetPlanCode: "launch
     expect(claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
   })
 
+  it('refuses a subscription change after a steer is acknowledged but not yet consumed', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let releaseInspection!: () => void
+    const inspectionGate = new Promise<void>((resolve) => {
+      releaseInspection = resolve
+    })
+    let subscriptionPreflighted!: () => void
+    const subscriptionPreflight = new Promise<void>((resolve) => {
+      subscriptionPreflighted = resolve
+    })
+    let liveTurn: CodexAppServerLiveTurn | null = null
+    let toolPreflightCount = 0
+    const subscriptionRequest = vi.fn(async () => {
+      throw new Error('A stale subscription change must not reach transport.')
+    })
+    const claimSubscriptionAssistantInputId = vi.fn(() => `ain_${'b'.repeat(32)}`)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 1000}
+await tools.murph__automation({ action: "inspect", lookup: "slow-effect" });
+await tools.murph__subscription({ action: "change_plan", targetPlanCode: "launch_edge_monthly", quoteId: "quote_synthetic" }).catch(() => null);
+text("done");
+`,
+          name: 'exec',
+        },
+      },
+      {
+        // Codex holds a steer until the stream opens, so this request has not
+        // consumed the follow-up while the old cell carries on.
+        beforeRespond: async () => {
+          await liveTurn?.steer({ prompt: 'Cancel that change.' })
+          releaseInspection()
+          await subscriptionPreflight
+          await delay(250)
+        },
+        requestIncludes: ['Script running'],
+        text: 'STALE_ANSWER',
+      },
+      {
+        requestIncludes: ['Cancel that change.'],
+        text: 'CANCEL_HANDLED',
+      },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SUBSCRIPTION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async () => {
+            await inspectionGate
+            return {
+              action: 'inspect' as const,
+              automationId: 'automation-slow-effect',
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'slow-effect',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        beforeToolExecution: async () => {
+          toolPreflightCount += 1
+          if (toolPreflightCount === 2) subscriptionPreflighted()
+        },
+        claimSubscriptionAssistantInputId,
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        subscriptionTool: { request: subscriptionRequest },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        liveTurn = turn
+        return () => {}
+      },
+      prompt: 'Apply the quoted change.',
+    })
+
+    expect(result.finalMessage).toBe('CANCEL_HANDLED')
+    expect(toolPreflightCount).toBe(2)
+    expect(subscriptionRequest).not.toHaveBeenCalled()
+    expect(claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
+  })
+
   it('incorporates rapid successive steers into one reply without stale preempted text', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

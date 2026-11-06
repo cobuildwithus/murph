@@ -199,11 +199,19 @@ reproduced on a real App Server:
   misses a running cell: `await slowTool(); await subscription()` issues its RPC
   after the steer, so it is stamped with the new ordinal. Steering does not stop
   cells. Telling these apart would need cell-provenance tracking.
-- Decision: a plan change only runs in a provider turn nobody has steered
-  (`currentDeliveryContextOrdinal() > 0` refuses). Production already behaved this
-  way by accident, so billing does not change in this PR. A confirmation that lands
-  as a mid-turn message is refused and the model asks for it in a new message.
-  Allowing steered confirmations is a separate product decision for the owner.
+- Decision: a plan change only runs in a provider turn nobody has steered.
+  Production already behaved this way by accident, so billing does not change in
+  this PR. A confirmation that lands as a mid-turn message is refused and the model
+  asks for it in a new message. Allowing steered confirmations is a separate
+  product decision for the owner.
+- Final ReviewGPT round 1 found the signal was too late. `turn/steer` only
+  acknowledges transport: Codex holds a steer while a request awaits response
+  headers, and issued tools keep running, so `currentDeliveryContextOrdinal()` can
+  still be 0 after a cancel is acknowledged. A `period_end` change schedules through
+  Stripe with no further confirmation, so this was a billing regression. Accepted
+  and reproduced by holding a request before headers. The rule now counts a steer
+  from submission: `automationRelativeDateReferenceWindows.length > 1`, an entry
+  pushed before `turn/steer` and rolled back if it is rejected.
 - Scope is deliberate. `assistant_configuration` still runs after a steer: it is a
   reversible preference, Web binds no semantics to the input, and refusing it is
   the reported bug.
@@ -233,8 +241,9 @@ expiry, turn commit). Do not merge the two context objects wholesale.
   after; net deleted lines; no remaining `currentAssistantInputId` reference.
 - Observed: the composed regression fails on the old source with the production
   error `assistant configuration updates require user-sourced input`, and passes
-  after the change. Both steered-subscription sequences pass with the rule and fail
-  without it, and each reaches the call rather than ending the turn first.
+  after the change. All three steered-subscription sequences fail without the rule
+  and pass with it: queued behind a slow tool, issued by an older cell, and issued
+  after the steer is acknowledged but before Codex consumes it.
 - Live model: `pnpm test:assistant:live -- --test "explicit Max upgrade"` passed.
   A confirmation with a mid-turn follow-up made no subscription request, and the
   reply said nothing was applied and asked for one more confirmation. Confirming

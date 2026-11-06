@@ -4863,7 +4863,9 @@ async function runCodexAppServerTurnOnProcess(
               )
             ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
-          providerTurnSteered: currentDeliveryContextOrdinal() > 0,
+          // Counted from submission: `turn/steer` only acknowledges transport,
+          // and currentDeliveryContextOrdinal waits for Codex to consume it.
+          providerTurnSteered: automationRelativeDateReferenceWindows.length > 1,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:
             input.onboardingFirstReadCompletionTransitionAvailable ?? false,
