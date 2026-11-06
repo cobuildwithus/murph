@@ -209,7 +209,7 @@ test("malformed sole-copy catalogue blocks checkpoint without writes or pruning"
 });
 
 
-test.each([true, false, undefined])("preserved photos keep inline checkpoint and receipt bytes with pending=%s", async pendingUpload => {
+test.each([true, false, undefined])("pending photos stay inline; settled photos leave checkpoints but retain receipt bytes (pending=%s)", async pendingUpload => {
   const root = await mkdtemp(path.join(tmpdir(), "inline-photo-preserver-"));
   const vaultRoot = path.join(root, "vault");
   const { objects, mediaStore } = storeFixture();
@@ -230,7 +230,7 @@ test.each([true, false, undefined])("preserved photos keep inline checkpoint and
     const originalRaw = receipts[0]!.receipt.actions.find(action => action.targetRelativePath === paths[1]);
     expect(rewritten.receipt.actions).toContainEqual(originalRaw);
     expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore }))
-      .toMatchObject({ excludedVaultPaths: [], uploadedMediaCount: 0, prunedMediaCount: 0 });
+      .toMatchObject({ excludedVaultPaths: pendingUpload === true ? [] : paths, uploadedMediaCount: 0, prunedMediaCount: 0 });
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(entries);
     expect(mediaStore.put).not.toHaveBeenCalled();
     expect(mediaStore.get).not.toHaveBeenCalled();

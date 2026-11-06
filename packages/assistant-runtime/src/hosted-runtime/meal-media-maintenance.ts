@@ -1,17 +1,19 @@
 import path from "node:path";
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { readFile } from "node:fs/promises";
-import { compareEventRevisionPriority, eventRecordSchema, type EventRecord } from "@murphai/contracts";
+import { collectEventRawReferencePaths, compareEventRevisionPriority, eventRecordSchema, type EventRecord } from "@murphai/contracts";
 import {
   inferRawAssetOwnerFromDirectory, listEventLedgerShardPathsInterruptible,
   visitEventLedgerShardRecordsInterruptible, statAndHashVaultFileInterruptible,
   resolveVaultPathOnDisk, withCanonicalWriteLock,
+  canonicalRawArtifactMatches,
 } from "@murphai/core";
 import { raceHostedRuntimeCancellation } from "../hosted-workspace-restore-preparation.ts";
 import { HostedRuntimeMediaWriteError, type HostedRuntimeMediaStore } from "./platform.ts";
 import {
   isHostedPendingMealMedia, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue,
   type HostedMediaReference,
+  hostedPhotoIntentIsCommitted,
 } from "./media-references.ts";
 
 export const HOSTED_MEAL_MEDIA_RETRY_MS = 60 * 60_000;
@@ -48,9 +50,11 @@ export async function runHostedMealMediaMaintenance(input: {
     if (!pending.length || input.budget.remaining <= 0) return result;
     input.budget.deadlineMs = deliveryDeadlineMs;
     const cursor = catalogue.mealUploadCursor ?? "";
-    const selected = [...pending.filter(entry => entry.mediaId > cursor), ...pending.filter(entry => entry.mediaId <= cursor)]
+    const eligible = pending.filter(entry => hostedPhotoIntentIsCommitted(input.vaultRoot, entry.mediaId));
+    const selected = [...eligible.filter(entry => entry.mediaId > cursor), ...eligible.filter(entry => entry.mediaId <= cursor)]
       .slice(0, input.budget.remaining);
-    const holders = await step(() => readSelectedMealHolders(input.vaultRoot, selected, signal));
+    if (!selected.length) return result;
+    const holders = await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
     await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
     for (const entry of selected) {
       live();
@@ -58,7 +62,7 @@ export async function runHostedMealMediaMaintenance(input: {
       await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
       try {
         const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath));
-        if (owner?.kind !== "meal") throw new Error("Invalid pending meal media owner.");
+        if (!owner) throw new Error("Invalid pending photo owner.");
         const action = await settleEntry(entry, holders.get(owner.id), input, signal, step);
         await step(() => updateCatalogue(input.vaultRoot, entry, signal, action));
         if (action === "delivered") result.uploaded += 1;
@@ -86,8 +90,13 @@ async function settleEntry(
   input: { vaultRoot: string; mediaStore: HostedRuntimeMediaStore }, signal: AbortSignal,
   step: <T>(work: () => Promise<T>) => Promise<T>,
 ): Promise<"delivered" | "retired"> {
-  const thumbnail = holder?.kind === "meal" && holder.lifecycle?.state !== "deleted" ? holder.photoThumbnail : null;
-  if (thumbnail?.relativePath === entry.relativePath && thumbnail.sha256 === entry.sha256 && thumbnail.byteSize === entry.byteSize) {
+  // Measurement deletion retains its raw evidence. Meal retirement replaces
+  // canonical identity, so an old cleanup pointer cannot authorize another PUT.
+  const retained = holder && (holder.kind !== "meal" || holder.lifecycle?.state !== "deleted")
+    && collectEventRawReferencePaths(holder).includes(entry.relativePath)
+    && (entry.expiresAt === null || Date.parse(entry.expiresAt) > Date.now())
+    && await step(() => canonicalRawArtifactMatches({ vaultRoot: input.vaultRoot, ...entry }));
+  if (retained) {
     await deliver(entry, input, signal, step);
     return "delivered";
   }
@@ -106,30 +115,31 @@ async function deliver(
 ): Promise<void> {
   const integrity = await step(() => statAndHashVaultFileInterruptible(input.vaultRoot, entry.relativePath, { shouldContinue: () => !signal.aborted }));
   if (integrity.kind !== "ok" || integrity.integrity.sha256 !== entry.sha256 || integrity.integrity.byteSize !== entry.byteSize) {
-    throw new HostedRuntimeMediaWriteError({ cause: new Error("Pending meal thumbnail bytes are unavailable or invalid."), retryable: false });
+    throw new HostedRuntimeMediaWriteError({ cause: new Error("Pending photo bytes are unavailable or invalid."), retryable: false });
   }
   const resolved = await step(() => resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath));
   const bytes = await step(() => readFile(resolved.absolutePath, { signal }));
   if (!input.mediaStore.record || !input.mediaStore.delete) throw new Error("Meal media lifecycle is unavailable.");
-  await step(() => input.mediaStore.record!({ ...entry, expiresAt: null }, { signal }));
-  await step(() => input.mediaStore.put({ ...entry, bytes, expiresAt: null }, { signal }));
+  await step(() => input.mediaStore.record!(entry, { signal }));
+  await step(() => input.mediaStore.put({ ...entry, bytes }, { signal }));
 }
 
-// Selected meal IDs bound retained memory. Scan every revision before deciding
+// Selected holder IDs bound retained memory. Scan every revision before deciding
 // that a holder is live or absent; a later shard can delete/replace an early hit.
-async function readSelectedMealHolders(vaultRoot: string, entries: HostedMediaReference[], signal: AbortSignal) {
+async function readSelectedPhotoHolders(vaultRoot: string, entries: HostedMediaReference[], signal: AbortSignal) {
   const selected = new Set(entries.map(entry => inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath))?.id));
   const latest = new Map<string, { record: EventRecord; relativePath: string }>();
   const shards = await listEventLedgerShardPathsInterruptible({ vaultRoot, signal });
   if (shards.interrupted) throw new Error("Meal holder discovery interrupted.");
   for (const relativePath of shards.relativePaths) {
     const visited = await visitEventLedgerShardRecordsInterruptible({ vaultRoot, relativePath, signal, visit(row) {
-      if (row.kind !== "meal" || typeof row.mealId !== "string" || !selected.has(row.mealId)) return;
+      const id = row.kind === "meal" ? row.mealId
+        : row.kind === "measurement" || row.kind === "body_measurement" ? row.id : null;
+      if (typeof id !== "string" || !selected.has(id)) return;
       const record = eventRecordSchema.parse(row);
-      if (record.kind !== "meal") return;
-      const old = latest.get(record.mealId);
+      const old = latest.get(id);
       if (!old || compareEventRevisionPriority({ ...record, relativePath }, { ...old.record, relativePath: old.relativePath }) > 0) {
-        latest.set(record.mealId, { record, relativePath });
+        latest.set(id, { record, relativePath });
       }
     } });
     if (visited.interrupted) throw new Error("Meal holder discovery interrupted.");

@@ -340,7 +340,7 @@ test("cold catalogue survives restore, media merge, checkpoint and another resto
     // Receipt/media reconciliation must preserve the same entry too.
     await publishHostedWorkspaceMediaReferences({ vaultRoot: restored, mediaStore });
     const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
-    expect(publication.excludedVaultPaths).toEqual([closedPath]);
+    expect(publication.excludedVaultPaths).toEqual(catalogue.entries.map(entry => entry.relativePath));
     expect(publication.prunedMediaCount).toBe(0);
     expect(await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).toEqual(catalogue);
     const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: restored, vaultRoot: restored,

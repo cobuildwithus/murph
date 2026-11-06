@@ -71,6 +71,7 @@ import {
 import {
   initializeVault,
   addMeal,
+  addMeasurement,
   deleteEvent,
   runMealPhotoMaintenance,
   withHostedCanonicalWritePort,
@@ -368,6 +369,52 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await checkpoint();
     expect(store.calls).toEqual([]);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true });
+  });
+
+  it.each(["rejected", "lost_response", "accepted"])("new full-photo intents require exact checkpoint acceptance across warm idle passes: %s", async outcome => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(vaultRoot, "fixture.jpg");
+      await writeFile(sourcePath, "synthetic photo bytes");
+      const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic measurement", occurredAt: "2030-01-01T12:00:00.000Z", measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      const photo = measurement.event.attachments![0]!.relativePath;
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const { calls, platform } = createRuntimePlatform();
+      const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+      const complete = calls.completeSnapshotSession.getMockImplementation()!;
+      calls.completeSnapshotSession.mockImplementationOnce(async input => {
+        // Even a warm idle pass inside completion cannot release discovery.
+        await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+        expect(store.calls).toEqual([]);
+        expect(input.checkpointRequest.inboxMediaRetentionWakeAt).toBe("2030-01-09T13:00:00.000Z");
+        expect(input.checkpointRequest.nextWakeReason).toBe("inbox_media_retention");
+        const completed = await complete(input);
+        if (outcome === "lost_response") throw new Error("Synthetic lost checkpoint response");
+        if (outcome === "rejected") completed.checkpoint.checkpointed = false;
+        return completed;
+      });
+      const builder = createSnapshotArchiveBuilder();
+      const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder: builder });
+      const checkpoint = () => options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+      if (outcome === "lost_response") await expect(checkpoint()).rejects.toThrow("Synthetic lost checkpoint response");
+      else await checkpoint();
+      expect(vi.mocked(builder.buildEncryptedSnapshot).mock.calls[0]![0].archiveEntries)
+        .toContainEqual(expect.objectContaining({ relativePath: photo }));
+      await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+      expect(store.calls.filter(call => call.operation === "put")).toHaveLength(outcome === "accepted" ? 1 : 0);
+      if (outcome !== "accepted") {
+        await checkpoint();
+        await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+      }
+      expect(store.calls.filter(call => call.operation === "put")).toHaveLength(1);
+      await checkpoint();
+      expect(vi.mocked(builder.buildEncryptedSnapshot).mock.lastCall![0].archiveEntries.some(entry => entry.relativePath === photo)).toBe(false);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]?.pendingUpload).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 
   it("fails closed when the mailbox decoder is missing", () => {

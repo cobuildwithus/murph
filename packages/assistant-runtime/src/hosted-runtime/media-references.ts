@@ -60,7 +60,23 @@ export { HOSTED_MEDIA_REFS_RELATIVE_PATH, HOSTED_MEDIA_REFS_SCHEMA } from "@murp
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RAW_MEALS_PREFIX = `${VAULT_LAYOUT.rawMealsDirectory}/`;
 export function isHostedPendingMealMedia(entry: HostedMediaReference): boolean {
-  return isHostedMealMediaV2Path(entry.relativePath) && entry.pendingUpload === true;
+  return isHostedCanonicalPhotoPath(entry.relativePath) && entry.pendingUpload === true;
+}
+
+// A warm workspace can retain a failed checkpoint's local catalogue. Only the
+// exact accepted archive (or a cold restore) releases these newly found intents.
+const uncommittedPhotoIntents = new Map<string, Set<string>>();
+export function hostedPhotoIntentIsCommitted(vaultRoot: string, mediaId: string): boolean {
+  return !uncommittedPhotoIntents.get(vaultRoot)?.has(mediaId);
+}
+export function releaseHostedPhotoIntents(vaultRoot: string, mediaIds: readonly string[], accepted = true): void {
+  if (!accepted) return;
+  const blocked = uncommittedPhotoIntents.get(vaultRoot);
+  for (const id of mediaIds) blocked?.delete(id);
+  if (!blocked?.size) uncommittedPhotoIntents.delete(vaultRoot);
+}
+export function resetHostedPhotoIntentsAfterColdRestore(vaultRoot: string): void {
+  uncommittedPhotoIntents.delete(vaultRoot);
 }
 
 export { isHostedMealMediaV2Path } from "@murphai/runtime-state/node";
@@ -69,6 +85,7 @@ export type { HostedMediaReference, HostedMediaReferenceCatalogue } from "@murph
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
 
 export interface PublishHostedWorkspaceMediaReferencesResult {
+  pendingPhotoMediaIds: string[];
   excludedVaultPaths: string[];
   prunedMediaCount: number;
   referenceCount: number;
@@ -93,6 +110,7 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   if (!input.mediaStore) {
     if ((await readHostedColdIngestReferences(input.vaultRoot)).length > 0) throw new HostedColdHistoryUnavailableError();
     return {
+      pendingPhotoMediaIds: [],
       excludedVaultPaths: [],
       prunedMediaCount: 0,
       referenceCount: 0,
@@ -141,10 +159,15 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
     vaultRoot: input.vaultRoot,
   });
 
+  const excludedVaultPaths: string[] = [];
+  for (const entry of entries) {
+    if (entry.pendingUpload !== true && await hostedMediaReferenceDenialReason(input.vaultRoot, entry) === null) {
+      excludedVaultPaths.push(entry.relativePath);
+    }
+  }
   return {
-    // Preserving future photo descriptors must not expand archive exclusions.
-    // Meal and measurement bytes stay inline whenever they are present.
-    excludedVaultPaths: entries.filter(entry => !isHostedCanonicalPhotoPath(entry.relativePath)).map(entry => entry.relativePath),
+    pendingPhotoMediaIds: entries.filter(isHostedPendingMealMedia).map(entry => entry.mediaId),
+    excludedVaultPaths,
     prunedMediaCount,
     referenceCount: entries.length,
     uploadedMediaCount,
@@ -184,7 +207,7 @@ async function prepareHostedWorkspaceMediaReferences(input: {
   const existingByPath = new Map(
     existingCatalogue.entries.map((entry) => [entry.relativePath, entry]),
   );
-  const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal);
+  const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal, input.includeColdIngests === true);
   const currentMonth = new Date().toISOString().slice(0, 7);
   const ingestPaths = input.includeColdIngests
     ? new Set(await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory))
@@ -473,6 +496,7 @@ export async function readHostedMediaReferenceCatalogue(input: {
 async function collectHostedMediaCandidates(
   vaultRoot: string,
   signal: AbortSignal | null | undefined,
+  discoverPhotos: boolean,
 ): Promise<HostedMediaCandidate[]> {
   const eventInventory = await collectHostedMediaEventInventory(vaultRoot, signal);
   return dedupeHostedMediaCandidates([
@@ -482,7 +506,37 @@ async function collectHostedMediaCandidates(
       vaultRoot,
     }),
     ...collectCaptureHostedMediaCandidates(eventInventory.latestEvents),
+    ...(discoverPhotos ? collectPhotoCandidates(eventInventory.latestEvents) : []),
   ]);
+}
+
+function collectPhotoCandidates(records: readonly EventRecord[]): HostedMediaCandidate[] {
+  const candidates: HostedMediaCandidate[] = [];
+  for (const record of records) {
+    const lifetime = photoUploadLifetime(record);
+    if (!lifetime) continue;
+    const { capturedAt, expiresAt } = lifetime;
+    for (const attachment of record.attachments ?? []) {
+      if (!isHostedCanonicalPhotoPath(attachment.relativePath)
+        || !attachment.mediaType.startsWith("image/")
+        || (record.kind === "meal" && attachment.relativePath === record.photoThumbnail?.relativePath)) continue;
+      candidates.push({ relativePath: attachment.relativePath, mediaKind: "image",
+        byteSize: null, sha256: attachment.sha256,
+        mimeType: attachment.mediaType, recordedAt: capturedAt, expiresAt });
+    }
+  }
+  return candidates;
+}
+
+function photoUploadLifetime(record: EventRecord): { capturedAt: string; expiresAt: string | null } | null {
+  if (record.lifecycle?.state === "deleted") return null;
+  if (record.kind !== "meal" && record.kind !== "measurement" && record.kind !== "body_measurement") return null;
+  if (record.kind === "meal" && (!record.photoThumbnail || !record.photoCapturedAt)) return null;
+  const capturedAt = record.kind === "meal" ? record.photoCapturedAt! : record.recordedAt;
+  if (Date.now() - Date.parse(capturedAt) < 7 * 86_400_000) return null;
+  const expiresAt = record.kind === "meal"
+    ? new Date(Date.parse(capturedAt) + INBOX_IMAGE_RETENTION_WINDOW_MS).toISOString() : null;
+  return expiresAt && Date.parse(expiresAt) <= Date.now() ? null : { capturedAt, expiresAt };
 }
 
 async function collectInboxHostedMediaCandidates(input: {
@@ -709,9 +763,15 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
       uploaded: false,
     };
   }
-  // Meal bytes remain in receipts and snapshots. Persist their delivery intent
-  // before the first PUT: a response can be lost after remote registration.
-  if (isHostedMealMediaV2Path(entry.relativePath)) {
+  // Full photos need an accepted checkpoint before any remote registration.
+  // Thumbnail-v2 intent already has the canonical receipt durability boundary.
+  if (isHostedCanonicalPhotoPath(entry.relativePath)) {
+    if (!await canonicalRawArtifactMatches({ vaultRoot: input.vaultRoot, ...entry })) return null;
+    if (!isHostedMealMediaV2Path(entry.relativePath)) {
+      const blocked = uncommittedPhotoIntents.get(input.vaultRoot) ?? new Set<string>();
+      blocked.add(entry.mediaId);
+      uncommittedPhotoIntents.set(input.vaultRoot, blocked);
+    }
     return { entry: { ...entry, pendingUpload: true }, uploaded: false };
   }
   const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
