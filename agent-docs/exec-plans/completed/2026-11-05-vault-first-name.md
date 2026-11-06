@@ -1,5 +1,9 @@
 # Vault first-name persistence
 
+Status: completed
+Created: 2026-11-05
+Updated: 2026-11-06
+
 ## Outcome
 
 A member whose vault already holds a usable first name is no longer asked for it
@@ -43,3 +47,4 @@ routes, dispatch events, flags or backfill.
 The runtime consumer ships and deploys first; the Web producer follows. A replica
 without the field is a miss, which shows today's name screen. Keep the consumer
 while accepted actions can remain queued or restored.
+Completed: 2026-11-06
