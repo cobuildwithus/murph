@@ -13,15 +13,19 @@ vi.mock("@murphai/hosted-execution", async () => ({
   ...await vi.importActual("@murphai/hosted-execution"),
   emitHostedExecutionStructuredLog: mocks.log,
 }));
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+});
 
-test("a real socket close before upload response preserves retryable failure and permits a later owner retry", async () => {
+test.each([1, 2])("recovers one real socket close and retains owner recovery after %i socket closes", async (failures) => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 0, 1));
   let requests = 0;
   const server = createServer((request, response) => {
     requests += 1;
     request.resume();
     request.on("end", () => {
-      if (requests === 1) request.socket.destroy();
+      if (requests <= failures) request.socket.destroy();
       else response.writeHead(200).end();
     });
   });
@@ -34,18 +38,25 @@ test("a real socket close before upload response preserves retryable failure and
       timeoutMs: 5_000,
     });
     const artifact = { bytes: new TextEncoder().encode("synthetic artifact"), sha256: "a".repeat(64) };
-    const failedPut = store.put(artifact);
-    await expect(failedPut).rejects.toBeInstanceOf(HostedRuntimeArtifactWriteError);
-    await expect(failedPut).rejects.toMatchObject({ retryable: true });
-    expect(requests).toBe(1);
+    const upload = store.put(artifact);
+    if (failures === 1) {
+      await expect(upload).resolves.toBeUndefined();
+      expect(requests).toBe(2);
+    } else {
+      await expect(upload).rejects.toBeInstanceOf(HostedRuntimeArtifactWriteError);
+      await expect(upload).rejects.toMatchObject({ retryable: true });
+      expect(requests).toBe(2);
+      await store.put(artifact);
+      expect(requests).toBe(3);
+    }
     expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({
-      message: "Hosted runtime artifact upload failed before response.",
+      message: failures === 1
+        ? "Hosted runtime artifact upload transport recovery backoff."
+        : "Hosted runtime artifact upload failed before response.",
       details: expect.objectContaining({ fetchNetworkErrorCode: "UND_ERR_SOCKET" }),
     }));
     await store.put(artifact);
-    expect(requests).toBe(2);
-    await store.put(artifact);
-    expect(requests).toBe(2);
+    expect(requests).toBe(failures + 1);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

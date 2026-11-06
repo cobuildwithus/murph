@@ -47,7 +47,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
     chatId: "chat-created",
     messageId: "provider-message-created",
   }),
-  getHostedLinqChatHandles: vi.fn(),
+  getHostedLinqChatSummary: vi.fn(),
   isHostedLinqAttachmentSendPrepareFailure: vi.fn(() => false),
   sendHostedLinqAttachmentMessage: vi.fn(),
 }));
@@ -129,7 +129,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   >("@/src/lib/hosted-onboarding/linq-daily-state");
   return {
     ...actual,
-    claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
     claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
     readHostedLinqDailyState: vi.fn().mockResolvedValue(null),
@@ -150,7 +149,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
     }),
     markHostedLinqDeliveryAcceptedTx: vi.fn().mockResolvedValue({
       deliveryStatus: "accepted",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     }),
     markHostedLinqDeliverySendFailedTx: vi.fn(actual.markHostedLinqDeliverySendFailedTx),
@@ -194,7 +192,6 @@ import {
   sendHostedLinqChatMessage,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
-  claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
   HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
@@ -378,7 +375,6 @@ describe("hosted Linq webhook transport", () => {
       });
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValue({
       deliveryStatus: "accepted",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
     vi.mocked(requireHostedOnboardingLinqConfig).mockReturnValue({
@@ -513,13 +509,7 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeDefined();
 
     expect(scheduledTasks).toHaveLength(0);
-    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
-      memberId: "member-1",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma: expect.objectContaining({
-        $queryRaw: expect.any(Function),
-      }),
-    });
+    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       { maxWait: 5_000, timeout: 15_000 },
@@ -532,7 +522,6 @@ describe("hosted Linq webhook transport", () => {
       groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
       sourceRef: effect.effectId,
     }));
-    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1082,18 +1071,9 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("reopens group context and daily suppression when acceptance replays its lone buffered failure", async () => {
+  it("leaves buffered-failure suppression to the delivery owner", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "failed",
-      reopenOnboardingLink: {
-        groupJoinReplyContext: {
-          outreachId: "hgrpjoa-failed",
-          repliedAt: "2026-03-26T12:00:00.000Z",
-      },
-      memberId: "member-1",
-      occurredAt: "2026-03-26T00:00:00.000Z",
-      releaseDailySuppression: true,
-    },
       restoreOnboardingLink: null,
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -1120,18 +1100,13 @@ describe("hosted Linq webhook transport", () => {
 
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
     expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
-    expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
-      memberId: "member-1",
-      occurredAt: "2026-03-26T00:00:00.000Z",
-      prisma: expect.any(Object),
-    });
+    expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
   it("awaits one share when accepted-milestone replay finds an earlier delivered receipt", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat-1",
         memberId: "member-1",
@@ -1218,7 +1193,6 @@ describe("hosted Linq webhook transport", () => {
     arrangeAuthorizedMemberParticipantLine();
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat-created",
         memberId: "member-1",
@@ -1264,7 +1238,6 @@ describe("hosted Linq webhook transport", () => {
   it("does not share a replayed delivered signup over SMS", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat-1",
         memberId: "member-1",
@@ -1301,7 +1274,6 @@ describe("hosted Linq webhook transport", () => {
   it("skips a replayed delivered contact-card share inside a transaction", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat-1",
         memberId: "member-1",
@@ -1348,7 +1320,6 @@ describe("hosted Linq webhook transport", () => {
   it("does not delay, fail, or retry the signup reply when a replayed card share fails", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat-1",
         memberId: "member-1",
@@ -1924,7 +1895,6 @@ describe("hosted Linq webhook transport", () => {
         id: "invite-1",
       },
     });
-    expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("starts AI usage quota replies through the delivery row before provider send", async () => {
@@ -3984,7 +3954,6 @@ describe("hosted Linq webhook transport", () => {
       targetKind: "thread",
       template: "invite_signup",
     }));
-    expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();

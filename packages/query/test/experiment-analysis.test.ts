@@ -868,6 +868,114 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
   });
 });
 
+test.each([
+  ["active", "2026-04-20", "intervention", "sufficient_for_progress"],
+  ["active", "2026-04-22", "review_due", "ready_for_review"],
+  ["completed", "2026-04-20", "completed", "ready_for_review"],
+] as const)("numeric coverage preserves asymmetric thresholds for %s on %s", (
+  experimentStatus,
+  asOf,
+  phase,
+  threeByThreeStatus,
+) => {
+  const vault = createVaultReadModel({
+    vaultRoot: "synthetic/experiment-coverage-thresholds",
+    metadata: { timezone: "UTC" },
+    entities: [makeExperiment(experimentStatus)],
+  });
+
+  for (const [baselineDays, interventionDays, status] of [
+    [3, 2, "sufficient_for_progress"],
+    [2, 3, "partial"],
+    [3, 3, threeByThreeStatus],
+  ] as const) {
+    const metricPoints = [
+      ...["2026-04-01", "2026-04-02", "2026-04-03"].slice(0, baselineDays),
+      ...["2026-04-08", "2026-04-09", "2026-04-10"].slice(0, interventionDays),
+    ].map((date) => makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:resting-heart-rate",
+      date,
+      metricKey: "resting-heart-rate",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Wearable summary",
+      sourceRecordId: `evt_coverage_${date}`,
+      unit: "bpm",
+      value: 60,
+    }));
+    const progress = summarizeExperimentProgress(vault, "sauna-rhr", { asOf, metricPoints });
+
+    assert.equal(progress.phase, phase);
+    assert.deepEqual(progress.dataCoverage, {
+      activityProviders: [],
+      baselineDaysAvailable: baselineDays,
+      interventionDaysAvailable: interventionDays,
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      primaryMetricDaysAvailable: baselineDays + interventionDays,
+      status,
+      wearableProviders: [],
+    });
+  }
+});
+
+test.each([
+  ["legacy", "no_wearable_data"],
+  ["explicit", "insufficient"],
+  ["missing", "insufficient"],
+] as const)("numeric coverage distinguishes missing and supporting-only data for a %s primary", (
+  primaryKind,
+  emptyStatus,
+) => {
+  const primaryKey = "biomarker:resting-heart-rate";
+  const secondaryKey = "biomarker:hrv-rmssd";
+  const analysisPlan = {
+    ...(primaryKind === "legacy"
+      ? { primaryBiomarkerKey: primaryKey }
+      : primaryKind === "explicit"
+        ? { primaryOutcome: { kind: "metric", key: primaryKey } }
+        : {}),
+    secondaryBiomarkerKeys: [secondaryKey],
+  };
+  const vault = createVaultReadModel({
+    vaultRoot: "synthetic/experiment-coverage-missing-data",
+    metadata: { timezone: "UTC" },
+    entities: [makeExperiment("completed", { analysisPlan })],
+  });
+
+  for (const hasSupportingData of [false, true]) {
+    const metricPoints = hasSupportingData
+      ? [
+          "2026-04-01", "2026-04-02", "2026-04-03",
+          "2026-04-08", "2026-04-09", "2026-04-10",
+        ].map((date) => makeProjectedMetricPoint({
+          biomarkerKey: secondaryKey,
+          date,
+          metricKey: "hrv-rmssd",
+          sourceKind: "wearable-summary",
+          sourceLabel: "Wearable summary",
+          sourceRecordId: `evt_supporting_coverage_${date}`,
+          unit: "ms",
+          value: 45,
+        }))
+      : [];
+    const progress = summarizeExperimentProgress(vault, "sauna-rhr", {
+      asOf: "2026-04-22",
+      metricPoints,
+    });
+
+    assert.equal(progress.phase, "completed");
+    assert.equal(progress.signals.length, primaryKind === "missing" ? 1 : 2);
+    assert.deepEqual(progress.dataCoverage, {
+      activityProviders: [],
+      baselineDaysAvailable: hasSupportingData ? 3 : 0,
+      interventionDaysAvailable: hasSupportingData ? 3 : 0,
+      primaryBiomarkerKey: primaryKind === "missing" ? null : primaryKey,
+      primaryMetricDaysAvailable: 0,
+      status: hasSupportingData ? "partial" : emptyStatus,
+      wearableProviders: [],
+    });
+  }
+});
+
 test("experiment data coverage keeps wearable summaries separate from activity capability", () => {
   const vault = createVaultReadModel({
     vaultRoot: "/virtual/experiment-analysis-sleep-recovery-only-coverage",

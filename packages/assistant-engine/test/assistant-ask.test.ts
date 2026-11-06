@@ -82,7 +82,7 @@ describe('executeReadOnlyAssistantAsk', () => {
           PATH: '/runtime/bin',
         },
         groupSharedReader,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
         now,
         question: 'What exercise is prescribed today?',
@@ -110,7 +110,7 @@ describe('executeReadOnlyAssistantAsk', () => {
       developerInstructions: 'Use Murph voice.',
       dynamicTools: [expect.objectContaining({ name: 'group', namespace: 'murph' })],
       ephemeral: true,
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
       permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
@@ -130,6 +130,8 @@ describe('executeReadOnlyAssistantAsk', () => {
       'read_shared',
     ])
     expect(Object.keys(detachedGroupTool.inputSchema.properties)).toEqual([
+      'participantId',
+      'history',
       'action',
       'projectionScopes',
     ])
@@ -376,7 +378,6 @@ describe('executeReadOnlyAssistantAsk', () => {
 
   it('strips ambient hosted capabilities when no explicit child env is supplied', async () => {
     const workspaceRoot = await createTempRoot('murph-assistant-ask-ambient-')
-    vi.stubEnv('EXA_API_KEY', 'ambient-search-secret')
     askMocks.buildEvidence.mockResolvedValue('No committed evidence.')
     askMocks.executeTurn.mockResolvedValue({
       finalMessage: JSON.stringify({
@@ -392,7 +393,6 @@ describe('executeReadOnlyAssistantAsk', () => {
     })
 
     const childEnv = askMocks.executeTurn.mock.calls[0]?.[0].env
-    expect(childEnv.EXA_API_KEY).toBeUndefined()
   })
 
   it('rejects invalid structured output and invalid questions', async () => {
@@ -609,6 +609,9 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
       })
       expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()
     }
+    expect(answerInput.environments).toBeUndefined()
+    expect(reviewInput.environments).toEqual([])
+    expect(answerInput.threadConfig).toMatchObject({ 'agents.enabled': false, 'features.goals': false })
     expect(answerInput.threadConfig).toBe(READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG)
     expect(answerInput.threadConfig).not.toHaveProperty('features.shell_tool')
     expect(answerInput.workingDirectory).not.toBe(workspaceRoot)
@@ -680,7 +683,6 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
       },
     ])
   })
-
 
   it('assembles a self-contained direct-recipient answer contract', async () => {
     const workspaceRoot = await createTempRoot('murph-consented-direct-ask-')

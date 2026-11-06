@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -7,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   finishHostedOnboardingTiming: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   maybeHandoffHostedExecutionWebhookWake: vi.fn(),
+  maybeScheduleHostedLinqAckReaction: vi.fn(),
   planHostedOnboardingLinqWebhook: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
   requireHostedLinqMessageReceivedEvent: vi.fn(),
@@ -54,6 +56,10 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", () => ({
     mocks.resolveHostedLinqThreadContainerCryptoPreparationTarget,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-ack-reaction", () => ({
+  maybeScheduleHostedLinqAckReaction: mocks.maybeScheduleHostedLinqAckReaction,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", () => ({
   maybeHandoffHostedExecutionWebhookWake: mocks.maybeHandoffHostedExecutionWebhookWake,
 }));
@@ -90,10 +96,10 @@ import {
 describe("hosted Linq read receipt route authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
       api_version: "2026-01-01",
@@ -201,5 +207,59 @@ describe("hosted Linq read receipt route authority", () => {
         wakeHandoffSignalAccepted: true,
       }),
     );
+  });
+
+  it("schedules the ack tapback after the wake handoff and never waits for it", async () => {
+    mocks.planHostedOnboardingLinqWebhook.mockResolvedValue({
+      desiredSideEffects: [],
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      wakeHandoffs: [{
+        conversationIsGroup: false,
+        eventId: "evt_read_receipt_mismatch",
+        linqChatId: "chat_123",
+        mailboxItemId: "mailbox_123",
+        source: "linq",
+        userId: "member_123",
+      }],
+    });
+    mocks.sendHostedLinqReadReceipt.mockResolvedValue({ ok: true, status: 204 });
+    const pendingForever = vi.fn(() => new Promise<void>(() => {}));
+    mocks.maybeScheduleHostedLinqAckReaction.mockImplementation((input: {
+      scheduleAfterResponse?: (task: () => Promise<void>) => void;
+    }) => {
+      input.scheduleAfterResponse?.(pendingForever);
+      return true;
+    });
+    const scheduled: Array<() => Promise<void>> = [];
+    const webhookReceivedAt = new Date("2026-11-05T12:00:00.000Z");
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: "{}",
+      scheduleAfterResponse: (task) => { scheduled.push(task); },
+      signature: null,
+      timestamp: null,
+      webhookReceivedAt,
+    })).resolves.toMatchObject({ ok: true, reason: "wake-appended-active-member" });
+
+    expect(mocks.maybeScheduleHostedLinqAckReaction).toHaveBeenCalledOnce();
+    expect(mocks.maybeScheduleHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({
+      currentInboundReply: { chatId: "chat_123", messageId: "linq_message_123" },
+      instantFirstTurnOwnsReply: false,
+      response: expect.objectContaining({ reason: "wake-appended-active-member" }),
+      wakeHandoff: expect.objectContaining({ conversationIsGroup: false, linqChatId: "chat_123" }),
+      wakeHandoffResult: expect.objectContaining({ started: true }),
+      webhookReceivedAt,
+    }));
+    expect(mocks.maybeHandoffHostedExecutionWebhookWake.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.maybeScheduleHostedLinqAckReaction.mock.invocationCallOrder[0]!);
+    // The tapback task was only handed to the scheduler; the webhook returned
+    // without running or awaiting it.
+    expect(scheduled).toContain(pendingForever);
+    expect(pendingForever).not.toHaveBeenCalled();
   });
 });

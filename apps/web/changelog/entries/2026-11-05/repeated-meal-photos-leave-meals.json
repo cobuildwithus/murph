@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "repeated-meal-photos-leave-meals",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A meal you already logged stays one meal",
+    "summary": "When a captured photo shows a meal you already told Murph about, Murph now removes the extra entry instead of keeping two in Meals.",
+    "details": "If you typed the meal, Murph keeps the photo and moves your details onto it. A photo with a note you wrote stays, and if Murph isn't sure, it keeps both. Entries Murph has already reviewed stay until you remove them.",
+    "relevanceTags": [
+      "meals"
+    ],
+    "sourcePullRequests": [
+      4612,
+      4623
+    ]
+  }
+}

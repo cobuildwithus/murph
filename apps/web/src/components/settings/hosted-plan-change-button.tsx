@@ -3,7 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -21,6 +24,7 @@ import {
 import type { HostedBillingPlanSwitchResult } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
 import { cn } from "@/src/lib/utils";
 
+import { BillingPortalButton } from "./billing-portal-button";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 export function HostedPlanChangeButton(props: {
@@ -43,7 +47,7 @@ export function HostedPlanChangeButton(props: {
 }) {
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ error: unknown } | null>(null);
   const [pending, setPending] = useState(false);
   const plan = getHostedBillingPlanDefinition(props.targetPlanCode);
   const verb = props.mode === "schedule" ? "Switch" : "Upgrade";
@@ -51,8 +55,19 @@ export function HostedPlanChangeButton(props: {
     ? props.mode === "schedule" ? "Scheduling..." : "Opening Stripe..."
     : props.children ?? `${verb} to ${plan.displayName}`;
 
+  const error = failure?.error;
+  const errorMessage = failure
+    ? toErrorMessage(
+        error,
+        `Could not ${props.mode === "schedule" ? "schedule" : "make"} this plan change right now.`,
+      )
+    : null;
+  const showCancellationRecovery = error instanceof HostedOnboardingApiError
+    && error.code === "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"
+    && error.details?.code === "cancellation";
+
   async function handleConfirm() {
-    setErrorMessage(null);
+    setFailure(null);
     setPending(true);
 
     try {
@@ -85,10 +100,7 @@ export function HostedPlanChangeButton(props: {
       router.refresh();
       setPending(false);
     } catch (error) {
-      setErrorMessage(toErrorMessage(
-        error,
-        `Could not ${props.mode === "schedule" ? "schedule" : "make"} this plan change right now.`,
-      ));
+      setFailure({ error });
       setPending(false);
     }
   }
@@ -129,6 +141,7 @@ export function HostedPlanChangeButton(props: {
               onClose={() => setConfirmationOpen(false)}
               onConfirm={() => void handleConfirm()}
               pending={pending}
+              showCancellationRecovery={showCancellationRecovery}
               targetPlanCode={props.targetPlanCode}
             />
           </DialogContent>
@@ -144,6 +157,7 @@ export function HostedPlanChangeConfirmationContent(props: {
   onClose: () => void;
   onConfirm: () => void;
   pending: boolean;
+  showCancellationRecovery?: boolean;
   targetPlanCode: HostedBillingPlanCode;
 }) {
   const plan = getHostedBillingPlanDefinition(props.targetPlanCode);
@@ -188,15 +202,19 @@ export function HostedPlanChangeConfirmationContent(props: {
       ) : null}
 
       <div className="flex flex-col gap-2">
-        <Button
-          type="button"
-          size="xl"
-          onClick={props.onConfirm}
-          disabled={props.pending}
-          className="w-full"
-        >
-          {props.pending ? "Scheduling..." : "Confirm switch"}
-        </Button>
+        {props.showCancellationRecovery ? (
+          <BillingPortalButton block label="Manage billing" variant="secondary" />
+        ) : (
+          <Button
+            type="button"
+            size="xl"
+            onClick={props.onConfirm}
+            disabled={props.pending}
+            className="w-full"
+          >
+            {props.pending ? "Scheduling..." : "Confirm switch"}
+          </Button>
+        )}
         <Button
           type="button"
           size="xl"

@@ -31,6 +31,20 @@ function historical(rolling = false) {
 }
 
 describe("canonical daily nutrition goal resolution", () => {
+  it("keeps missing authority missing for totals-only presentation without manufacturing or mutating goals", () => {
+    expect(resolveMealNutritionGoals([], date).status).toBe("missing");
+    const partial = [goal("accepted-protein", [target("protein-grams", 110)])];
+    const before = structuredClone(partial);
+    const context = resolveMealNutritionGoals(partial, date);
+    expect(context.status).toBe("missing");
+    expect(context.targets.proteinGrams.target).toBe(110);
+    expect(context.targets.calories.target).toBeNull();
+    expect(partial).toEqual(before);
+    // Presentation may choose all-null; the authority result is not rewritten.
+    const conflict = [...partial, goal("other-protein", [target("protein-grams", 130)])];
+    expect(resolveMealNutritionGoals(conflict, date).status).toBe("conflict");
+  });
+
   it("resolves all five points with exact provenance without mutating canonical evidence", () => {
     const input = [goal("accepted")];
     const before = structuredClone(input);

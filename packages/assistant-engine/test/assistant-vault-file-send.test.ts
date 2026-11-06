@@ -1,3 +1,7 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { assistantVaultFileMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.js'
 import { createHash } from 'node:crypto'
 import {
   chmod,
@@ -14,15 +18,30 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { parseAssistantRuntimeIssueRecord } from '@murphai/runtime-state/node'
 
-import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
+import { readCodexRpcSuccessResponse } from '../src/assistant-codex/app-server-protocol.js'
+import {
+  executeMurphDynamicToolRequest,
+  readMurphDynamicToolRequest,
+} from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  toolTextResult,
+  withVaultFileToolFailureDetails,
+  type ToolFailureDiagnostic,
+} from '../src/assistant-codex/tool-failure-diagnostics.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
+import {
+  flushPendingAssistantRuntimeIssueWrites,
+  recordAssistantRuntimeIssueInputsBestEffort,
+} from '../src/assistant/issue-reporting.js'
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
 import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
+  isAssistantOutboxRetryableError,
   listAssistantOutboxIntents,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -41,8 +60,94 @@ import {
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
+const issueWrites = vi.hoisted(() => ({
+  write: vi.fn<typeof import('@murphai/runtime-state/node').writePendingAssistantRuntimeIssueRecord>(),
+}))
+vi.mock('@murphai/runtime-state/node', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@murphai/runtime-state/node')>(),
+  writePendingAssistantRuntimeIssueRecord: issueWrites.write,
+}))
+
+const privateVaultFileContent = 'SYNTHETIC_PRIVATE_VAULT_FILE_CONTENT'
+const vaultFileCallId = `${privateVaultFileContent}_CALL`
+const unknownVaultFileDiagnostic = {
+  failureStage: 'execution', failureReason: 'handler_exception', errorCategory: 'unknown',
+} as const
+
+async function dispatchVaultFile(
+  ref: string,
+  sendVaultFile: AssistantHostedToolContext['sendVaultFile'],
+) {
+  const request = readMurphDynamicToolRequest({ id: 1, method: 'item/tool/call', params: {
+    namespace: 'murph', tool: 'send_vault_file', arguments: { ref },
+    threadId: `${privateVaultFileContent}_THREAD`,
+    turnId: `${privateVaultFileContent}_TURN`, callId: vaultFileCallId,
+  } })
+  if (!request || request.kind !== 'send-vault-file') {
+    throw new Error('Expected a synthetic vault-file request.')
+  }
+  const fetchImpl = vi.fn<typeof fetch>()
+  const nextUsageOrdinal = vi.fn(() => 1)
+  const result = await executeMurphDynamicToolRequest({
+    env: {}, fetchImpl, publicFetchImpl: fetchImpl, nextUsageOrdinal, progressDelivery: null,
+    request,
+    hostedToolContext: {
+      computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [], sendVaultFile, vaultFileSendAvailable: true,
+    },
+  })
+  expect(fetchImpl).not.toHaveBeenCalled()
+  expect(nextUsageOrdinal).not.toHaveBeenCalled()
+  expect(issueWrites.write).not.toHaveBeenCalled()
+  return result
+}
+
+function expectNoPrivateVaultFileContent(value: unknown) {
+  const serialized = JSON.stringify(value)
+  expect(serialized).not.toContain(privateVaultFileContent)
+  return serialized
+}
+
+async function expectPersistedVaultFileFailure(
+  result: Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>,
+  diagnostic: ToolFailureDiagnostic,
+) {
+  const rpcResult = { success: false, contentItems: [{ type: 'inputText',
+    text: diagnostic.vaultFileErrorCode === 'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED'
+      ? 'This file format is not supported for secure delivery. Use a supported image, audio, video, or document format, or create a ZIP containing the requested file and submit that ZIP for approval. Do not just rename its extension.'
+      : 'secure vault-file approval could not be prepared' }] }
+  const details = { requestKind: 'send-vault-file', ...diagnostic, diagnosticRole: 'classification' }
+  expect(result).toEqual({
+    rpcResult, finalActionPatch: { kind: 'reply-required' }, failureDiagnostic: diagnostic,
+    runtimeIssueInputs: [expect.objectContaining({ details })],
+  })
+  expectNoPrivateVaultFileContent(result)
+  expectNoPrivateVaultFileContent(result.runtimeIssueInputs)
+  const wire = JSON.stringify({ id: 1, result: result.rpcResult })
+  expect(wire).toBe(JSON.stringify({ id: 1, result: rpcResult }))
+  expect(readCodexRpcSuccessResponse(JSON.parse(wire))?.result).toEqual(rpcResult)
+  expectNoPrivateVaultFileContent(wire)
+  for (const key of ['vaultFileErrorCode', 'failureDiagnostic', 'runtimeIssueInputs']) {
+    expect(wire).not.toContain(key)
+  }
+  recordAssistantRuntimeIssueInputsBestEffort({
+    issues: result.runtimeIssueInputs!, vault: 'synthetic-vault',
+    policy: { environment: 'hosted', surface: null, privateIssueCaptureEnabled: true },
+  })
+  await flushPendingAssistantRuntimeIssueWrites()
+  expect(issueWrites.write).toHaveBeenCalledTimes(1)
+  const record = issueWrites.write.mock.calls[0]![0].record
+  const parsed = parseAssistantRuntimeIssueRecord(JSON.parse(expectNoPrivateVaultFileContent(record)))
+  expect(parsed.details).toEqual(details)
+  expectNoPrivateVaultFileContent(parsed)
+  const legacyDetails = { ...parsed.details }
+  delete legacyDetails.vaultFileErrorCode
+  expect(parseAssistantRuntimeIssueRecord({ ...parsed, details: legacyDetails }).details).toEqual(legacyDetails)
+}
 
 afterEach(async () => {
+  await flushPendingAssistantRuntimeIssueWrites()
+  issueWrites.write.mockReset()
   vi.restoreAllMocks()
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, {
     force: true,
@@ -51,6 +156,34 @@ afterEach(async () => {
 })
 
 describe('assistant vault-file send', () => {
+  it('rejects a finished ZIP over 100 MiB without dropping archive entries or requesting approval', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-large-zip-')
+    tempRoots.push(parentRoot)
+    const ref = 'exports/complete.zip'
+    await mkdir(path.join(vaultRoot, 'exports'), { recursive: true })
+    await promisify(execFile)('python3', ['-c', [
+      'import sys, zipfile',
+      'with zipfile.ZipFile(sys.argv[1], "w", compression=zipfile.ZIP_STORED) as z:',
+      ' with z.open("full-original.bin", "w") as f:',
+      '  for _ in range(100): f.write(bytes(1024 * 1024))',
+      ' z.writestr("last-original.txt", "keep this too")',
+    ].join('\n'), path.join(vaultRoot, ref)])
+    const before = await stat(path.join(vaultRoot, ref))
+    expect(before.size).toBeGreaterThan(assistantVaultFileMaxBytes)
+    const request = vi.fn()
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: { request, read: vi.fn() },
+      bindingDelivery: { kind: 'thread', target: 'synthetic-large-zip' },
+      channel: 'linq', ref, sessionId: 'synthetic-session', threadId: 'synthetic-large-zip',
+      threadIsDirect: true, turnId: 'synthetic-turn', vault: vaultRoot,
+    })).rejects.toMatchObject({ code: 'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED' })
+    expect(request).not.toHaveBeenCalled()
+    expect((await stat(path.join(vaultRoot, ref))).size).toBe(before.size)
+    const inspected = await promisify(execFile)('python3', ['-c',
+      'import sys, zipfile; z=zipfile.ZipFile(sys.argv[1]); print(",".join(z.namelist())); assert z.testzip() is None', path.join(vaultRoot, ref)])
+    expect(inspected.stdout.trim()).toBe('full-original.bin,last-original.txt')
+  })
+
   it('captures exact export-pack receipts only for a generated ZIP', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-export-packs-',
@@ -530,12 +663,22 @@ describe('assistant vault-file send', () => {
     expect((await stat(filePath)).mode & 0o777).toBe(0o666)
   })
 
-  it.each(['linq', 'telegram'])('adopts the exact assistant-owned %s delivery for initial prep and persisted retries', async (channel) => {
+  it.each(['linq', 'telegram'].flatMap((channel) => [
+    { filename: 'report.pdf', contentType: 'application/pdf' },
+    { filename: 'picture.jpg', contentType: 'image/jpeg' },
+    { filename: 'picture.PNG', contentType: 'image/png' },
+    { filename: 'picture.heic', contentType: 'image/heic' },
+    { filename: 'recording.mp3', contentType: 'audio/mpeg' },
+    { filename: 'recording.m4a', contentType: 'audio/x-m4a' },
+    { filename: 'clip.mp4', contentType: 'video/mp4' },
+    { filename: 'clip.mov', contentType: 'video/quicktime' },
+    { filename: 'guide.epub', contentType: 'application/epub+zip' },
+  ].map((file) => ({ channel, ...file }))))('adopts $filename for $channel approval and persisted retries', async ({ channel, filename, contentType }) => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-runtime-delivery-',
     )
     tempRoots.push(parentRoot)
-    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${filename}`
     const filePath = path.join(vaultRoot, ...ref.split('/'))
     const contents = Buffer.from('generated report')
     await mkdir(path.dirname(filePath), { recursive: true })
@@ -565,7 +708,7 @@ describe('assistant vault-file send', () => {
       vault: vaultRoot,
     })
     expect(prepared).toMatchObject({
-      filename: 'report.pdf',
+      filename,
       status: 'pending',
     })
     expect(approvalRequest).toHaveBeenCalledTimes(1)
@@ -576,12 +719,13 @@ describe('assistant vault-file send', () => {
       throw new Error('Expected one persisted vault-file descriptor.')
     }
 
-    expect(persistedMedia.filename).toBe('report.pdf')
+    expect(persistedMedia.filename).toBe(filename)
+    expect(persistedMedia.contentType).toBe(contentType)
     expect(persistedMedia.ref).not.toBe(ref)
     expect(persistedMedia.ref.startsWith(
-      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report-`,
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/`,
     )).toBe(true)
-    expect(persistedMedia.ref.endsWith('.pdf')).toBe(true)
+    expect(persistedMedia.ref.endsWith(path.extname(filename).toLowerCase())).toBe(true)
     const ownedPath = path.join(vaultRoot, ...persistedMedia.ref.split('/'))
     await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await stat(ownedPath)).mode & 0o777).toBe(0o600)
@@ -1284,6 +1428,7 @@ describe('assistant vault-file send', () => {
   })
 
   it('hands the approval link back to the normal assistant reply path', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
@@ -1298,11 +1443,11 @@ describe('assistant vault-file send', () => {
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
-      fetchImpl: fetch,
+      fetchImpl,
       hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
-      publicFetchImpl: fetch,
+      publicFetchImpl: fetchImpl,
       request: {
         kind: 'send-vault-file',
         ref: 'documents/report.pdf',
@@ -1320,9 +1465,15 @@ describe('assistant vault-file send', () => {
       status: 'pending',
     }))
     expect(result.rpcResult.contentItems[0]?.text).not.toContain('haa_test')
+    expect(hostedToolContext.sendVaultFile).toHaveBeenCalledExactlyOnceWith('documents/report.pdf')
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result.failureDiagnostic).toBeUndefined()
+    expect(result.runtimeIssueInputs).toBeUndefined()
+    expect(issueWrites.write).not.toHaveBeenCalled()
   })
 
   it('treats a prior-turn active send as an existing obligation instead of requesting another approval', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
@@ -1338,11 +1489,11 @@ describe('assistant vault-file send', () => {
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
-      fetchImpl: fetch,
+      fetchImpl,
       hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
-      publicFetchImpl: fetch,
+      publicFetchImpl: fetchImpl,
       request: {
         kind: 'send-vault-file',
         ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
@@ -1359,9 +1510,17 @@ describe('assistant vault-file send', () => {
         'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
       status: 'already_in_progress',
     }))
+    expect(hostedToolContext.sendVaultFile).toHaveBeenCalledExactlyOnceWith(
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`, 'call-after-approval',
+    )
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result.failureDiagnostic).toBeUndefined()
+    expect(result.runtimeIssueInputs).toBeUndefined()
+    expect(issueWrites.write).not.toHaveBeenCalled()
   })
 
   it('leaves approved vault-file delivery with the existing runtime intent', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
@@ -1375,11 +1534,11 @@ describe('assistant vault-file send', () => {
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
-      fetchImpl: fetch,
+      fetchImpl,
       hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
-      publicFetchImpl: fetch,
+      publicFetchImpl: fetchImpl,
       request: {
         kind: 'send-vault-file',
         ref: 'documents/report.pdf',
@@ -1398,6 +1557,201 @@ describe('assistant vault-file send', () => {
         'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
       status: 'approved',
     }))
+    expect(hostedToolContext.sendVaultFile).toHaveBeenCalledExactlyOnceWith('documents/report.pdf')
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result.failureDiagnostic).toBeUndefined()
+    expect(result.runtimeIssueInputs).toBeUndefined()
+    expect(issueWrites.write).not.toHaveBeenCalled()
+  })
+})
+
+describe('vault-file failure evidence through dispatch and issue persistence', () => {
+  function sender(
+    vault: string,
+    actionApprovalPort: Parameters<typeof requestAssistantVaultFileSend>[0]['actionApprovalPort'],
+  ) {
+    return vi.fn<AssistantHostedToolContext['sendVaultFile']>((ref, toolCallId) =>
+      requestAssistantVaultFileSend({
+        actionApprovalPort, ref, toolCallId, vault,
+        bindingDelivery: { kind: 'thread', target: 'synthetic-chat' },
+        channel: 'linq', sessionId: 'synthetic-session', threadId: 'synthetic-chat',
+        threadIsDirect: true, turnId: 'synthetic-turn',
+      }))
+  }
+
+  it.each([
+    { ref: '../synthetic.pdf', vaultFileErrorCode: 'ASSISTANT_VAULT_FILE_REF_INVALID' },
+    { ref: 'documents/report.xyz', vaultFileErrorCode: 'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED' },
+    { ref: 'documents/missing.pdf', errorCategory: 'not_found' },
+  ] as const)('retains the real file-owner rejection without approving or writing ($ref)', async (example) => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-vault-file-diagnostic-')
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'))
+    const filePath = path.join(vaultRoot, 'documents/report.xyz')
+    await writeFile(filePath, privateVaultFileContent)
+    const before = await readdir(vaultRoot, { recursive: true })
+    const metadata = await stat(filePath)
+    const actionApprovalPort = { read: vi.fn(), request: vi.fn() }
+    const sendVaultFile = sender(vaultRoot, actionApprovalPort)
+
+    const result = await dispatchVaultFile(example.ref, sendVaultFile)
+    expect(sendVaultFile).toHaveBeenCalledExactlyOnceWith(example.ref, vaultFileCallId)
+    expect(actionApprovalPort.read).not.toHaveBeenCalled()
+    expect(actionApprovalPort.request).not.toHaveBeenCalled()
+    expect(await readdir(vaultRoot, { recursive: true })).toEqual(before)
+    expect(await readFile(filePath, 'utf8')).toBe(privateVaultFileContent)
+    expect((await stat(filePath)).mtimeMs).toBe(metadata.mtimeMs)
+    expect(JSON.stringify(result)).not.toContain(example.ref)
+    expect(JSON.stringify(result)).not.toContain(vaultRoot)
+    await expectPersistedVaultFileFailure(result, {
+      ...unknownVaultFileDiagnostic,
+      ...('vaultFileErrorCode' in example
+        ? { vaultFileErrorCode: example.vaultFileErrorCode }
+        : { errorCategory: example.errorCategory }),
+    })
+  })
+
+  it('preserves pending and approved real-owner results without delivery or diagnostics', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-vault-file-diagnostic-success-')
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'))
+    await writeFile(path.join(vaultRoot, 'documents/report.pdf'), 'synthetic PDF bytes')
+    const actionApprovalPort = {
+      read: vi.fn(),
+      request: vi.fn()
+        .mockResolvedValueOnce({ approvalId: `haa_${'a'.repeat(32)}`,
+          approvalUrl: 'https://murph.test/approve/synthetic',
+          expiresAt: '2026-06-24T12:15:00.000Z', status: 'pending' })
+        .mockResolvedValueOnce({ approvalId: `haa_${'a'.repeat(32)}`,
+          approvalGeneration: 'b'.repeat(64), status: 'approved' }),
+    }
+    const sendVaultFile = sender(vaultRoot, actionApprovalPort)
+    const pending = await dispatchVaultFile('documents/report.pdf', sendVaultFile)
+    expect(pending).toEqual({
+      rpcResult: { success: true, contentItems: [{ type: 'inputText',
+        text: JSON.stringify({ filename: 'report.pdf', status: 'pending' }) }] },
+      requiredVaultFileApprovalUrl: 'https://murph.test/approve/synthetic',
+    })
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    expect(intents).toHaveLength(1)
+    expect(intents[0]?.status).toBe('awaiting_approval')
+
+    const approved = await dispatchVaultFile('documents/report.pdf', sendVaultFile)
+    expect(approved).toEqual({
+      rpcResult: { success: true, contentItems: [{ type: 'inputText', text: JSON.stringify({
+        filename: 'report.pdf',
+        note: 'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
+        status: 'approved',
+      }) }] },
+      finalActionPatch: { kind: 'none', owner: 'vault-file' },
+    })
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual(intents)
+    expect(actionApprovalPort.read).not.toHaveBeenCalled()
+    expect(actionApprovalPort.request).toHaveBeenCalledTimes(2)
+    expect(actionApprovalPort.request.mock.calls[1]?.[0]).toEqual(actionApprovalPort.request.mock.calls[0]?.[0])
+    expect(sendVaultFile).toHaveBeenCalledTimes(2)
+    for (const args of sendVaultFile.mock.calls) expect(args).toEqual(['documents/report.pdf', vaultFileCallId])
+    expectNoPrivateVaultFileContent([pending, approved])
+  })
+
+  function privateError(code: unknown) {
+    return { code, message: privateVaultFileContent, stack: privateVaultFileContent,
+      path: privateVaultFileContent, ref: privateVaultFileContent, requestId: privateVaultFileContent,
+      arguments: privateVaultFileContent, result: privateVaultFileContent,
+      body: privateVaultFileContent, payload: privateVaultFileContent,
+      cause: { code: 'ASSISTANT_VAULT_FILE_REF_INVALID', message: privateVaultFileContent },
+      context: { code: 'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED', content: privateVaultFileContent },
+    }
+  }
+
+  it.each([
+    undefined, null, privateVaultFileContent, 'ASSISTANT_VAULT_FILE_UNKNOWN',
+    'ASSISTANT_VAULT_FILE_REF_INVALID_PRIVATE', ' ASSISTANT_VAULT_FILE_REF_INVALID',
+    'ASSISTANT_VAULT_FILE_REF_INVALID\n', 'assistant_vault_file_ref_invalid', 503,
+    { code: 'ASSISTANT_VAULT_FILE_REF_INVALID' },
+  ])('keeps unknown own codes unknown and drops private error content (%#)', async (code) => {
+    const error = privateError(code)
+    const sendVaultFile = vi.fn(async () => { throw error })
+    const ref = `documents/${privateVaultFileContent}.pdf`
+    const result = await dispatchVaultFile(ref, sendVaultFile)
+    expect(sendVaultFile).toHaveBeenCalledExactlyOnceWith(ref, vaultFileCallId)
+    await expectPersistedVaultFileFailure(result, unknownVaultFileDiagnostic)
+  })
+
+  it.each([
+    { error: new VaultCliError(privateVaultFileContent, privateVaultFileContent, { timedOut: true }),
+      errorCategory: 'timeout' },
+    { error: { ...privateError(privateVaultFileContent), status: 503 }, errorCategory: 'unavailable' },
+  ] as const)('preserves existing structural categories without an allowed vault-file code (%#)', async ({ error, errorCategory }) => {
+    const sendVaultFile = vi.fn(async () => { throw error })
+    const ref = `documents/${privateVaultFileContent}.pdf`
+    const result = await dispatchVaultFile(ref, sendVaultFile)
+    expect(sendVaultFile).toHaveBeenCalledExactlyOnceWith(ref, vaultFileCallId)
+    await expectPersistedVaultFileFailure(result, { ...unknownVaultFileDiagnostic, errorCategory })
+  })
+
+  it.each([
+    { name: 'opaque primitive', create: () => privateVaultFileContent },
+    { name: 'missing error', create: () => undefined },
+    { name: 'ordinary error', create: () => new Error(privateVaultFileContent) },
+    { name: 'inherited code', create: () => Object.create(
+      new VaultCliError('ASSISTANT_VAULT_FILE_REF_INVALID', privateVaultFileContent),
+    ) },
+    { name: 'accessor code', create: (read: () => never) => Object.defineProperty(
+      new VaultCliError('ASSISTANT_VAULT_FILE_REF_INVALID', privateVaultFileContent), 'code', { get: read },
+    ) },
+    { name: 'proxy error', create: (read: () => never) => new Proxy(
+      new VaultCliError('ASSISTANT_VAULT_FILE_REF_INVALID', privateVaultFileContent),
+      { get: read, getOwnPropertyDescriptor: read, getPrototypeOf: read },
+    ) },
+    { name: 'revoked proxy error', create: (read: () => never) => {
+      const { proxy, revoke } = Proxy.revocable(privateError('ASSISTANT_VAULT_FILE_REF_INVALID'),
+        { get: read, getOwnPropertyDescriptor: read, getPrototypeOf: read })
+      revoke()
+      return proxy
+    } },
+  ])('does not inspect $name through the caught-error path', async ({ create }) => {
+    const read = vi.fn((): never => { throw new Error('Unexpected private property read') })
+    const error = create(read)
+    // Throw inside the async port: resolving a Proxy fixture would read `then`.
+    const sendVaultFile = vi.fn(async () => { throw error })
+    const ref = `documents/${privateVaultFileContent}.pdf`
+    const result = await dispatchVaultFile(ref, sendVaultFile)
+    expect(sendVaultFile).toHaveBeenCalledExactlyOnceWith(ref, vaultFileCallId)
+    await expectPersistedVaultFileFailure(result, unknownVaultFileDiagnostic)
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('retains an exact own code while private data and accessors stay inert (%#)', async (accessors) => {
+    const read = vi.fn((): never => { throw new Error('Unexpected private property read') })
+    const code = 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE'
+    const error = privateError(code)
+    if (accessors) {
+      Object.defineProperties(error, Object.fromEntries(
+        ['message', 'stack', 'cause', 'context', 'payload', 'body', 'path', 'ref', 'requestId', 'arguments', 'result', 'toJSON']
+          .map((key) => [key, { get: read }]),
+      ))
+    }
+    const sendVaultFile = vi.fn(async () => { throw error })
+    const ref = `documents/${privateVaultFileContent}.pdf`
+    const result = await dispatchVaultFile(ref, sendVaultFile)
+    expect(sendVaultFile).toHaveBeenCalledExactlyOnceWith(ref, vaultFileCallId)
+    await expectPersistedVaultFileFailure(result, { ...unknownVaultFileDiagnostic, vaultFileErrorCode: code })
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('keeps the detail observer inert for prototype proxies, proxy values, successes and legacy results', () => {
+    const read = vi.fn((): never => { throw new Error('Unexpected private property read') })
+    const proxy = new Proxy({}, { get: read, getOwnPropertyDescriptor: read, getPrototypeOf: read })
+    const failure = toolTextResult(false, 'Existing failure.', 'handler_exception')
+    for (const error of [Object.create(proxy), { code: proxy }]) {
+      expect(withVaultFileToolFailureDetails(failure, error)).toBe(failure)
+    }
+    const success = toolTextResult(true, 'Existing success.')
+    const legacy = { rpcResult: failure.rpcResult }
+    expect(withVaultFileToolFailureDetails(success, proxy)).toBe(success)
+    expect(withVaultFileToolFailureDetails(legacy, proxy)).toBe(legacy)
+    expect(read).not.toHaveBeenCalled()
   })
 })
 
@@ -1448,3 +1802,36 @@ function createVaultFileIntent() {
     updatedAt: '2026-06-24T11:00:00.000Z',
   }
 }
+
+
+it('propagates secure-file materialization interruption through the dynamic tool', async () => {
+  const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+  await expect(dispatchVaultFile('raw/inbox/synthetic/photo.png', async () => { throw interrupted }))
+    .rejects.toBe(interrupted)
+})
+
+it.each(['transport', 'expired', 'missing', 'integrity', 'obsolete', 'size'] as const)(
+  'preserves the outbox retry policy for a %s materialization outcome',
+  async (reason) => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-file-read-retry-')
+    tempRoots.push(parentRoot)
+    const ref = 'raw/inbox/synthetic/photo.png'
+    const error = await readVerifiedAssistantVaultFileBytes({
+      vaultRoot,
+      file: {
+        kind: 'vault_file', ref, filename: 'photo.png', contentType: 'image/png',
+        sha256: 'a'.repeat(64), sizeBytes: 42, approvalId: null, approvalGeneration: null,
+      },
+      materializeWorkspaceArtifacts: async () => ({
+        materializedArtifactPaths: new Set(),
+        missingArtifactPaths: new Map([[`vault:${ref}`, reason]]),
+      }),
+    }).catch((failure: unknown) => failure)
+    expect(error).toMatchObject({
+      code: 'ASSISTANT_VAULT_FILE_UNAVAILABLE',
+      deliveryMayHaveSucceeded: false,
+      retryable: reason === 'transport',
+    })
+    expect(isAssistantOutboxRetryableError(error)).toBe(reason === 'transport')
+  },
+)

@@ -84,6 +84,74 @@ enrollment owner grants capacity and activates the member without contacting
 Stripe. A second ordinary planner pass counts and appends the original inbound
 once after active access is visible.
 
+## Text entry and image access
+
+New model-admitted direct phone contacts on iMessage, SMS, or RCS can use instant
+start from the existing configured phone prefixes. Signed provider ingress,
+exact same-line routing, unique new-member creation, and the exact admission
+token still own activation. Existing pending accounts are not converted by this
+change. iMessage email handles retain their separate existing identity path;
+SMS/RCS cannot claim email-handle authority.
+
+Personal Starter accounts must start a subscription through the normal Pulse
+or eligible Group signup flow before hosted image generation or editing.
+A saved card alone grants no image access. Ordinary text chat remains available
+within the existing Starter allowance. Active paid plans and Family sponsorship
+retain their existing image access. Group image generation and editing require
+available usage plus either an active group sponsorship authorization or a
+fulfilled, paid usage-credit purchase for that group with credit remaining.
+House allowance and ops-granted credit alone do not qualify. The image access
+check reads at most one sponsorship and one purchase, sequentially, without
+loading payer details or changing ordinary text-chat usage admission.
+
+Web derives image permission from the canonical usage gate: denied usage stays
+denied; allowed direct Starter requires a subscription; groups also require the
+paid funding described above. Other allowed sources retain image access.
+Subscription activation, cancellation, sponsorship,
+suspension, and exhaustion converge through those existing owners. There is no
+new Stripe read, card setup flow, account field, or cached entitlement.
+
+The Cloudflare provider interceptor enforces the signed, runtime-member-bound
+Web decision before Images API generation/editing and native `image_generation`
+tools in Responses HTTP requests. Opaque Responses WebSockets require image
+access once at handshake; missing, failed, incompatible, or denied access returns
+HTTP 426 so native Codex uses HTTPS with the per-request image gate. Ordinary
+HTTP text adds no image callback. An admitted socket retains its eligibility
+until it closes; subscription changes apply on the next connection, while
+consent withdrawal uses existing container destruction. The Worker forwards
+unaccepted upgrades without a frame relay. HTTP Responses inspection retains
+the 32 MiB body limit. Codex-native memory stays disabled; its unused egress
+accounting is removed. The caller cannot select a different payer. Local image
+generation is unchanged.
+
+A denied image completion directs the member to normal subscription Settings
+and invites them to request the image again after subscribing. It never starts
+checkout or retries automatically, asks for payment details in chat, promises
+no charge, or claims an image was created. Existing subscription checkout owns
+its normal pricing, confirmation, activation, and retries.
+
+The existing operational alert cron also evaluates Starter abuse signals:
+10 enrolled accounts created in 15 minutes, or 3 accounts created in the past
+hour whose original Starter grants have at most half their capacity remaining.
+It reads at most 1,000 recent accounts; saturation alerts with lower-bound
+counts. It reuses `HOSTED_LINQ_ALERT_EMAILS`, the shared Resend configuration,
+and the incident lease, idempotency, and reminder policy. Alerts may send during
+quiet hours and do not depend on latency timezone configuration. Email contains
+aggregate counts and an Ops link, not member identities or messages. These
+signals request investigation; they neither prove fraud nor suspend accounts.
+
+Deploy the Web subscription-access route with
+`HOSTED_ONBOARDING_LINQ_SMS_INSTANT_START_ENABLED` unset first, then deploy
+the Cloudflare gateway check. Only after its signed access proof passes, set
+that Web variable to `1` to enable new SMS/RCS instant start. It defaults off
+so a mixed deployment cannot open SMS grants before the image restriction.
+A new gateway against old Web denies images;
+old gateways do not enforce the card rule. Warm older runtimes still pass
+through the updated Worker gateway but may display generic failure copy until
+the assistant bundle updates. No persisted schema changes or data backfills
+are required. Once the restriction is enabled, rolling the Worker back below
+this check would reopen image access and requires disabling that effect first.
+
 ## Paid conversion
 
 A starter member may begin an eligible paid direct plan through the existing

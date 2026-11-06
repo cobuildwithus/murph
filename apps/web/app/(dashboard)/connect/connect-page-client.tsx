@@ -1,13 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { Input } from "@/src/components/ui/input";
+import { releaseLinkPageVeil } from "@/src/components/link-page/link-page-veil";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
 import {
@@ -22,6 +23,10 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import {
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
+  ConnectLinkFailedTakeover,
+  ConnectLinkReadyTakeover,
+  ConnectLinkSettledTakeover,
+  ConnectLinkSignInTakeover,
   ConnectRedirectDialog,
   ConnectSourceDialog,
   VitalConnectionDialog,
@@ -40,7 +45,7 @@ import {
   resolveConnectSourceIdFromHash,
   resolveCallbackSourceId,
   resolveConnectIntentRedirectSource,
-  resolveConnectIntentStartSource,
+  resolveConnectIntentSource,
   resolveInitialConnectIntentPresentation,
   stripConnectCallbackParams,
   stripConnectSourceHash,
@@ -75,6 +80,11 @@ type VitalConnectionRequest = {
   source: ConnectSource;
 };
 
+type ConnectIntentFailure = {
+  claim: string;
+  source: ConnectSource;
+};
+
 const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
 
 export type {
@@ -92,6 +102,7 @@ export const CONNECT_NOTICE_PRESENTATION = {
 export function ConnectSourcesGrid({
   authenticated = true,
   appleHealthRelaySyncContactActions = {},
+  deviceConnectChatContactAction = null,
   deviceConnectRecoveryContactAction = null,
   garminHistoricalDataVoiceMemoSrc = null,
   initialCallback = null,
@@ -109,6 +120,7 @@ export function ConnectSourcesGrid({
       DeviceSyncCompletionContactAction | null
     >
   >;
+  deviceConnectChatContactAction?: MurphContactOption | null;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
   garminHistoricalDataVoiceMemoSrc?: string | null;
   initialCallback?: ConnectCallbackInput;
@@ -133,6 +145,8 @@ export function ConnectSourcesGrid({
   } | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
+  const [connectIntentFailure, setConnectIntentFailure] =
+    useState<ConnectIntentFailure | null>(null);
   const [vitalConnectionRequest, setVitalConnectionRequest] =
     useState<VitalConnectionRequest | null>(null);
   const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] =
@@ -158,7 +172,6 @@ export function ConnectSourcesGrid({
   );
   const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] =
     useState(false);
-  const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -313,27 +326,6 @@ export function ConnectSourcesGrid({
     return () => window.clearInterval(intervalId);
   }, [hasActiveFitbitMigration, router]);
 
-  useEffect(() => {
-    if (
-      authenticated ||
-      initialConnectIntentAuthOpenedRef.current ||
-      !activeConnectIntent?.claim
-    ) {
-      return;
-    }
-
-    const source = resolveConnectIntentStartSource(
-      activeConnectIntent,
-      displaySources,
-    );
-    if (!source) {
-      return;
-    }
-
-    initialConnectIntentAuthOpenedRef.current = true;
-    openAuthDialog();
-  }, [activeConnectIntent, authenticated, displaySources, openAuthDialog]);
-
   const startConnection = useCallback(
     async (source: ConnectSource, options: ConnectStartOptions = {}) => {
       if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
@@ -344,6 +336,7 @@ export function ConnectSourcesGrid({
       setActionError(null);
       setNotice(null);
       setConnectIntentRecovery(null);
+      setConnectIntentFailure(null);
       setShowWhoopAppleHealthSetupDialog(false);
       setActiveSetupGuideId(null);
 
@@ -410,6 +403,9 @@ export function ConnectSourcesGrid({
           message,
           sourceId: source.id,
         });
+        if (options.intentClaim) {
+          setConnectIntentFailure({ claim: options.intentClaim, source });
+        }
         setPendingSourceId(null);
       }
     },
@@ -501,12 +497,33 @@ export function ConnectSourcesGrid({
           message,
           sourceId: source.id,
         });
+        setConnectIntentFailure({ claim: activeConnectIntent.claim, source });
       });
 
     return () => {
       cancelled = true;
     };
   }, [activeConnectIntent, authenticated, displaySources]);
+
+  const connectIntentSource = resolveConnectIntentSource(
+    activeConnectIntent,
+    displaySources,
+  );
+  const connectLinkPage = readConnectLinkPage({
+    activeConnectIntent,
+    authenticated,
+    displaySources,
+    initialConnectIntentDismissed,
+    otherLinkStates: [
+      connectIntentRedirectName,
+      connectIntentRecovery,
+      connectIntentFailure,
+      initialConnectIntentPresentation,
+    ],
+    vitalConnectionRequest,
+  });
+
+  useReleaseLinkPageVeil(!connectLinkPage.open);
 
   const disconnectConnection = useCallback(async (
     source: ConnectSource,
@@ -598,6 +615,25 @@ export function ConnectSourcesGrid({
       setPendingDisconnectSourceId(null);
     }
   }, [pendingDisconnectSourceId, pendingSourceId, router]);
+
+  const closeVitalConnectionRequest = (open: boolean) => {
+    if (!open) {
+      setVitalConnectionRequest(null);
+    }
+  };
+
+  const continueVitalConnectionRequest = () => {
+    const request = vitalConnectionRequest;
+    if (!request) {
+      return;
+    }
+
+    setVitalConnectionRequest(null);
+    void startConnection(request.source, {
+      vitalDisclosureConfirmed: true,
+      ...(request.intentClaim ? { intentClaim: request.intentClaim } : {}),
+    });
+  };
 
   const closeDeepLinkedSourceDialog = useCallback(() => {
     setDeepLinkedSourceId(null);
@@ -761,27 +797,17 @@ export function ConnectSourcesGrid({
       ) : null}
 
       <VitalConnectionDialog
-        source={vitalConnectionRequest?.source ?? null}
+        source={connectLinkPage.hubDialogSource}
         voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
-        onOpenChange={(open) => {
-          if (!open) {
-            setVitalConnectionRequest(null);
-          }
-        }}
-        onContinue={() => {
-          const request = vitalConnectionRequest;
-          if (!request) {
-            return;
-          }
+        onOpenChange={closeVitalConnectionRequest}
+        onContinue={continueVitalConnectionRequest}
+      />
 
-          setVitalConnectionRequest(null);
-          void startConnection(request.source, {
-            vitalDisclosureConfirmed: true,
-            ...(request.intentClaim
-              ? { intentClaim: request.intentClaim }
-              : {}),
-          });
-        }}
+      <ConnectLinkReadyTakeover
+        source={connectLinkPage.readySource}
+        voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
+        onOpenChange={closeVitalConnectionRequest}
+        onContinue={continueVitalConnectionRequest}
       />
 
       <ConnectDisconnectDialog
@@ -814,7 +840,101 @@ export function ConnectSourcesGrid({
           }
         }}
       />
+
+      <ConnectLinkResultTakeovers
+        chatContactAction={deviceConnectChatContactAction}
+        failure={connectIntentFailure}
+        needsSignIn={connectLinkPage.needsSignIn}
+        onDismissFailure={() => setConnectIntentFailure(null)}
+        onDismissSettled={() => setInitialConnectIntentDismissed(true)}
+        onRetry={(failure) => void startConnection(failure.source, {
+          intentClaim: failure.claim,
+          vitalDisclosureConfirmed: true,
+        })}
+        recoveryContactAction={deviceConnectRecoveryContactAction}
+        settled={initialConnectIntentPresentation}
+        source={connectIntentSource}
+      />
     </section>
+  );
+}
+
+/** Lifts the veil once the page knows no link page is taking over. */
+function useReleaseLinkPageVeil(release: boolean) {
+  useEffect(() => {
+    if (release) {
+      releaseLinkPageVeil();
+    }
+  }, [release]);
+}
+
+/** Whether a link is showing its own page, rather than the Connect hub underneath. */
+function readConnectLinkPage(input: {
+  activeConnectIntent: Parameters<typeof resolveConnectIntentRedirectSource>[0];
+  authenticated: boolean;
+  displaySources: Parameters<typeof resolveConnectIntentRedirectSource>[1];
+  initialConnectIntentDismissed: boolean;
+  otherLinkStates: readonly unknown[];
+  vitalConnectionRequest: { intentClaim?: string | null; source: ConnectSource } | null;
+}) {
+  const { activeConnectIntent, authenticated, displaySources } = input;
+  const needsSignIn = !authenticated
+    && Boolean(activeConnectIntent?.claim && activeConnectIntent.connectSource);
+  const intentStarting = !input.initialConnectIntentDismissed
+    && Boolean(resolveConnectIntentRedirectSource(
+      activeConnectIntent,
+      displaySources,
+      authenticated,
+    ));
+  const readySource = input.vitalConnectionRequest?.intentClaim
+    ? input.vitalConnectionRequest.source
+    : null;
+
+  return {
+    // A link's own page replaces the hub's dialog for the same request.
+    hubDialogSource: readySource ? null : input.vitalConnectionRequest?.source ?? null,
+    needsSignIn,
+    open: needsSignIn
+      || intentStarting
+      || readySource !== null
+      || input.otherLinkStates.some((state) => state !== null),
+    readySource,
+  };
+}
+
+function ConnectLinkResultTakeovers(props: {
+  chatContactAction: MurphContactOption | null;
+  failure: ConnectIntentFailure | null;
+  needsSignIn: boolean;
+  onDismissFailure: () => void;
+  onDismissSettled: () => void;
+  onRetry: (failure: ConnectIntentFailure) => void;
+  recoveryContactAction: ComponentProps<typeof ConnectLinkFailedTakeover>["contactAction"];
+  settled: { notice?: { kind: string } | null } | null;
+  source: ComponentProps<typeof ConnectLinkSettledTakeover>["source"];
+}) {
+  const { failure, settled } = props;
+  return (
+    <>
+      {props.needsSignIn ? <ConnectLinkSignInTakeover source={props.source} /> : null}
+
+      {failure ? (
+        <ConnectLinkFailedTakeover
+          contactAction={props.recoveryContactAction}
+          source={failure.source}
+          onContinueExploring={props.onDismissFailure}
+          onRetry={() => props.onRetry(failure)}
+        />
+      ) : null}
+
+      {settled ? (
+        <ConnectLinkSettledTakeover
+          contactAction={props.chatContactAction}
+          source={settled.notice?.kind === "success" ? props.source : null}
+          onContinueExploring={props.onDismissSettled}
+        />
+      ) : null}
+    </>
   );
 }
 

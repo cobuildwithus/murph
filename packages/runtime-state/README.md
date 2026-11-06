@@ -3,6 +3,11 @@
 Workspace-private shared runtime-state helpers for Murph packages that need explicit local state
 next to a vault without turning that state into canonical product truth.
 
+Directory locks publish their complete metadata through one atomic directory
+rename. The unpublished metadata file needs no separate atomic rename; its
+private permissions and the existing ownership and stale-lock checks remain
+required.
+
 ## Scope
 
 - root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback helpers plus pure hosted bundle identity types/equality used by shared contracts
@@ -28,6 +33,12 @@ The bounded presentation-only group participant display-name cache at `.runtime/
 The exact flat `.runtime/operations/assistant/generated-deliveries/<filename>` subtree is declared portable for active one-time delivery continuity. Encrypted hosted checkpoints include it, while portable support ZIPs exclude it with all `.runtime/**`. After the reader-compatible release converges, initial and retry file-send preparation may adopt only this exact direct regular file: assistant-runtime parents are tightened to `0700`, the file to `0600`, and path/type/symlink state is revalidated before reading or hashing. Quiescent cleanup retains exact active descriptors and removes only terminal, changed, or orphaned direct files after the direct inventory and outbox state are trusted. A legacy nested directory is counted and retained as opaque residue without blocking independent direct-file cleanup; it never gains generated-delivery ownership. No generic `exports/**` path is reserved by this contract, and the reader-compatible release remains the rollback floor while a persisted ref may exist.
 
 Direct-R2 v2 hosted snapshots keep that broad runtime continuity policy and write one encrypted compressed workspace archive directly to R2 from the hosted container during `idle_shutdown`. Hosted Codex native memory generation and reads are currently disabled. The dormant portability boundary preserves only the exact Codex-owned read artifacts `.codex-hosted/memories/raw_memories.md`, `.codex-hosted/memories/MEMORY.md`, and `.codex-hosted/memories/memory_summary.md`, plus active `.codex-hosted/sessions/YYYY/MM/DD/rollout-*.jsonl` files referenced by live assistant session resume state. Skills, extensions, rollout summaries, Git state and history, arbitrary memory descendants, memory/state SQLite databases and sidecars, and credential, secret, key, certificate, auth, config, cache, temp, lock, pid, socket, log, history, and prompt-history files are not portable. Cold and warm-clean restore both prune Codex home back to those exact read artifacts and referenced rollouts. Full native-memory workspace persistence remains deferred until Codex owns a sealed or quiesced export that can prove excluded credential material is absent from live files and history. Foreground assistant turns do not publish a separate Codex continuity artifact or workspace pointer. If a warm container dies before the next idle-shutdown v2 snapshot, restore must still be correct from durable mailbox, audit transcript records, and assistant runtime state even when provider-native resume optimization is unavailable; bounded committed transcript history may be included only in fresh-thread prompts or stale-resume fallback prompts. `canonical_runtime_commit` stores exact hosted canonical write receipts in supervisor-owned artifacts and durably checkpoints the receipt-log ref in workspace status until the idle checkpoint snapshot becomes authoritative and omits the receipt-log ref from committed workspace status. Pre-checkpoint foreground reruns append from that in-flight log; restore replays artifact-backed receipt logs only for legacy or interrupted checkpoint states that still expose a log ref, and never replays assistant-local receipt files. Legacy hosted-bundle full/base, hot, and delta producers remain compatibility surfaces for old refs and tests only; new production workspace snapshots are produced by the direct-R2 v2 `idle_shutdown` path.
+
+Snapshot inventory filters excluded paths before filesystem inspection. A root
+absent at its initial inspection remains optional for uninitialized workspaces;
+once an included file or directory is observed, its disappearance fails planning
+instead of accepting a partial replacement snapshot. This applies to both vault
+and operator-home traversal.
 
 The hosted container synchronously stops the resident Codex process before
 starting every cold or warm-clean restore. The next process rebuilds its private
@@ -69,3 +80,140 @@ during residue maintenance and retains rows only while their input events
 survive. This database is not a disposable projection: loss or corruption fails
 closed. The first database write establishes a SQLite-capable runner rollback
 floor; old runners cannot consume converted workspace metadata.
+
+## CLI timing transport and optional failure detail
+
+`@murphai/runtime-state/cli-timing` owns the finite timing schema, registered
+command catalog, code/stage vocabularies, normalization and bounds.
+`@murphai/runtime-state/node/cli-timing` owns one best-effort authenticated
+loopback UDP datagram per subprocess. The CLI exit owner observes the existing
+exit code before calling `process.exit`; it does not await telemetry. Bundled
+and source entrypoints continue to share the existing timing owner.
+
+The six synchronous `query-metric-*` spans optionally include `cpu` with
+`count`, `sumUs` and `maxUs`: process CPU microseconds for measured observations.
+CPU coverage is separate from wall-span count; missing CPU is not zero. CPU can
+exceed wall time because it includes other threads in the CLI process, and
+nested inclusive spans are not additive. Only these fixed synchronous phases
+sample CPU; asynchronous database/provider spans do not. Sampling is inactive
+outside the existing collection and failures preserve wall timing and command
+behavior. No data contents, arguments, identifiers or workload values are logged.
+
+Older readers discard this optional field while preserving the existing timing
+object; newer readers accept old reports. Deploy the Web reader before the
+runner producer for measurement coverage, then verify bounded aggregates for
+CPU coverage, CPU/wall ratios and error outcomes over 24 and 72 hours of normal
+traffic. For CPU/wall ratios, require `cpu.count === count` within each phase
+aggregate; partial coverage cannot identify its matching wall sum. Maxima may come from
+different calls. Existing 8 KiB/report, command/span and receiver report limits
+remain unchanged, and transport truncation remains explicit. This instrumentation
+addresses the missing attribution in issue #3997; no production speedup is implied.
+
+The sender uses a fixed synchronous `127.0.0.1` lookup for both bind and send,
+and an exclusive ephemeral bind. Node's default numeric-address lookup still
+schedules asynchronous work; a following `process.exit` can otherwise discard
+that work even after the socket has bound. Exclusive binding also avoids the
+cluster shared-handle path. The socket remains unreferenced and closes on send
+completion or error. Missing/invalid endpoints, native bind/send failure, a dead
+receiver and send-buffer pressure remain best-effort loss, never delayed exits,
+command errors, output, retries or keepalive. There is no flush wait, timer,
+queue, persisted file, process supervisor or parallel reporting channel.
+
+`murph.cli-timing.v1` is unchanged. Per-command `failures` and `droppedFailures`
+remain optional; older producers without them are accepted. New codes
+`exercise_not_found`, `exercise_catalog_unavailable` and `exercise_catalog_invalid`
+are exact existing source-owned errors, not new domain behavior. Prefer
+consumer-first deployment of catalog additions: older finite readers collapse
+unrecognized codes to `unknown`, retaining timing, outcome and failure counts.
+Unknown strings/extra fields are never forwarded. Assistant shell diagnostics
+reuse these catalogs; they do not establish another timing or error vocabulary.
+
+Phase names skew differently: an older `normalizeCliTiming` rejects the whole
+timing object when any command carries an unknown phase, rather than collapsing
+it. New names are appended to the catalog and need readers deployed before
+producers. `canonical-write-wait` (core lock acquisition, never the hold) and
+`importers-runtime-load` (each vault-usecases importer import) follow that
+rule. Their semantics, rollout and proof live in
+`docs/hosted-runtime-log-database.md` under "Canonical write wait and importer
+load".
+
+### Optional CLI source cause
+
+The original-error timing observer can add `sourceCause: { code, vaultCode? }`
+to an existing `unknown` failure. It preserves the established failure code,
+stage, count and command/outcome identity; it does not widen the global code
+catalog or change an error, output, exit, tool contract or prompt. Only three
+registered commands admit this detail:
+
+| Command | Existing source decisions retained |
+| --- | --- |
+| `meal edit` | `contract_invalid`, `invalid_timestamp`, or `vault_error` from the event mutation/usecase owners; the admitted nested codes below distinguish contract, ledger and lock failures. |
+| `meal remove-photo` | `contract_invalid` from stored-record reads or `vault_error`; nested codes distinguish ledger, lock, retained-byte integrity, manifest and lingering-reference failures. The already classified `invalid_operation` is unchanged. |
+| `food search-labels-batch` | The labels client's existing auth, rate limit, HTTP timeout, service availability, other HTTP rejection, body timeout, body-read failure and invalid-response codes. |
+
+The timing allowlists live in `src/cli-timing.ts`. Provider configuration,
+transport-only errors and other commands gain no new admission. Existing codes
+shared by request and response failures remain subject to their unchanged
+recorded stage. A source code may still combine multiple failures, such as JSON
+and schema rejection; it is evidence of the typed cause, not a diagnosis of an
+earlier production failure.
+
+For both meal commands, `contract_invalid` admits `EVENT_CONTRACT_INVALID` and
+`VAULT_INVALID_JSONL`. Their `vault_error` admits `CANONICAL_WRITE_LOCKED` and
+`EVENT_LEDGER_SHARD_AMBIGUOUS`. Photo removal also admits
+`EVENT_CONTRACT_INVALID`, `VAULT_INVALID_JSONL`,
+`MEAL_PHOTO_RETENTION_PRECONDITION_FAILED`, `MEAL_PHOTO_RETENTION_MANIFEST_INVALID`
+and `MEAL_PHOTO_RETENTION_REFERENCE_INVALID` under `vault_error`, as reached
+inside removal after its initial read. Other nested names remain absent.
+
+Only the two meal commands' otherwise-unknown original failures can emit
+`sourceCause.code` equal to `missing_code` or `unrecognized_code`. These describe
+evidence availability: no safely observed own code (including rejected proxy,
+accessor or inherited metadata), or an observed value outside the admitted
+codes. They are not diagnoses or classifications of exception prose. An original
+code literally equal to either diagnostic label is itself unrecognized.
+Recognized legacy codes keep their existing classification. Missing old wire
+detail stays absent; readers never manufacture these states retrospectively.
+
+Wire detail requires an own outer `code` of exactly `unknown`; an unrecognized
+outer code that normalizes to `unknown` cannot authorize it. Capture and wire
+admission read only own data descriptors. They never coerce,
+enumerate, invoke accessors, follow causes/prototypes, or inspect messages,
+arguments, results, status values or arbitrary nested error codes. Unknown or
+malformed detail is omitted independently of the failure. The Node original-error
+observer uses native proxy detection before descriptor reads, including nested
+context and its EPIPE observation. It passes a detached own `vaultCode` value
+to the portable selector; proxy traps cannot manufacture original-error evidence.
+The portable wire reader handles parsed JSON, which cannot contain proxies;
+its defensive descriptor reads still catch throwing traps on direct in-process
+inputs. The two source-cause
+fields participate in variant equality under the existing eight-variant cap;
+`droppedFailures` records omitted observations without changing invocation
+call counts. Existing command, span, report, UDP and usage-body limits remain
+unchanged.
+
+Readers predating `sourceCause` drop that field and coalesce equal legacy
+variants. The preceding meal reader retains its known source codes and two photo
+retention codes, dropping new nested codes and observation labels while retaining
+failures, timing, profiles and token accounting. New readers
+accept absent detail without inventing a cause. Run the history-backed portable
+and hosted checks with `MURPH_CLI_SOURCE_CAUSE_COMPAT_BASE` set to the reviewed
+base; `MURPH_CLI_MEAL_ORIGIN_COMPAT_BASE` selects the preceding meal reader.
+The real-handler collision test supports `MURPH_CLI_MEAL_ORIGIN_BASELINE` on
+unchanged base owners with only its test hunk applied. Reader-first deployment
+preserves measurement coverage; old readers remain
+safe during skew. Natural observations are useful only after authorized
+reader/writer convergence, with repeated profiles deduplicated by turn and
+native command completions kept separate from CLI counts.
+
+`test/cli-timing-process.test.ts` uses actual terminating subprocesses, the
+production source module and a live loopback receiver, including immediate and
+already-bound failures, nested termination and failed/dead transports. CLI
+entrypoint tests in `packages/cli/test/cli-timing-subprocess.test.ts` separately
+cover domain/validation rejection and nearby successes with isolated synthetic
+state, fake food lookup and byte-identical output/exit checks. They neither
+identify historical production arguments nor require a real-model journey.
+
+Assistant status snapshots are retired. New snapshots omit the old `status.json`
+projection; historical hot-state exclusions remain defensive. Hosted workspace
+progress and runtime logs have separate owners and do not read that file.

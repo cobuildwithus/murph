@@ -11,6 +11,7 @@ export interface AssistantSelfDeliveryTargetLookupInput {
   identityId?: string | null
   participantId?: string | null
   threadId?: string | null
+  threadIsDirect?: boolean | null
 }
 
 export type AssistantSelfDeliveryTargetMap = Record<
@@ -35,12 +36,6 @@ interface AssistantSelfDeliveryTargetDependencies {
   resolveDefaults: (
     homeDirectory: string,
   ) => Promise<AssistantSelfDeliveryTargetDefaultsLike | null>
-  saveDefaultsPatch: (
-    patch: {
-      selfDeliveryTargets: AssistantSelfDeliveryTargetMap | null
-    },
-    homeDirectory: string,
-  ) => Promise<unknown>
 }
 
 export async function listAssistantSelfDeliveryTargets(
@@ -68,79 +63,6 @@ export async function resolveAssistantSelfDeliveryTarget(
   return defaults?.selfDeliveryTargets?.[normalizedChannel] ?? null
 }
 
-export async function saveAssistantSelfDeliveryTarget(
-  target: AssistantSelfDeliveryTarget,
-  dependencies: AssistantSelfDeliveryTargetDependencies,
-  homeDirectory: string,
-): Promise<AssistantSelfDeliveryTarget> {
-  const normalizedTarget = normalizeAssistantSelfDeliveryTarget(
-    target,
-    dependencies.normalizeString,
-  )
-  const existing = await dependencies.resolveDefaults(homeDirectory)
-  const nextTargets = {
-    ...(existing?.selfDeliveryTargets ?? {}),
-    [normalizedTarget.channel]: normalizedTarget,
-  }
-
-  await dependencies.saveDefaultsPatch(
-    {
-      selfDeliveryTargets: nextTargets,
-    },
-    homeDirectory,
-  )
-
-  return normalizedTarget
-}
-
-export async function clearAssistantSelfDeliveryTargets(
-  channel: string | null | undefined,
-  dependencies: AssistantSelfDeliveryTargetDependencies,
-  homeDirectory: string,
-): Promise<string[]> {
-  const existing = await dependencies.resolveDefaults(homeDirectory)
-  const currentTargets = {
-    ...(existing?.selfDeliveryTargets ?? {}),
-  }
-  const normalizedChannel =
-    normalizeAssistantSelfDeliveryTargetChannel(
-      channel,
-      dependencies.normalizeString,
-    ) ?? null
-
-  if (normalizedChannel) {
-    if (!currentTargets[normalizedChannel]) {
-      return []
-    }
-
-    delete currentTargets[normalizedChannel]
-    await dependencies.saveDefaultsPatch(
-      {
-        selfDeliveryTargets:
-          Object.keys(currentTargets).length > 0 ? currentTargets : null,
-      },
-      homeDirectory,
-    )
-    return [normalizedChannel]
-  }
-
-  const clearedChannels = sortAssistantSelfDeliveryTargets(currentTargets).map(
-    (target) => target.channel,
-  )
-  if (clearedChannels.length === 0) {
-    return []
-  }
-
-  await dependencies.saveDefaultsPatch(
-    {
-      selfDeliveryTargets: null,
-    },
-    homeDirectory,
-  )
-
-  return clearedChannels
-}
-
 export async function applyAssistantSelfDeliveryTargetDefaults(
   input: AssistantSelfDeliveryTargetLookupInput,
   dependencies: AssistantSelfDeliveryTargetDependencies,
@@ -164,34 +86,46 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
       ? await resolveSingleAssistantSelfDeliveryTarget(dependencies, homeDirectory)
       : null
 
-  if (!savedTarget) {
-    return {
-      channel: normalizedChannel,
-      identityId: dependencies.normalizeString(input.identityId),
-      participantId: dependencies.normalizeString(input.participantId),
-      threadId: dependencies.normalizeString(input.threadId),
-      deliveryTarget: dependencies.normalizeString(input.deliveryTarget),
-    }
+  const explicit = {
+    channel: normalizedChannel,
+    identityId: dependencies.normalizeString(input.identityId),
+    participantId: dependencies.normalizeString(input.participantId),
+    threadId: dependencies.normalizeString(input.threadId),
+    deliveryTarget: dependencies.normalizeString(input.deliveryTarget),
   }
+  const resolved = savedTarget
+    ? {
+        channel: explicit.channel ?? savedTarget.channel,
+        identityId: explicit.identityId ?? savedTarget.identityId ?? null,
+        participantId: explicit.participantId ?? savedTarget.participantId ?? null,
+        threadId: explicit.threadId ?? savedTarget.threadId ?? null,
+        deliveryTarget: explicit.deliveryTarget ?? savedTarget.deliveryTarget ?? null,
+      }
+    : explicit
+  return preserveExplicitAssistantTargetAudience(input.threadIsDirect, explicit, resolved)
+}
+
+function preserveExplicitAssistantTargetAudience(
+  threadIsDirect: boolean | null | undefined,
+  explicit: AssistantSelfDeliveryTargetLookupInput,
+  resolved: AssistantSelfDeliveryTargetLookupInput,
+): AssistantSelfDeliveryTargetLookupInput {
+  // Audience evidence belongs to the supplied route, never a locator or
+  // destination introduced by saved defaults.
+  const preservesExplicitRoute =
+    explicit.channel !== null &&
+    Boolean(explicit.deliveryTarget || explicit.threadId || explicit.participantId) &&
+    explicit.channel === resolved.channel &&
+    explicit.identityId === resolved.identityId &&
+    explicit.participantId === resolved.participantId &&
+    explicit.threadId === resolved.threadId &&
+    explicit.deliveryTarget === resolved.deliveryTarget
 
   return {
-    channel: normalizedChannel ?? savedTarget.channel,
-    identityId:
-      dependencies.normalizeString(input.identityId) ??
-      savedTarget.identityId ??
-      null,
-    participantId:
-      dependencies.normalizeString(input.participantId) ??
-      savedTarget.participantId ??
-      null,
-    threadId:
-      dependencies.normalizeString(input.threadId) ??
-      savedTarget.threadId ??
-      null,
-    deliveryTarget:
-      dependencies.normalizeString(input.deliveryTarget) ??
-      savedTarget.deliveryTarget ??
-      null,
+    ...resolved,
+    ...(preservesExplicitRoute && typeof threadIsDirect === 'boolean'
+      ? { threadIsDirect }
+      : {}),
   }
 }
 

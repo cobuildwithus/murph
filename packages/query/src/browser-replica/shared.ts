@@ -1,6 +1,8 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type {
   ExperimentOutcome,
+  MemoryDemographics,
+  CompanionMealsProjection,
 } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
@@ -10,10 +12,6 @@ import type {
   OverviewExperiment,
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
-import type {
-  PersonalPatternReport,
-  PersonalPatternVocabulary,
-} from "../personal-patterns.ts";
 import type { JournalView } from "../journal-view.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
@@ -37,7 +35,6 @@ export const BROWSER_VAULT_REPLICA_POLICY_ID = "health-vault-browser";
 export const BODY_PREVIEW_CHARS = 280;
 export const METRIC_LOOKBACK_DAYS = 365;
 export const RECENT_JOURNAL_LIMIT = 4;
-export const TRACKED_EXPERIMENT_LIMIT = 24;
 export const TIMELINE_LIMIT = 240;
 export const SIGNAL_LIMIT = 30;
 export const SOURCE_HEALTH_LIMIT = 24;
@@ -52,7 +49,6 @@ export const INCLUDED_FAMILIES = [
   "family",
   "genetics",
   "goal",
-  "habitat",
   "journal",
   "protocol",
   "regimen",
@@ -65,6 +61,7 @@ export const EXCLUDED_FAMILIES = [
   "audit",
   "core",
   "food",
+  "habitat",
   "recipe",
 ] as const;
 
@@ -230,75 +227,6 @@ export interface BrowserVaultAssistantSummary {
   latestDate: string | null;
 }
 
-export const BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA =
-  "murph.browser-vault.experiment-run-card.v1";
-
-export type BrowserVaultExperimentRunCardStatus =
-  | "active"
-  | "paused"
-  | "finished"
-  | "stopped";
-
-export interface BrowserVaultExperimentRunCardMetric {
-  baseline?: string;
-  /** Used by the web display layer to preserve health-commons sentiment coloring. */
-  biomarkerKey?: string;
-  current: string;
-  delta?: string;
-  direction?: "down" | "neutral" | "up";
-  label: string;
-}
-
-export interface BrowserVaultExperimentRunCardDailyCadence {
-  cadence: string;
-  completed: number;
-  expected: number;
-  label?: string;
-}
-
-export interface BrowserVaultExperimentRunCardSummary {
-  completionPercent?: number;
-  dailyCadence?: BrowserVaultExperimentRunCardDailyCadence;
-  dateRange?: string;
-  day?: number;
-  metric?: BrowserVaultExperimentRunCardMetric;
-  metrics: BrowserVaultExperimentRunCardMetric[];
-}
-
-export interface BrowserVaultExperimentRunCardLookupKeys {
-  experimentIds: string[];
-  protocolKeys: string[];
-  slugs: string[];
-}
-
-/**
- * A bounded, rebuildable home-card projection. It is generated with the
- * replica and therefore shares the replica's single freshness/version owner.
- */
-export interface BrowserVaultExperimentRunCard {
-  id: string;
-  lookupKeys: BrowserVaultExperimentRunCardLookupKeys;
-  requiredMetricBuckets: BrowserVaultMetricBucketId[];
-  runSummary: BrowserVaultExperimentRunCardSummary;
-  schema: typeof BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA;
-  slug: string | null;
-  startedOn: string | null;
-  status: BrowserVaultExperimentRunCardStatus;
-  statusLabel: string;
-  summary: string | null;
-  summaryDetail: string | null;
-  tags: string[];
-  title: string;
-}
-
-export type BrowserVaultExperimentRunCardLookup =
-  | string
-  | {
-      experimentId?: string;
-      protocolKeys?: readonly string[];
-      slug?: string;
-    };
-
 export interface BrowserVaultMetricGoalProgressRow {
   currentValue: number | null;
   currentValueLabel: string | null;
@@ -314,23 +242,26 @@ export interface BrowserVaultMetricGoalProgressRow {
 }
 
 export interface BrowserVaultReplica {
+  /** Absent before generation 18, or when memory could not be read: unknown.
+   * No canonical memory text is exported. */
+  demographics?: MemoryDemographics;
+  /** Resolved vault name; absent on older replicas or when unreadable. */
+  displayName?: string;
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
   /** Absent only on replicas produced before canonical outcome projection shipped. */
   experimentOutcomes?: ExperimentOutcome[];
-  /** Absent only on legacy replicas produced before compact home cards shipped. */
-  experimentRunCards?: BrowserVaultExperimentRunCard[];
   generatedAt: string;
   /** Absent only on legacy replicas produced before generation-aware freshness. */
   generation?: number;
   labResultRows: BrowserVaultLabResultRow[];
   /** Absent only on replicas produced before the derived Journal view shipped. */
   journal?: JournalView;
+  /** Absent on older replicas or when canonical timezone is unavailable. */
+  meals?: CompanionMealsProjection;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
-  /** Absent only on replicas produced before Personal Patterns shipped. */
-  personalPatterns?: PersonalPatternReport;
   policy: BrowserVaultReplicaPolicy;
   schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   searchRows: BrowserVaultSearchRow[];
@@ -344,14 +275,15 @@ export interface BrowserVaultReplica {
 
 type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   BrowserVaultReplica,
+  | "demographics"
+  | "displayName"
   | "assistantSummary"
   | "entities"
-  | "experimentRunCards"
   | "generatedAt"
   | "generation"
   | "hasLabBiomarkers"
   | "journal"
-  | "personalPatterns"
+  | "meals"
   | "policy"
   | "schema"
   | "searchRows"
@@ -362,9 +294,8 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
 
 export type BrowserVaultCoreReplica = Omit<
   BrowserVaultLegacyCompatibleCoreReplica,
-  "experimentRunCards" | "hasLabBiomarkers"
+  "hasLabBiomarkers"
 > & {
-  experimentRunCards: BrowserVaultExperimentRunCard[];
   hasLabBiomarkers: boolean;
 };
 
@@ -395,10 +326,12 @@ export type BrowserVaultLabsReplica = BrowserVaultCoreReplica & Pick<
 >;
 
 export interface CreateBrowserVaultReplicaInput {
+  demographics?: MemoryDemographics;
+  /** Resolved vault name; absent on older replicas or when unreadable. */
+  displayName?: string;
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
-  personalPatternVocabulary?: PersonalPatternVocabulary | null;
   signal?: AbortSignal;
   sourceBundleHash: string;
   vault: VaultReadModel;
@@ -448,11 +381,6 @@ interface BrowserVaultCoreQueryAccess {
   entities: {
     get(idOrLookupId: string): BrowserVaultEntity | null;
     list(filters?: BrowserVaultEntityFilters): BrowserVaultEntity[];
-  };
-  experimentRunCards: {
-    find(lookup: BrowserVaultExperimentRunCardLookup): BrowserVaultExperimentRunCard | null;
-    get(experimentId: string): BrowserVaultExperimentRunCard | null;
-    list(): BrowserVaultExperimentRunCard[];
   };
   search(query: string, filters?: BrowserVaultSearchFilters): BrowserVaultSearchRow[];
   timeline: {
@@ -524,7 +452,6 @@ export interface BrowserVaultQueryClient extends BrowserVaultCoreQueryAccess, Br
   capability: "core+metrics+labs";
   replica: BrowserVaultReplica & {
     experimentOutcomes: ExperimentOutcome[];
-    experimentRunCards: BrowserVaultExperimentRunCard[];
     hasLabBiomarkers: boolean;
   };
 }

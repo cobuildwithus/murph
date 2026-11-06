@@ -83,7 +83,6 @@ interface SmokeCodexShellResult {
   cliSurfaceHotPathProofCount?: unknown;
   client?: unknown;
   healthCommonsCliGoalProofCount?: unknown;
-  murphPathBytes?: unknown;
   noteAddBytes?: unknown;
   stderrBytes?: unknown;
   vaultCliLlmsBytes?: unknown;
@@ -564,7 +563,6 @@ export function assertSmokeCodexShellResult(
   }
   for (const [key, rawValue] of Object.entries({
     cliSurfaceContractBytes: value.cliSurfaceContractBytes,
-    murphPathBytes: value.murphPathBytes,
     noteAddBytes: value.noteAddBytes,
     vaultCliLlmsBytes: value.vaultCliLlmsBytes,
     vaultCliPathBytes: value.vaultCliPathBytes,

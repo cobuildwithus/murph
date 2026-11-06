@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-cholesterol
 slug: lower-cholesterol
-title: Lower My Cholesterol
-summary: Improve the parts of your cholesterol profile that matter using food, activity, and treatment matched to your overall risk.
+title: Understand My Cholesterol
+summary: Understand cholesterol results, everyday lifestyle factors, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: lower my cholesterol
+  goalPhrase: understand my cholesterol
   successSignals:
     - id: atherogenic_cholesterol
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my cholesterol.
+  startPrompt: Hey Murph, help me understand my cholesterol.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -85,4 +85,4 @@ Don’t stop a cholesterol medicine because a repeat test looks better; the medi
 
 ## Related goals
 
-[Lower My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Lower My ApoB](/goals/lower-apob) · [Lower My Triglycerides](/goals/lower-triglycerides)
+[Understand My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Understand My ApoB](/goals/lower-apob) · [Understand My Triglycerides](/goals/lower-triglycerides)

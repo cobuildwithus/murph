@@ -1,3 +1,9 @@
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
+import { sleepSummaryResponseCardV1Schema } from "@murphai/contracts";
+import { sendLinqMessage } from "@murphai/assistant-engine/assistant-channel-runtime";
+import { prepareHostedCodexRuntimeEnvironment } from "../src/hosted-runtime/codex-config.ts";
+import { HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY } from "../src/hosted-runtime/codex-shell-env-policy.ts";
+import { buildHostedLinqChannelEnv } from "../src/hosted-runtime/channel-activity.ts";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +15,7 @@ import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/si
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
   buildHostedRunnerExecutablePath,
+  createHostedAssistantTurnEnvironment,
   buildHostedPlatformBackedRuntimeEnv,
   HOSTED_RUNNER_EXECUTABLE_PATH,
   normalizeHostedAssistantRuntimeConfig,
@@ -104,11 +111,12 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.userEnv, userEnv);
 });
 
-test("hosted runtime config rejects platform-owned asset-root env overrides from every producer", () => {
+test("hosted runtime config rejects platform-owned asset-root and priority env overrides from every producer", () => {
   const platform = createHostedRuntimePlatformStub();
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
         MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
@@ -117,6 +125,7 @@ test("hosted runtime config rejects platform-owned asset-root env overrides from
       resolvedConfig: createHostedRuntimeResolvedConfig(),
       userEnv: {
         ANTHROPIC_API_KEY: "anthropic-secret",
+        HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
         MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
@@ -354,6 +363,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       },
       deviceSync: null,
       managedAutoReplyChannels: [
+        { capabilityReady: true, channel: "voice" },
         {
           capabilityReady: true,
           channel: "email",
@@ -681,7 +691,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     buildHostedRuntimeForwardedEnv({
       FFMPEG_COMMAND: "/stale/ffmpeg",
       ELEVENLABS_API_KEY: "elevenlabs-token",
-      EXA_API_KEY: "exa-token",
       GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
@@ -690,7 +699,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,parsers,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,parsers,telegram",
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -713,7 +722,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     }),
     {
       ELEVENLABS_API_KEY: "elevenlabs-token",
-      EXA_API_KEY: "exa-token",
       GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
@@ -738,7 +746,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
 });
 
 test("hosted runtime parsers profile is semantic and forwards no native paths", () => {
-  assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.exa, ["EXA_API_KEY"]);
   assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.parsers, []);
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
@@ -831,12 +838,7 @@ test("hosted runtime resolved config derives typed channel and device-sync state
     telegramBotConfigured: true,
   });
   assert.deepEqual(resolved.deviceSync, {
-    providerConfigs: {
-      whoop: {
-        clientId: "whoop-client",
-        clientSecret: "whoop-secret",
-      },
-    },
+    providerConfigs: {},
     publicBaseUrl: "https://device-sync.example.test",
     secret: "secret_123",
   });
@@ -1131,86 +1133,21 @@ test("hosted platform-backed env strips non-platform entries from platform env",
 
 test("hosted runtime config deep-clones resolved device-sync provider config", () => {
   const platform = createHostedRuntimePlatformStub();
-  const ouraScopes = ["daily", "sleep"];
+  const providerFilter = ["garmin", "oura", "whoop"];
   const resolvedConfig = createHostedRuntimeResolvedConfig({
     deviceSync: {
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          providerFilter: ["garmin"],
-          region: "us",
-        },
-        oura: {
-          clientId: "oura-client",
-          clientSecret: "oura-secret",
-          scopes: ouraScopes,
-        },
-        whoop: {
-          clientId: "whoop-client",
-          clientSecret: "whoop-secret",
-          scopes: ["read:profile", "offline"],
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", providerFilter, region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "secret_123",
     },
   });
-  const normalized = normalizeHostedAssistantRuntimeConfig(
-    {
-      resolvedConfig,
-    },
-    platform,
-  );
-
-  assert.deepEqual(
-    normalized.resolvedConfig.channelCapabilities,
-    resolvedConfig.channelCapabilities,
-  );
-  assert.equal(
-    normalized.resolvedConfig.deviceSync?.publicBaseUrl,
-    resolvedConfig.deviceSync?.publicBaseUrl,
-  );
-  assert.equal(
-    normalized.resolvedConfig.deviceSync?.secret,
-    resolvedConfig.deviceSync?.secret,
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.junction,
-    {
-      environment: "sandbox",
-      providerFilter: ["garmin"],
-      region: "us",
-    },
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura,
-    {
-      clientId: "oura-client",
-      clientSecret: "oura-secret",
-      scopes: ["daily", "sleep"],
-    },
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop,
-    resolvedConfig.deviceSync?.providerConfigs.whoop,
-  );
+  const normalized = normalizeHostedAssistantRuntimeConfig({ resolvedConfig }, platform);
+  assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
   assert.notEqual(normalized.resolvedConfig.deviceSync, resolvedConfig.deviceSync);
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs,
-    resolvedConfig.deviceSync?.providerConfigs,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-    resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-    resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-    ouraScopes,
-  );
+  assert.notEqual(normalized.resolvedConfig.deviceSync?.providerConfigs, resolvedConfig.deviceSync?.providerConfigs);
+  assert.notEqual(normalized.resolvedConfig.deviceSync?.providerConfigs.junction?.providerFilter, providerFilter);
+  providerFilter.push("strava");
+  assert.deepEqual(normalized.resolvedConfig.deviceSync?.providerConfigs.junction?.providerFilter, ["garmin", "oura", "whoop"]);
 });
 
 test("withHostedProcessEnvironment restores overwritten and newly introduced env values", async () => {
@@ -1633,3 +1570,66 @@ async function removeHostedProcessEnvironmentTestRoots(input: {
     recursive: true,
   });
 }
+
+// Exercise the real runtime projections and channel sender; only provider HTTP is synthetic.
+test("per-member native sleep flag reaches Linq through the hosted runtime without entering the Codex shell", async () => {
+  const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "native-sleep-runtime-"));
+  const card = sleepSummaryResponseCardV1Schema.parse({
+    kind: "sleep_summary", version: 1, localDate: "2026-11-03", totalSleepMinutes: 420,
+    bedtime: null, wakeTime: null, score: null, stages: null, awakeMinutes: null,
+    efficiencyPercent: null, hrv: null, restingHeartRate: null, wakeUps: null,
+  });
+  try {
+    for (const flag of [undefined, "0", "true", " 1 ", "1", undefined]) {
+      const launch = buildHostedRuntimeLaunchSpec({
+        forwardedEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          OPENAI_API_KEY: "synthetic-openai-key",
+          LINQ_API_TOKEN: "synthetic-linq-token",
+          ...(flag === undefined ? {} : { [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: flag }),
+        },
+        // Member config cannot enable the gate or replace a Worker decision.
+        userEnv: { [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: flag === "1" ? "0" : "1" },
+      });
+      const runtime = normalizeHostedAssistantRuntimeConfig(launch.runtime, createHostedRuntimePlatformStub());
+      assert.equal(runtime.userEnv[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV], undefined);
+      const prepared = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: { ...runtime.forwardedEnv, ...runtime.userEnv },
+      });
+      const turn = createHostedAssistantTurnEnvironment({
+        operatorHomeRoot, runtimeEnv: prepared.runtimeEnv, vaultRoot: operatorHomeRoot,
+      });
+      assert.ok(turn.env);
+      assert.equal(turn.env[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV], flag);
+      assert.equal((HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY as readonly string[]).includes(MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV), false);
+      assert.doesNotMatch(await readFile(prepared.codexConfigPath, "utf8"), /MURPH_NATIVE_SLEEP_CARD/u);
+      const linqEnv = buildHostedLinqChannelEnv({
+        forwardedEnv: runtime.forwardedEnv,
+        userEnv: runtime.userEnv,
+      });
+      const bodies: unknown[] = [];
+      const delivered = await sendLinqMessage({
+        card, directRecipientPhoneNumber: "+15555550101", fromPhoneNumber: "+15555550102",
+        idempotencyKey: "synthetic-sleep", message: "", target: "synthetic-chat",
+        targetKind: "thread", threadIsDirect: true,
+      }, {
+        env: linqEnv,
+        appCardCapabilityFetchImplementation: async () =>
+          new Response(JSON.stringify({ available: true }), { headers: { "Content-Type": "application/json" } }),
+        fetchImplementation: async (_url, init) => {
+          bodies.push(JSON.parse(String(init.body)));
+          return new Response(JSON.stringify({ message: { id: "synthetic-sleep-message" } }), { headers: { "Content-Type": "application/json" } });
+        },
+      });
+      assert.equal(delivered.providerMessageId, "synthetic-sleep-message");
+      assert.equal(bodies.length, 1);
+      assert.deepEqual(
+        (bodies[0] as { message: { parts: Array<{ interactive: boolean }> } }).message.parts.map(part => part.interactive),
+        [flag === "1"],
+      );
+    }
+  } finally {
+    await rm(operatorHomeRoot, { recursive: true, force: true });
+  }
+});

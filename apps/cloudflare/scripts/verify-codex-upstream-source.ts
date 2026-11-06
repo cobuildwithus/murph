@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   PINNED_CODEX_OPENAI_EGRESS_INVENTORY,
 } from "../test/fixtures/codex-openai-egress-routes.ts";
+import { hostedRunnerBaseImageRemoteTag } from "./runner-base-image-contract.ts";
 
 const CODEX_UPSTREAM_URL = "https://github.com/openai/codex.git";
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -27,6 +28,24 @@ async function main(): Promise<void> {
   if (inventory.upstreamTag !== `rust-v${inventory.version}`) {
     throw new Error("Codex upstream tag does not match the pinned package version.");
   }
+  const dockerfile = await readFile(
+    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner-base"),
+    "utf8",
+  );
+  if (!dockerfile.includes(`ARG CODEX_UPSTREAM_REVISION=${inventory.upstreamCommit}\n`)) {
+    throw new Error("Codex image source does not match the reviewed upstream commit.");
+  }
+  if (!dockerfile.includes(`ARG CODEX_CLI_VERSION=${inventory.version}\n`)
+    || !hostedRunnerBaseImageRemoteTag.endsWith(`-codex${inventory.version}-live1`)) {
+    throw new Error("Codex native build and runner base tag must match the reviewed version.");
+  }
+  const runnerDockerfile = await readFile(
+    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner"),
+    "utf8",
+  );
+  if (!runnerDockerfile.startsWith(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageRemoteTag}\n`)) {
+    throw new Error("Codex runner Dockerfile does not match the base-image contract.");
+  }
 
   const temporaryRoot = await mkdtemp(
     path.join(tmpdir(), "murph-codex-upstream-source-"),
@@ -43,7 +62,6 @@ async function main(): Promise<void> {
       "fetch",
       "--quiet",
       "--depth=1",
-      "--filter=blob:none",
       "origin",
       `refs/tags/${inventory.upstreamTag}`,
     ], upstreamRepository);
@@ -52,20 +70,19 @@ async function main(): Promise<void> {
       ["rev-parse", "FETCH_HEAD^{commit}"],
       upstreamRepository,
     );
-    const actualSourceTree = runGit(
-      ["rev-parse", `FETCH_HEAD:${inventory.upstreamSourceRoot}`],
-      upstreamRepository,
-    );
     if (actualCommit !== inventory.upstreamCommit) {
       throw new Error(
         `Codex tag ${inventory.upstreamTag} resolved to unexpected commit ${actualCommit}.`,
       );
     }
-    if (actualSourceTree !== inventory.upstreamSourceTree) {
-      throw new Error(
-        `Codex source root ${inventory.upstreamSourceRoot} resolved to unexpected tree ${actualSourceTree}.`,
-      );
-    }
+
+    // Verify the same patch the deployment build applies to this exact release.
+    // The commit pins every tree. The shallow fetch includes all blobs, so
+    // checking against the index needs neither lazy fetches nor a checkout.
+    runGit(["read-tree", "FETCH_HEAD"], upstreamRepository);
+    runGit([
+      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-public-live.patch"),
+    ], upstreamRepository);
 
     const sourceFiles = new Set(runGit([
       "ls-tree",
@@ -90,7 +107,7 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write(
-      `Verified Codex ${inventory.version} tag, commit, ${inventory.upstreamSourceRoot} tree, and ${declaredSources.size} reviewed source paths.\n`,
+      `Verified Codex ${inventory.version} tag, commit, native patch applicability, and ${declaredSources.size} reviewed source paths.\n`,
     );
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });

@@ -11,11 +11,17 @@ const describeRealModel = RUN_REAL_MODEL ? describe : describe.skip;
 
 const CASES = [
   { expectedKind: "welcome", text: "Hey Murph" },
-  { expectedKind: "answer", text: "Yes, ready", openingTone: "formal" },
-  { expectedKind: "answer", text: "Yes, I want to get stronger", openingTone: "formal" },
-  { expectedKind: "handoff", text: "Call me Robin, I am 34", openingTone: "formal" },
-  { expectedKind: "handoff", text: "Can you help with a symptom first?", openingTone: "formal" },
-  { expectedKind: "handoff", text: "I would rather skip these questions", openingTone: "formal" },
+  { expectedKind: "answer", text: "Yes, ready", opening: { tone: "formal", question: "identity" } },
+  { expectedKind: "handoff", text: "Yes, I want to get stronger", opening: { tone: "formal", question: "identity" } },
+  { expectedKind: "handoff", text: "Call me Robin, I am 34", opening: { tone: "formal", question: "identity" } },
+  { expectedKind: "handoff", text: "Can you help with a symptom first?", opening: { tone: "formal", question: "identity" } },
+  { expectedKind: "handoff", text: "I would rather skip these questions", opening: { tone: "formal", question: "identity" } },
+  { expectedKind: "answer", text: "Morgan, 29, nonbinary", opening: { tone: "formal", question: "aspiration" } },
+  { expectedKind: "answer", text: "Just call me Morgan", opening: { tone: "casual", question: "aspiration" } },
+  { expectedKind: "answer", text: "Skip name and age for now", opening: { tone: "formal", question: "aspiration" } },
+  { expectedKind: "handoff", text: "Morgan, 29. I want more energy", opening: { tone: "formal", question: "aspiration" } },
+  { expectedKind: "handoff", text: "Morgan. I have chest pain and cannot breathe", opening: { tone: "formal", question: "aspiration" } },
+  { expectedKind: "handoff", text: "I do not want to continue this setup", opening: { tone: "formal", question: "aspiration" } },
   { expectedKind: "welcome", text: "What can you help me with?" },
   {
     expectedKind: "answer",
@@ -54,7 +60,7 @@ describeRealModel("hosted Linq instant first-turn real-model semantics", () => {
     const response = await openAi.responses.create(
       buildHostedLinqInstantFirstTurnOpenAiBody({
         text,
-        ...("openingTone" in scenario ? { openingTone: scenario.openingTone } : {}),
+        ...("opening" in scenario ? { opening: scenario.opening } : {}),
       }),
       { maxRetries: 0, timeout: 18_000 },
     );

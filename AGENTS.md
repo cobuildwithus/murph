@@ -34,7 +34,7 @@ immutable historical evidence, never current operating instructions.
 | iMessage/SMS or assistant/provider prompts | `agent-docs/operations/imessage-deliverability.md` |
 | Auth, secrets, dependencies, or external boundaries | `agent-docs/SECURITY.md` |
 | Concurrency, retries, queues, or failure handling | `agent-docs/RELIABILITY.md` |
-| Cloudflare infrastructure | Security and reliability docs above, plus current official Cloudflare docs |
+| Cloudflare infrastructure | Security and reliability docs above, `apps/cloudflare/README.md` § CLI access for operational reads, plus current official Cloudflare docs |
 | Test selection or verification changes | `agent-docs/references/testing-ci-map.md` |
 | Marketing or Health Commons | `agent-docs/product-marketing-context.md`; `agent-docs/product-specs/health-commons.md` for Commons work |
 
@@ -52,6 +52,11 @@ immutable historical evidence, never current operating instructions.
   require explicit current-task permission for any Temporal mutation.
 - A Cloudflare rollback, including restoring older versions or repointing aliases,
   requires explicit permission for that exact rollback.
+- Before sending an operator-initiated message to a member through Ops or any
+  other channel, show the proposed message and intended recipient and obtain
+  explicit user confirmation immediately before sending. A general request to
+  investigate or contact the member does not replace this confirmation.
+  Read-only diagnostics may proceed without this messaging approval.
 - Preserve unrelated edits and active work. Before resuming an existing PR,
   establish ownership from its head, worktree, and handoff. An ambiguous owner or
   unexpected head movement blocks mutation until an explicit handoff.
@@ -93,6 +98,9 @@ immutable historical evidence, never current operating instructions.
 
 ## Notes
 
+- Default to Cloudflare `cf` for direct API operations; start with
+  `cf cli search "<action and resource type>"`. Follow the Cloudflare README
+  for pinned setup, private output handling, and existing Wrangler exceptions.
 - Before secondary-worktree development, read
   `agent-docs/operations/hosted-local-worktree-dev.md` for coordinated isolation.
 - Primary local database: `postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync`.

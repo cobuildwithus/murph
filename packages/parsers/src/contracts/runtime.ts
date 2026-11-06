@@ -26,6 +26,8 @@ export interface RequeueAttachmentParseJobsInput {
   captureId?: string;
   attachmentId?: string;
   state?: AttachmentParseState;
+  /** Reset only this still-claimed attempt; a later attempt of the job never matches. */
+  exactAttempt?: { jobId: string; attempt: number };
 }
 
 export interface CompleteAttachmentParseJobInput {

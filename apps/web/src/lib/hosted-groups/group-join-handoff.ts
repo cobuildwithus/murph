@@ -1,6 +1,6 @@
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 export const GROUP_JOIN_POST_AUTH_QUERY_KEY = "postJoin";
 
@@ -11,7 +11,7 @@ export type GroupJoinPostJoinDestination =
   | typeof HOSTED_APP_HOME_PATH
   | "/join";
 type GroupJoinAuthCompletionHandoff = Pick<
-  HostedPrivyCompletionPayload,
+  HostedAuthenticationCompletionPayload,
   "stage"
 >;
 

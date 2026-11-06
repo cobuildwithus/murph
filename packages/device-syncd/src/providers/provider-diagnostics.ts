@@ -2,7 +2,7 @@ import {
   isHostedRuntimeIdShapedDiagnosticToken,
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
-import { normalizeString, splitScopeList } from "../shared.ts";
+import { normalizeString } from "../shared.ts";
 
 type ProviderDiagnosticValue = boolean | number | string | null | undefined;
 
@@ -33,99 +33,6 @@ const PROVIDER_ERROR_DESCRIPTION_FIELDS = Object.freeze([
   "reason",
   "title",
 ] as const);
-
-export function buildOAuthTokenRequestDiagnostics(input: {
-  endpointKind: string;
-  parameters: Record<string, string>;
-  responseBody?: string;
-}): Record<string, ProviderDiagnosticValue> {
-  const parameterNames = Object.keys(input.parameters).sort();
-  const scopes = splitScopeList(input.parameters.scope);
-  const responseDiagnostics = input.responseBody === undefined
-    ? null
-    : inspectProviderErrorBody(input.responseBody);
-
-  return {
-    ...buildProviderRequestDiagnostics({
-      method: "POST",
-      endpointKind: input.endpointKind,
-      authKind: "oauth_client_secret_body",
-      authPlacement: "body_parameters",
-      credentialPresent: Boolean(input.parameters.client_secret?.trim()),
-      contentType: "application_x_www_form_urlencoded",
-      bodyKind: "form_urlencoded",
-      bodyFieldNames: parameterNames,
-    }),
-    ...(responseDiagnostics ? buildProviderResponseDiagnostics(responseDiagnostics) : {}),
-    ...(responseDiagnostics?.responseErrorCode ? { oauthErrorCode: responseDiagnostics.responseErrorCode } : {}),
-    ...(responseDiagnostics?.responseErrorDescription
-      ? { oauthErrorDescription: responseDiagnostics.responseErrorDescription }
-      : {}),
-    oauthGrantType: input.parameters.grant_type,
-    oauthRequestBodyBuilderKind: "url_search_params_record",
-    oauthRequestClientAuthPlacement: "body_parameters",
-    oauthRequestClientCredentialPresent: Boolean(input.parameters.client_secret?.trim()),
-    oauthRequestClientIdPresent: Boolean(input.parameters.client_id?.trim()),
-    oauthRequestContentType: "application_x_www_form_urlencoded",
-    oauthRequestDuplicateParameterCount: 0,
-    oauthRequestEncodingKind: "form_urlencoded",
-    oauthRequestHasDuplicateParameters: false,
-    oauthRequestMethod: "POST",
-    oauthRequestOfflineScopePresent: scopes.includes("offline"),
-    oauthRequestParameterCount: parameterNames.length,
-    oauthRequestParameterNames: formatProviderDiagnosticTokenList(parameterNames),
-    oauthRequestRefreshCredentialPresent: Boolean(input.parameters.refresh_token?.trim()),
-    oauthRequestScopeCount: scopes.length,
-    oauthRequestScopePresent: Boolean(input.parameters.scope?.trim()),
-    oauthRequestScopeValue: formatProviderDiagnosticTokenList(scopes),
-    oauthRequestTokenEndpointKind: input.endpointKind,
-    ...(responseDiagnostics
-      ? {
-          oauthResponseErrorDescriptionFieldPresent: responseDiagnostics.responseErrorDescriptionFieldPresent,
-          oauthResponseErrorFieldPresent: responseDiagnostics.responseErrorFieldPresent,
-          oauthResponseShapeKind: responseDiagnostics.responseShapeKind,
-        }
-      : {}),
-  };
-}
-
-export function resolveOAuthTokenRequestAccountStatus(input: {
-  diagnostics: Record<string, ProviderDiagnosticValue>;
-  parameters: Record<string, string>;
-  response: Response;
-  treatCompleteRefreshInvalidRequestAsReauthorization?: boolean;
-  treatUnauthorizedAsReauthorization?: boolean;
-}): "reauthorization_required" | null {
-  const oauthErrorCode = typeof input.diagnostics.oauthErrorCode === "string"
-    ? input.diagnostics.oauthErrorCode
-    : null;
-  const isRefreshTokenRequest = input.parameters.grant_type === "refresh_token";
-  const isRefreshTokenFailureStatus = input.response.status === 400 || input.response.status === 401;
-
-  if (
-    isRefreshTokenRequest
-    && isRefreshTokenFailureStatus
-    && oauthErrorCode === "invalid_grant"
-  ) {
-    return "reauthorization_required";
-  }
-
-  if (
-    input.treatCompleteRefreshInvalidRequestAsReauthorization === true
-    && isRefreshTokenRequest
-    && isRefreshTokenFailureStatus
-    && oauthErrorCode === "invalid_request"
-    && Boolean(input.parameters.client_id?.trim())
-    && Boolean(input.parameters.client_secret?.trim())
-    && Boolean(input.parameters.refresh_token?.trim())
-  ) {
-    return "reauthorization_required";
-  }
-
-  return input.response.status === 401 && input.treatUnauthorizedAsReauthorization !== false
-    ? "reauthorization_required"
-    : null;
-}
 
 export function buildProviderRequestDiagnostics(input: {
   method: ProviderApiRequestMethod;
@@ -207,20 +114,6 @@ export function inspectProviderErrorBody(body: string): ProviderErrorBodyDiagnos
       responseErrorFieldPresent: false,
       responseShapeKind: "non_json",
     };
-  }
-}
-
-export function extractProviderQueryParameterNames(pathOrUrl: string): string[] {
-  try {
-    const url = new URL(pathOrUrl, "https://provider.invalid");
-    return normalizeDiagnosticNameList([...url.searchParams.keys()]);
-  } catch {
-    const queryStart = pathOrUrl.indexOf("?");
-    if (queryStart < 0) {
-      return [];
-    }
-
-    return normalizeDiagnosticNameList([...new URLSearchParams(pathOrUrl.slice(queryStart + 1)).keys()]);
   }
 }
 

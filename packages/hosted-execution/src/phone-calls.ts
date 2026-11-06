@@ -163,9 +163,9 @@ export const hostedPhoneCallStatusRequestSchema = z
 
 export const hostedPhoneCallStatusItemSchema = z
   .object({
-    analyzedAt: z.iso.datetime().nullable(),
-    createdAt: z.iso.datetime(),
-    endedAt: z.iso.datetime().nullable(),
+    analyzedAt: z.isoDateTime().nullable(),
+    createdAt: z.isoDateTime(),
+    endedAt: z.isoDateTime().nullable(),
     phoneCallId: z.string().trim().min(1).max(200),
     result: hostedPhoneCallResultSchema.nullable(),
     status: z.enum([
@@ -176,8 +176,8 @@ export const hostedPhoneCallStatusItemSchema = z
       "needs_user",
       "failed",
     ]),
-    stopRequestedAt: z.iso.datetime().nullable(),
-    updatedAt: z.iso.datetime(),
+    stopRequestedAt: z.isoDateTime().nullable(),
+    updatedAt: z.isoDateTime(),
   })
   .strict();
 

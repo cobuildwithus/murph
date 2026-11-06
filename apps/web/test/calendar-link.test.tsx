@@ -35,11 +35,13 @@ describe("calendar link Web experience", () => {
       />,
     );
 
-    expect(markup).toContain("Care, appointment; follow-up");
-    expect(markup).toContain("Wednesday, October 14, 2026");
-    expect(markup).toContain("2:30 PM–3:15 PM");
+    expect(markup).toContain("Care, appointment; follow-up.");
+    expect(markup).toContain('aria-label="Wednesday, October 14, 2026"');
+    expect(markup).toContain(">Wednesday<");
+    expect(markup).toContain(">OCT<");
+    expect(markup).toContain(">14<");
+    expect(markup).toContain("2:30–3:15 PM");
     expect(markup).toContain("UTC−04:00");
-    expect(markup).toContain("Nothing is added yet");
     expect(markup).toContain(
       "Your calendar app will ask you to confirm before anything is added.",
     );
@@ -66,7 +68,7 @@ describe("calendar link Web experience", () => {
     );
 
     expect(markup).toMatch(
-      new RegExp(`class="[^"]*\\[overflow-wrap:anywhere\\][^"]*">${event.title}`, "u"),
+      new RegExp(`class="[^"]*break-words[^"]*"[^>]*>${event.title}\\.`, "u"),
     );
     expect(markup).toMatch(
       new RegExp(`class="[^"]*\\[overflow-wrap:anywhere\\][^"]*">${event.location}`, "u"),
@@ -74,13 +76,14 @@ describe("calendar link Web experience", () => {
     expect(markup).toMatch(
       new RegExp(`class="[^"]*\\[overflow-wrap:anywhere\\][^"]*">${event.notes}`, "u"),
     );
-    expect(markup).toContain("grid-cols-[62px_minmax(0,1fr)]");
+    expect(markup).toContain("min-w-0");
   });
 
   it("renders a direct recovery state without exposing parser details", () => {
     const markup = renderToStaticMarkup(<CalendarLinkUnavailable />);
     expect(markup).toContain("This invite can’t be opened.");
-    expect(markup).toContain("ask Murph to make a fresh calendar link");
+    expect(markup).toContain("Ask Murph to make a fresh calendar link.");
+    expect(markup).toContain('href="sms:"');
     expect(markup).not.toContain("payload");
   });
 

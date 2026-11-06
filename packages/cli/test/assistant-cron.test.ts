@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { writeFile } from 'node:fs/promises'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -45,7 +46,7 @@ import {
   setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from '@murphai/assistant-engine/assistant-cron'
-import { saveAssistantSelfDeliveryTarget } from '@murphai/operator-config/operator-config'
+import { resolveOperatorConfigPath } from '@murphai/operator-config/operator-config'
 
 const cleanupPaths: string[] = []
 let previousHome: string | undefined
@@ -213,17 +214,14 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
   process.env.HOME = homeRoot
 
   try {
-    await saveAssistantSelfDeliveryTarget(
-      {
-        channel: 'telegram',
-        deliverySource: null,
-        participantId: 'saved-chat',
-        threadId: 'saved-chat',
-        deliveryTarget: null,
-        identityId: null,
-      },
-      homeRoot,
-    )
+    const configPath = resolveOperatorConfigPath(homeRoot)
+    await mkdir(path.dirname(configPath), { recursive: true })
+    await writeFile(configPath, JSON.stringify({
+      schema: 'murph.operator-config.v1', defaultVault: null, updatedAt: '2026-11-02T12:00:00.000Z',
+      assistant: { selfDeliveryTargets: { telegram: {
+        channel: 'telegram', deliverySource: null, participantId: 'saved-chat', threadId: 'saved-chat', deliveryTarget: null, identityId: null,
+      } } },
+    }))
 
     const installed = await installAssistantCronPreset({
       vault: vaultRoot,

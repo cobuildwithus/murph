@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { afterEach, test, vi } from "vitest";
+import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
 
 import {
   healthCoreRuntimeMethodNames,
@@ -75,7 +76,6 @@ function createQueryRuntimeStub() {
     summarizeWearableMetricTrendRuntime: vi.fn(async () => undefined),
     summarizeWearableSleepRuntime: vi.fn(async () => undefined),
     summarizeWearableSleepPatternRuntime: vi.fn(async () => undefined),
-    buildPersonalPatternReportRuntime: vi.fn(async () => undefined),
     summarizeWearableActivityRuntime: vi.fn(async () => undefined),
     summarizeWearableBodyStateRuntime: vi.fn(async () => undefined),
     summarizeWearableDayRuntime: vi.fn(async () => undefined),
@@ -368,6 +368,194 @@ test("loadQueryRuntime clears the cache after a shape mismatch and retries clean
   assert.equal(recoveredRuntime, queryRuntime);
   assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/query"], ["@murphai/query"]]);
 });
+
+test("query-runtime-load times only cold shared loads, excludes the shape check and keeps reset semantics", async () => {
+  const queryRuntime = createQueryRuntimeStub();
+  const importFailure = new Error("synthetic import failure");
+  const original = process.hrtime.bigint;
+  let clock = 0n;
+  const advance = (ms: number) => { clock += BigInt(ms) * 1_000_000n; };
+  let attempt = 0;
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    assert.equal(specifier, "@murphai/query");
+    attempt += 1;
+    advance(5);
+    if (attempt === 1) throw importFailure;
+    if (attempt === 2) return {};
+    // The shape check reads this member after the timed load has resolved.
+    return Object.defineProperty({ ...queryRuntime }, "readVault", {
+      enumerable: true,
+      get() { advance(7); return queryRuntime.readVault; },
+    });
+  });
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    { "../src/runtime-import.ts": () => ({ loadRuntimeModule: loadRuntimeModuleMock }) },
+  );
+  // Same post-reset module instance (and AsyncLocalStorage) as runtime.ts.
+  const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+  function timed<T>(run: () => Promise<T>) {
+    let report: CliTiming | undefined;
+    let result: T | undefined;
+    const outcome = withCliTiming(() => timeCliDispatch("wearables latest", async () => { result = await run(); }),
+      (value) => { report = value; }).then(() => result);
+    const loads = () => {
+      assert.ok(report);
+      assert.deepEqual(normalizeCliTiming(report), report);
+      return report.commands[0]!.phases.filter((phase) => phase.phase.endsWith("-load"))
+        .map((phase) => [phase.phase, phase.count, phase.sumUs]);
+    };
+    return { outcome, loads };
+  }
+  const unavailable = { name: "VaultCliError", code: "runtime_unavailable" };
+
+  process.hrtime.bigint = () => clock;
+  try {
+    const failedImport = timed(() => runtimeModule.loadQueryRuntime());
+    await assert.rejects(failedImport.outcome, { ...unavailable, context: {
+      cause: "synthetic import failure",
+      packages: ["@murphai/core", "@murphai/importers", "@murphai/query", "incur"],
+    } });
+    assert.deepEqual(failedImport.loads(), [["query-runtime-load", 1, 5_000]]);
+
+    const failedShape = timed(() => runtimeModule.loadQueryRuntime());
+    await assert.rejects(failedShape.outcome, unavailable);
+    assert.deepEqual(failedShape.loads(), [["query-runtime-load", 1, 5_000]]);
+
+    const cold = timed(() => Promise.all([runtimeModule.loadQueryRuntime(), runtimeModule.loadQueryRuntime()]));
+    const [first, second] = (await cold.outcome) ?? [];
+    assert.ok(first);
+    assert.equal(first, second);
+    // One shared-promise owner; the 7 ms shape-check getter is outside the span.
+    assert.deepEqual(cold.loads(), [["query-runtime-load", 1, 5_000]]);
+
+    const warm = timed(() => runtimeModule.loadQueryRuntime());
+    assert.equal(await warm.outcome, first);
+    assert.deepEqual(warm.loads(), []);
+    assert.equal(await runtimeModule.loadQueryRuntime(), first);
+  } finally {
+    process.hrtime.bigint = original;
+  }
+  assert.equal(loadRuntimeModuleMock.mock.calls.length, 3);
+});
+
+test("importers-runtime-load times each importer import call and preserves its value and error", async () => {
+  const importersModule = { createImporters: vi.fn() };
+  const importFailure = new Error("synthetic importer import failure");
+  const original = process.hrtime.bigint;
+  let clock = 0n;
+  let attempt = 0;
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    assert.equal(specifier, "@murphai/importers");
+    attempt += 1;
+    clock += BigInt(attempt) * 1_000_000n; // 1 ms, then 2 ms, then 3 ms.
+    if (attempt === 1) throw importFailure;
+    return importersModule;
+  });
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    { "../src/runtime-import.ts": () => ({ loadRuntimeModule: loadRuntimeModuleMock }) },
+  );
+  // Same post-reset module instance (and AsyncLocalStorage) as runtime.ts.
+  const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+  let report: CliTiming | undefined;
+
+  process.hrtime.bigint = () => clock;
+  try {
+    await withCliTiming(() => timeCliDispatch("meal add", async () => {
+      await assert.rejects(runtimeModule.loadImportersRuntimeModule(), (error: unknown) => error === importFailure);
+      assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
+      assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
+    }), (value) => { report = value; });
+  } finally {
+    process.hrtime.bigint = original;
+  }
+
+  assert.ok(report);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  // No shared promise or retry owner: one sample per existing loader call.
+  assert.deepEqual(report.commands[0]!.phases.filter((phase) => phase.phase.endsWith("-load"))
+    .map((phase) => [phase.phase, phase.count, phase.sumUs]), [["importers-runtime-load", 3, 6_000]]);
+  assert.equal(loadRuntimeModuleMock.mock.calls.length, 3);
+  assert.equal(importersModule.createImporters.mock.calls.length, 0);
+  // Outside a CLI scope the loader is unchanged and records nothing.
+  assert.equal(await runtimeModule.loadImportersRuntimeModule(), importersModule);
+});
+
+for (const lookupKind of ["exact", "owner"] as const) {
+  test(`event-core-load times ${lookupKind} imports without timing reads or changing results/errors`, async () => {
+    const originalClock = process.hrtime.bigint;
+    let clock = 0n;
+    const advance = (ms: number) => { clock += BigInt(ms) * 1_000_000n; };
+    const event: import("@murphai/contracts").MealEventRecord = {
+      schemaVersion: "murph.event.v1", id: "evt_00000000000000000000000001",
+      kind: "meal", mealId: "meal_00000000000000000000000002", source: "manual",
+      occurredAt: "2026-01-01T12:00:00.000Z", recordedAt: "2026-01-01T12:00:00.000Z",
+      dayKey: "2026-01-01",
+      // Conversion/structuredClone touches this after the import has ended.
+      get title() { advance(11); return "PRIVATE_SENTINEL"; },
+    };
+    const ledgerFile = "ledger/events/2026/2026-01.jsonl";
+    const read = vi.fn(async () => { advance(7); return { eventId: event.id, ledgerFile, event }; });
+    const importFailure = Object.assign(new Error("PRIVATE_SENTINEL"), { details: { payload: "PRIVATE_SENTINEL" } });
+    let rejectImport = false;
+    const load = vi.fn(async (specifier: string) => {
+      assert.equal(specifier, "@murphai/core/event-read");
+      advance(5);
+      if (rejectImport) throw importFailure;
+      return { readEvent: read, readOwnedEvent: read };
+    });
+    const module = await importWithMocks<typeof import("../src/usecases/exact-event-record.ts")>(
+      "../src/usecases/exact-event-record.ts",
+      { "../src/runtime-import.ts": () => ({ loadRuntimeModule: load }) },
+    );
+    const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+    const run = () => lookupKind === "exact"
+      ? module.readExactEventRecord({ vault: "./PRIVATE_SENTINEL", lookup: ` ${event.id} `, entityLabel: "meal" })
+      : module.readOwnedEventRecord({ vault: "./PRIVATE_SENTINEL", lookup: ` ${event.mealId} `, kind: "meal" });
+    const reports: CliTiming[] = [];
+    const timed = async (action: () => Promise<void>) =>
+      withCliTiming(() => timeCliDispatch("meal show", action), (report) => { reports.push(report); });
+
+    process.hrtime.bigint = () => clock;
+    try {
+      const untimed = await run();
+      const values: Awaited<ReturnType<typeof run>>[] = [];
+      await timed(async () => { values.push(await run(), await run()); });
+      for (const value of values) {
+        assert.deepEqual(value, untimed);
+        assert.equal(value.event, event);
+      }
+      assert.equal(read.mock.calls.length, 3);
+      assert.equal(load.mock.calls.length, 3);
+      rejectImport = true;
+      await assert.rejects(timed(async () => { await run(); }), (error: unknown) => error === importFailure);
+      // Disabled instrumentation preserves the identical loader rejection too.
+      await assert.rejects(run(), (error: unknown) => error === importFailure);
+      assert.equal(read.mock.calls.length, 3);
+      assert.equal(load.mock.calls.length, 5);
+    } finally {
+      process.hrtime.bigint = originalClock;
+    }
+
+    assert.equal(reports.length, 2);
+    for (const [index, report] of reports.entries()) {
+      assert.deepEqual(normalizeCliTiming(report), report);
+      const command = report.commands[0]!;
+      assert.equal(command.outcome, index === 0 ? "ok" : "error");
+      const count = index === 0 ? 2 : 1;
+      assert.deepEqual(command.phases.filter((phase) => phase.phase.startsWith("event-")), [{
+        phase: "event-core-load", count, sumUs: count * 5_000, maxUs: 5_000,
+        buckets: [count, 0, 0, 0, 0, 0, 0, 0],
+      }]);
+      assert.equal(report.droppedSpans, 0);
+      assert.equal(report.droppedCalls, 0);
+      assert.equal(/PRIVATE_SENTINEL|evt_|meal_|ledger\//u.test(JSON.stringify(report)), false);
+    }
+    // Successful dispatch includes read and conversion work; the load phase does not.
+    assert.ok(reports[0]!.commands[0]!.phases.find((phase) => phase.phase === "dispatch")!.sumUs > 24_000);
+  });
+}
 
 test("loadIntegratedRuntime composes cached owner loaders and retries only the failed owner", async () => {
   const coreRuntime = createCoreRuntimeStub();

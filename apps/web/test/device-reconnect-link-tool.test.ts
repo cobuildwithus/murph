@@ -23,8 +23,6 @@ const configuredWhoopEnv = {
   JUNCTION_ENV: "sandbox",
   JUNCTION_PROVIDER_FILTER: "whoop_v2",
   JUNCTION_REGION: "us",
-  WHOOP_CLIENT_ID: "whoop-client",
-  WHOOP_CLIENT_SECRET: "whoop-secret",
 };
 
 describe("hosted device reconnect link tool", () => {
@@ -32,7 +30,7 @@ describe("hosted device reconnect link tool", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the Junction source slug to avoid choosing direct WHOOP", async () => {
+  it("resolves the WHOOP reconnect target from its Junction source slug", async () => {
     const { resolveHostedDeviceReconnectLinkTarget } = await import(
       "@/src/lib/device-sync/reconnect-link-tool"
     );
@@ -53,19 +51,35 @@ describe("hosted device reconnect link tool", () => {
     });
   });
 
-  it("refuses an ambiguous WHOOP target when direct and Junction routes are configured", async () => {
+  it.each([
+    { connectSourceId: null, connectTarget: null, sourceProviderSlug: null },
+    { connectSourceId: " ", connectTarget: "!!!", sourceProviderSlug: " " },
+    { connectSourceId: "oura", connectTarget: "whoop", sourceProviderSlug: "whoop_v2" },
+    { connectSourceId: "whoop", connectTarget: "oura", sourceProviderSlug: "whoop_v2" },
+    { connectSourceId: "whoop", connectTarget: "whoop", sourceProviderSlug: "oura" },
+    { connectSourceId: null, connectTarget: null, sourceProviderSlug: "unknown" },
+  ])("rejects missing or mismatched reconnect selectors: %j", async (selectors) => {
     const { resolveHostedDeviceReconnectLinkTarget } = await import(
       "@/src/lib/device-sync/reconnect-link-tool"
     );
+    expect(resolveHostedDeviceReconnectLinkTarget(configuredWhoopEnv, selectors))
+      .toEqual({ status: "missing" });
+  });
 
-    const result = resolveHostedDeviceReconnectLinkTarget(configuredWhoopEnv, {
-      connectSourceId: null,
-      connectTarget: "whoop",
-      sourceProviderSlug: null,
-    });
-
-    expect(result.status).toBe("ambiguous");
-    expect(result.status === "ambiguous" ? result.matches : []).toHaveLength(2);
+  it("matches all supplied normalized selectors against the same target", async () => {
+    const { resolveHostedDeviceReconnectLinkTarget } = await import(
+      "@/src/lib/device-sync/reconnect-link-tool"
+    );
+    expect(resolveHostedDeviceReconnectLinkTarget(configuredWhoopEnv, {
+      connectSourceId: " WHOOP ",
+      connectTarget: " WHOOP ",
+      sourceProviderSlug: " WHOOP_V2 ",
+    })).toMatchObject({ status: "found", target: {
+      connectSourceId: "whoop", connectTarget: "whoop", sourceProviderSlug: "whoop_v2",
+    } });
+    expect(resolveHostedDeviceReconnectLinkTarget({}, {
+      connectSourceId: "whoop", connectTarget: null, sourceProviderSlug: null,
+    })).toEqual({ status: "missing" });
   });
 
   it("does not issue a hosted reconnect target for configured Strava routes", async () => {
@@ -76,10 +90,6 @@ describe("hosted device reconnect link tool", () => {
     expect(resolveHostedDeviceReconnectLinkTarget({
       ...configuredWhoopEnv,
       JUNCTION_PROVIDER_FILTER: "strava",
-      STRAVA_CLIENT_ID: "strava-client",
-      STRAVA_CLIENT_SECRET: "strava-secret",
-      WHOOP_CLIENT_ID: "",
-      WHOOP_CLIENT_SECRET: "",
     }, {
       connectSourceId: "strava",
       connectTarget: null,

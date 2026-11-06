@@ -1,14 +1,12 @@
 # Command Surface
 
-Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
+Status: frozen baseline plus health extension fence for `vault-cli`
 
 ## Namespace
 
-- `murph` is the product CLI. It uses the selected active vault for normal commands, `murph onboard --vault <path>` creates or selects one during setup, and `murph use <path>` selects an existing vault for future product commands.
 - `vault-cli` is the raw explicit-vault and operator surface. The command synopses below list that explicit-vault contract because every canonical vault command names its target with `--vault <path>`.
-- `murph` and `vault-cli` are two UX layers over the same command graph; product aliases such as `murph run`, `murph status`, `murph doctor`, and `murph stop` must stay discovery-compatible with their explicit-vault equivalents.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
-- `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
+- `device` retains hosted provider discovery, connect and account command signatures. Authenticated device effects belong to the invocation-scoped hosted device tool; canonical health writes remain behind importers/core.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 - Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
@@ -30,29 +28,18 @@ vault-cli vault repair-inbox-envelopes --vault <path> [--dry-run] [--apply] [--m
 vault-cli vault compact-inbox-parser-attempts --vault <path> [--dry-run] [--apply] [--max-attempts <count>] [--request-id <id>]
 vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
+vault-cli audit receipt <xfm_id> --vault <path> [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli run --vault <path> [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--request-id <id>]
 vault-cli knowledge upsert --vault <path> --body <markdown> [--title <title>] [--slug <slug>] [--page-type <type>] [--status <status>] [--clear-library-links] [--library-slug <slug> ...] [--related-slug <slug> ...] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge append-section <slug> <heading> --vault <path> --body <markdown> [--title <title>] [--position prepend|append] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge list --vault <path> [--page-type <type>] [--status <status>] [--request-id <id>]
 vault-cli knowledge search <query> --vault <path> [--page-type <type>] [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli knowledge show <slug> --vault <path> [--request-id <id>]
+vault-cli knowledge show <slug> --vault <path> [--if-exists] [--request-id <id>]
 vault-cli knowledge lint --vault <path> [--request-id <id>]
 vault-cli knowledge log tail --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli knowledge index rebuild --vault <path> [--request-id <id>]
-vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
-vault-cli assistant doctor --vault <path> [--repair] [--request-id <id>]
-vault-cli assistant run --vault <path> [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--request-id <id>]
-vault-cli assistant stop --vault <path> [--request-id <id>]
-vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
-vault-cli doctor --vault <path> [--repair] [--request-id <id>]
-vault-cli stop --vault <path> [--request-id <id>]
-vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path> [--compact] [--record-only]
 vault-cli memory set-name <displayName> --vault <path> [--compact]
 vault-cli memory upsert <text> --vault <path> [--compact] --section <section>
@@ -61,7 +48,7 @@ vault-cli memory forget <memoryId> --vault <path> [--compact]
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
-vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
+vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>] [--include-instructions] [--cursor <automation-id>]
 vault-cli automation import-json --vault <path> --input @payload.json|-
 vault-cli device provider list --vault <path> [--baseUrl <url>]
 vault-cli device connect <target> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
@@ -69,12 +56,9 @@ vault-cli device account list --vault <path> [--baseUrl <url>] [--provider <prov
 vault-cli device account show <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device account reconcile <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>]
-vault-cli device daemon status --vault <path> [--baseUrl <url>]
-vault-cli device daemon start --vault <path> [--baseUrl <url>]
-vault-cli device daemon stop --vault <path> [--baseUrl <url>]
-vault-cli commons protocol list [--query <query>] [--category <category>] [--limit <n>]
-vault-cli commons protocol show <key-or-slug>
-vault-cli commons protocol explore <query> [--limit <n>]
+vault-cli commons goal list [--query <query>] [--category <category> ...] [--limit <n>]
+vault-cli commons goal show <key-or-slug>
+vault-cli commons knowledge search <query> [--limit <n>]
 vault-cli provider scaffold --vault <path> [--request-id <id>]
 vault-cli provider import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli provider show <id> --vault <path> [--request-id <id>]
@@ -106,12 +90,12 @@ vault-cli event encounter add --vault <path> --encounter-type <type> --occurred-
 vault-cli event procedure add --vault <path> --procedure <name> --occurred-at <ts> [--status ordered|planned|completed|cancelled] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event adverse-effect add --vault <path> --substance <text> --effect <text> --occurred-at <ts> [--severity mild|moderate|severe] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event exposure add --vault <path> --exposure-type <type> --substance <text> --occurred-at <ts> [--duration <text>] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
-vault-cli event edit <id> --vault <path> [--kind <kind>] [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
+vault-cli event edit <id> --vault <path> [--kind <kind>] [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli event show <id> --vault <path> [--request-id <id>]
 vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--request-id <id>]
 vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--reuse-exact] [--request-id <id>]
 vault-cli document workout-import-status <raw-ref> --vault <path> [--request-id <id>]
-vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
+vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
@@ -121,7 +105,7 @@ vault-cli capture show <id-or-label> --vault <path> [--request-id <id>]
 vault-cli capture list --vault <path> [--from <date>] [--to <date>] [--label <text>] [--body-site <text>] [--collection <text>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
 vault-cli capture manifest <id-or-label> --vault <path> [--request-id <id>]
 vault-cli meal add --vault <path> [--input @file.json|-] [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
-vault-cli meal edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--ingredient <text> ...] [--nutrition-calories <n>] [--nutrition-protein-grams <n>] [--nutrition-carbs-grams <n>] [--nutrition-fat-grams <n>] [--nutrition-fiber-grams <n>] [--nutrition-source <source>] [--nutrition-confidence <level>] [--nutrition-source-detail <text>] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-ingredients] [--clear-nutrition] [--day-key-policy keep|recompute] [--request-id <id>]
+vault-cli meal edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--tag <tag> ...] [--ingredient <text> ...] [--nutrition-calories <n>] [--nutrition-protein-grams <n>] [--nutrition-carbs-grams <n>] [--nutrition-fat-grams <n>] [--nutrition-fiber-grams <n>] [--nutrition-source <source>] [--nutrition-confidence <level>] [--nutrition-source-detail <text>] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-tags] [--clear-ingredients] [--clear-nutrition] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal show <id> --vault <path> [--request-id <id>]
 vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli measurement add --vault <path> [--metric <name> ...] [--value <number> ...] [--unit <unit> ...] [--qualifier <key=value> ...] [--measurement-note <text> ...] [--media <path> ...] [--note <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
@@ -155,13 +139,13 @@ vault-cli workout import-json --vault <path> --input @file.json|- [--duration <m
 vault-cli workout payload-schema
 vault-cli workout import inspect <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi]
 vault-cli workout import csv <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi] [--store-raw-only] [--correct-units]
-vault-cli workout edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--duration <minutes>] [--type <type>] [--distance-km <km>] [--workout-source-app <slug>] [--workout-source-workout-id <id>] [--workout-started-at <ts>] [--workout-ended-at <ts>] [--workout-routine-id <id>] [--workout-routine-name <text>] [--workout-session-note <text>] [--workout-media <fields> ...] [--workout-exercise <fields> ...] [--workout-set <fields> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-distance] [--clear-workout] [--day-key-policy keep|recompute] [--request-id <id>]
+vault-cli workout edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--tag <tag> ...] [--duration <minutes>] [--type <type>] [--distance-km <km>] [--workout-source-app <slug>] [--workout-source-workout-id <id>] [--workout-started-at <ts>] [--workout-ended-at <ts>] [--workout-routine-id <id>] [--workout-routine-name <text>] [--workout-session-note <text>] [--workout-media <fields> ...] [--workout-exercise <fields> ...] [--workout-set <fields> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-tags] [--clear-duration] [--clear-distance] [--clear-workout] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
 vault-cli workout format show <name> --vault <path> [--request-id <id>]
 vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--regimen-id <regimenId>] [--experiment <slug-or-id>] [--skip-experiment-link] [--allow-out-of-window] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
-vault-cli intervention edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--type <type>] [--duration <minutes>] [--regimen-id <id>] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-regimen-id] [--day-key-policy keep|recompute] [--request-id <id>]
+vault-cli intervention edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--tag <tag> ...] [--type <type>] [--duration <minutes>] [--regimen-id <id>] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-tags] [--clear-duration] [--clear-regimen-id] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
 vault-cli samples add --vault <path> --stream <stream> --unit <unit> --recorded-at <ts> [--value <number>] [--source <source>] [--quality <quality>] [--stage <stage>] [--start-at <ts>] [--end-at <ts>] [--duration-minutes <n>] [--source-path <path>] [--batch-source-file-name <name>] [--batch-preset-id <id>] [--batch-delimiter <char>] [--batch-timestamp-column <name>] [--batch-value-column <name>] [--batch-metadata-columns <name> ...] [--request-id <id>]
 vault-cli samples import-json --vault <path> --input @file.json [--request-id <id>]
@@ -173,10 +157,10 @@ vault-cli samples show <id> --vault <path> [--request-id <id>]
 vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]
 vault-cli samples batch show <id> --vault <path> [--request-id <id>]
 vault-cli samples batch list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
-vault-cli experiment start <slug> --vault <path> (--from-protocol <key-or-route> | --custom) [--test-plan-id <id>] [--page-revision-id sha256:<64-hex>] [--run-spec-revision-id sha256:<64-hex>] [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--intervention-start <date>] [--intervention-end <date>] [--baseline-start <date>] [--baseline-end <date>] [--baseline-days <n>] [--intervention-days <n>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--primary-biomarker-key biomarker:<key>] [--secondary-biomarker-key biomarker:<key> ...] [--analysis-anchor role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:<key> ...] [--planned-measurement role=followup,kind=lab_panel,window=<date>..<date>,biomarkerKeys=biomarker:<key> ...] [--dry-run] [--request-id <id>]
+vault-cli experiment start <slug> --vault <path> --primary-outcome-key biomarker:<key> [--primary-outcome-kind <kind>] [--primary-outcome-label <label>] [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--intervention-start <date>] [--intervention-end <date>] [--baseline-start <date>] [--baseline-end <date>] [--baseline-days <n>] [--intervention-days <n>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--primary-biomarker-key biomarker:<key>] [--secondary-biomarker-key biomarker:<key> ...] [--analysis-anchor role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:<key> ...] [--planned-measurement role=followup,kind=lab_panel,window=<date>..<date>,biomarkerKeys=biomarker:<key> ...] [--dry-run] [--request-id <id>]
 vault-cli experiment show <id> --vault <path> [--request-id <id>]
 vault-cli experiment list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli experiment edit <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--protocol-key protocol_variant:<key>] [--page-revision-id sha256:<64-hex>] [--run-spec-revision-id sha256:<64-hex>] [--test-plan-id <id>] [--baseline-days <n>] [--intervention-days <n>] [--intervention-start <date>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--analysis-anchor role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:<key> ...] [--planned-measurement role=followup,kind=lab_panel,window=<date>..<date>,biomarkerKeys=biomarker:<key> ...] [--setup-answer <id=value> ...] [--reminder-policy <id>] [--missed-log-followup <policy>] [--request-id <id>]
+vault-cli experiment edit <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--baseline-days <n>] [--intervention-days <n>] [--intervention-start <date>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--analysis-anchor role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:<key> ...] [--planned-measurement role=followup,kind=lab_panel,window=<date>..<date>,biomarkerKeys=biomarker:<key> ...] [--setup-answer <id=value> ...] [--reminder-policy <id>] [--missed-log-followup <policy>] [--request-id <id>]
 vault-cli experiment checkpoint <lookup> --vault <path> [--occurred-at <ts>] [--title <title>] [--note <text>] [--request-id <id>]
 vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note "..."] [--request-id <id>]
 vault-cli experiment session log <lookup> --vault <path> [--reminder-intent-id <outbox-id>] [--date <YYYY-MM-DD>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--intervention-type <type>] [--status completed|partial|missed|skipped] [--session-status completed|partial|missed|skipped] [--duration-minutes <n>] [--protocol-id <id>] [--timing <text>] [--temperature-c <number>] [--after-exercise] [--symptoms <text> ...] [--confounders <text> ...] [--confounder <key=value> ...] [--request-id <id>]
@@ -223,6 +207,14 @@ vault-cli supplement compound list --vault <path> [--status <status>] [--limit <
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 ```
 
+`automation list --include-instructions` returns at most 20 records and 48 KiB
+of data JSON per page in immutable-id order. Follow every `nextCursor`, retaining
+the same filters. An oversized instruction body is `null` with
+`instructionsComplete: false`; read that exact automation before judging it.
+This mode is incompatible with `--compact`. Ordinary listings retain their
+existing projection and ordering. Mutation candidates still require exact
+readback and their current revision.
+
 When `experiment session log` receives `--reminder-intent-id`, the strict sent outbox intent is the immutable occurrence proof. The canonical writer validates private provider delivery, the exact `experiment:<experimentId>` support owner, `scheduledOccurrenceAt`, and `plannedOccurrenceAt`; derives one event identity from the experiment and planned occurrence; returns the existing event when the same planned session is confirmed through an identical retry or another accepted reminder; rejects a replay that changes the already logged effect so the caller can edit that event explicitly; and includes canonical experiment progress in the result. `--date`, `--occurred-at`, and `--source` are invalid in this mode because the writer derives the occurrence and records an explicit manual report. A legacy reminder without `plannedOccurrenceAt` remains conversational context and must use ordinary plan-based session resolution rather than this strict writer. Later automation edits, archival, or deletion do not invalidate the historical occurrence; the current automation revision and consent remain pre-send authority for future delivery.
 
 `medication history add` is a medication-only facade over the private regimen registry for completed courses copied from records. It creates `kind: medication` regimen records, defaults to `status: completed` and `group: medication/history`, and uses a date-qualified slug derived from the title plus `startedOn`/`stoppedOn` so repeated historical courses do not collide or become active regimens or point-in-time intake events. Current medication creation and updates stay on `regimen save --kind medication`.
@@ -255,15 +247,15 @@ Patch-style edit commands (`event`, `document`, `meal`, `workout`, `intervention
 
 For event-backed edit commands (`event`, `document`, `meal`, `workout`, `intervention`), changing `occurredAt` or `timeZone` without setting `dayKey` directly now requires `--day-key-policy keep|recompute`. This prevents silent stale-day retention and prevents legacy records without explicit `timeZone` provenance from silently materializing the vault default timezone into the saved record during edits.
 
-`vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state only. Durable user-facing memory is managed through the top-level canonical `memory` noun backed by `bank/memory.md`, and durable scheduled assistant prompts are managed through the top-level canonical `automation` noun backed by `bank/automations/*.md`. Accepted inbound assistant-automation captures may still auto-preserve stored document attachments into the canonical document import surface before reply behavior runs, while leaving the original inbox capture evidence in place under `raw/inbox/**`. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, and other assistant runtime artifacts live under `vault/.runtime/operations/assistant/**` for read-only `status` / `doctor` inspection. Session JSON keeps only public provider headers; secret-bearing provider headers live in private sidecars under `vault/.runtime/operations/assistant/secrets/**`, and `assistant doctor --repair` can tighten permissive runtime modes in place. Assistant ask/chat and the root `chat` shorthand are Codex App Server surfaces only: they accept Codex launch/config overrides such as `--codexCommand`, `--codexHome`, `--modelProvider`, `--reasoningEffort`, `--sandbox`, `--approvalPolicy never`, and `--profile`. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, and the canonical vault remains authoritative.
+`vault-cli assistant onboarding` reads or updates the shared hosted onboarding lifecycle. Durable user-facing memory is managed through the top-level canonical `memory` noun backed by `bank/memory.md`, and durable scheduled assistant prompts are managed through the top-level canonical `automation` noun backed by `bank/automations/*.md`. Accepted inbound assistant-automation captures may still auto-preserve stored document attachments into the canonical document import surface before reply behavior runs, while leaving the original inbox capture evidence in place under `raw/inbox/**`. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, and other assistant runtime artifacts live under `vault/.runtime/operations/assistant/**`. Session JSON keeps only public provider headers; secret-bearing provider headers live in private sidecars under `vault/.runtime/operations/assistant/secrets/**`. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, and the canonical vault remains authoritative.
 
 Assistant personality settings remain canonical product state in the active runtime's `bank/preferences.json`, owned by core preference usecases. They are intentionally absent from the raw CLI so no registered general command advertises an audience-independent path to them. Private direct turns and authenticated hosted Linq group turns receive the exact-turn `murph.assistant_style` operation instead; the former targets the person runtime and the latter targets only the synthetic room runtime. Hosted mutations obtain the current provider batch's runtime-owned causal frontier, equal to the newest exact-successor sequence admitted before provider start; the model cannot supply or rewrite that number or a target member. Synthetic room writes also require the accepted input's current non-direct Linq route authority, and group email cannot mutate room style. Per-field watermarks live in the bounded companion `bank/assistant-preference-mutations.json` and are committed by the same owner. This is a registered-tool and prompt-surface policy, not a filesystem sandbox around the privileged Codex runtime. The first personality-aware reader/writer release remains the rollback floor because older strict readers can reject `assistant.personality`.
 
-Assistant delivery targets are transport-native strings only; serialized objects such as JSON blobs or `[object Object]` are rejected before outbound delivery. `assistant status --session <id>` preflights the session id and fails with the assistant session-not-found error instead of silently falling back to a global empty status window.
+Assistant delivery targets are transport-native strings only; serialized objects such as JSON blobs or `[object Object]` are rejected before outbound delivery.
 
-The existing assistant runtime commands remain runtime inspection/control only. Any future user-facing, queryable, or durable assistant setting must pass the persisted-state placement gate: canonical product state is not an `assistant` runtime CRUD surface, so it must use a core-owned canonical record or explicit derived materialization.
+Onboarding state remains runtime lifecycle state. Any future user-facing, queryable, or durable assistant setting must pass the persisted-state placement gate: canonical product state is not an `assistant` runtime CRUD surface, so it must use a core-owned canonical record or explicit derived materialization.
 
-`vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt plus the first-class assistant knowledge tools, not in `AGENTS.md`.
+`vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. `knowledge show` fails with `knowledge_page_not_found` for a missing slug; for an optional page, `--if-exists` instead returns `page: null` and `degradation: null`, but only when every generic page parses, because an invalid page could still declare the slug. Otherwise it fails with `knowledge_page_invalid`, and it never writes. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt, which routes wiki reads and writes through these `vault-cli knowledge` commands, not in `AGENTS.md`.
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-` or `--input @file.jsonl|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract and returns the Murph-owned JSON contract as `murph.payload-schema.v1`. Scaffold commands are examples, not complete writable contracts. The current supported payload-schema tranche covers `condition import-json`, `blood-test import-json`, `encounter import-json`, `workout import-json`, `assertion import-json`, `vitals import-json`, `diagnostic-test import-json`, `clinical-note import-json`, `social-history import-json`, and per-line `event import-jsonl` rows. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
 
@@ -332,8 +324,9 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` / `food unschedule` add the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals or clearing that rule explicitly.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `regimen` is the private medication, supplement, therapy, and habit registry noun; it is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
-- `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON import plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
+- `protocol` is the private reusable-adaptation noun; it exposes explicit reviewed JSON import plus readable/list surfaces. Health Commons no longer publishes public protocols.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
+- `profile` is the facade for stable personal health facts with no other record family. `profile show` returns the current blood type and `profile set --blood-type` saves one as a single blood-test result with slug `blood-type`; it adds no storage family. The current value is the most recently saved recognizable result (by `recordedAt`, then `occurredAt`, then id), including legacy results labelled ABO group, ABO/Rh or blood type and panels with separate ABO and Rh rows. `set` returns `unchanged` only for an exact retry; new evidence for the same value is appended.
 - `assertion` is the bounded explicit clinical assertion facade for negative, denied, normality, and no-known-* facts. It writes canonical `kind: "clinical_assertion"` events rather than allergy, condition, or social-history records.
 - `vitals` is a visit-import convenience facade over canonical `kind: "measurement"` events.
 - `diagnostic-test` is a general test-result import facade over canonical `kind: "test"` events when the specialized `blood-test` noun is too narrow.
@@ -354,14 +347,10 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `vault` exposes `show | stats | repair | update`.
 - `export` exposes `create | show | list | materialize | prune`.
 - `audit` exposes `show | list | tail`.
-- `assistant` is a Codex App Server-backed orchestration noun for local turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
+- `assistant onboarding` exposes the hosted lifecycle commands `status`, `resume-context`, `complete`, and `reopen`; canonical health writes remain owned by their existing vault commands.
 - `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show`, save the user's preferred display name with the typed `set-name` command, and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids. Group runtimes receive the preferred display name through the consented `profile-name.v0` vault-share projection from memory.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
-- Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
-- Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
-- Top-level `run` is a shorthand alias for `assistant run`; it shares the same option/output contract so installed `murph run` discovery stays truthful while keeping automation explicit.
-- Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `murph stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
-- `device` is backed locally by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault. In hosted execution, `device account list` and `device account reconcile` use the invocation-scoped bridge instead of starting a local daemon.
+- `device` retains the hosted catalog and account command contracts. The local daemon and launcher are retired.
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
@@ -372,7 +361,7 @@ Registry-backed readable/list surfaces may expose noun-specific filters where th
 Every command now uses native `incur` command definitions directly:
 
 1. `incur` validates positional arguments and named options against the command schema.
-2. The handler receives parsed `args` and `options` and delegates to the owning boundary surface for that noun. Current owners include `core`, `importers`, `query`, `vault-usecases`, `inbox-services`, `device-syncd`, `assistant-cli`/`assistant-engine`, and gateway packages. Canonical health writes still terminate in `packages/core`.
+2. The handler receives parsed `args` and `options` and delegates to the owning boundary surface for that noun. Current owners include `core`, `importers`, `query`, `vault-usecases`, `inbox-services`, `device-syncd`, `assistant-engine`, and gateway packages. Canonical health writes still terminate in `packages/core`.
 3. The handler returns the command-specific payload directly.
 4. Plain `--format json` writes that payload body directly to stdout.
 5. `--full-output --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.
@@ -394,8 +383,8 @@ Read surfaces intentionally separate summary from detail:
 
 ## Shared Option Rules
 
-- `--vault <path>` is required for canonical vault commands so the target vault is explicit. `device` commands also require it so Murph can manage the local daemon and its launcher state for that vault, even when callers override the control-plane endpoint with `--baseUrl`.
-- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `DEVICE_SYNC_BASE_URL` and then the Murph-managed local daemon default.
+- `--vault <path>` is required for canonical vault commands so the target vault is explicit.
+- `--baseUrl <url>` remains in device command signatures. Hosted execution rejects explicit local control-plane targets.
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
 - Machine-stable callers that need metadata or CTA suggestions should prefer `--full-output --format json`. The payload examples below describe the `data` body emitted by plain JSON mode.

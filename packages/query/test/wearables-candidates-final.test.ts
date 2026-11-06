@@ -1172,3 +1172,15 @@ test("exported helpers merge and group wearable candidates deterministically", (
   assert.equal(fallbackBase.title, "Fallback title");
   assert.equal(fallbackBase.candidateId.startsWith("oura:2026-04-03:sample:steps"), true);
 });
+
+
+test("candidate origin keeps absent, valid and invalid metadata inference equivalent", () => {
+  const entity = makeEntity({ entityId: "evt_origin_synthetic", family: "event", kind: "observation", recordClass: "ledger" });
+  const externalRef = makeExternalRef({ system: "junction", resourceType: "junction-whoop-sleep" });
+  const inferred = { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop", originConfidence: "low" };
+  const valid = { ...inferred, originConfidence: "high" };
+  for (const value of [undefined, null, "invalid", {}, { version: 999 }, valid]) {
+    const candidate = createMetricCandidateBase({ ...entity, attributes: { dataOrigin: value } }, "junction", externalRef, "2026-06-01", "event", "observation");
+    assert.deepEqual(candidate.dataOrigin, value === valid ? valid : inferred);
+  }
+});

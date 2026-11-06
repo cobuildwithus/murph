@@ -18,6 +18,7 @@ export const MURPH_DEFAULT_METADATA_DESCRIPTION =
 export const MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION =
   "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
 export const MURPH_IOS_APP_STORE_ID = "6786145859";
+export const MURPH_IOS_APP_STORE_URL = `https://apps.apple.com/us/app/murph-ai/id${MURPH_IOS_APP_STORE_ID}`;
 export const MURPH_PUBLIC_SITE_URL = "https://www.withmurph.ai";
 
 export const MURPH_INDEXABLE_PAGE_ROBOTS = {

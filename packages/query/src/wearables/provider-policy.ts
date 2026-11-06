@@ -40,28 +40,6 @@ export function resolveWearableProviderPriority(
   });
 }
 
-export function isPreferredWearableProvider(
-  metric: WearableMetricKey,
-  provider: string,
-  providers: readonly string[],
-  options: {
-    metricFamily?: WearableMetricPolicyFamily;
-  } = {},
-): boolean {
-  const normalizedProvider = normalizeLowercaseString(provider);
-
-  if (!normalizedProvider) {
-    return false;
-  }
-
-  const bestProvider = [...providers]
-    .map((value) => normalizeLowercaseString(value))
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => compareWearableProviders(metric, left, right, options))[0];
-
-  return bestProvider === normalizedProvider;
-}
-
 export function compareWearableProviders(
   metric: WearableMetricKey,
   left: string,
@@ -173,6 +151,12 @@ export function sourceFamilyScore(family: WearableCandidateSourceFamily): number
   }
 }
 
+export function isActivitySummaryResource(resourceType: string | null | undefined): boolean {
+  const normalized = normalizeLowercaseString(resourceType);
+  return Boolean(normalized)
+    && ["activity", "cycle", "summary"].some((token) => normalized?.includes(token));
+}
+
 export function resourceTypeScore(
   metric: WearableMetricKey,
   resourceType: string | null | undefined,
@@ -190,10 +174,7 @@ export function resourceTypeScore(
     return 4;
   }
 
-  if (
-    ACTIVITY_METRIC_KEYS.has(metric)
-    && (normalized.includes("activity") || normalized.includes("cycle") || normalized.includes("summary"))
-  ) {
+  if (ACTIVITY_METRIC_KEYS.has(metric) && isActivitySummaryResource(normalized)) {
     return 4;
   }
 

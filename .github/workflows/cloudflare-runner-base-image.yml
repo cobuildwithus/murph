@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/cloudflare-runner-base-image.yml"
       - "Dockerfile.cloudflare-hosted-runner-base"
+      - "patches/codex-public-live.patch"
       - "apps/cloudflare/scripts/runner-base-image.ts"
       - "apps/cloudflare/scripts/runner-base-image-contract.ts"
       - "apps/cloudflare/package.json"
@@ -20,14 +21,14 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: Publish runner base image
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -46,6 +47,11 @@ jobs:
 
       - name: Login to GHCR
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Registry cache export requires the container driver when the Docker
+      # daemon does not have the containerd image store enabled.
+      - name: Create isolated BuildKit builder
+        run: docker buildx create --name runner-base-publisher --driver docker-container --use
 
       - name: Publish runner base image
         run: pnpm --dir apps/cloudflare runner:docker:base -- --push

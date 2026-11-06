@@ -1,3 +1,8 @@
+const usageGate = vi.hoisted(() => vi.fn(async () => ({ allowed: true })));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async original => ({
+  ...await original<typeof import("@/src/lib/hosted-execution/usage-allowance")>(), readHostedAiUsageGate: usageGate,
+}));
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { ComputerUseCrypto } from "../src/lib/computer-use/crypto";
@@ -46,6 +51,19 @@ type MockComputerUseStore = ComputerUseStore & {
 };
 
 describe("Kernel managed-login handoffs", () => {
+  it("denies a new managed-login provider effect when AI usage is unavailable", async () => {
+    const run = createRun();
+    const store = createStore({ handoff: createHandoff(), run });
+    const kernel = createKernel();
+    const service = new ComputerUseService({ kernel, now: () => NOW, store });
+    usageGate.mockResolvedValueOnce({ allowed: false });
+    await expect(service.continueManagedLoginHandoff({ memberId: run.memberId, token: "handoff-token" }))
+      .rejects.toMatchObject({ code: "HOSTED_COMPUTER_USAGE_REQUIRED", httpStatus: 403 });
+    expect(store.claimHandoffForCompletion).not.toHaveBeenCalled();
+    expect(kernel.startManagedAuthLogin).not.toHaveBeenCalled();
+    expect(kernel.createBrowser).not.toHaveBeenCalled();
+  });
+
   it("routes managed login without decrypting the task Live View", async () => {
     const run = createRun();
     const handoff = createHandoff();

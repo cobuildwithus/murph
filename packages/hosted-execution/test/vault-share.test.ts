@@ -34,6 +34,7 @@ import {
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
+  serializeHostedVaultShareProjectionContentDigestInput,
 } from "../src/vault-share.ts";
 
 const TEST_SOURCE_WORKSPACE_VERSION = "7";
@@ -758,16 +759,18 @@ describe("vault-share contracts", () => {
     ).toThrow(/known vault-share projection kind/u);
   });
 
-  it("parses only opaque tokens for active projection scopes", () => {
+  it("parses only opaque tokens and source versions for active projection scopes", () => {
     const scopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
     const generationToken = "b".repeat(43);
     expect(parseHostedVaultShareActiveProjectionKindsResponse({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      publishedSourceWorkspaceVersionByProjectionScopeKey: { [scopeKey]: "7" },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toEqual({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
       hasDeferredProjectionWork: false,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: { [scopeKey]: "7" },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     });
@@ -784,6 +787,44 @@ describe("vault-share contracts", () => {
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toThrow(/SHA-256 base64url digest/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: "7",
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/inactive scope key/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [scopeKey]: "not-a-version",
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/canonical PostgreSQL bigint version/u);
+  });
+
+  it("serializes current-state content digests without runtime-controlled occurrence time", () => {
+    const older = serializeHostedVaultShareProjectionContentDigestInput({
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Theo" },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: "a".repeat(32),
+      }],
+    });
+    const newer = serializeHostedVaultShareProjectionContentDigestInput({
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Theo" },
+        occurredAt: "2026-10-02T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: "a".repeat(32),
+      }],
+    });
+
+    expect(newer).toBe(older);
+    expect(newer).not.toContain("occurredAt");
   });
 
   it("parses the fixed-width deferred-work signal and rejects non-booleans", () => {
@@ -2487,5 +2528,32 @@ describe("profile-name.v0 delivery records", () => {
         })
       ).toThrow(/displayName/u);
     }
+  });
+});
+
+
+describe("sleep session qualification at sharing ingress", () => {
+  const record = {
+    recordKey: "2026-04-10.garmin", occurredAt: "2026-04-10T00:00:00.000Z",
+    source: { source: "garmin", label: "Garmin" },
+    data: { date: "2026-04-10", metricKey: "total-sleep-minutes", unit: "minutes", value: 38 },
+  };
+  const scope = { projectionKind: "sleep-duration-days.v0" } as const;
+  it("preserves bounded qualifications and accepts old unqualified records", () => {
+    expect(parseHostedVaultShareDeliveryRecord(record, scope)).toEqual(record);
+    for (const sleepType of ["main_sleep", "short_sleep", "nap", "unknown"] as const) {
+      for (const sleepState of ["tentative", "confirmed"] as const) {
+        const qualified = { ...record, data: { ...record.data, sleepType, sleepState } };
+        expect(parseHostedVaultShareDeliveryRecord(qualified, scope)).toEqual(qualified);
+      }
+    }
+  });
+  it("rejects invalid classifications and qualifiers on unrelated metrics", () => {
+    for (const invalid of [{ sleepType: "rest" }, { sleepState: "finished" }]) {
+      expect(() => parseHostedVaultShareDeliveryRecord({ ...record, data: { ...record.data, ...invalid } }, scope)).toThrow();
+    }
+    expect(() => parseHostedVaultShareDeliveryRecord({
+      ...record, data: { ...record.data, metricKey: "steps", unit: "count", sleepType: "short_sleep" },
+    }, { projectionKind: "steps-days.v0" })).toThrow(/does not accept sleep classification/u);
   });
 });

@@ -7,11 +7,9 @@ import { afterEach, test } from 'vitest'
 
 import {
   resolveOperatorConfigPath,
-  saveDefaultVaultConfig,
 } from '../src/operator-config.ts'
 import {
   expandConfiguredVaultPath,
-  normalizeVaultForConfig,
   pathExists,
   readOperatorConfigFile,
   resolveOperatorHomeDirectory,
@@ -39,7 +37,7 @@ test('operator config writes private directory and file modes on non-windows hos
   const vaultDirectory = path.join(homeDirectory, 'vaults', 'primary')
   await mkdir(vaultDirectory, { recursive: true })
 
-  await saveDefaultVaultConfig(vaultDirectory, homeDirectory)
+  await writeOperatorConfigFile(resolveOperatorConfigPath(homeDirectory), '{}\n')
 
   if (process.platform === 'win32') {
     return
@@ -56,12 +54,8 @@ test('operator config writes private directory and file modes on non-windows hos
 test('operator config storage normalizes vault paths and home-directory fallbacks', () => {
   const homeDirectory = path.resolve('/tmp/operator-config-home')
   const nestedVault = path.join(homeDirectory, 'vaults', 'primary')
-  const outsideVault = path.resolve('/tmp/operator-config-other')
 
   assert.equal(resolveOperatorHomeDirectory({ HOME: '   ' }), path.resolve(os.homedir()))
-  assert.equal(normalizeVaultForConfig(homeDirectory, homeDirectory), '~')
-  assert.equal(normalizeVaultForConfig(nestedVault, homeDirectory), '~/vaults/primary')
-  assert.equal(normalizeVaultForConfig(outsideVault, homeDirectory), outsideVault)
 
   assert.equal(expandConfiguredVaultPath('~', homeDirectory), homeDirectory)
   assert.equal(expandConfiguredVaultPath('~/vaults/primary', homeDirectory), nestedVault)

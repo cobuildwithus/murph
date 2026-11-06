@@ -13,6 +13,21 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime log contracts", () => {
+  it("accepts only fixed thread rotation labels and numeric automation preparation timings", () => {
+    for (const reason of [null, "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled"]) {
+      expect(parseHostedRuntimeRedactedJson({ threadRotationReason: reason }, "log")).toEqual({ threadRotationReason: reason });
+    }
+    for (const value of ["private-unrecognized-reason", 7, {}, true]) {
+      expect(() => parseHostedRuntimeRedactedJson({ threadRotationReason: value }, "log")).toThrow();
+    }
+    for (const key of ["automationGroupAndOperationScopeMs", "automationTerminalEvidenceMs", "automationSessionPreflightMs", "automationCrossSessionContextMs", "automationPromptPreparationMs"]) {
+      expect(parseHostedRuntimeRedactedJson({ [key]: 12 }, "log")).toEqual({ [key]: 12 });
+      for (const value of ["private timing text", -1, Infinity, true]) {
+        expect(() => parseHostedRuntimeRedactedJson({ [key]: value }, "log")).toThrow();
+      }
+    }
+  });
+
   it("exports the structural redacted JSON parser with privacy guards intact", () => {
     expect(parseHostedRuntimeRedactedJson(
       { importedCount: 2 },
@@ -175,7 +190,7 @@ describe("hosted runtime log contracts", () => {
         jsonType: "object",
         jsonValid: true,
         methodKind: "POST",
-        modelKind: "gpt-5.6-terra",
+        modelKind: "gpt-6.1-sol",
         previousResponseFingerprint: `hmac-sha256:${"c".repeat(64)}`,
         previousResponseFingerprintPresent: true,
         previousResponsePresent: true,
@@ -446,6 +461,8 @@ describe("hosted runtime log contracts", () => {
         rawPayloadBytes: 2048,
         routePlanningActiveExperimentContextElapsedMs: 6000,
         routePlanningAssistantContextSnapshotElapsedMs: 8,
+        routePlanningAssistantContextSnapshotRefreshElapsedMs: 7,
+        routePlanningFollowUpContextElapsedMs: 6,
         routePlanningCliBootstrapElapsedMs: null,
         routePlanningElapsedMs: 16,
         routePlanningFallbackInstructionsElapsedMs: null,
@@ -473,6 +490,8 @@ describe("hosted runtime log contracts", () => {
       rawPayloadBytes: 2048,
       routePlanningActiveExperimentContextElapsedMs: 6000,
       routePlanningAssistantContextSnapshotElapsedMs: 8,
+      routePlanningAssistantContextSnapshotRefreshElapsedMs: 7,
+      routePlanningFollowUpContextElapsedMs: 6,
       routePlanningCliBootstrapElapsedMs: null,
       routePlanningElapsedMs: 16,
       routePlanningFallbackInstructionsElapsedMs: null,
@@ -493,6 +512,8 @@ describe("hosted runtime log contracts", () => {
     for (const timingKey of [
       "routePlanningActiveExperimentContextElapsedMs",
       "routePlanningAssistantContextSnapshotElapsedMs",
+      "routePlanningAssistantContextSnapshotRefreshElapsedMs",
+      "routePlanningFollowUpContextElapsedMs",
       "routePlanningElapsedMs",
       "routePlanningPrimarySystemPromptElapsedMs",
       "routePlanningVaultOverviewElapsedMs",

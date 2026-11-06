@@ -1,8 +1,10 @@
+import { HOSTED_RUNTIME_POLL_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_CONNECTED_APPS_PATH,
 } from "@murphai/hosted-execution/connected-apps";
 import {
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -38,12 +40,13 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
   HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
+  HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LABS_TOOL_PATH,
@@ -52,13 +55,16 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  HOSTED_RUNTIME_VOICE_INPUT_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
   HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+  HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
@@ -163,6 +169,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "clinical_records_connect_link",
     HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
   ),
+  clinicalRecordsFetchDocument: defineHostedRunnerWebControlPostRoute(
+    "clinical_records_fetch_document",
+    HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
+  ),
   clinicalRecordsFetchPage: defineHostedRunnerWebControlPostRoute(
     "clinical_records_fetch_page",
     HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
@@ -174,10 +184,6 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   clinicalRecordsRecordOutcome: defineHostedRunnerWebControlPostRoute(
     "clinical_records_record_outcome",
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
-  ),
-  codexAuthUpdate: defineHostedRunnerWebControlPostRoute(
-    "codex_auth_update",
-    HOSTED_RUNTIME_CODEX_AUTH_PATH,
   ),
   connectedApps: defineHostedRunnerWebControlPostRoute(
     "connected_apps",
@@ -198,6 +204,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   deviceSyncPendingDirtyState: defineHostedRunnerWebControlPostRoute(
     "device_sync_pending_dirty_state",
     HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
+  ),
+  companionPresence: defineHostedRunnerWebControlPostRoute(
+    "companion_presence",
+    "/api/internal/companion/presence",
   ),
   deviceSyncReconcile: defineHostedRunnerWebControlPostRoute(
     "device_sync_reconcile",
@@ -223,6 +233,7 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "group_tool",
     HOSTED_RUNTIME_GROUP_TOOL_PATH,
   ),
+  pollTool: defineHostedRunnerWebControlPostRoute("poll_tool", HOSTED_RUNTIME_POLL_TOOL_PATH),
   imessageContactTool: defineHostedRunnerWebControlPostRoute(
     "imessage_contact_tool",
     HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
@@ -242,6 +253,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   mailboxFetch: defineHostedRunnerWebControlPostRoute(
     "mailbox_fetch",
     HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  ),
+  voiceInput: defineHostedRunnerWebControlPostRoute(
+    "voice_input",
+    HOSTED_RUNTIME_VOICE_INPUT_PATH,
   ),
   mailboxPayloadFetch: defineHostedRunnerWebControlPostRoute(
     "mailbox_payload_fetch",
@@ -283,9 +298,21 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "physical_note_send",
     HOSTED_PHYSICAL_NOTES_PATH,
   ),
+  imageGenerationAccess: defineHostedRunnerWebControlPostRoute(
+    "image_generation_access",
+    HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
+  ),
+  usageDiagnostics: defineHostedRunnerWebControlPostRoute(
+    "usage_diagnostics",
+    HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
+  ),
   planUsageTool: defineHostedRunnerWebControlPostRoute(
     "plan_usage_tool",
     HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  ),
+  usageFeedbackRecording: defineHostedRunnerWebControlPostRoute(
+    "usage_feedback_recording",
+    HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
   ),
   productFeedbackRecording: defineHostedRunnerWebControlPostRoute(
     "product_feedback_recording",
@@ -306,6 +333,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   threadRouteAuthority: defineHostedRunnerWebControlPostRoute(
     "thread_route_authority",
     HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+  ),
+  memberNotificationRoute: defineHostedRunnerWebControlPostRoute(
+    "member_notification_route",
+    HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH,
   ),
   usageRecording: defineHostedRunnerWebControlPostRoute(
     "usage_recording",

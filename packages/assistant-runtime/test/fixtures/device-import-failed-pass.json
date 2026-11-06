@@ -1,0 +1,12 @@
+{
+  "outcome": "failed",
+  "passStage": "control_plane_reconcile",
+  "processedJobs": 1,
+  "deviceSyncConnectionKey": "942c1a876540b8df40bf42581994c5a818de39199c8fb601b2272c7c913260de",
+  "incomingRetainedJobCount": 1,
+  "outgoingRetainedJobCount": 0,
+  "queueSnapshotAfterPresent": true,
+  "deviceSyncImportAppliedCount": 0,
+  "incomingRetainedProgressFingerprint": "82476920f02400fa4049d92618c2cb00649c1a180ea5531d652fa3f72ccc2eb7",
+  "outgoingRetainedProgressFingerprint": "de718dff9dc94d714e9905b60ce8b100e6b3199fd104471b6f5909bf2150fa97"
+}

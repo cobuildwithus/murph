@@ -260,46 +260,33 @@ export async function checkpointHostedWorkspaceTx(input: {
     Prisma.sql`updated_at = NOW()`,
   ];
 
+  // Omitted projection fields retain their current values.
   if ("nextWakeAt" in input) {
     workspaceAssignments.push(Prisma.sql`next_wake_at = ${
       input.nextWakeAt === undefined || input.nextWakeAt === null
         ? null
         : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt")
-    }`);
+    }::timestamp`);
   }
-
   if ("nextWakeReason" in input) {
     workspaceAssignments.push(
-      Prisma.sql`next_wake_reason = ${normalizeNullableString(input.nextWakeReason)}`,
+      Prisma.sql`next_wake_reason = ${normalizeNullableString(input.nextWakeReason)}::text`,
     );
   }
-
   if (progressProjectionKeyCount > 0) {
     workspaceAssignments.push(
-      Prisma.sql`next_default_processing_wake_at = ${
-        requestedNextDefaultProcessingWakeAt
-      }`,
-      Prisma.sql`next_default_processing_wake_reason = ${
-        requestedNextDefaultProcessingWakeReason
-      }`,
-      Prisma.sql`system_mailbox_progress_generation = ${
-        requestedSystemMailboxProgressGeneration
-      }`,
+      Prisma.sql`next_default_processing_wake_at = ${requestedNextDefaultProcessingWakeAt}::timestamp`,
+      Prisma.sql`next_default_processing_wake_reason = ${requestedNextDefaultProcessingWakeReason}::text`,
+      Prisma.sql`system_mailbox_progress_generation = ${requestedSystemMailboxProgressGeneration}::bigint`,
     );
   }
-
   if ("inboxMediaRetentionWakeAt" in input) {
     workspaceAssignments.push(Prisma.sql`inbox_media_retention_wake_at = ${
-      input.inboxMediaRetentionWakeAt === undefined
-        || input.inboxMediaRetentionWakeAt === null
+      input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
         ? null
-        : requireDate(
-          input.inboxMediaRetentionWakeAt,
-          "Hosted workspace inboxMediaRetentionWakeAt",
-        )
-    }`);
+        : requireDate(input.inboxMediaRetentionWakeAt, "Hosted workspace inboxMediaRetentionWakeAt")
+    }::timestamp`);
   }
-
   if ("redactedStatusJson" in input) {
     const redactedStatusJson = input.redactedStatusJson === undefined
       ? null
@@ -308,11 +295,9 @@ export async function checkpointHostedWorkspaceTx(input: {
         "Hosted workspace redactedStatusJson",
         HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
       );
-    workspaceAssignments.push(
-      Prisma.sql`redacted_status_json = ${
-        redactedStatusJson === null ? null : JSON.stringify(redactedStatusJson)
-      }::jsonb`,
-    );
+    workspaceAssignments.push(Prisma.sql`redacted_status_json = ${
+      redactedStatusJson === null ? null : JSON.stringify(redactedStatusJson)
+    }::jsonb`);
   }
 
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
@@ -508,15 +493,6 @@ export async function checkpointHostedWorkspaceTx(input: {
       SELECT
         conversation_ahead.value AS "conversationInputAhead"
       FROM conversation_ahead
-      CROSS JOIN (
-        SELECT COUNT(*) FROM stamped_conversation
-      ) AS stamped_count
-      CROSS JOIN (
-        SELECT COUNT(*) FROM advanced_conversation
-      ) AS conversation_count
-      CROSS JOIN (
-        SELECT COUNT(*) FROM advanced_system
-      ) AS system_count
     `);
     if (mailboxRows.length !== 1 || !mailboxRows[0]) {
       throw new Error(
@@ -528,7 +504,10 @@ export async function checkpointHostedWorkspaceTx(input: {
     }
   }
 
-  const { replacedSnapshotRef: replacedSnapshotRefValue, ...updatedWorkspace } = updatedRows[0];
+  const {
+    replacedSnapshotRef: replacedSnapshotRefValue,
+    ...updatedWorkspace
+  } = updatedRows[0];
   const replacedSnapshotRef = parseHostedExecutionSnapshotRef(
     replacedSnapshotRefValue,
     "Hosted workspace checkpoint replaced snapshotRef",
@@ -833,40 +812,6 @@ export function readHostedWorkspaceBrowserVaultSourceStateHash(
     ?? null;
 }
 
-/**
- * Claims the per-member cooldown that decides which accepted-attempt failure
- * triggers a runtime recheck. The claim lives in workspace control state, so
- * recovery never depends on a best-effort diagnostic row being written or read
- * back. Concurrent callbacks serialize on the workspace row, and exactly one
- * of them sees a claimed count.
- */
-export async function claimHostedAcceptedAttemptFailureRecheck(input: {
-  cooldownMs: number;
-  now?: Date | string;
-  prisma?: HostedWorkspaceStoreClient;
-  userId: string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now === undefined
-    ? new Date()
-    : requireDate(input.now, "Hosted accepted-attempt recheck claim time");
-  const claimedAfter = new Date(now.getTime() - input.cooldownMs);
-  const result = await prisma.hostedWorkspace.updateMany({
-    data: {
-      acceptedAttemptFailureRecheckClaimedAt: now,
-    },
-    where: {
-      OR: [
-        { acceptedAttemptFailureRecheckClaimedAt: null },
-        { acceptedAttemptFailureRecheckClaimedAt: { lt: claimedAfter } },
-      ],
-      userId: requireNonEmptyString(input.userId, "Hosted workspace userId"),
-    },
-  });
-
-  return result.count > 0;
-}
-
 export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorkspaceRecord {
   return {
     browserVaultReplicaRef: record.browserVaultReplicaRef,
@@ -897,9 +842,13 @@ function assertHostedSystemMailboxProgressGenerationTransition(input: {
     ? input.requested === 0n || input.requested === 1n
     : input.requested === input.current || input.requested === input.current + 1n;
   if (!transitionAllowed) {
-    throw new TypeError(
+    throw Object.assign(new TypeError(
       "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
-    );
+    ), {
+      code: input.current === null ? "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
+        : input.requested < input.current ? "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
+        : "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT",
+    });
   }
 }
 

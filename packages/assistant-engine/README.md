@@ -2,9 +2,137 @@
 
 Workspace-private headless assistant execution runtime for Murph.
 
+`@murphai/assistant-engine/managed-automations` exposes
+`getMurphMaintenanceAutomationIds` from the existing managed seed owner without
+entering through the engine root barrel. The root export remains available.
+
 This package owns headless assistant execution and assistant-specific tool surfaces. That includes the assistant turn runtime, Codex app-server provider execution path, direct CLI prompt/bootstrap guidance, assistant state/outbox/status/store surfaces, assistant automation, and input/tool integration points for the daemon and hosted runtimes.
 
-Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inbox service composition lives in `@murphai/inbox-services`. `assistant-engine` consumes those owners instead of owning their factories. Canonical writes still terminate in `packages/core`. Provider-target normalization plus hosted provider preset/config utilities are owned by `@murphai/operator-config` and consumed here directly.
+Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inbox service composition lives in `@murphai/inbox-services`. `assistant-engine` consumes those owners instead of owning their factories. Canonical writes still terminate in `packages/core`. OpenAI target normalization and hosted configuration utilities are owned by `@murphai/operator-config` and consumed here directly.
+
+Murph assistant execution supports OpenAI models only. Hosted configuration
+exposes model and reasoning choices; there is no provider selector or custom
+endpoint. Local execution explicitly selects OpenAI even when the saved target
+omits a provider, and rejects local OSS mode. OpenAI API, ChatGPT subscription,
+and synthetic local-test transports retain their existing execution boundaries.
+
+## Route-planning telemetry
+
+Provider-plan diagnostics time follow-up context resolution as
+`routePlanningFollowUpContextElapsedMs` and foreground snapshot refresh as
+`routePlanningAssistantContextSnapshotRefreshElapsedMs`. The existing
+`routePlanningAssistantContextSnapshotElapsedMs` times the subsequent current-state
+read. These serial spans contribute to measured/unaccounted time and slowest-stage
+selection (`follow_up_context`, `assistant_context_snapshot_refresh`, and
+`assistant_context_snapshot`). Both hosted trace projection and durable-log
+validation preserve the numeric fields and stage values. Skipped refreshes remain
+`null`; timing does not change follow-up expiry, authority, or resume decisions.
+
+Provider plans also carry `threadRotationReason`: `profile_isolated`,
+`native_resume_disabled`, `binding_absent`, `route_mismatch`, or
+`contract_mismatch` (in that decision order). A resumed plan has no rotation
+reason. This metadata follows the existing trace callback to hosted logging;
+the shared engine never writes structured logs to stdout.
+
+## Codex failure telemetry
+
+Auto-reply failure context retains `codexErrorInfoPresent` only as a boolean,
+`codexErrorInfo` as a closed recognized kind or `unrecognized` for other strings,
+and `codexErrorHttpStatusCode` only as an integer from 100 through 599. Wrong
+kinds of values are omitted, not coerced. Hosted maintenance logs project these
+as `failureCodexErrorInfoPresent`, `failureCodexErrorInfo`, and
+`failureCodexErrorHttpStatusCode` without changing classification, retry policy,
+or event count.
+
+`internalServerError` identifies structured server-error evidence, unlike
+`responseStreamDisconnected` or `httpConnectionFailed`; the latter's status
+still affects the existing connection-loss classification. Presence `false`
+means no structured info was attached, so classification may be text-based.
+Missing presence is unavailable telemetry, not `false`; `unrecognized` retains
+presence without exposing the external kind string.
+
+Natural-traffic query (read-only): use one fixed UTC `[start, end)` window of at
+most 12 hours in the existing maintenance logs. Filter `type = 'input.reply-failed'`
+and `errorCode IN ('ASSISTANT_CODEX_FAILED', 'ASSISTANT_CODEX_CONNECTION_LOST',
+'ASSISTANT_CODEX_USAGE_LIMIT')`; group `COUNT(*)` by `errorCode`,
+`failureCodexErrorInfoPresent`, `failureCodexErrorInfo`,
+`failureCodexErrorHttpStatusCode`, and `failureRetryable`, limited to 100 groups.
+Keep missing values separate from `false`, select metadata only, and do not
+induce failures. An empty window is not evidence that the path works.
+
+## Cron delivery reconciliation telemetry
+
+Cron wake selection uses the same canonical schedule and runtime projection as
+claim selection. Onboarding gates research notifications when an occurrence
+executes; it does not remove that occurrence's wake. A gated occurrence records
+its skip at the scheduled time instead of waiting for an unrelated wake to expire.
+Foreground yield defers due background maintenance with the existing short retry
+and preserves future maintenance occurrence times.
+
+`cron.job.completed` describes execution; `runOutcome=delivery_pending` means
+the outbox still owns delivery. It is not a delivery failure. When
+`cron/delivery-reconciliation.ts` successfully persists clearing a job's pending
+delivery reference, its optional `onEvent` emits `cron.delivery.reconciled`.
+This covers immediate outbox terminal transitions and later pending-delivery
+repair, including stale missing intents. Journal finalization and any required
+one-shot archival precede the corresponding local or canonical runtime store
+write; a failed write emits no reconciliation for that owner. A later repair
+can emit even when an earlier attempt already finalized the journal. Repeats
+with no matching pending reference emit nothing.
+
+The event carries only `deliveryStatus` (`sent`, `failed`, `abandoned`, or
+`missing`), the existing `runOutcome` (`delivered` or `failed`), and
+`deliveryFingerprint`. `sent` names the persisted outbox terminal boundary;
+it does not assert handset delivery. `abandoned` retains delivery uncertainty,
+and `missing` records the existing stale-intent repair decision. Reconciliation
+does not change reasons, occurrence consumption, or eligibility for a fresh
+intent under the existing retry policy.
+
+Pending completion and reconciliation share a fingerprint of the job/intent
+pair: `cd1_` plus the first 24 hex characters of SHA-256 over the UTF-8 JSON
+array `["murph.cron-delivery.v1", jobId, intentId]`. Only the current outbox
+creator's `outbox_` plus lowercase, hyphenless UUIDv4 format is eligible.
+`createAssistantOutboxIntent` generates that identity with `randomUUID()`;
+dedupe and persistence retain it, as does the cron pending reference used by
+later repair, even if the outbox record has disappeared. Job IDs can be
+predictable, so they are never hashed without an eligible intent. The general
+opaque-ID schema is not an entropy guarantee: missing or other legacy intent
+shapes produce `null` without changing their delivery handling. Format cannot
+prove randomness for a hand-authored UUIDv4-shaped value; privacy relies on
+owner-generated random intent IDs that have not been independently disclosed.
+
+Join within the same hosted subject on this fingerprint. The same pair remains
+stable across restart; different jobs sharing an intent and fresh intents for
+the same occurrence have different fingerprints. This bounded correlation is
+not an authentication proof. No job, intent, member, route, title, instruction,
+response, or provider error text is added to these fields. Neither excluded
+platform fingerprint secret is needed or forwarded. Non-cron context
+fingerprints retain their existing keyed behavior.
+
+Outbox dispatch hooks and direct terminal/preparation APIs forward the optional
+observer. Hosted maintenance and delivery callbacks reuse
+`assistant.automation_detail` and the existing `failure*` field prefix, yielding
+`failureDeliveryStatus`, `failureRunOutcome`, and `failureDeliveryFingerprint`.
+Terminal reconciliation bypasses maintenance's ordinary 12-detail scan cap.
+There is at most one new event per successfully persisted matching job/intent
+reference, with no new owner-state reads or writes, retries, timers, or awaited telemetry.
+Throwing or rejecting observers cannot change the durable result. Hosted info
+records use the existing bounded best-effort log transport and may be lost.
+
+The engine and hosted observer ship together in the runner bundle. Existing
+Web/Worker runtime-log readers already accept these additive scalar details
+under the unchanged event code; no schema migration or coordinated state
+cutover is needed. Older producers/callers may omit the observation or emit
+`null` (the normal hosted environment) or the incompatible keyed `h1_` scheme;
+an older hosted maintenance projection ignores the new event type. `cd1_`
+values join only to the same scheme, so a pending event from an older runner
+can remain unmatched after reconciliation by a corrected runner. Historical
+nulls and `h1_` values cannot be converted or backfilled by this correction.
+Rollback preserves durable behavior but loses the new correlation. Historical
+pending rows cannot be reclassified from absence of a reconciliation: older code,
+missing correlation,
+log loss, and retention can all leave the terminal outcome unknown. This is
+prospective best-effort evidence, with no historical backfill or new alert.
 
 ## Prompt time context
 
@@ -26,6 +154,14 @@ runtime/container. A turn is an RPC into that process rather than a per-turn
 app-server subprocess. Overlapping turns fail busy instead of spawning parallel
 app-server processes.
 
+Cancelling an active turn uses native `turn/interrupt`. An acknowledged
+interruption drains host-owned effects, releases the turn, and reports cancellation
+without retiring the resident process or its independent realtime media session.
+A normal completion racing cancellation also leaves the process reusable. Missing
+terminal acknowledgement retains the bounded interruption timeout and process
+cleanup; cancellation before a turn has an addressable native ID still uses
+process shutdown. Workspace shutdown remains the owner of closing live media.
+
 Process launch identity contains only process-stable settings such as the
 command, args, stable working directory, Codex home, and sanitized stable env.
 Prompts, session/thread/turn ids, delivery routes, invocation credentials, and
@@ -46,6 +182,20 @@ restart instead of reconstructing a bounded transcript as a new thread. This
 applies to every registered dynamic tool, including the private
 `murph.assistant_style` surface; no tool-specific stale-resume fallback is
 needed.
+
+Idle checkpoint maintenance retires native resume state for every session whose
+`lastTurnAt` (or `updatedAt` when no turn timestamp exists) is strictly older than
+30 days. The assistant store owns this single fixed window and clears both resume
+aliases through the atomic session writer, holding the vault turn lock before the
+runtime write lock. It preserves session timestamps, routing, transcripts and
+canonical memory; active turns finish before eligibility is checked again.
+Snapshot selection already follows persisted resume references, so retired
+rollouts are omitted without changing the snapshot format or deleting live files.
+The next turn starts a fresh native thread with the ordinary vault/context path.
+An interrupted pass or lost checkpoint is safe to repeat. Old snapshots restore
+with their references intact and converge at the next idle maintenance pass;
+old runners can read the existing nullable resume shape in new snapshots, but
+will not retire newly idle sessions until upgraded.
 
 Scheduled automation occurrences use this same ordinary turn path. The saved
 automation instructions become the turn request; schedule occurrence and
@@ -93,23 +243,14 @@ A current canonically sent continuity
 obligation remains exempt from terminal outbox pruning until its journal is
 applied; applied intents return to ordinary terminal retention.
 
-The `creative-response` and `creative-response-text` notification prompt
-profiles are isolated system continuations for verified, explicitly requested
-social moments. Both prompts are built only from the engine-supplied task and
-bounded committed conversation history. Message and poem requests use an
-output-only turn profile with no tools. Song format projects only
-`generate_song`, the sole format-specific tool, and requires exactly one call
-with `durationSeconds: 15`. The application-owned song tool retains the bound
-provider transport plus the existing authority-free public transport required
-for a validated signed Linq upload; those transports are not native Codex
-browsing capabilities. The ordinary response-media and outbox owners remain
-unchanged. Named style references are reduced to broad musical traits rather
-than copied melody, lyrics, catchphrases, vocal identity, or signature
-arrangement. A creative provider failure settles the optional notification
-instead of starting another song attempt. A selected song without exactly one
-generated voice-memo attachment fails before receipt, transcript persistence,
-or delivery and is never replaced by a text-only response. A committed delivery
-intent retains the ordinary outbox retry and deduplication behavior.
+Sponsorship creative prompts, turn profiles, and song-media requirements are
+retired. Hosted readers still accept `creative-response` and
+`creative-response-text` solely to skip retained mailbox work and restored
+pending, sending, or recording items before active execution. Unknown profiles
+fail closed. Existing outbox delivery retains its continuation and deduplication
+ownership. Ordinary notifications, including private sponsorship recovery,
+keep their output-only behavior. Group running-bit context is no longer read,
+persisted, or added to prompts.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
@@ -179,15 +320,58 @@ provider payloads enter these new fields. Existing numeric exit code, saturated
 turn-local ordinal and finite family attribution are unchanged. Bare `rg` or
 `grep` exit 1 remains expected no-match; recovery remains family-level only.
 
+Shell completion details additionally carry optional `commandAttribution`:
+`recognized`, `missing_command`, `oversized_command`, `shell_syntax`,
+`unrecognized_executable` or `unrecognized_cli_path`. It explains the existing
+fallback instead of changing the family or failure predicate. `shell_syntax`
+means compound/unsupported shell syntax or malformed quoting, **not** which
+pipeline/subcommand failed. The existing 4,096-character lexical bound and
+single known-shell-wrapper rule still apply. `vaultCliCommand` is present only
+when literal leading command words match the existing runtime-state CLI timing
+catalog (including three-word paths). Quoted or option-first command paths
+remain unattributed; whitespace-split option values are never treated as argv.
+
+A recognized executable may also carry `vaultCliErrorAttribution`: `recognized`,
+`unknown_code`, `missing_output`, `oversized_output` or `unstructured_output`.
+This concerns the existing bounded JSON envelope, not arbitrary shell stderr.
+Optional `vaultCliErrorCode` and `vaultCliErrorStage` use the timing owner's exact
+code/stage vocabularies; each unknown scalar is omitted independently. A known
+coarse category can coexist with `unknown_code` when its code is outside that
+narrower catalog. No new provider-code catalog is introduced. The existing
+exercise codes distinguish `exercise_not_found` (missing item),
+`exercise_catalog_unavailable` (missing/unreadable artifacts), and
+`exercise_catalog_invalid` (invalid artifacts); validation remains invalid
+input. No source error, hint, tool result, RPC or canonical contract changes.
+
+For the next shell-failure aggregate, filter the existing
+`CODEX_COMMAND_EXIT_NONZERO` completion rows over one bounded deployment/time
+cohort. Group by the finite attribution reason first, then catalog-normalized
+`vaultCliCommand`, `vaultCliErrorAttribution`, `vaultCliErrorCode` and
+`vaultCliErrorStage`. This separates missing/compound/oversized commands from
+recognized CLI calls with missing, unstructured or unmapped error output, and
+separates input rejection, missing exercise items and missing artifacts without
+reading commands or outputs. Apply source-owned allowlists before grouping;
+map absent old fields to `missing_evidence`, never to success or `recognized`.
+These fields are optional metadata accepted by the existing issue parser and
+24-key sanitizer; older readers may ignore them. No issue schema bump or
+additional event is needed. Existing started/completed ordinal correlation,
+completion deduplication and search recovery remain unchanged.
+
 These are **classifications, not another call denominator**.
 `diagnosticRole=classification` marks dynamic-tool/branch/intake rows and
 `diagnosticRole=completion` marks generic failed-action rows. A failed dynamic
 call may produce both: never add them as failed calls. Even completion rows are
 not a lossless ledger. Use existing action-diagnostics counts for rates over the
-same window and deployment cohort. The unchanged eight-issue per-turn cap,
-best-effort writes and export retries make coverage lossy; missing diagnostics
+same window and deployment cohort. Per-turn collection and best-effort persistence
+retain up to eight ordinary issues plus two `create-phone-call` dynamic-tool
+failure issues, so earlier tool failures cannot evict pre-row phone-start evidence.
+The fixed ten-issue maximum, best-effort writes and export retries still make
+coverage lossy; missing diagnostics
 never prove success or no traffic. There is no new queue, awaited tool-path I/O,
 state, schema, backend or dependency.
+The reserved phone slots take effect after the next Cloudflare-hosted runtime
+deploy; existing warm bundles retain the old cap until replaced. The issue
+schema is unchanged, so old and new Web readers accept both producer versions.
 
 For future natural-traffic verification, use read-only aggregate queries with
 bounded time parameters. This mixed-version recipe emits only finite labels
@@ -315,6 +499,14 @@ native function, while code-mode-only models receive its schema in `exec`
 guidance without a search step. Murph must not add a second discovery action,
 execution envelope, or compatibility namespace.
 
+Authorized full group conversations expose `group_data` eagerly because shared
+reads are routine and namespace discovery expands unrelated schemas. Its input
+schema and authorization remain identical; private conversations keep the group
+family deferred, and read-only scheduled group turns keep their narrower tool.
+
+The [vault-share freshness contract](../../agent-docs/references/hosted-runtime-protocol.md#vault-share-direct-read-and-cutover)
+owns the wearable-only schema domain and ordinary nonwearable shared reads.
+
 Response-card, exercise-routine, Telegram rich-content, and group-challenge
 card tools follow the same deferred contract. Resident messaging guidance
 provides the discovery trigger; the discovered tool remains the sole owner of
@@ -342,6 +534,16 @@ again when invoked. Adding a tool therefore requires only:
 3. including the tool in the planning-time `resolveMurphDynamicTools` call.
 
 Do not add per-tool availability booleans to provider or app-server inputs.
+
+`murph.usage_diagnostics` is a separate default-off, read-only private tool for
+usage investigations and the weekly usage review. It requires the bound hosted
+read port and a private accepted-input or scheduled invocation scope. Requests
+select only a bounded window (1–31 days) and top-turn count (1–20), never a
+member identity. Responses validate against the shared aggregate contract:
+recorded allowance costs, model/source totals, bounded expensive turns, model
+rates, and sanitized tool output byte counts. Byte counts are not exact tokens
+or tool-attributed costs; missing profiles and truncated groups remain explicit.
+No raw tool output, command arguments, prompts, or transcripts are returned.
 
 `murph.plan_usage` follows this default-off rule. It is advertised only when a
 hosted plan-usage service exists, accepts no arguments, and returns only the
@@ -401,6 +603,34 @@ package suite.
 
 ## Real-Codex test fixtures
 
+Canonical live fixtures and the meal benchmark use the shared hosted Codex
+behavior builder. Their App Server launcher requires Murph's patched native
+`app-server --ignore-user-config` option: it excludes personal behavioral settings
+and global `AGENTS.md`/`AGENTS.override.md` inputs. It retains the original auth
+home, credential-store and keyring-backend selection, login/workspace restrictions,
+and ChatGPT auth endpoint in their normal configuration precedence. Managed
+requirements, project instructions, and exec rules still apply. Personal proxy
+preferences and other feature switches are not restored by this auth projection.
+CLI table overrides alone cannot provide isolation because native TOML merging
+preserves unspecified personal permission grants.
+Provider-key fixtures pass their trusted provider definition explicitly through
+the launcher, using the same serializer as the generated fixture home. Only
+provider metadata and the environment-variable name enter configuration; the
+credential value remains in the process environment and its name is omitted
+from shell-tool allowlists. Model, provider, reasoning, and approval selections
+remain explicit journey inputs.
+
+Build from the exact source pin with `patches/codex-public-live.patch` applied,
+then select that local artifact with `pnpm test:assistant:live -- --test <name>
+--codex-command <absolute-native-binary>`. The unpatched npm CLI does not support
+this App Server option. Keep the matching release's helper layout; the native
+build contract is documented in `apps/cloudflare/README.md`. Selecting a local
+verification binary does not install a global package or deploy the runner.
+
+The isolated checkout and Node install are read-only local stand-ins for `/app`;
+credential-shaped files stay denied. Production permission profiles are
+unchanged. Local shells retain the fixture PATH and Codex's credential exclusions.
+
 Synthetic real-Codex journeys that need fixture executables can opt into
 `executeRealCodexAppServerTurn`'s `fixtureBinDirectory`. The test harness adds
 that directory to PATH and creates a private login profile beneath the journey's
@@ -411,3 +641,64 @@ harness tests exercise actual `zsh -lc` selection when zsh is installed; that
 integration case explicitly skips when the executable is absent. Portable
 profile quoting, provider-key exclusion, and caller-profile ownership remain
 covered without zsh. These tests do not start Codex or make a model request.
+
+Session preflight validates routing under the existing runtime write lock without
+preparing secret storage. Session persistence owns that directory's permission
+and symlink checks before writing a session or removing its legacy sidecar.
+
+## Canonical reminder verification
+
+The canonical live reminder fixture supplies a synthetic hosted automation port
+for creation and cancellation. That port delegates persistence and timing to the
+production core and cron owners; hosted authorization and route policy remain
+covered by assistant-runtime entrypoint tests. The journey checks one hosted save,
+the saved reminder model override, actual queued delivery, and one archive patch.
+`canonical-live-preflight.test.ts` verifies its port wiring, canonical records,
+optimistic concurrency, and cancellation without a model or delivery provider.
+
+Research scout and Personal Patterns are retired managed automations. Their immutable IDs remain in the retirement set so maintenance archives existing active or paused records and stale claimed occurrences skip before provider work. Member-authored jobs with matching slugs remain member-owned. Historical wiki pages and usage rows are not deleted. Deployments must drain old in-flight scout attempts and pending outbound deliveries before removing the old runner/Exa boundary; new runners suppress stale canonical occurrences even with an older Web.
+
+Group game tools consume the capable hosted-execution contract and choose group
+instructions from immutable `maxPlayers: 10`, including a two-person turnout.
+Ordinary reads compose shared setup and native poll instructions once, followed
+by the pair/group fragments for all modes present. The selected game's immutable
+mode governs consent even in mixed rooms. Only the starter edits an invited
+group; live changes require the existing strict majority. Start now requires
+canStartNow and a majority ask; it accepts no invitees. Eligible players may be
+named from returned evidence; never shame, joke about bodies or weight, or nudge
+someone through another person, or use vs. in group copy. Stable numbered first
+names within each game's remaining-player cohort disambiguate shared state and
+Prove it facts. Only the
+accused may concede their own day; Murph never judges evidence or asks the room
+for a verdict. Unjoined people appear as a count except a consenting Talk
+author's profile name and submitted note. Talk accepts no invitation and changes
+no terms. Tools preserve private unjoined task overrides. Shared recaps require one kind
+superlative per eligible person. They read authorized room-audience game lore
+and the bounded transcript for callbacks about eligible memberIds, excluding
+private material, leavers and unjoined people. `loreAccess: "read"` forbids lore
+replacement during group recaps. After a successful recap write, trusted code
+records the canonical bare `recap.chatLine` once as `Chat line used:`, trimming
+oldest lines to 64 KiB. Pair recap lore writes stay unchanged. The focused real-Codex
+journey `group game addressed acceptance with duplicate first names` exercises
+production prompt builders, read_game and canonical approve arguments.
+
+Group Same again copies previous terms first; requested modifications use one
+invited starter edit, or the majority path if someone joined meanwhile. Confirm
+only returned state and never recover by creating another game. Web supplies
+compact comparison facts plus the canonical revision; `require_game_rematch`
+is rejected by unsupported runners, and final sends require Web's current
+revision/room acknowledgement. After an already-delivered offer changes, ask for
+fresh agreement; hidden individual tasks require private invitation review.
+Cancellation leaves its one announcement to the lifecycle owner, even when live.
+
+Kickoff offers share the pair wording: a strictly earlier live game suppresses
+the offer, simultaneous starts each offer, and settled games do not suppress.
+Offers never schedule. On explicit individual consent, existing automations save
+the exact game and requester IDs, local time, timezone and bounded duration.
+Each occurrence calls scheduled `read_game`, requires an OK result, the exact
+game's live status and the requester in its current players, then derives their name
+and task. It skips missing games, departures, ended games or unavailable room
+authority. Never substitute another game or schedule for someone else's request.
+Group missed-day batches and change-resolution notifications have separate
+producers; batch lore writes require room-only evidence and final room authority,
+while group recap lore stays read-only.

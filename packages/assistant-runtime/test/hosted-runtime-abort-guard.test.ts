@@ -54,7 +54,6 @@ describe("hosted runtime abort guard", () => {
       async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [this.#mailboxItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -95,7 +94,7 @@ describe("hosted runtime abort guard", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_prototype_mailbox_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -168,7 +167,7 @@ describe("hosted runtime abort guard", () => {
       await expect(runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_provider_abort_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -261,7 +260,7 @@ describe("hosted runtime abort guard", () => {
       await expect(runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_device_preference_abort_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -350,7 +349,7 @@ describe("hosted runtime abort guard", () => {
       await expect(runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_clinical_abort_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -477,7 +476,7 @@ describe("hosted runtime abort guard", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_prototype_effects_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -560,7 +559,7 @@ describe("hosted runtime abort guard", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_health_commons_env",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -673,7 +672,6 @@ function createDefaultMailboxPort(): HostedRuntimeMailboxPort {
   return {
     async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
       return {
-        assistantProvider: "openai",
         fetchedAt: TEST_NOW,
         items: [],
         maxSeqByLane: request.lanes.map((lane) => ({

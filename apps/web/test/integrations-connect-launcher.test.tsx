@@ -5,6 +5,12 @@ import { IntegrationsConnectLauncher } from "@/src/components/connected-apps/int
 
 import { renderClientComponent } from "./render-client-component";
 
+const LAUNCHER_PROPS = {
+  accountLabel: "Gmail",
+  claim: "test-claim",
+  logoSrc: "/brand-logos/connect/gmail.svg",
+};
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -17,7 +23,7 @@ test("waits five seconds before starting the single-use connection", async () =>
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test claim" }),
+    createElement(IntegrationsConnectLauncher, { ...LAUNCHER_PROPS, claim: "test claim" }),
     {
       location: {
         href: "https://example.test/integrations/connect/test-claim",
@@ -29,11 +35,18 @@ test("waits five seconds before starting the single-use connection", async () =>
     expect(rendered.container.textContent).toContain(
       "Continuing in 5 seconds",
     );
+    expect(rendered.button.textContent).toBe("Continuing in 5");
     expect(fetchMock).not.toHaveBeenCalled();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(4_999);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
+    expect(rendered.button.textContent).toBe("Continuing in 3");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_999);
+    });
+    expect(rendered.button.textContent).toBe("Continuing in 1");
     expect(fetchMock).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -63,7 +76,7 @@ test("lets the member continue immediately without starting twice", async () => 
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     {
       location: {
         href: "https://example.test/integrations/connect/test-claim",
@@ -79,7 +92,8 @@ test("lets the member continue immediately without starting twice", async () => 
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(rendered.container.textContent).toContain("Opening Composio");
+    expect(rendered.container.querySelector('[role="status"]')?.textContent)
+      .toBe("Opening…");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
@@ -98,7 +112,7 @@ test("lets the member pause automatic continuation and continue later", async ()
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     {
       location: {
         href: "https://example.test/integrations/connect/test-claim",
@@ -121,6 +135,8 @@ test("lets the member pause automatic continuation and continue later", async ()
     expect(rendered.container.textContent).toContain(
       "Automatic continuation paused",
     );
+    expect(rendered.button.textContent).toBe("Continue");
+    expect(rendered.container.textContent).not.toContain("Stay here");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
@@ -161,7 +177,7 @@ test("does not abort a connection that starts as the member pauses", async () =>
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     {
       location: {
         href: "https://example.test/integrations/connect/test-claim",
@@ -205,7 +221,7 @@ test("waits for five visible seconds when mounted in a hidden tab", async () => 
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     {
       location: {
         href: "https://example.test/integrations/connect/test-claim",
@@ -250,7 +266,7 @@ test("restarts the five-second interval after the tab becomes visible again", as
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     {
       location: {
         href: "https://example.test/integrations/connect/test-claim",
@@ -297,14 +313,14 @@ test("restarts the five-second interval after the tab becomes visible again", as
   }
 });
 
-test("stays on the page with an alert when the start request fails", async () => {
+test("stays on the page with an alert and retries only by reloading when the start request fails", async () => {
   vi.useFakeTimers();
   const initialHref = "https://example.test/integrations/connect/test-claim";
   const fetchMock = vi.fn(async () => new Response(null, { status: 503 }));
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     { location: { href: initialHref } },
   );
 
@@ -315,9 +331,20 @@ test("stays on the page with an alert when the start request fails", async () =>
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(rendered.window.location.href).toBe(initialHref);
+    expect(rendered.container.textContent).toContain("Gmail didn’t connect.");
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
-      .toContain("Could not start the connection");
-    expect(rendered.container.querySelector("button")).toBeNull();
+      .toContain("Try again, or ask Murph for a new link.");
+
+    // A claim is single-use, so Try again reloads the page and never posts again.
+    const retryButton = rendered.container.querySelector("button");
+    expect(retryButton?.textContent).toBe("Try again");
+    await act(async () => {
+      retryButton?.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    expect(rendered.reload).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }
@@ -341,7 +368,7 @@ test("aborts an in-flight start and ignores its late success after unmount", asy
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS),
     { location: { href: initialHref } },
   );
   let cleanedUp = false;

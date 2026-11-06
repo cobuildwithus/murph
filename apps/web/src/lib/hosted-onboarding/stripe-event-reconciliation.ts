@@ -138,9 +138,6 @@ import {
   reconcileHostedUsageCreditStripeEvent,
 } from "./usage-credit-stripe-reconciliation";
 import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
-import {
-  materializeHostedGroupSponsorshipIfApplicable,
-} from "../hosted-groups/group-sponsorship-notification";
 
 // Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
 // read-only preparation deadline, and a request-count ceiling. Keep the receipt
@@ -1146,15 +1143,6 @@ async function processClaimedHostedStripeEvent(
         });
       }
       if (
-        usageCreditReconciliation.handled &&
-        usageCreditReconciliation.purchaseId
-      ) {
-        await materializeHostedGroupSponsorshipIfApplicable({
-          prisma,
-          purchaseId: usageCreditReconciliation.purchaseId,
-        });
-      }
-      if (
         result.cleanupFamilySponsoredStripeSubscriptionId &&
         processingMemberId
       ) {
@@ -1193,10 +1181,8 @@ async function processClaimedHostedStripeEvent(
         if (!claimed.subscriptionCancellationEmailSentAt) {
           const cancellationEmailResult =
             await sendHostedSubscriptionCancellationEmailForMember({
-              memberId: result.subscriptionCancellationEmail.memberId,
+              ...result.subscriptionCancellationEmail,
               prisma,
-              stripeSubscriptionId:
-                result.subscriptionCancellationEmail.stripeSubscriptionId,
             });
 
           if (cancellationEmailResult.status === "sent") {
@@ -1502,6 +1488,17 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
     processingContext.canonicalSubscription?.metadata.kind !==
       HOSTED_FAMILY_STRIPE_METADATA_KIND
   ) {
+    if (
+      stripeEvent.type === "customer.subscription.deleted" &&
+      processingContext.canonicalSubscription?.status === "canceled"
+    ) {
+      // Account deletion can remove the owner before Stripe emits cancellation.
+      // Do not let an unlocked handler rediscover or mutate a different owner.
+      return {
+        memberId: null,
+        result: buildEmptyHostedStripeEventProcessingResult(),
+      };
+    }
     throw new Error("Canonical Stripe billing owner was unavailable for locked processing.");
   }
 

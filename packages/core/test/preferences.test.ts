@@ -635,11 +635,11 @@ test("stores persona sparsely and applies causal order per preference field", as
     vaultRoot,
     updatedAt: "2026-07-20T10:02:00.000Z",
     preferences: {
-      persona: "navy-seal",
+      persona: "classic",
     },
   });
   assert.deepEqual(selected.document.assistant, {
-    persona: "navy-seal",
+    persona: "classic",
     tone: "casual",
     voice: "warm",
   });
@@ -661,7 +661,7 @@ test("stores persona sparsely and applies causal order per preference field", as
   });
   assert.equal(delayedMixedWrite.updated, true);
   assert.deepEqual(delayedMixedWrite.document.assistant, {
-    persona: "navy-seal",
+    persona: "classic",
     personality: {
       humor: 8,
     },
@@ -677,7 +677,7 @@ test("stores persona sparsely and applies causal order per preference field", as
   );
 });
 
-test("normalizes legacy stored persona ids to canonical main-only ids", async () => {
+test.each(["longevity-scientist", "navy-seal-with-scientist"] as const)("normalizes stored persona %s to Classic while preserving explicit preferences", async (persona) => {
   const vaultRoot = await createTempVault();
   await writeFile(
     path.join(vaultRoot, "bank/preferences.json"),
@@ -685,8 +685,10 @@ test("normalizes legacy stored persona ids to canonical main-only ids", async ()
       schemaVersion: 1,
       updatedAt: "2026-07-20T10:00:00.000Z",
       assistant: {
-        persona: "longevity-scientist",
+        persona,
+        personality: { humor: 8 },
         tone: "formal",
+        voice: "warm",
       },
       workoutUnitPreferences: {},
       wearablePreferences: {
@@ -696,11 +698,17 @@ test("normalizes legacy stored persona ids to canonical main-only ids", async ()
     "utf8",
   );
 
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
   const document = await readPreferencesDocument(vaultRoot);
   assert.deepEqual(document.assistant, {
-    persona: "scientist",
+    persona: "classic",
+    personality: { humor: 8 },
     tone: "formal",
+    voice: "warm",
   });
+  await updateAssistantPreferences({ vaultRoot, preferences: { persona, personality: { detail: 7 } } });
+  const persisted = JSON.parse(await readFile(resolvePreferencesDocumentPath(vaultRoot), "utf8"));
+  assert.equal(persisted.assistant.persona, "classic");
 });
 
 test("uses mailbox causal order per field across delayed Settings and conversation writes", async () => {

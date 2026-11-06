@@ -39,7 +39,7 @@ function requireHostedTelegramBotToken(): string {
  * Issues one bounded Bot API request. Delivery callers rely only on Telegram
  * accepting the request; metadata reads may opt into bounded JSON parsing.
  */
-async function callHostedTelegramApi(input: {
+export async function callHostedTelegramApi(input: {
   body: unknown;
   method: string;
   readJson?: boolean;

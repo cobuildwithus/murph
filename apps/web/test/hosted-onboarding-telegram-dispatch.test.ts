@@ -60,6 +60,7 @@ type TelegramExactRootUnwrapper = (input: TelegramRootReference & {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
     acceptHostedFamilyInviteFromTelegramTx: vi.fn(),
     activeRootKeyIdsByDomain: new Map<string, string[]>(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -67,7 +68,6 @@ const mocks = vi.hoisted(() => {
     familyFallbackResolutionOverrides: [] as Array<string | null>,
     familyInboundResolutionOverrides: [] as Array<string | null>,
     lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
-    memberRowLockOutcomes: [] as boolean[],
     preparedRootKeyIdsByDomain: new Map<string, string[]>(),
     providerKmsWork: vi.fn(),
     providerCallsDisabledDuringTransactionRootReads: [] as boolean[],
@@ -179,8 +179,8 @@ const mocks = vi.hoisted(() => {
       linqApiBaseUrl: "https://linq.example.test",
       linqApiToken: "linq-token",
       linqWebhookSecret: null as string | null,
-      privyAppId: "privy-app-id",
-      privyVerificationKey: "privy-key",
+
+
       publicBaseUrl: "https://join.example.test",
       stripeBillingMode: "payment" as const,
       stripePriceIdsByPlan: {
@@ -246,6 +246,11 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
+vi.mock("@/src/lib/hosted-runtime-latency/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-runtime-latency/store")>(),
+  recordHostedIngressTemporalSignalAccepted: mocks.recordHostedIngressTemporalSignalAccepted,
+}));
+
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
     "@/src/lib/hosted-mailbox/store",
@@ -253,6 +258,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 
   return {
     ...actual,
+    lockAndReadHostedTelegramUpdateOwnerIdsTx: vi.fn(async () => []),
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     appendHostedMailboxEnvelopeWithPreparedCryptoTx:
       mocks.appendHostedMailboxEnvelopeTx,
@@ -343,10 +349,6 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
-  handleHostedStripeWebhook: vi.fn(),
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => {
     throw new Error("Unexpected getPrisma call in hosted-onboarding-telegram-dispatch.test.ts");
@@ -433,7 +435,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.activeRootKeyIdsByDomain.clear();
     mocks.familyFallbackResolutionOverrides.length = 0;
     mocks.familyInboundResolutionOverrides.length = 0;
-    mocks.memberRowLockOutcomes.length = 0;
     mocks.preparedRootKeyIdsByDomain.clear();
     mocks.providerCallsDisabledDuringTransactionRootReads.length = 0;
     installDefaultHostedSecureBoxStringTestCodec();
@@ -679,6 +680,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       update_id: 321,
     });
     const response = await handleHostedOnboardingTelegramWebhook({
+      webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
       prisma,
       rawBody,
       secretToken: "telegram-secret",
@@ -709,10 +711,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:321",
     });
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationIsGroup: false, source: "telegram", webhookReceivedAt: expect.any(Date) }),
+    );
     expect(response).not.toHaveProperty("wakeUserId");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
@@ -1328,75 +1334,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.providerKmsWork).toHaveBeenCalledTimes(4);
   });
 
-  it("retries without waiting when activation already owns the direct Telegram member row", async () => {
-    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    mocks.memberRowLockOutcomes.push(false, true);
-    const member = buildTelegramRoutingCore("member_telegram_activation_race");
-    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
-    const prisma = withPrismaTransaction({
-      hostedMemberRouting: {
-        findMany: vi.fn().mockResolvedValue([{
-          member,
-          memberId: member.id,
-        }]),
-        findUnique: vi.fn().mockResolvedValue({
-          member,
-          memberId: member.id,
-        }),
-        upsert: hostedMemberRoutingUpsert,
-      },
-    });
-
-    await expect(handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_012 }),
-      secretToken: "telegram-secret",
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails closed when activation owns the direct Telegram member row twice", async () => {
-    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    mocks.memberRowLockOutcomes.push(false, false);
-    const member = buildTelegramRoutingCore("member_telegram_activation_contention");
-    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
-    const prisma = withPrismaTransaction({
-      hostedMemberRouting: {
-        findMany: vi.fn().mockResolvedValue([{
-          member,
-          memberId: member.id,
-        }]),
-        findUnique: vi.fn().mockResolvedValue({
-          member,
-          memberId: member.id,
-        }),
-        upsert: hostedMemberRoutingUpsert,
-      },
-    });
-
-    await expect(handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_013 }),
-      secretToken: "telegram-secret",
-    })).rejects.toMatchObject({
-      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-      details: {
-        preparationTarget: "direct_telegram_sender_route",
-      },
-      retryable: true,
-    });
-
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
-
   it("accepts randomized direct Telegram route ciphertext on the same prepared root", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const member = buildTelegramRoutingCore("member_telegram_randomized_route");
@@ -1635,8 +1572,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         ([call]) => call.transactionOpen === false,
       )).toBe(true);
       expect(executionOrder.slice(0, 2)).toEqual([
-        "control-root-lock",
         "member-lock",
+        "control-root-lock",
       ]);
       expect(executionOrder.slice(-2)).toEqual([
         "ingress-root-lock",
@@ -1810,6 +1747,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     await expect(handleHostedOnboardingTelegramWebhook({
+      webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
       prisma,
       rawBody: JSON.stringify({
         message: {
@@ -1927,10 +1865,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_group_container",
       mailboxItemId: "mailbox_telegram:update:322",
     });
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationIsGroup: true, source: "telegram", webhookReceivedAt: expect.any(Date) }),
+    );
   });
 
   it("re-prepares for a Telegram route that wins after the transaction route read", async () => {
@@ -3106,6 +3048,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: acceptedMemberId,
       mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
@@ -3410,6 +3353,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:326",
@@ -3981,6 +3925,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:654",
@@ -4041,6 +3986,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:655",
@@ -4924,20 +4870,7 @@ function withPrismaTransaction<T extends Record<string, unknown>>(
 ): T & TelegramWebhookPrismaHarness {
   const prismaWithTransaction = prisma as T & TelegramWebhookPrismaHarness;
   prismaWithTransaction.$executeRaw = async () => 0;
-  prismaWithTransaction.$queryRaw = vi.fn(async (query: unknown) => {
-    const sql = Array.isArray(query)
-      ? query.join("?")
-      : query && typeof query === "object" && "sql" in query
-        && typeof query.sql === "string"
-        ? query.sql
-        : "";
-    if (/FOR UPDATE SKIP LOCKED/i.test(sql)) {
-      return (mocks.memberRowLockOutcomes.shift() ?? true)
-        ? [{ id: "locked-member" }]
-        : [];
-    }
-    return [];
-  });
+  prismaWithTransaction.$queryRaw = vi.fn(async () => []);
   prismaWithTransaction.$transaction = vi.fn(async (
     callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>,
   ) => {

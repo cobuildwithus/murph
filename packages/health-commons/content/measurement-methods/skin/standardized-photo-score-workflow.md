@@ -17,34 +17,23 @@ categories:
   - "measurement-method"
   - "standardized-photo"
 relations:
+  - type: measures
+    target: biomarker:standardized-skin-photo-score
+  - type: measures
+    target: biomarker:periocular-wrinkle-score
+  - type: measures
+    target: biomarker:skin-texture-roughness-score
+  - type: safety_outcome
+    target: biomarker:skin-tolerability-symptoms
+  - type: cites
+    target: source_artifact:pmid-39960921
+  - type: cites
+    target: source_artifact:pmid-32649063
+  - type: cites
+    target: source_artifact:doi-10.3390-cosmetics12010004
+  - type: cites
+    target: source_artifact:pmid-15909229
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
-  -
-    type: "measures"
-    target: "biomarker:standardized-skin-photo-score"
-  -
-    type: "measures"
-    target: "biomarker:periocular-wrinkle-score"
-  -
-    type: "measures"
-    target: "biomarker:skin-texture-roughness-score"
-  -
-    type: "safety_outcome"
-    target: "biomarker:skin-tolerability-symptoms"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39960921"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-32649063"
-  -
-    type: "cites"
-    target: "source_artifact:doi-10.3390-cosmetics12010004"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-15909229"
 measurementMethod:
   shortName: "Photo Score Workflow"
   displayName: "Standardized Photo Score Workflow"

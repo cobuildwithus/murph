@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
+import { createPostgresTestOwner, forbiddenLegacyRuntime, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -30,6 +33,8 @@ import {
   deleteTelegramMessages,
   setTelegramMessageReaction,
 } from "@murphai/operator-config/telegram-runtime";
+import { buildHostedRunnerContainerEnv } from "../src/hosted-env-policy.ts";
+import { startHostedLocalLinqStub } from "./helpers/hosted-local-linq-support.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
   hostedRunnerIntercept,
@@ -47,9 +52,6 @@ import {
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
-import type {
-  WorkerProviderEgressTokenValidationResult,
-} from "../src/worker-contracts.ts";
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
@@ -87,7 +89,7 @@ const NUTRITION_CARD = {
   },
 } as const;
 
-const ELEVENLABS_MP3_BYTES = new Uint8Array([0xff, 0xfb, 0x90, 0x64]);
+const ELEVENLABS_MP3_BYTES = new Uint8Array(readFileSync(new URL("../../../fixtures/generated-audio/speech.mp3", import.meta.url)));
 const TELEGRAM_FILE_BYTES = new Uint8Array([1, 2, 3]);
 
 type ForwardedRequest = {
@@ -103,63 +105,83 @@ afterEach(() => {
 });
 
 describe("hosted provider egress conformance", () => {
-  it("drives the real Linq response-card client through the production provider-fetch boundary", async () => {
-    const validateRuntimeProviderEgressToken = vi.fn(
-      createProviderEgressTokenValidationResult,
+  it("drives generated runner env and the real Linq card client through Worker egress to HTTP", async () => {
+    const readProviderContext = vi.fn(
+      createProviderContextResult,
     );
     const validateRuntimeWriteFence = vi.fn(async () => {
       throw new Error("Provider fetch should authorize with the invocation token.");
     });
-    const env = createProviderInterceptEnv({
-      validateRuntimeProviderEgressToken,
-      validateRuntimeWriteFence,
+    const linq = await startHostedLocalLinqStub({
+      expectedAuthorizationToken: "linq-worker-secret",
     });
-    const forwarded: ForwardedRequest[] = [];
-    vi.stubGlobal("fetch", createProviderUpstreamFetch(forwarded));
+    try {
+      const env = {
+        ...createProviderInterceptEnv({
+          readProviderContext,
+          validateRuntimeWriteFence,
+        }),
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+        LINQ_API_BASE_URL: linq.baseUrl,
+      };
+      const runnerEnv = buildHostedRunnerContainerEnv(env);
+      const forwarded: ForwardedRequest[] = [];
+      const realFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        forwarded.push({
+          body: await readForwardedBody(request),
+          headers: request.headers,
+          method: request.method,
+          url: new URL(request.url),
+        });
+        return realFetch(request);
+      });
 
-    await expect(sendLinqMessage({
-      card: NUTRITION_CARD,
-      directRecipientPhoneNumber: "+15550000001",
-      fromPhoneNumber: "+15550000000",
-      idempotencyKey: "card_egress_conformance_1",
-      message: "Nutrition summary",
-      target: "chat_1",
-      targetKind: "thread",
-      threadIsDirect: true,
-    }, {
-      env: {
-        LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      },
-      fetchImplementation: createProductionProviderFetch(env),
-    })).resolves.toMatchObject({
-      providerMessageId: "message_1",
-      target: "chat_1",
-    });
+      const result = await sendLinqMessage({
+        card: NUTRITION_CARD,
+        directRecipientPhoneNumber: "+15550000001",
+        fromPhoneNumber: "+15550000000",
+        idempotencyKey: "card_egress_conformance_1",
+        message: "Nutrition summary",
+        target: "chat_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      }, {
+        env: runnerEnv,
+        persistAppCardTextFallback: async () => {},
+        fetchImplementation: createProductionProviderFetch(env),
+      });
 
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(2);
-    expect(forwarded).toHaveLength(2);
-    expect(forwarded[0]).toMatchObject({
-      body: {
-        address: "+15550000001",
-        from: "+15550000000",
-      },
-      method: "POST",
-    });
-    expect(forwarded[0]?.url.pathname)
-      .toBe("/api/partner/v3/capability/check_imessage");
-    expect(forwarded[0]?.headers.get("authorization"))
-      .toBe("Bearer linq-worker-secret");
-    expect(forwarded[1]?.body).toMatchObject({
-      message: {
-        idempotency_key: "card_egress_conformance_1",
-        preferred_service: "iMessage",
-        parts: [{ interactive: true, type: "imessage_app" }],
-      },
-    });
-    expect(forwarded[1]?.url.pathname)
-      .toBe("/api/partner/v3/chats/chat_1/messages");
-    assertAuthorityHeadersStripped(forwarded);
+      expect(result).toMatchObject({
+        providerMessageId: linq.requireLatestObservedMessageId("chat_1"),
+        target: "chat_1",
+      });
+      expect(runnerEnv.LINQ_API_TOKEN).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+      expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+      expect(readProviderContext).toHaveBeenCalledTimes(2);
+      expect(forwarded).toHaveLength(2);
+      expect(forwarded[0]).toMatchObject({
+        body: { address: "+15550000001", from: "+15550000000" },
+        method: "POST",
+      });
+      expect(forwarded[0]?.url.pathname).toBe("/capability/check_imessage");
+      expect(forwarded[1]?.body).toMatchObject({
+        message: {
+          idempotency_key: "card_egress_conformance_1",
+          preferred_service: "iMessage",
+          parts: [{ interactive: true, type: "imessage_app" }],
+        },
+      });
+      expect(forwarded[1]?.url.pathname).toBe("/chats/chat_1/messages");
+      expect(linq.acceptedSendRequests).toHaveLength(1);
+      expect(linq.observedRequests.every((request) => request.authorizationStatus === "expected"))
+        .toBe(true);
+      assertAuthorityHeadersStripped(forwarded);
+    } finally {
+      await linq.stop();
+    }
   });
 
   it.each([
@@ -184,7 +206,7 @@ describe("hosted provider egress conformance", () => {
         },
       ),
       createProviderInterceptEnv({ validateRuntimeWriteFence }),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(403);
@@ -193,14 +215,14 @@ describe("hosted provider egress conformance", () => {
   });
 
   it("drives every hosted Telegram client route through the production provider-fetch boundary", async () => {
-    const validateRuntimeProviderEgressToken = vi.fn(
-      createProviderEgressTokenValidationResult,
+    const readProviderContext = vi.fn(
+      createProviderContextResult,
     );
     const validateRuntimeWriteFence = vi.fn(async () => {
       throw new Error("Provider fetch should authorize with the invocation token.");
     });
     const env = createProviderInterceptEnv({
-      validateRuntimeProviderEgressToken,
+      readProviderContext,
       validateRuntimeWriteFence,
     });
     const forwarded: ForwardedRequest[] = [];
@@ -330,7 +352,7 @@ describe("hosted provider egress conformance", () => {
       "https://api.telegram.org/file/bottelegram-worker-secret/photos/file_1.jpg",
     );
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(10);
+    expect(readProviderContext).toHaveBeenCalledTimes(10);
     assertAuthorityHeadersStripped(forwarded);
   });
 });
@@ -350,15 +372,6 @@ function createProviderUpstreamFetch(
       url,
     });
 
-    if (url.pathname.endsWith("/capability/check_imessage")) {
-      return Response.json({
-        address: "+15550000001",
-        available: true,
-      });
-    }
-    if (url.pathname.endsWith("/chats/chat_1/messages")) {
-      return Response.json({ message: { id: "message_1" } });
-    }
     if (url.pathname.startsWith("/file/bottelegram-worker-secret/")) {
       return new Response(TELEGRAM_FILE_BYTES, {
         headers: { "content-type": "image/jpeg" },
@@ -406,10 +419,13 @@ function createProductionProviderFetch(
           headers: { "content-type": "audio/mpeg" },
         });
       }
+      // Cloudflare only invokes outbound interception on ports 80/443;
+      // a direct callback must not make an arbitrary local port look covered.
+      expect(new URL(request.url).port).toBe("");
       return await hostedRunnerIntercept(
         request,
         env,
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
     },
     {
@@ -436,10 +452,9 @@ async function readForwardedBody(request: Request): Promise<unknown> {
 }
 
 function createProviderInterceptEnv(input: {
-  validateRuntimeProviderEgressToken?: (input: {
-    providerEgressToken: string;
+  readProviderContext?: (input: {
     userId: string;
-  }) => Promise<WorkerProviderEgressTokenValidationResult>;
+  }) => Promise<TestProviderContext>;
   validateRuntimeWriteFence: (input: {
     attemptId: string;
     generation: string;
@@ -451,25 +466,20 @@ function createProviderInterceptEnv(input: {
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     LINQ_API_TOKEN: "linq-worker-secret",
     TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async () => ({ owns: false }),
-        validateRuntimeProviderEgressToken:
-          input.validateRuntimeProviderEgressToken
-          ?? (async () => ({ owns: false })),
-        validateRuntimeWriteFence: input.validateRuntimeWriteFence,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: nativeProviderTestNamespace(async () => {
+      const result = await input.readProviderContext?.({ userId: "member_123" });
+      return result?.owns ? createPostgresTestOwner({ userId: result.userId, attemptId: result.attemptId,
+        generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion }) : null;
+    }),
   };
   return env;
 }
 
-async function createProviderEgressTokenValidationResult(input: {
-  providerEgressToken: string;
+async function createProviderContextResult(input: {
   userId: string;
-}): Promise<WorkerProviderEgressTokenValidationResult> {
+}): Promise<TestProviderContext> {
   expect(input).toEqual({
-    providerEgressToken: PROVIDER_EGRESS_TOKEN,
     userId: "member_123",
   });
   return {

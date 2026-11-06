@@ -3,6 +3,9 @@ import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE, MURPH_ASSISTANT_ONBOARDING_IDEN
 import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseAssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import { priceHostedAiUsageForAllowance } from "@/src/lib/hosted-execution/usage-allowance";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
@@ -13,10 +16,11 @@ const mocks = vi.hoisted(() => ({
     linqFirstContactAdmissionModel: "gpt-5.6-luna",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
-  hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx: vi.fn(),
+  handoffHostedMailboxWake: vi.fn(),
   hostedMemberRoutingRecordsEqual: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
-  hostedLinqDeliveryFindMany: vi.fn(),
+  readOpeningDeliveries: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadRouteFindMany: vi.fn(),
   readHostedMailboxRecentLiveConversationItemIds: vi.fn(),
@@ -25,10 +29,13 @@ const mocks = vi.hoisted(() => ({
   hostedLinqDeliveryUpdateMany: vi.fn(),
   hostedMailboxItemUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
   lockHostedMemberRoutingStateTx: vi.fn(),
+  lockHostedLinqMessageReceiptsTx: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
   markHostedLinqDeliverySendFailedTx: vi.fn(),
-  markHostedLinqDeliverySkippedTx: vi.fn(),
+  abandonHostedLinqInstantFirstTurnDeliveryTx: vi.fn(),
+  recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx: vi.fn(),
   prepareHostedMailboxEnvelopeAppend: vi.fn(),
   projectHostedMemberRoutingState: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -36,6 +43,8 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberRoutingRecord: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   recordHostedAiUsageRecords: vi.fn(),
+  recordHostedIngressAcceptedFromMailboxItem: vi.fn(),
+  recordHostedIngressTemporalSignalAccepted: vi.fn(),
   resolveHostedMemberDirectRoute: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
 }));
@@ -70,7 +79,23 @@ vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   deriveHostedOnboardingTimingErrorName: (error: unknown) =>
     error instanceof Error ? error.name : "UnknownError",
   logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
+  finishHostedOnboardingTiming: vi.fn(),
+  startHostedOnboardingTiming: vi.fn(),
   toHostedOnboardingLogIdSuffix: (value: string) => value.slice(-8),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
+  handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery:
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
+  recordHostedIngressAcceptedFromMailboxItem:
+    mocks.recordHostedIngressAcceptedFromMailboxItem,
+  recordHostedIngressDirectEnsureTiming: vi.fn(),
+  recordHostedIngressTemporalSignalAccepted:
+    mocks.recordHostedIngressTemporalSignalAccepted,
 }));
 
 vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
@@ -95,29 +120,23 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
   recordHostedAiUsageRecords: mocks.recordHostedAiUsageRecords,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async (importOriginal) => ({
+  buildHostedLinqDeliveryId: (await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")>()).buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx:
     mocks.claimHostedLinqDeliveryProviderDispatchTx,
-  hasConflictingHostedLinqInstantFirstTurnForChatTx:
-    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx:
+    mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE: "instant_first_turn_v1",
-  isHostedLinqInstantFirstTurnFallbackTerminal: (input: {
-    failedAt: Date | null;
-    payloadCiphertext: string | null;
-    payloadSchema: string | null;
-    skippedAt: Date | null;
-    status: string;
-  }) => input.skippedAt !== null
-    || input.status === "skipped"
-    || (
-      (input.failedAt !== null || input.status === "failed")
-      && input.payloadCiphertext === null
-      && input.payloadSchema === null
-    ),
+  HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+  recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx: mocks.recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx,
   markHostedLinqDeliveryAcceptedTx: mocks.markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx:
     mocks.markHostedLinqDeliverySendFailedTx,
-  markHostedLinqDeliverySkippedTx: mocks.markHostedLinqDeliverySkippedTx,
+  abandonHostedLinqInstantFirstTurnDeliveryTx: mocks.abandonHostedLinqInstantFirstTurnDeliveryTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-message-receipt-lock", () => ({
+  lockHostedLinqMessageReceiptsTx: mocks.lockHostedLinqMessageReceiptsTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -144,6 +163,9 @@ import {
   isHostedLinqInstantFirstTurnRequestEligible,
   startHostedLinqInstantFirstTurnGeneration,
 } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
+import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
+
+const ATTEMPTED_AT = new Date("2026-08-22T21:00:00.000Z");
 
 const REQUEST = {
   eventId: "evt_instant_first_turn",
@@ -168,10 +190,10 @@ const WAKE_HANDOFF = {
 
 function createPrisma(): PrismaClient {
   const transaction = {
+    $queryRaw: mocks.readOpeningDeliveries,
     hostedThreadRoute: { findMany: mocks.hostedThreadRouteFindMany },
     hostedLinqDelivery: {
       findUnique: mocks.hostedLinqDeliveryFindUnique,
-      findMany: mocks.hostedLinqDeliveryFindMany,
       update: mocks.hostedLinqDeliveryUpdate,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
@@ -180,13 +202,13 @@ function createPrisma(): PrismaClient {
     },
   };
   const prisma = {
+    $queryRaw: mocks.readOpeningDeliveries,
     hostedThreadRoute: { findMany: mocks.hostedThreadRouteFindMany },
     hostedMember: { findUnique: mocks.hostedMemberFindUnique },
     $transaction: vi.fn(async (operation: (tx: typeof transaction) => unknown) =>
       operation(transaction)),
     hostedLinqDelivery: {
       findUnique: mocks.hostedLinqDeliveryFindUnique,
-      findMany: mocks.hostedLinqDeliveryFindMany,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
   };
@@ -254,7 +276,11 @@ function buildUsageResponse(
 describe("hosted Linq instant first turn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.handoffHostedMailboxWake.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+    mocks.readOpeningDeliveries.mockResolvedValue([]);
     mocks.hostedMemberFindUnique.mockResolvedValue({ assistantTone: "formal" });
     mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue(["mailbox_welcome"]);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
@@ -266,7 +292,7 @@ describe("hosted Linq instant first turn", () => {
     });
     mocks.environment.linqFirstContactAdmissionModel = "gpt-5.6-luna";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
-    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx.mockResolvedValue(
+    mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx.mockResolvedValue(
       false,
     );
     mocks.hostedMemberRoutingRecordsEqual.mockReturnValue(true);
@@ -278,9 +304,10 @@ describe("hosted Linq instant first turn", () => {
       status: "skipped",
     });
     mocks.recordHostedAiUsageRecords.mockResolvedValue({ recordedIds: [] });
+    mocks.lockHostedLinqMessageReceiptsTx.mockResolvedValue(undefined);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
-      id: "delivery_123",
+      attemptedAt: ATTEMPTED_AT,      id: "delivery_123",
     });
     mocks.hostedLinqDeliveryUpdate.mockResolvedValue({ id: "delivery_123" });
     mocks.hostedLinqDeliveryUpdateMany.mockResolvedValue({ count: 1 });
@@ -307,13 +334,11 @@ describe("hosted Linq instant first turn", () => {
     });
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
       deliveryStatus: "accepted",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(null);
-    mocks.markHostedLinqDeliverySkippedTx.mockResolvedValue({
-      id: "delivery_123",
-    });
+    mocks.abandonHostedLinqInstantFirstTurnDeliveryTx.mockResolvedValue(true);
+    mocks.recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx.mockResolvedValue(true);
     mocks.appendPreparedHostedMailboxEnvelopeTx.mockResolvedValue({
       mailboxItemId: "mailbox_outbound",
     });
@@ -326,7 +351,7 @@ describe("hosted Linq instant first turn", () => {
   });
 
   function prepareContinuation() {
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([
+    mocks.readOpeningDeliveries.mockResolvedValue([
       { acceptedAt: new Date("2026-09-01T12:00:00Z"), messageLookupKey: "message:welcome_message" },
     ]);
   }
@@ -341,11 +366,11 @@ describe("hosted Linq instant first turn", () => {
       prisma,
       request,
     });
-    expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
+    expect(claim).toEqual({ attemptedAt: ATTEMPTED_AT, kind: "generate", opening: { tone: "formal", question: "identity" } });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
       kind: "answer", message: "Ignored model wording",
     })));
-    const generation = await startHostedLinqInstantFirstTurnGeneration({ claim, request });
+    const generation = await startHostedLinqInstantFirstTurnGeneration({ claim: requireAvailableClaim(claim), request });
     await expect(completeHostedLinqInstantFirstTurn({
       generation,
       inboundMessageId: "inbound_message",
@@ -355,7 +380,7 @@ describe("hosted Linq instant first turn", () => {
       service: "imessage",
       wakeHandoff: WAKE_HANDOFF,
     })).resolves.toMatchObject({ kind: "accepted" });
-    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(3);
+    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(2);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       chatId: "chat_123",
       message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal,
@@ -372,6 +397,86 @@ describe("hosted Linq instant first turn", () => {
         }),
       }),
     }));
+  });
+
+  function prepareAspiration() {
+    mocks.readOpeningDeliveries.mockResolvedValue([
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+      { acceptedAt: new Date(), messageLookupKey: "message:identity_message" },
+    ]);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      eventId: "identity_event", kind: "conversation.message", userId: WAKE_HANDOFF.userId,
+      message: { channel: "linq", linqMessage: {
+        chatId: "chat_123", messageId: "identity_message", isFromMe: true, threadIsDirect: true,
+        parts: [{ type: "text", value: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal }],
+      } },
+    });
+  }
+
+  it("delivers a third opening reply and imports it through the existing suppression boundary", async () => {
+    prepareAspiration();
+    const prisma = createPrisma();
+    const request = { ...REQUEST, text: "Morgan, 29, nonbinary" };
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma, request,
+    });
+    expect(claim).toEqual({ attemptedAt: ATTEMPTED_AT, kind: "generate", opening: { tone: "formal", question: "aspiration" } });
+    const message = "Good to meet you, Morgan. What would you most like from your health?";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({ kind: "answer", message })));
+    const generation = await startHostedLinqInstantFirstTurnGeneration({ claim: requireAvailableClaim(claim), request });
+    expect(generation).toMatchObject({ attemptedAt: ATTEMPTED_AT, kind: "reply", message });
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation, inboundMessageId: "identity_answer", prisma,
+      participantContact: { kind: "phone", lookupKey: "phone_lookup", value: "+15555550199" },
+      recipientPhoneNumber: "+15555550199", service: "imessage", wakeHandoff: WAKE_HANDOFF,
+    })).resolves.toMatchObject({ kind: "accepted" });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message }));
+    expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({ message: expect.objectContaining({
+        linqMessage: expect.objectContaining({ replyToMessageId: "identity_answer", parts: [{ type: "text", value: message }] }),
+      }) }),
+    }));
+  });
+
+  it("caps the opening at three replies and rejects an unaccepted predecessor", async () => {
+    prepareAspiration();
+    mocks.readOpeningDeliveries.mockResolvedValue([
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+      { acceptedAt: new Date(), messageLookupKey: "message:identity_message" },
+      { acceptedAt: new Date(), messageLookupKey: "message:aspiration_message" },
+    ]);
+    const input = { continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST };
+    await expect(claimHostedLinqInstantFirstTurn(input)).resolves.toEqual({ kind: "unavailable" });
+    mocks.readOpeningDeliveries.mockResolvedValue([
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+      { acceptedAt: null, messageLookupKey: "message:identity_message" },
+    ]);
+    await expect(claimHostedLinqInstantFirstTurn(input)).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the third reply allowance under the chat lock", async () => {
+    prepareAspiration();
+    const prior = [
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+      { acceptedAt: new Date(), messageLookupKey: "message:identity_message" },
+    ];
+    mocks.readOpeningDeliveries.mockResolvedValueOnce(prior).mockResolvedValueOnce([...prior, { acceptedAt: null, messageLookupKey: null }]);
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it("hands mixed identity and immediate needs to the runtime without sending", async () => {
+    prepareAspiration();
+    const request = { ...REQUEST, text: "Morgan, 29. Help with a symptom first." };
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({ kind: "handoff", message: "" })));
+    expect((await startHostedLinqInstantFirstTurnGeneration({ claim: requireAvailableClaim(claim), request })).kind).toBe("unavailable");
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("leaves an unresolved direct member to the runtime without claiming a first reply", async () => {
@@ -399,9 +504,9 @@ describe("hosted Linq instant first turn", () => {
     const claim = await claimHostedLinqInstantFirstTurn({
       continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: { ...REQUEST, text: "yes" },
     });
-    expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
-    expect(mocks.hostedLinqDeliveryFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([
+    expect(claim).toEqual({ attemptedAt: ATTEMPTED_AT, kind: "generate", opening: { tone: "formal", question: "identity" } });
+    expect(mocks.readOpeningDeliveries.mock.calls[0]).toContain(WAKE_HANDOFF.userId);
+    mocks.readOpeningDeliveries.mockResolvedValue([
       { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
       { acceptedAt: new Date(), messageLookupKey: "message:identity_message" },
     ]);
@@ -411,8 +516,9 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledOnce();
   });
 
-  it("recovers the exact accepted second reply after later messages without regenerating", async () => {
-    prepareContinuation();
+  it.each(["second", "third"])("recovers the exact accepted %s reply after later messages without regenerating", async (stage) => {
+    if (stage === "third") prepareAspiration();
+    else prepareContinuation();
     mocks.hostedLinqDeliveryFindUnique.mockResolvedValue({
       template: "instant_first_turn_v1", linqChatLookupKey: "chat:chat_123",
       acceptedAt: new Date(), payloadCiphertext: null,
@@ -426,13 +532,13 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await startHostedLinqInstantFirstTurnGeneration({ claim, request: REQUEST });
+    await startHostedLinqInstantFirstTurnGeneration({ claim: requireAvailableClaim(claim), request: REQUEST });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rechecks the two-reply cap under the existing chat lock", async () => {
     prepareContinuation();
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+    mocks.readOpeningDeliveries.mockResolvedValueOnce([
       { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
     ]).mockResolvedValueOnce([
       { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
@@ -444,9 +550,8 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("rejects a group route at continuation admission, including a concurrent conversion %s", async (concurrent) => {
+  it("rejects a group route under the chat lock after continuation preflight", async () => {
     prepareContinuation();
-    if (concurrent) mocks.hostedThreadRouteFindMany.mockResolvedValueOnce([]);
     mocks.hostedThreadRouteFindMany.mockResolvedValue([{
       channel: "linq", containerMemberId: "group_container",
       container: { member: { id: "group_container" }, owner: { id: "group_owner" } },
@@ -465,7 +570,7 @@ describe("hosted Linq instant first turn", () => {
     })).resolves.toEqual({ kind: "unavailable" });
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
       eventId: "earlier_inbound", kind: "conversation.message", userId: WAKE_HANDOFF.userId,
-      message: { channel: "linq", linqMessage: { isFromMe: false } },
+      message: { channel: "linq", linqMessage: { isFromMe: false, parts: [] } },
     });
     await expect(claimHostedLinqInstantFirstTurn({
       continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
@@ -478,9 +583,9 @@ describe("hosted Linq instant first turn", () => {
       kind: "answer", message: "Ignored model wording",
     })));
     await expect(startHostedLinqInstantFirstTurnGeneration({
-      claim: { kind: "generate", openingTone }, request: { ...REQUEST, text: "yes" },
+      claim: { attemptedAt: ATTEMPTED_AT, kind: "generate", opening: { tone: openingTone, question: "identity" } }, request: { ...REQUEST, text: "yes" },
     })).resolves.toMatchObject({
-      kind: "reply", message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS[openingTone],
+      attemptedAt: ATTEMPTED_AT, kind: "reply", message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS[openingTone],
     });
   });
 
@@ -491,10 +596,10 @@ describe("hosted Linq instant first turn", () => {
       continuationMemberId: WAKE_HANDOFF.userId,
       linqChatId: "chat_123", prisma: createPrisma(), request,
     });
-    expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
+    expect(claim).toEqual({ attemptedAt: ATTEMPTED_AT, kind: "generate", opening: { tone: "formal", question: "identity" } });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({ kind: "handoff", message: "" })));
     const generation = await startHostedLinqInstantFirstTurnGeneration({
-      claim, request,
+      claim: requireAvailableClaim(claim), request,
     });
     expect(generation.kind).toBe("unavailable");
     await expect(completeHostedLinqInstantFirstTurn({
@@ -528,11 +633,11 @@ describe("hosted Linq instant first turn", () => {
       linqChatId: "chat_123",
       prisma: createPrisma(),
       request: REQUEST,
-    })).resolves.toEqual({ kind: "generate" });
+    })).resolves.toEqual({ attemptedAt: ATTEMPTED_AT, kind: "generate" });
 
     expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledOnce();
     expect(
-      mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+      mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
     ).toHaveBeenCalledWith(expect.objectContaining({
       eventId: REQUEST.eventId,
       linqChatId: "chat_123",
@@ -562,10 +667,6 @@ describe("hosted Linq instant first turn", () => {
     });
 
     expect(claim).toEqual({ kind: "unavailable" });
-    await expect(startHostedLinqInstantFirstTurnGeneration({
-      claim,
-      request,
-    })).resolves.toEqual({ kind: "unavailable" });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
       .not.toHaveBeenCalled();
@@ -573,51 +674,16 @@ describe("hosted Linq instant first turn", () => {
   });
 
   it("terminalizes a speculative claim under the same chat lock", async () => {
-    const prisma = createPrisma();
-
     await abandonHostedLinqInstantFirstTurn({
-      eventId: REQUEST.eventId,
-      linqChatId: "chat_123",
-      prisma,
-      reason: "planner-selected-non-instant-path",
+      expectedAttemptedAt: ATTEMPTED_AT, eventId: REQUEST.eventId,
+      linqChatId: "chat_123", prisma: createPrisma(), reason: "planner-selected-non-instant-path",
     });
-
-    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledWith({
-      chatId: "chat_123",
-      tx: expect.any(Object),
-    });
-    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        linqChatId: "chat_123",
-        reason: "planner-selected-non-instant-path",
-        sourceRef: REQUEST.eventId,
-        template: "instant_first_turn_v1",
-      }),
-    );
+    expect(mocks.abandonHostedLinqInstantFirstTurnDeliveryTx).toHaveBeenCalledWith(expect.objectContaining({
+      expectedAttemptedAt: ATTEMPTED_AT, reason: "planner-selected-non-instant-path",
+      idempotencyKey: expect.stringContaining("linq-instant-first-turn-v1-"),
+    }));
     expect(mocks.acquireHostedLinqChatOwnershipLockTx.mock.invocationCallOrder[0]!)
-      .toBeLessThan(mocks.markHostedLinqDeliverySkippedTx.mock.invocationCallOrder[0]!);
-  });
-
-  it("does not create a skipped row when no speculative claim exists", async () => {
-    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(null);
-
-    await abandonHostedLinqInstantFirstTurn({
-      eventId: REQUEST.eventId,
-      linqChatId: "chat_123",
-      prisma: createPrisma(),
-      reason: "planner-selected-non-instant-path",
-    });
-
-    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledOnce();
-    expect(mocks.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
-      select: { id: true },
-      where: {
-        idempotencyKey: expect.stringContaining(
-          "linq-instant-first-turn-v1-",
-        ),
-      },
-    });
-    expect(mocks.markHostedLinqDeliverySkippedTx).not.toHaveBeenCalled();
+      .toBeLessThan(mocks.abandonHostedLinqInstantFirstTurnDeliveryTx.mock.invocationCallOrder[0]!);
   });
 
   it("resumes the same encrypted obligation without regenerating", async () => {
@@ -629,11 +695,11 @@ describe("hosted Linq instant first turn", () => {
       linqChatId: "chat_123",
       prisma: createPrisma(),
       request: REQUEST,
-    })).resolves.toEqual({ kind: "resume" });
+    })).resolves.toEqual({ attemptedAt: ATTEMPTED_AT, kind: "resume" });
     await expect(startHostedLinqInstantFirstTurnGeneration({
-      claim: { kind: "resume" },
+      claim: { attemptedAt: ATTEMPTED_AT, kind: "resume" },
       request: REQUEST,
-    })).resolves.toEqual({ kind: "resume" });
+    })).resolves.toEqual({ attemptedAt: ATTEMPTED_AT, kind: "resume" });
   });
 
   it("does not regenerate a terminal ledger fallback on an exact retry", async () => {
@@ -650,10 +716,6 @@ describe("hosted Linq instant first turn", () => {
     });
 
     expect(claim).toEqual({ kind: "unavailable" });
-    await expect(startHostedLinqInstantFirstTurnGeneration({
-      claim,
-      request: REQUEST,
-    })).resolves.toEqual({ kind: "unavailable" });
     expect(mocks.hostedLinqDeliveryFindUnique).not.toHaveBeenCalled();
   });
 
@@ -666,11 +728,11 @@ describe("hosted Linq instant first turn", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await startHostedLinqInstantFirstTurnGeneration({
-      claim: { kind: "generate" },
+      claim: { attemptedAt: ATTEMPTED_AT, kind: "generate" },
       request: REQUEST,
     });
     expect(result).toMatchObject({
-      kind: "reply",
+      attemptedAt: ATTEMPTED_AT, kind: "reply",
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -678,7 +740,7 @@ describe("hosted Linq instant first turn", () => {
     const body = JSON.parse(String(requestInit.body));
     expect(body).toMatchObject({
       input: [{ content: REQUEST.text, role: "user" }],
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       reasoning: { effort: "medium" },
       service_tier: "priority",
       store: false,
@@ -704,10 +766,10 @@ describe("hosted Linq instant first turn", () => {
     })));
 
     await expect(startHostedLinqInstantFirstTurnGeneration({
-      claim: { kind: "generate" },
+      claim: { attemptedAt: ATTEMPTED_AT, kind: "generate" },
       request: { ...REQUEST, text: "Hey Murph" },
     })).resolves.toMatchObject({
-      kind: "reply",
+      attemptedAt: ATTEMPTED_AT, kind: "reply",
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     });
   });
@@ -729,7 +791,7 @@ describe("hosted Linq instant first turn", () => {
       request: REQUEST,
     });
     const generation = await startHostedLinqInstantFirstTurnGeneration({
-      claim,
+      claim: requireAvailableClaim(claim),
       request: REQUEST,
     });
     const completion = await completeHostedLinqInstantFirstTurn({
@@ -763,10 +825,17 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
       expect.objectContaining({
         usage: [expect.objectContaining({
-          tokenPricingBasis: "openai-priority",
+          tokenPricingBasis: "standard",
         })],
       }),
     );
+    const usage = parseAssistantUsageRecord(mocks.recordHostedAiUsageRecords.mock.calls[0]?.[0].usage[0]);
+    const memberPrice = priceHostedAiUsageForAllowance(usage);
+    const standardPrice = priceHostedAiUsageForAllowance({ ...usage, tokenPricingBasis: "standard" });
+    const priorityPrice = priceHostedAiUsageForAllowance({ ...usage, tokenPricingBasis: "openai-priority" });
+    expect(memberPrice.costUsdMicros).toBeGreaterThan(0n);
+    expect(memberPrice.costUsdMicros).toBe(standardPrice.costUsdMicros);
+    expect(memberPrice.costUsdMicros * 2n).toBe(priorityPrice.costUsdMicros);
     expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
@@ -783,7 +852,9 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
           laneSeq: "2",
@@ -792,6 +863,111 @@ describe("hosted Linq instant first turn", () => {
     });
   });
 
+  it("retains the accepted delivery link on completed webhook replay without resending", async () => {
+    const result = await completeHostedLinqInstantFirstTurn({
+      generation: { kind: "completed" },
+      inboundMessageId: "inbound_message_123",
+      participantContact: { kind: "phone", lookupKey: "phone_lookup_123", value: "+15551234567" },
+      prisma: createPrisma(),
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    });
+    expect(result).toMatchObject({
+      kind: "accepted",
+      wakeHandoff: {
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
+        mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
+      },
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  for (const wakeFails of [false, true]) {
+    it.each(["reply", "completed", "resume"] as const)(
+      `links original ingress after %s completion with echo wake failure=${wakeFails}`,
+      async (generationKind) => {
+        const tasks: Array<() => Promise<void>> = [];
+        const scheduleAfterResponse = (task: () => Promise<void>) => { tasks.push(task); };
+        const wakeHandoff = structuredClone(WAKE_HANDOFF);
+        const wakeError = new Error("synthetic signal failure");
+        if (wakeFails) mocks.handoffHostedMailboxWake.mockRejectedValueOnce(wakeError);
+        if (generationKind === "resume") {
+          mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+            acceptedAt: new Date("2026-08-22T21:00:01.000Z"),
+            template: "instant_first_turn_v1",
+          });
+        }
+        const completion = await completeHostedLinqInstantFirstTurn({
+          generation: generationKind === "reply" ? {
+            attemptedAt: ATTEMPTED_AT, kind: "reply",
+            message: "Hey! What would you like help with?",
+            usage: { requestedModel: "gpt-6-luna", response: buildUsageResponse() },
+          } : generationKind === "resume" ? { attemptedAt: ATTEMPTED_AT, kind: "resume" } : { kind: "completed" },
+          inboundMessageId: "inbound_message_123",
+          participantContact: { kind: "phone", lookupKey: "phone_lookup_123", value: "+15551234567" },
+          prisma: createPrisma(),
+          recipientPhoneNumber: "+15550000000",
+          service: "iMessage",
+          wakeHandoff,
+        });
+        if (completion.kind !== "accepted") throw new Error("Expected accepted completion");
+
+        const result = maybeHandoffHostedExecutionWebhookWake({
+          response: { ok: true },
+          scheduleAfterResponse,
+          wakeHandoff: completion.wakeHandoff,
+        });
+        if (wakeFails) await expect(result).rejects.toBe(wakeError);
+        else await expect(result).resolves.toEqual({
+          reason: "temporal-signaled",
+          signalAccepted: true,
+          started: true,
+          workflowId: "hosted-user-runtime:member_123",
+        });
+
+        expect(wakeHandoff).toEqual(WAKE_HANDOFF);
+        expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(generationKind === "reply" ? 1 : 0);
+        expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+        expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledExactlyOnceWith({
+          directWakeSource: "linq",
+          expectedUserId: "member_123",
+          knownCheckpoint: { lane: "conversation", laneSeq: "2", userId: "member_123" },
+          mailboxItemId: "mailbox_outbound",
+          onDirectWakeTiming: expect.any(Function),
+          scheduleAfterResponse,
+          signal: undefined,
+          timeoutMs: undefined,
+        });
+        expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+        expect(tasks).toHaveLength(1);
+        await tasks[0]!();
+        expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+          authenticatedUserId: "member_123",
+          answeredMailboxItemIds: ["mailbox_outbound", "mailbox_inbound"],
+          linqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
+          replyRuntimeAttemptId: null,
+        });
+        const ingress = {
+          ingressTypingAcceptedAt: undefined,
+          webhookReceivedAt: undefined,
+          mailboxItemId: "mailbox_outbound",
+          source: "linq",
+        };
+        if (wakeFails) {
+          expect(mocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledExactlyOnceWith(ingress);
+          expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+        } else {
+          expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledExactlyOnceWith({
+            ...ingress, at: expect.any(Date), expectedUserId: "member_123",
+          });
+          expect(mocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+        }
+      },
+    );
+  }
+
   it("makes unsafe model output unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
       kind: "answer",
@@ -799,19 +975,19 @@ describe("hosted Linq instant first turn", () => {
     })));
 
     await expect(startHostedLinqInstantFirstTurnGeneration({
-      claim: { kind: "generate" },
+      claim: { attemptedAt: ATTEMPTED_AT, kind: "generate" },
       request: REQUEST,
-    })).resolves.toEqual({ kind: "unavailable" });
+    })).resolves.toEqual({ attemptedAt: ATTEMPTED_AT, kind: "unavailable" });
   });
 
   it("delivers the accepted reply and leaves both conversation rows for runtime import", async () => {
     const prisma = createPrisma();
     const result = await completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse("default"),
         },
       },
@@ -833,6 +1009,21 @@ describe("hosted Linq instant first turn", () => {
       message: "Hey! What would you like help with?",
       replyToMessageId: "inbound_message_123",
     });
+    expect(mocks.lockHostedLinqMessageReceiptsTx).toHaveBeenCalledExactlyOnceWith({
+      messageIds: ["provider_message_123"],
+      prisma: expect.anything(),
+    });
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prisma: mocks.lockHostedLinqMessageReceiptsTx.mock.calls[0]?.[0].prisma,
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.lockHostedLinqMessageReceiptsTx.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.lockHostedLinqMessageReceiptsTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqDeliveryAcceptedTx.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -845,7 +1036,9 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
           laneSeq: "2",
@@ -861,10 +1054,10 @@ describe("hosted Linq instant first turn", () => {
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -880,10 +1073,10 @@ describe("hosted Linq instant first turn", () => {
       wakeHandoff: WAKE_HANDOFF,
     })).resolves.toEqual({ kind: "fallback" });
 
-    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
+    expect(mocks.abandonHostedLinqInstantFirstTurnDeliveryTx).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "direct-route-unavailable",
-        sourceRef: REQUEST.eventId,
+        expectedAttemptedAt: ATTEMPTED_AT,
       }),
     );
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
@@ -895,16 +1088,16 @@ describe("hosted Linq instant first turn", () => {
     mocks.readHostedMemberRoutingRecord.mockRejectedValueOnce(
       new Error("Synthetic route read failure."),
     );
-    mocks.markHostedLinqDeliverySkippedTx.mockRejectedValueOnce(
+    mocks.abandonHostedLinqInstantFirstTurnDeliveryTx.mockRejectedValueOnce(
       new Error("Synthetic terminalization failure."),
     );
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -929,27 +1122,16 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("retains Web ownership when the skip writer preserves provider entry", async () => {
-    mocks.readHostedMemberRoutingRecord.mockRejectedValueOnce(
-      new Error("Synthetic route read failure."),
-    );
-    mocks.hostedLinqDeliveryFindUnique
-      .mockResolvedValueOnce({ id: "delivery_123" })
-      .mockResolvedValueOnce({
-        failedAt: null,
-        payloadCiphertext: "sealed:Exact prior reply",
-        payloadSchema:
-          "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
-        skippedAt: null,
-        status: "provider_dispatch_started",
-      });
+  it("retains Web ownership when guarded abandonment loses", async () => {
+    mocks.readHostedMemberRoutingRecord.mockRejectedValueOnce(new Error("Synthetic route read failure."));
+    mocks.abandonHostedLinqInstantFirstTurnDeliveryTx.mockResolvedValueOnce(false);
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -969,7 +1151,7 @@ describe("hosted Linq instant first turn", () => {
       retryable: true,
     });
 
-    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledOnce();
+    expect(mocks.abandonHostedLinqInstantFirstTurnDeliveryTx).toHaveBeenCalledOnce();
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
       .not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -978,16 +1160,15 @@ describe("hosted Linq instant first turn", () => {
   it("keeps accepted Web ownership when a buffered provider failure is replayed", async () => {
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValueOnce({
       deliveryStatus: "failed",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1005,7 +1186,9 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
+        originalInboundMailboxItemId: "mailbox_inbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
           laneSeq: "2",
@@ -1035,10 +1218,10 @@ describe("hosted Linq instant first turn", () => {
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1075,7 +1258,7 @@ describe("hosted Linq instant first turn", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(completeHostedLinqInstantFirstTurn({
-      generation: { kind: "resume" },
+      generation: { attemptedAt: ATTEMPTED_AT, kind: "resume" },
       inboundMessageId: "inbound_message_123",
       participantContact: {
         kind: "phone",
@@ -1103,10 +1286,10 @@ describe("hosted Linq instant first turn", () => {
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1120,12 +1303,17 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).rejects.toMatchObject({
+    }).then((completion) => maybeHandoffHostedExecutionWebhookWake({
+      response: { ok: true },
+      wakeHandoff: completion.kind === "accepted" ? completion.wakeHandoff : WAKE_HANDOFF,
+    }))).rejects.toMatchObject({
       code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
       retryable: true,
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledOnce();
     expect(mocks.prepareHostedMailboxEnvelopeAppend).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedMailboxWake).not.toHaveBeenCalled();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
   it("falls back to the runtime after a definitive provider rejection", async () => {
@@ -1137,12 +1325,12 @@ describe("hosted Linq instant first turn", () => {
       retryable: false,
     }));
 
-    await expect(completeHostedLinqInstantFirstTurn({
+    const completion = await completeHostedLinqInstantFirstTurn({
       generation: {
-        kind: "reply",
+        attemptedAt: ATTEMPTED_AT, kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1156,15 +1344,28 @@ describe("hosted Linq instant first turn", () => {
       recipientPhoneNumber: "+15550000000",
       service: "iMessage",
       wakeHandoff: WAKE_HANDOFF,
-    })).resolves.toEqual({ kind: "fallback" });
-    expect(mocks.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          payloadCiphertext: null,
-          payloadOwnerMemberId: null,
-          payloadSchema: null,
-        },
-      }),
+    });
+    expect(completion).toEqual({ kind: "fallback" });
+    const tasks: Array<() => Promise<void>> = [];
+    await maybeHandoffHostedExecutionWebhookWake({
+      response: { ok: true },
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: completion.kind === "accepted" ? completion.wakeHandoff : WAKE_HANDOFF,
+    });
+    for (const task of tasks) await task();
+    expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith(expect.objectContaining({
+      mailboxItemId: "mailbox_inbound",
+      knownCheckpoint: { lane: "conversation", laneSeq: "1", userId: "member_123" },
+    }));
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedAttemptedAt: ATTEMPTED_AT }),
     );
+    expect(mocks.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 });
+
+function requireAvailableClaim(claim: Awaited<ReturnType<typeof claimHostedLinqInstantFirstTurn>>) {
+  if (claim.kind === "unavailable") throw new Error("Synthetic claim must be available.");
+  return claim;
+}

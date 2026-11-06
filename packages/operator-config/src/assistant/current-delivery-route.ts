@@ -19,6 +19,7 @@ export interface AssistantAutomationRouteFields extends AssistantDeliveryRouteFi
 export interface AssistantAutomationRouteDeliverabilityIssue {
   code:
     | 'channel_required'
+    | 'ephemeral_channel'
     | 'email_delivery_target_required'
     | 'email_hosted_thread_target_invalid'
     | 'email_hosted_thread_target_recipient_required'
@@ -233,6 +234,13 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
     }
   }
 
+  if (channel === 'voice') {
+    return {
+      code: 'ephemeral_channel',
+      message: 'A voice call cannot receive future reminders. Connect a messaging destination before scheduling one.',
+    }
+  }
+
   if (channel === 'linq') {
     const hasParticipantSource =
       Boolean(participantId) &&
@@ -273,58 +281,7 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
   }
 
   if (channel === 'email') {
-    if (profile !== 'hosted') {
-      return {
-        code: 'email_local_unsupported',
-        message:
-          'Local email automation delivery is not supported. Use Telegram or Linq for local automations.',
-      }
-    }
-
-    const hostedEmailThreadTarget = deliveryTarget?.startsWith(
-      HOSTED_EMAIL_THREAD_TARGET_PREFIX,
-    )
-      ? parseHostedEmailThreadTarget(deliveryTarget)
-      : null
-
-    if (
-      deliveryTarget &&
-      looksLikePrivateAssistantRoutePlaceholder(deliveryTarget)
-    ) {
-      return {
-        code: 'email_private_delivery_target',
-        message:
-          'Email automation routes cannot use redacted conversation placeholders as delivery targets.',
-      }
-    }
-
-    if (
-      deliveryTarget?.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX) &&
-      hostedEmailThreadTarget === null
-    ) {
-      return {
-        code: 'email_hosted_thread_target_invalid',
-        message:
-          'Email automation routes cannot use malformed hosted email thread targets.',
-      }
-    }
-
-    if (hostedEmailThreadTarget && !hostedEmailThreadTarget.to[0]) {
-      return {
-        code: 'email_hosted_thread_target_recipient_required',
-        message:
-          'Email automation routes cannot use hosted email thread targets without a recipient.',
-      }
-    }
-
-    if (!deliveryTarget) {
-      return {
-        code: 'email_delivery_target_required',
-        message:
-          'Email automation routes require an explicit delivery target. Pass --delivery-target with a recipient address or hosted email thread target; thread and participant locators alone are local continuity metadata.',
-      }
-    }
-    return null
+    return getEmailAutomationRouteDeliverabilityIssue(deliveryTarget, profile)
   }
 
   if (!deliveryTarget && !participantId && !threadId) {
@@ -335,6 +292,64 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
     }
   }
 
+  return null
+}
+
+function getEmailAutomationRouteDeliverabilityIssue(
+  deliveryTarget: string | null,
+  profile: AssistantAutomationRouteValidationProfile,
+): AssistantAutomationRouteDeliverabilityIssue | null {
+  if (profile !== 'hosted') {
+    return {
+      code: 'email_local_unsupported',
+      message:
+        'Local email automation delivery is not supported. Use Telegram or Linq for local automations.',
+    }
+  }
+
+  const hostedEmailThreadTarget = deliveryTarget?.startsWith(
+    HOSTED_EMAIL_THREAD_TARGET_PREFIX,
+  )
+    ? parseHostedEmailThreadTarget(deliveryTarget)
+    : null
+
+  if (
+    deliveryTarget &&
+    looksLikePrivateAssistantRoutePlaceholder(deliveryTarget)
+  ) {
+    return {
+      code: 'email_private_delivery_target',
+      message:
+        'Email automation routes cannot use redacted conversation placeholders as delivery targets.',
+    }
+  }
+
+  if (
+    deliveryTarget?.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX) &&
+    hostedEmailThreadTarget === null
+  ) {
+    return {
+      code: 'email_hosted_thread_target_invalid',
+      message:
+        'Email automation routes cannot use malformed hosted email thread targets.',
+    }
+  }
+
+  if (hostedEmailThreadTarget && !hostedEmailThreadTarget.to[0]) {
+    return {
+      code: 'email_hosted_thread_target_recipient_required',
+      message:
+        'Email automation routes cannot use hosted email thread targets without a recipient.',
+    }
+  }
+
+  if (!deliveryTarget) {
+    return {
+      code: 'email_delivery_target_required',
+      message:
+        'Email automation routes require an explicit delivery target. Pass --delivery-target with a recipient address or hosted email thread target; thread and participant locators alone are local continuity metadata.',
+    }
+  }
   return null
 }
 

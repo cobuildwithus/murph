@@ -115,7 +115,7 @@ When the user's main question is what the HRV/RHR, sleep-stage, sleep-score, or 
 Lead with the recommendation when evidence supports a call:
 
 1. **Call:** planned, guarded, easy/recovery, rest, recovery block, or care route.
-2. **Why:** the one to three facts that changed the decision, plus important uncertainty.
+2. **Why:** the one to three facts that changed the decision.
 3. **Action:** the exact guardrail, behavior, or handoff.
 4. **Recheck:** what to observe and when the decision should change.
 

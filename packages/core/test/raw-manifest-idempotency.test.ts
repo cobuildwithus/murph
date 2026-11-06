@@ -1,3 +1,4 @@
+import { archiveClosedAuditShards } from "../src/index.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -187,7 +188,7 @@ test("exact document evidence batch isolates damaged receipts from valid neighbo
   assert.deepEqual(groups[2]?.evidence, []);
 });
 
-test("exact document evidence binds one idempotent inbox promotion correlation", async () => {
+test.each([false, true])("exact document evidence binds one idempotent inbox promotion correlation (archived=%s)", async (archived) => {
   const vaultRoot = await makeTempDirectory("murph-core-document-promotion-correlation");
   const sourceRoot = await makeTempDirectory("murph-core-document-promotion-correlation-source");
   await initializeVault({ vaultRoot });
@@ -207,6 +208,12 @@ test("exact document evidence binds one idempotent inbox promotion correlation",
     await recordInboxDocumentDefaultPromotion(correlation),
     { created: true },
   );
+  if (archived) {
+    const now = new Date();
+    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const result = await archiveClosedAuditShards({ vaultRoot, now: nextMonth });
+    assert.ok(result.archivedShardCount > 0);
+  }
   assert.deepEqual(
     await recordInboxDocumentDefaultPromotion(correlation),
     { created: false },

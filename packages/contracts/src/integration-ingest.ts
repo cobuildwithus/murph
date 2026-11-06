@@ -110,6 +110,12 @@ export const integrationIngestRecordSchema = withContractMetadata(
         sampleCount: z.number().int().safe().nonnegative(),
       })
       .strict(),
+    // Results of canonical publication, not inputs to delivery identity.
+    publication: z.object({
+      skippedDuplicateCount: z.number().int().safe().nonnegative(),
+      supersededCount: z.number().int().safe().nonnegative(),
+      retractedCount: z.number().int().safe().nonnegative(),
+    }).strict().optional(),
     provenance: jsonObjectSchema.optional(),
   })
   .strict()

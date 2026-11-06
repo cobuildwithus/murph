@@ -29,6 +29,14 @@ export function createHostedWebActionApprovalPort(input: {
         route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.actionApprovalConsume,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
+      }).catch((error: unknown) => {
+        // A stalled response body surfaces as a raw TimeoutError that the
+        // delivery retry policy does not recognize. Repeating the same generation
+        // and consumer is safe, so consume marks it retryable here.
+        if (error instanceof Error && error.name === "TimeoutError") {
+          Object.assign(error, { retryable: true });
+        }
+        throw error;
       });
 
       return parseHostedActionApprovalResult(payload);

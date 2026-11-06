@@ -4,7 +4,6 @@ import {
   createHostedDataApiLabelsClient,
   hostedDataApiLabelBatchSearchInputSchema,
   hostedDataApiLabelSearchInputSchema,
-  hostedDataApiLabelSearchItemSchema,
   type HostedDataApiLabelsDependencies,
 } from './hosted-data-api-labels.js'
 
@@ -19,7 +18,6 @@ const supplementLabelsClient = createHostedDataApiLabelsClient({
 })
 
 export const supplementLabelSearchInputSchema = hostedDataApiLabelSearchInputSchema
-export const supplementLabelSearchItemSchema = hostedDataApiLabelSearchItemSchema
 export const supplementLabelSearchResultSchema = supplementLabelsClient.searchResultSchema
 export const supplementLabelBatchSearchInputSchema = hostedDataApiLabelBatchSearchInputSchema
 export const supplementLabelBatchSearchResultSchema =

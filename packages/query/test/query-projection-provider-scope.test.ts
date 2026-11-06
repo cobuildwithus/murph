@@ -1,3 +1,4 @@
+import { createWearableSummaryEncoder, decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -157,7 +158,7 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
       readOnly: true,
     });
     try {
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 26);
+      assert.ok(QUERY_PROJECTION_SQLITE_VERSION >= 26);
       assert.equal(
         readSqliteRuntimeUserVersion(rebuiltDatabase),
         QUERY_PROJECTION_SQLITE_VERSION,
@@ -177,8 +178,10 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
     }
 
     const currentStatus = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(currentStatus.fresh, true);
-    assert.notEqual(currentStatus.builtAt, legacyBuiltAt);
+    // Upgrading a wearable read certifies only the rebuilt wearable rows.
+    assert.equal(currentStatus.fresh, false);
+    assert.equal(currentStatus.builtAt, null);
+    assert.equal((await rebuildQueryProjection(vaultRoot)).fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -291,7 +294,9 @@ test("activity runtime reads bounded workout features without hydrating query en
       ].map((record) => JSON.stringify(record)).join("\n").concat("\n"),
       "utf8",
     );
+    const coldSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
     await rebuildQueryProjection(vaultRoot);
+    assert.deepEqual(await summarizeWearableSourceHealthRuntime(vaultRoot), coldSourceHealth);
 
     const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
     try {
@@ -522,14 +527,14 @@ test("runtime all-provider wearable source health recomputes provider staleness"
         .get() as { id: string; summaryJson: string } | undefined;
 
       assert.ok(alphaSourceHealthRow);
-      const alphaSourceHealthSummary = JSON.parse(alphaSourceHealthRow.summaryJson);
+      const alphaSourceHealthSummary = JSON.parse(decodeWearableSummaryJson(alphaSourceHealthRow.summaryJson, readWearableSummaryShapes(database)));
       alphaSourceHealthSummary.notes = [
         ...(alphaSourceHealthSummary.notes ?? []),
         "Synthetic stored source-health note that must not survive recomposition.",
       ];
       database
         .prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?")
-        .run(JSON.stringify(alphaSourceHealthSummary), alphaSourceHealthRow.id);
+        .run(createWearableSummaryEncoder(database)(JSON.stringify(alphaSourceHealthSummary)), alphaSourceHealthRow.id);
     } finally {
       database.close();
     }
@@ -640,7 +645,7 @@ test("provider-scoped wearable source health does not duplicate unknown rows", a
 
       assert.deepEqual(
         sourceHealthRows.map((row) => ({
-          provider: JSON.parse(row.summaryJson).provider,
+          provider: JSON.parse(decodeWearableSummaryJson(row.summaryJson, readWearableSummaryShapes(database))).provider,
           scope: row.providerScopeKey,
         })),
         [
@@ -758,6 +763,9 @@ test("provider-scoped wearable projection rows use resolved public providers", a
         `)
         .all() as Array<{ providerScopeKey: string; summaryJson: string }>;
 
+      for (const row of activityScopeRows) {
+        row.summaryJson = decodeWearableSummaryJson(row.summaryJson, readWearableSummaryShapes(database));
+      }
       assert.deepEqual(
         activityScopeRows.map((row) => row.providerScopeKey),
         ["providers:garmin", "providers:unknown"],
@@ -1021,3 +1029,43 @@ function isoDateDaysBefore(anchorDate: string, daysBefore: number): string {
   const date = new Date(Date.UTC(year, month - 1, day - daysBefore));
   return date.toISOString().slice(0, 10);
 }
+
+test("stored activity summaries take a worn device's steps while per-source rows stay separate", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-worn-steps-"));
+  const date = "2026-04-03";
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl");
+  const stepsEvent = (source: string, sourceType: string, value: number, recordedAt: string) => ({
+    schemaVersion: "murph.event.v1",
+    id: `evt_worn_steps_${source.replaceAll("-", "_")}`,
+    kind: "observation",
+    occurredAt: `${date}T00:00:00Z`,
+    recordedAt,
+    dayKey: date,
+    source: "device",
+    title: `${source} steps`,
+    metric: "steps",
+    value,
+    unit: "count",
+    dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: source, sourceType },
+    externalRef: { system: "junction", resourceType: `junction-${source}-activity` },
+  });
+
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(eventLedgerPath, `${[
+      stepsEvent("garmin", "watch", 9_000, `${date}T20:00:00Z`),
+      stepsEvent("apple-health-kit", "multiple_sources", 12_000, `${date}T23:00:00Z`),
+    ].map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+    await rebuildQueryProjection(vaultRoot);
+
+    const stepsFor = async (providers?: string[]) =>
+      (await summarizeWearableActivityRuntime(vaultRoot, { date, ...(providers ? { providers } : {}) }))[0]
+        ?.steps.selection.value;
+
+    assert.equal(await stepsFor(), 9_000);
+    assert.equal(await stepsFor(["garmin"]), 9_000);
+    assert.equal(await stepsFor(["apple-health-kit"]), 12_000);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});

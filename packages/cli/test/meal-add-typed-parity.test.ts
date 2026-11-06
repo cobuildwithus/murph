@@ -9,7 +9,7 @@ import {
 } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 
 import { registerMealCommands } from '../src/commands/meal.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -78,14 +78,14 @@ interface MealListResult {
   items: Array<{ id: string }>
 }
 
-function createMealCli() {
+function createMealCli(services = createIntegratedVaultServices()) {
   const cli = Cli.create('vault-cli', {
     description: 'meal add typed parity test cli',
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
 
-  registerMealCommands(cli, createIntegratedVaultServices())
+  registerMealCommands(cli, services)
   return cli
 }
 
@@ -148,6 +148,7 @@ test(
     for (const field of [
       'photo',
       'audio',
+      'name',
       'note',
       'occurredAt',
       'source',
@@ -221,7 +222,7 @@ test('meal remove-photo schema requires one automatic-capture meal id', async ()
 })
 
 test.sequential(
-  'meal remove-photo clears the automatic attachment while preserving structured nutrition',
+  'meal remove-photo completes review while preserving structured nutrition and media',
   async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-cli-meal-remove-photo-',
@@ -269,7 +270,7 @@ test.sequential(
       assert.equal(result.exitCode, null)
       const shown = requireData(result.envelope)
       assert.equal(shown.entity.id, meal.mealId)
-      assert.deepEqual(shown.entity.data.attachments ?? [], [])
+      assert.equal((shown.entity.data.attachments as Array<{ role: string }>)[0]?.role, 'reviewed_photo')
       assert.deepEqual(shown.entity.data.ingredients, ['tofu', 'rice'])
       assert.deepEqual(
         (shown.entity.data.nutrition as { totals?: { calories?: number } })
@@ -488,6 +489,7 @@ test.sequential(
         },
       }
       const payload = {
+        name: 'Berry oat bowl',
         occurredAt: '2026-03-14T08:30:00Z',
         source: 'manual',
         ingredients: ['rolled oats', 'blueberries', 'chia seeds'],
@@ -509,6 +511,7 @@ test.sequential(
       const typedResult = await runInProcessJsonCli<MealAddResult>(cli, [
         'meal',
         'add',
+        '--name', 'Berry oat bowl',
         '--occurred-at',
         payload.occurredAt,
         '--source',
@@ -804,6 +807,7 @@ test.sequential(
           `${JSON.stringify({
             audio: equalAudioPath,
             audioPath: equalAudioPath,
+            name: 'Bean bowl',
             note: 'Synthetic meal with matching media aliases.',
             photo: equalPhotoPath,
             photoPath: equalPhotoPath,
@@ -843,6 +847,7 @@ test.sequential(
       await writeFile(
         payloadPath,
         `${JSON.stringify({
+          name: 'Salmon rice bowl',
           occurredAt: '2026-03-15T08:00:00Z',
           source: 'import',
           ingredients: ['payload rice', 'payload salmon'],
@@ -941,6 +946,7 @@ test.sequential(
       await writeFile(
         payloadPath,
         `${JSON.stringify({
+          name: 'Oatmeal bowl',
           ingredients: ['payload oats'],
           nutrition: {
             provenance: {
@@ -973,3 +979,236 @@ test.sequential(
     }
   },
 )
+
+interface MealAddWithTotalsResult extends MealAddResult {
+  dailyTotals?:
+    | { status: 'available'; data: Awaited<ReturnType<ReturnType<typeof createIntegratedVaultServices>['query']['showMealNutritionTotals']>>; totalsOnlyCard: unknown }
+    | { status: 'unavailable'; localDate: string; code: string; hint: string }
+}
+
+test.sequential('meal save composes fresh totals and goals for its canonical local day', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-totals-')
+  const services = createIntegratedVaultServices()
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  try {
+    await initializeVault({ vaultRoot, timezone: 'America/Los_Angeles' })
+    await addMeal({ vaultRoot, occurredAt: '2026-04-10T18:00:00Z', note: 'Earlier synthetic meal',
+      nutrition: { totals: { calories: 300, proteinGrams: 10, carbsGrams: 40, fatGrams: 11, fiberGrams: 5 } } })
+    const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic evening meal', '--occurred-at', '2026-04-11T02:00:00Z',
+      '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
+      '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])
+    assert.equal(result.exitCode, null)
+    const saved = requireData(result.envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(totals.mock.calls.length, 1)
+    assert.deepEqual(totals.mock.calls[0], [{ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true }])
+    assert.equal(saved.dailyTotals.data.mealCount, 2)
+    assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 700, mealCount: 2 })
+    assert.equal(saved.dailyTotals.data.goalContext?.status, 'missing')
+    const fresh = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
+    assert.deepEqual(saved.dailyTotals.data, fresh)
+    assert.deepEqual(saved.dailyTotals.totalsOnlyCard, {
+      kind: 'daily_nutrition', version: 2, localDate: '2026-04-10', mealCount: 2,
+      totals: {
+        calories: { total: 700, mealCount: 2 }, proteinGrams: { total: 30, mealCount: 2 },
+        carbsGrams: { total: 90, mealCount: 2 }, fatGrams: { total: 24, mealCount: 2 },
+        fiberGrams: { total: 11, mealCount: 2 },
+      },
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    })
+    const shown = await runInProcessJsonCli<ShowResult>(createMealCli(), ['meal', 'show', saved.mealId, '--vault', vaultRoot])
+    assert.equal(requireData(shown.envelope).entity.id, saved.mealId)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential.each(['unavailable', 'malformed'] as const)('a %s post-save totals read preserves success and retries only the read', async (failure) => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-read-failure-')
+  const services = createIntegratedVaultServices()
+  const readTotals = services.query.showMealNutritionTotals.bind(services.query)
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  if (failure === 'unavailable') totals.mockRejectedValueOnce(new Error('Synthetic read unavailable'))
+  else totals.mockImplementationOnce(async (input) => ({ ...await readTotals(input), mealCount: -1 }))
+  try {
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic meal without numeric estimates', '--occurred-at', '2026-04-10',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])
+    assert.equal(result.exitCode, null)
+    const saved = requireData(result.envelope)
+    assert.equal(saved.dailyTotals?.status, 'unavailable')
+    if (saved.dailyTotals?.status !== 'unavailable') throw new Error('Expected unavailable totals')
+    assert.equal(saved.dailyTotals.localDate, '2026-04-10')
+    assert.match(saved.dailyTotals.hint, /do not repeat meal add/u)
+    assert.equal(saved.nutrition, null)
+    const retry = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
+    assert.equal(retry.mealCount, 1)
+    assert.deepEqual(retry.totals.calories, { total: null, mealCount: 0 })
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('accepted goals leave the totals-only card to model-authored goal statuses', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-goal-card-')
+  const services = createIntegratedVaultServices()
+  const readTotals = services.query.showMealNutritionTotals.bind(services.query)
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  totals.mockImplementationOnce(async (input) => {
+    const fresh = await readTotals(input)
+    if (!fresh.goalContext) throw new Error('Expected goal context')
+    return { ...fresh, goalContext: { ...fresh.goalContext, status: 'ready' as const, activeGoalCount: 1 } }
+  })
+  try {
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic goal-day meal', '--occurred-at', '2026-04-10T12:00:00Z',
+      '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
+      '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(saved.dailyTotals.data.goalContext?.status, 'ready')
+    assert.equal(saved.dailyTotals.totalsOnlyCard, null)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('ordinary and invalid meal saves never perform an optional totals read', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-read-opt-in-')
+  const services = createIntegratedVaultServices()
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli(services)
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(cli, [
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic nonnumeric meal', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals, undefined)
+    const invalid = await runInProcessJsonCli(cli, ['meal', 'add', '--with-daily-totals', '--vault', vaultRoot])
+    assert.equal(invalid.envelope.ok, false)
+    assert.equal(totals.mock.calls.length, 0)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('structured meal save retains incomplete daily coverage in its combined result', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-import-totals-')
+  try {
+    await initializeVault({ vaultRoot, timezone: 'Pacific/Auckland' })
+    await addMeal({ vaultRoot, occurredAt: '2026-04-10T06:00:00Z', note: 'Synthetic earlier meal without estimates' })
+    const inputFile = path.join(parentRoot, 'meal.json')
+    await writeFile(inputFile, JSON.stringify({ name: 'Chickpea rice bowl', note: 'Synthetic recipe', occurredAt: '2026-04-09T23:00:00Z',
+      ingredients: ['chickpeas', 'rice'], nutrition: { totals: { calories: 560 } } }))
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(), [
+      'meal', 'import-json', '--input', '@' + inputFile, '--with-daily-totals', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(saved.dailyTotals.data.goalContext?.localDate, '2026-04-10')
+    assert.equal(saved.dailyTotals.data.mealCount, 2)
+    assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 560, mealCount: 1 })
+    assert.deepEqual(saved.dailyTotals.data.totals.fiberGrams, { total: null, mealCount: 0 })
+    // Incomplete coverage needs recovery before any card, so none is offered.
+    assert.equal(saved.dailyTotals.totalsOnlyCard, null)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('meal names persist separately through add import and edit without changing totals', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli()
+    const payloadPath = path.join(parentRoot, 'meal.json')
+    await writeFile(payloadPath, JSON.stringify({ name: 'Lentil soup', note: 'Two cups from a cafe; estimated portion', nutrition: { totals: { calories: 620 } } }))
+    for (const args of [
+      ['add', '--name', 'Lentil soup', '--note', 'Two cups from a cafe; estimated portion', '--nutrition-calories', '620'],
+      ['import-json', '--input', `@${payloadPath}`],
+    ]) {
+      const saved = requireData((await runInProcessJsonCli<MealAddResult & { name: string }>(cli, ['meal', ...args, '--vault', vaultRoot])).envelope)
+      assert.equal(saved.name, 'Lentil soup')
+      assert.equal(saved.note, 'Two cups from a cafe; estimated portion')
+      const edited = await runInProcessJsonCli<ShowResult>(cli, ['meal', 'edit', saved.mealId, '--name', 'Red lentil soup', '--vault', vaultRoot])
+      assert.equal(edited.exitCode, null)
+      const shown = requireData((await runInProcessJsonCli<ShowResult>(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot])).envelope)
+      assert.equal(shown.entity.data.title, 'Red lentil soup')
+      assert.equal(shown.entity.data.note, saved.note)
+      assert.deepEqual(shown.entity.data.nutrition, saved.nutrition)
+    }
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('invalid meal names return actionable validation before add import or edit writes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-invalid-')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli()
+    const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', nutrition: { totals: { calories: 450 } } })
+    const before = await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json'])
+    const payloadPath = path.join(parentRoot, 'meal.json')
+    for (const name of ['x'.repeat(41), 'Estimated soup', 'Photo shows soup', 'Retained image reviewed: soup', 'Approximately soup', 'Lunch: soup', 'Breakfast: soup', 'Dinner: soup', 'Snack: soup', 'Probably soup', 'beans, rice and peas', 'One two three four five six', 'lentil soup']) {
+      await writeFile(payloadPath, JSON.stringify({ name, note: 'One bowl' }))
+      for (const args of [
+        ['add', '--name', name, '--note', 'One bowl'],
+        ['import-json', '--input', `@${payloadPath}`],
+        ['edit', saved.mealId, '--name', name],
+        ['edit', saved.mealId, '--title', name],
+      ]) {
+        const result = await runInProcessJsonCli(cli, ['meal', ...args, '--vault', vaultRoot])
+        assert.equal(result.exitCode, 1)
+        assert.equal(result.envelope.ok, false)
+        if (!result.envelope.ok) assert.match(JSON.stringify(result.envelope.error), /(?:40 characters|dish name)/u)
+      }
+    }
+    assert.equal(await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json']), before)
+    const list = requireData((await runInProcessJsonCli<MealListResult>(cli, ['meal', 'list', '--vault', vaultRoot])).envelope)
+    assert.equal(list.count, 1)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('meal saves require a dish name instead of displaying an ingredient-list note', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-required-')
+  try {
+    await initializeVault({ vaultRoot })
+    const result = await runInProcessJsonCli(createMealCli(), ['meal', 'add', '--note', 'Beans, rice, peas and carrots', '--vault', vaultRoot])
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    const list = requireData((await runInProcessJsonCli<MealListResult>(createMealCli(), ['meal', 'list', '--vault', vaultRoot])).envelope)
+    assert.equal(list.count, 0)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('meal corrections preserve optional names and validate an explicit generic title', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-corrections-')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli()
+    const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', occurredAt: '2026-10-20T12:00:00Z', nutrition: { totals: { calories: 450 } } })
+    for (const args of [['--note', 'One taco'], ['--nutrition-calories', '300'], ['--occurred-at', '2026-10-20T13:00:00Z', '--day-key-policy', 'keep']]) {
+      const edited = await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, ['meal', 'edit', saved.mealId, ...args, '--vault', vaultRoot])
+      assert.equal(edited.exitCode, null, JSON.stringify({ args, envelope: edited.envelope }))
+      assert.equal(requireData(edited.envelope).entity.title, 'Bean tacos')
+    }
+    const renamed = await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, ['meal', 'edit', saved.mealId, '--title', 'Black bean tacos', '--vault', vaultRoot])
+    const meal = requireData(renamed.envelope).entity
+    assert.equal(meal.title, 'Black bean tacos')
+    assert.equal(meal.data.note, 'One taco')
+    assert.deepEqual(meal.data.nutrition, { totals: { calories: 300 } })
+    assert.equal(meal.occurredAt, '2026-10-20T13:00:00.000Z')
+    const photoPath = path.join(parentRoot, 'synthetic.jpg')
+    await writeFile(photoPath, 'synthetic attachment')
+    const raw = await addMeal({ vaultRoot, photoPath })
+    const corrected = requireData((await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, [
+      'meal', 'edit', raw.mealId, '--note', 'Non-food object; not consumed.', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(corrected.entity.title, 'Meal')
+    assert.equal(corrected.entity.data.note, 'Non-food object; not consumed.')
+    const payload = path.join(parentRoot, 'unnamed.json')
+    await writeFile(payload, JSON.stringify({ note: 'One bowl' }))
+    assert.equal((await runInProcessJsonCli(cli, ['meal', 'import-json', '--input', `@${payload}`, '--vault', vaultRoot])).exitCode, 1)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})

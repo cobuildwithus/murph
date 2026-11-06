@@ -15,7 +15,7 @@ Fix local Junction/Garmin sync stuck in setup by preventing incomplete Junction 
 - Keep the fix provider-generic within the Junction adapter: no Garmin-specific workaround.
 - Do not loosen core event contracts.
 - Do not log or persist raw health payloads for diagnostics.
-- Preserve unrelated active Murph Age and hosted worktree edits.
+- Preserve unrelated active hosted worktree edits.
 
 ## Verification
 

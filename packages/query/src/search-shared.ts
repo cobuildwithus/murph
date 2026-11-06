@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@murphai/contracts";
+import { clinicalFactSchema, extractIsoDatePrefix } from "@murphai/contracts";
 
 import {
   linkTargetIds,
@@ -228,6 +228,7 @@ function searchableStructuredPayloadTerms(entity: CanonicalEntity): string[] {
   }
 
   const terms = [
+    ...clinicalFactTerms(entity),
     ...structuredTermsFromRecord(entity.attributes),
     ...(entity.frontmatter ? structuredTermsFromRecord(entity.frontmatter) : []),
   ];
@@ -249,6 +250,19 @@ function searchableStructuredPayloadTerms(entity: CanonicalEntity): string[] {
   }
 
   return limited;
+}
+
+function clinicalFactTerms(entity: CanonicalEntity): string[] {
+  if (entity.kind !== "note") return [];
+  const parsed = clinicalFactSchema.safeParse(entity.attributes.clinicalFact);
+  if (!parsed.success) return [];
+  const fact = parsed.data;
+  return compactStrings([
+    fact.category, fact.label, fact.statement, fact.subject, fact.clinicalDate,
+    scalarStructuredValue(fact.value), fact.unit, fact.status,
+    ...(fact.codings ?? []).flatMap((coding) => [coding.code, coding.system, coding.display]),
+    ...(fact.qualifiers ?? []).flatMap((qualifier) => [qualifier.name, qualifier.value]),
+  ]);
 }
 
 function structuredTermsFromRecord(value: unknown): string[] {

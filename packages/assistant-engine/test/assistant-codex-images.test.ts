@@ -129,8 +129,8 @@ describe('assistant codex image helpers', () => {
 
   it.each([
     ['gpt-5.6-luna', 'openai'],
-    ['gpt-5.6-terra', 'hosted-openai'],
-    ['gpt-5.6-sol', 'hosted-chatgpt-openai'],
+    ['gpt-6-sol', 'hosted-openai'],
+    ['gpt-6.1-sol', 'hosted-chatgpt-openai'],
     ['gpt-6-astra', 'hosted-openai'],
   ] as const)(
     'keeps original detail for %s on the %s route',
@@ -159,23 +159,16 @@ describe('assistant codex image helpers', () => {
         { bytes: Buffer.from([0x01]), detail: 'original' as const },
         { bytes: Buffer.from([0x02]), detail: 'original' as const },
       ],
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: 'hosted-openai',
       turnKind: 'initial' as const,
     },
     {
       name: 'live steer',
       images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: 'hosted-openai',
       turnKind: 'steer' as const,
-    },
-    {
-      name: 'custom inference',
-      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
-      model: 'gpt-5.6-terra',
-      modelProvider: 'hosted-custom-inference',
-      turnKind: 'initial' as const,
     },
     {
       name: 'unsupported OpenAI model',

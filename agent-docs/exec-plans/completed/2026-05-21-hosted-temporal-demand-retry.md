@@ -20,7 +20,7 @@ Close the remaining hosted Temporal demand/retry edge cases:
 
 - Temporal workflow state must stay pointer-only.
 - Do not expose mailbox payloads, prompts, transcripts, user identifiers, local paths, provider responses, or secrets in tests or logs.
-- Preserve unrelated dirty work in Murph Age and hosted-local MinIO harness files.
+- Preserve unrelated dirty work in hosted-local MinIO harness files.
 
 ## Status
 

@@ -1,22 +1,19 @@
 import "server-only";
 
-import { getGeneratedHealthCommonsWebGoalIndex } from "@murphai/health-commons/goal-index-runtime";
 import {
   buildTelegramThreadTarget,
   extractTelegramMessage,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import type { HostedMember, PrismaClient } from "@prisma/client";
 
-import {
-  buildMurphTelegramUrl,
-  resolveMurphTelegramBotUsername,
-} from "../murph-contact-routing";
 import { getPrisma } from "../prisma";
+import { sendHostedTelegramIncomingTargetReply } from "../hosted-execution/telegram-access-notice";
 import { sha256Hex } from "../primitives";
 import {
   HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
   HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
   isHostedOnboardingError,
+  hostedOnboardingError,
 } from "./errors";
 import {
   buildHostedFamilyDraftCheckoutConflictReplyText,
@@ -29,6 +26,11 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  claimHostedLinqSignupLinkReminderNotice,
+  releaseHostedLinqSignupLinkReminderNoticeClaim,
+  resolveHostedLinqDayUtc,
+} from "./linq-daily-state";
 import { buildHostedLinqGroupSetupEffectId } from "./linq-group-setup";
 import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
@@ -44,6 +46,7 @@ import {
 import { requireHostedOnboardingPublicBaseUrl } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
+  buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
@@ -69,9 +72,9 @@ export type HostedVisibleSecondaryLinqDependencies = {
 };
 
 export type HostedVisibleSecondaryTelegramDependencies = {
+  getPrisma: typeof getPrisma;
   parseHostedTelegramWebhookUpdate: typeof parseHostedTelegramWebhookUpdate;
   requireHostedOnboardingPublicBaseUrl: typeof requireHostedOnboardingPublicBaseUrl;
-  resolveMurphTelegramBotUrl?: typeof resolvePublicMurphTelegramBotUrl;
   sendHostedTelegramTextMessage: typeof sendHostedTelegramTextMessage;
   summarizeHostedTelegramWebhook: typeof summarizeHostedTelegramWebhook;
 };
@@ -88,9 +91,9 @@ const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
 };
 
 const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = {
+  getPrisma,
   parseHostedTelegramWebhookUpdate,
   requireHostedOnboardingPublicBaseUrl,
-  resolveMurphTelegramBotUrl: resolvePublicMurphTelegramBotUrl,
   sendHostedTelegramTextMessage,
   summarizeHostedTelegramWebhook,
 };
@@ -125,6 +128,7 @@ const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
 ]);
 
 const HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER = new Set([
+  "signup-link-already-sent",
   "group-chat",
   "home-line-capacity-exhausted",
   "thread-container-inactive",
@@ -261,24 +265,71 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       return response;
     }
 
-    const message = resolveHostedLinqVisibleSecondaryReply({
+    return sendHostedLinqVisibleSecondaryReply({
+      context,
+      dependencies,
+      eventId: event.event_id,
+      prisma,
       reason,
-      recognizedSender: Boolean(recognizedSender),
+      recognizedSender,
+      response,
+      signal: input.signal,
     });
-    if (!message) {
-      return response;
-    }
+  };
+}
 
+async function sendHostedLinqVisibleSecondaryReply(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  dependencies: HostedVisibleSecondaryLinqDependencies;
+  eventId: string;
+  prisma: PrismaClient;
+  reason: string;
+  recognizedSender: HostedVisibleSecondaryLinqSender | null;
+  response: Awaited<ReturnType<HostedOnboardingLinqWebhookHandler>>;
+  signal: AbortSignal | undefined;
+}): Promise<Awaited<ReturnType<HostedOnboardingLinqWebhookHandler>>> {
+  const { context, dependencies, prisma, reason, recognizedSender, response } = input;
+  if (reason === "signup-link-already-sent"
+    && context.messageEvent.data.service?.trim().toLowerCase() === "sms") {
+    return response;
+  }
+
+  const message = resolveHostedLinqVisibleSecondaryReply({
+    reason,
+    recognizedSender: Boolean(recognizedSender),
+  });
+  if (!message) {
+    return response;
+  }
+
+  const reminderClaim = reason === "signup-link-already-sent" && recognizedSender
+    ? { memberId: recognizedSender.id, occurredAt: context.occurredAt, prisma }
+    : null;
+  if (reason === "signup-link-already-sent") {
+    if (!reminderClaim || !await claimHostedLinqSignupLinkReminderNotice(reminderClaim)) {
+      return { ...response, reason: "signup-link-reminder-already-sent" };
+    }
+  }
+
+  try {
     await dependencies.sendHostedLinqChatMessage({
       chatId: context.summary.chatId,
-      idempotencyKey: `visible-secondary:${event.event_id}`,
+      idempotencyKey: reminderClaim
+        ? `signup-link-reminder:${reminderClaim.memberId}:${resolveHostedLinqDayUtc(reminderClaim.occurredAt).toISOString().slice(0, 10)}`
+        : `visible-secondary:${input.eventId}`,
       message,
-      replyToMessageId: context.summary.messageId,
+      // Keep the daily reminder payload stable if a later inbound retries it.
+      replyToMessageId: reminderClaim ? null : context.summary.messageId,
       ...(input.signal ? { signal: input.signal } : {}),
     });
+  } catch (error) {
+    if (reminderClaim) {
+      await releaseHostedLinqSignupLinkReminderNoticeClaim(reminderClaim);
+    }
+    throw error;
+  }
 
-    return buildVisibleSecondaryResponse(response, reason);
-  };
+  return buildVisibleSecondaryResponse(response, reason);
 }
 
 export function withHostedVisibleSecondaryTelegramOutcomes(
@@ -305,16 +356,8 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
     const signupUrl = reason === "unlinked-telegram"
       ? buildHostedSignupUrl(dependencies.requireHostedOnboardingPublicBaseUrl())
       : null;
-    const goalResumeUrl = reason === "unlinked-telegram" && summary.isDirect
-      ? await resolveHostedPublicGoalTelegramResumeUrl({
-          botUrl: (dependencies.resolveMurphTelegramBotUrl
-            ?? resolvePublicMurphTelegramBotUrl)(),
-          inboundText: message.text ?? null,
-        })
-      : null;
     const reply = resolveHostedTelegramVisibleSecondaryReply({
       familyInviteCode,
-      goalResumeUrl,
       isDirect: summary.isDirect,
       reason,
       signupUrl,
@@ -323,12 +366,26 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
       return publicResponse;
     }
 
-    await dependencies.sendHostedTelegramTextMessage({
+    const prisma = input.prisma ?? dependencies.getPrisma();
+    const delivery = await sendHostedTelegramIncomingTargetReply({
       message: reply,
+      prisma,
       replyToMessageId: message.message_id,
+      send: dependencies.sendHostedTelegramTextMessage,
+      sourceEventId: buildHostedTelegramWebhookEventId(update),
       target: buildTelegramThreadTarget(message),
       ...(input.signal ? { signal: input.signal } : {}),
     });
+    if (delivery.status === "in_flight") {
+      throw hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_VISIBLE_SECONDARY_RETRY",
+        details: { retryAt: delivery.retryAt.toISOString() },
+        httpStatus: 503,
+        message: "Hosted Telegram reply delivery is not complete.",
+        retryable: true,
+      });
+    }
+    if (delivery.status !== "sent" && delivery.status !== "already_notified") return publicResponse;
 
     return buildVisibleSecondaryResponse(publicResponse, reason);
   };
@@ -364,7 +421,6 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
 
 export function resolveHostedTelegramVisibleSecondaryReply(input: {
   familyInviteCode?: string | null;
-  goalResumeUrl?: string | null;
   isDirect: boolean;
   reason: string;
   signupUrl: string | null;
@@ -385,9 +441,7 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
         return HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
       }
       return input.signupUrl
-        ? input.goalResumeUrl
-          ? `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nAfter setup, tap this link and send the restored goal message: ${input.goalResumeUrl}`
-          : `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nThen message me again.`
+        ? `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nThen message me again.`
         : null;
     case "ambiguous-telegram-binding":
     case "telegram-binding-changed":
@@ -401,38 +455,6 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
     default:
       return null;
   }
-}
-
-export async function resolveHostedPublicGoalTelegramResumeUrl(input: {
-  botUrl: string | null;
-  inboundText: string | null;
-}): Promise<string | null> {
-  if (!input.botUrl || !input.inboundText) {
-    return null;
-  }
-
-  let isExactPublishedGoalPrompt = false;
-  try {
-    isExactPublishedGoalPrompt = getGeneratedHealthCommonsWebGoalIndex().goals.some(
-      (goal) => goal.startPrompt === input.inboundText,
-    );
-  } catch {
-    return null;
-  }
-  if (!isExactPublishedGoalPrompt) {
-    return null;
-  }
-
-  const resumeUrl = new URL(input.botUrl);
-  resumeUrl.searchParams.delete("start");
-  resumeUrl.searchParams.set("text", input.inboundText);
-  return resumeUrl.toString();
-}
-
-export function resolvePublicMurphTelegramBotUrl(
-  source?: Readonly<Record<string, string | undefined>>,
-): string {
-  return buildMurphTelegramUrl(resolveMurphTelegramBotUsername(source));
 }
 
 async function readHostedLinqSender(input: {

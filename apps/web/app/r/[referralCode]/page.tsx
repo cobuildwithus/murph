@@ -2,6 +2,7 @@ import {
   HostedSignupReferralLanding,
   type HostedSignupReferralLandingState,
 } from "@/src/components/hosted-onboarding/hosted-signup-referral-landing";
+import { LinkPageFrame } from "@/src/components/link-page/link-page-shell";
 import {
   readHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
@@ -53,10 +54,12 @@ export default async function HostedSignupReferralPage(props: {
   }
 
   return (
-    <HostedSignupReferralLanding
-      referralCode={referralCode}
-      state={state}
-    />
+    <LinkPageFrame>
+      <HostedSignupReferralLanding
+        referralCode={referralCode}
+        state={state}
+      />
+    </LinkPageFrame>
   );
 }
 

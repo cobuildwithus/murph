@@ -48,11 +48,6 @@ function createHarness(
     readFileSync(path.join(repoRoot, "scripts", "check-agent-docs-drift.sh"), "utf8"),
   );
   writeFileSync(
-    path.join(scriptsDir, "release-manifest.json"),
-    `${JSON.stringify({ packages: [{ path: "packages/cli" }] })}\n`,
-    "utf8",
-  );
-  writeFileSync(
     path.join(scriptsDir, "repo-tools.config.sh"),
     `cobuild_repo_tool_bin() {
   printf '%s\\n' "\${MURPH_TEST_DOCS_DRIFT_TOOL:?}"
@@ -205,29 +200,6 @@ describe("agent docs drift CI comparison", () => {
     expect(readFileSync(harness.delegateCapture, "utf8")).toBe(
       "base-ref=\nalternate-index=present\nscripts/example.sh\n",
     );
-  });
-
-  it("keeps the release-only exemption tied to the exact candidate diff", () => {
-    const harness = createHarness({
-      changedFiles: [
-        "packages/cli/package.json",
-        "packages/cli/CHANGELOG.md",
-        "packages/cli/release-notes/v1.0.1.md",
-        "",
-      ].join("\n"),
-    });
-    const result = harness.run();
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain(
-      "Agent docs drift checks passed for release artifacts only.",
-    );
-    const gitLog = readFileSync(harness.gitLog, "utf8");
-    expect(gitLog).toContain(`diff --name-only ${baseSha}..${candidateSha}`);
-    expect(gitLog).toContain(
-      `diff --unified=0 --no-color ${baseSha}..${candidateSha} -- packages/cli/package.json`,
-    );
-    expect(gitLog).not.toContain("read-tree ");
   });
 
   it("fetches only a missing exact base object and leaves mutable refs untouched", () => {

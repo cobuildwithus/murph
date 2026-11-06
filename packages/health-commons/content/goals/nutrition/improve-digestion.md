@@ -91,4 +91,4 @@ Blood in stool, black stool, progressive difficulty swallowing, anemia, persiste
 
 ## Related goals
 
-[Relieve Constipation](/goals/relieve-constipation) · [Reduce Bloating](/goals/reduce-bloating) · [Reduce Acid Reflux](/goals/reduce-acid-reflux) · [Manage IBS Symptoms](/goals/manage-ibs-symptoms)
+[Relieve Constipation](/goals/relieve-constipation) · [Reduce Bloating](/goals/reduce-bloating) · [Reduce Acid Reflux](/goals/reduce-acid-reflux) · [Track My IBS Symptoms](/goals/manage-ibs-symptoms)

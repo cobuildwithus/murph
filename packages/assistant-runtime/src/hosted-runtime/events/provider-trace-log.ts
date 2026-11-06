@@ -56,9 +56,14 @@ const HOSTED_ASSISTANT_REASONING_EFFORT_VALUES = new Set([
   "high",
   "xhigh",
 ]);
+const HOSTED_ASSISTANT_THREAD_ROTATION_REASON_VALUES = new Set([
+  "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled",
+]);
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",
   "assistant_context_snapshot",
+  "assistant_context_snapshot_refresh",
+  "follow_up_context",
   "cli_bootstrap",
   "fallback_instructions",
   "memory_overview",
@@ -146,16 +151,17 @@ const HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES = new Set([
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "initialized",
   "preinitialized",
-  "shutdown",
   "spawn-ready",
   "thread-resumed",
   "thread-started",
   "turn-completed",
   "turn-started",
-  "warm-abort-poisoned",
   "warm-idle",
   "warm-reused",
+  "provider-output-received",
+  "assistant-output-received",
 ]);
+const HOSTED_ASSISTANT_CODEX_RECEIPT_KIND_VALUES = new Set(["assistant", "reasoning", "tool"]);
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
   "node-process-first-use",
   "previous-explicit-stop",
@@ -165,6 +171,9 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
   "previous-process-unhealthy",
   "previous-turn-abort",
   "previous-turn-failure",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_TIMEOUT_PHASE_VALUES = new Set([
+  "websocket-send", "websocket-ack", "websocket-read", "http-read",
 ]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
   "stream-disconnected",
@@ -176,6 +185,7 @@ const HOSTED_ASSISTANT_CODEX_TRANSPORT_METHOD_VALUES = new Set([
   "error",
   "warning",
 ]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_SCOPE_VALUES = new Set(["turn", "thread", "unscoped"]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_VALUES = new Set([
   "http",
   "unknown",
@@ -327,9 +337,13 @@ const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS = [
   "codexTransportThreadIdPresent",
   "codexTransportTurnIdPresent",
   "codexTransportWillRetry",
+  "codexTransportWarmReused",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS = [
   "codexTransportErrorMessageLength",
+  "codexTransportElapsedMs",
+  "codexTransportProviderRequestOrdinal",
+  "codexTransportTurnCorrelation",
   "codexTransportProviderActionCount",
   "codexTransportRetryCount",
   "codexTransportRetryMax",
@@ -602,10 +616,17 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     workingDirectoryKind,
   };
 
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details, "threadRotationReason",
+    readHostedAssistantProviderDiagnosticAllowedString(record, "threadRotationReason", HOSTED_ASSISTANT_THREAD_ROTATION_REASON_VALUES),
+  );
+
   for (const key of [
     "dynamicToolCount",
     "routePlanningActiveExperimentContextElapsedMs",
     "routePlanningAssistantContextSnapshotElapsedMs",
+    "routePlanningAssistantContextSnapshotRefreshElapsedMs",
+    "routePlanningFollowUpContextElapsedMs",
     "routePlanningCliBootstrapElapsedMs",
     "routePlanningElapsedMs",
     "routePlanningFallbackInstructionsElapsedMs",
@@ -1048,12 +1069,20 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingElapsedMs",
     readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingElapsedMs"),
   );
+  if (stage === "thread-resumed") {
+    const rolloutBytes = readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingRolloutBytes");
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      "codexTimingRolloutBytes",
+      Number.isSafeInteger(rolloutBytes) ? rolloutBytes : undefined,
+    );
+  }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
     "codexTimingProviderActionCount",
     readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingProviderActionCount"),
   );
-  if (stage === "turn-completed") {
+  if (stage === "turn-completed" || stage === "provider-output-received" || stage === "assistant-output-received") {
     for (const key of [
       "codexTimingProviderRequestOrdinal",
       "codexTimingTurnCorrelation",
@@ -1061,6 +1090,10 @@ function readHostedAssistantCodexAppServerTimingTrace(
       "codexTimingTurnStartedNotificationElapsedMs",
       "codexTimingTurnCompletedNotificationElapsedMs",
       "codexTimingTurnCompleteElapsedMs",
+      "codexTimingFirstProviderReceiptElapsedMs",
+      "codexTimingFirstAssistantReceiptElapsedMs",
+      "codexTimingLastProviderReceiptElapsedMs",
+      "codexTimingProviderReceiptCount",
     ] as const) {
       maybeSetHostedAssistantProviderDiagnosticDetail(
         details,
@@ -1068,6 +1101,11 @@ function readHostedAssistantCodexAppServerTimingTrace(
         readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
       );
     }
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      "codexTimingReceiptKind",
+      readHostedAssistantProviderDiagnosticAllowedString(record, "codexTimingReceiptKind", HOSTED_ASSISTANT_CODEX_RECEIPT_KIND_VALUES),
+    );
   }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
@@ -1133,6 +1171,17 @@ function readHostedAssistantCodexTransportDiagnosticTrace(
     providerTraceKind: "codex.transport_diagnostics",
     schema: ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   };
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTransportTimeoutPhase",
+    readHostedAssistantProviderDiagnosticAllowedString(record, "codexTransportTimeoutPhase", HOSTED_ASSISTANT_CODEX_TRANSPORT_TIMEOUT_PHASE_VALUES),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTransportScope",
+    readHostedAssistantProviderDiagnosticAllowedString(record, "codexTransportScope", HOSTED_ASSISTANT_CODEX_TRANSPORT_SCOPE_VALUES),
+  );
 
   for (const key of HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS) {
     maybeSetHostedAssistantProviderDiagnosticDetail(

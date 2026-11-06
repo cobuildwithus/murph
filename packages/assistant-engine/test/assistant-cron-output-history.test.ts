@@ -3,7 +3,9 @@ import { rm } from 'node:fs/promises'
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
+  initializeVault,
   splitAutomationAvailabilityConflictBlock,
+  upsertAutomation,
 } from '@murphai/core'
 import type {
   AssistantCronRunOutcome,
@@ -123,7 +125,7 @@ describe('assistant cron output history', () => {
       }),
       createCronRun({
         outcome: 'delivered',
-        response: 'Prior-session cadence question.',
+        response: 'Prior-session cue.',
         runId: 'cronrun_prior_session',
         sessionId: 'session-prior',
       }),
@@ -157,12 +159,51 @@ describe('assistant cron output history', () => {
     expect(prompt).toContain('[reserved availability block start]')
   })
 
-  it('enriches only the current automation revision from its canonical vault', async () => {
+  it('enriches only the current automation revision and session without linked follow-up history', async () => {
     const context = await createTempVaultContext('assistant-cron-output-history-')
     tempRoots.push(context.parentRoot)
     const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await initializeVault({ vaultRoot: context.vaultRoot, timezone: 'UTC' })
+    const parent = await upsertAutomation({
+      automationId: AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Send a different Stoic quote every day.',
+      now: new Date('2026-08-09T12:00:00.000Z'),
+      route: {
+        channel: 'linq', deliveryTarget: 'synthetic-reminder', identityId: null,
+        participantId: null, threadId: 'synthetic-reminder', threadIsDirect: true,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '12:00' },
+      status: 'active',
+      title: 'Synthetic daily quote',
+      vaultRoot: context.vaultRoot,
+    })
+    const followUp = await upsertAutomation({
+      activeUntil: '2026-08-09T14:00:00.000Z',
+      continuityPolicy: 'preserve',
+      followUpParentAutomationId: parent.record.automationId,
+      followUpSourceIntentId: 'outbox_synthetic_quote',
+      instructions: 'Ask once whether the quote was useful; skip if already answered.',
+      now: new Date('2026-08-09T12:01:00.000Z'),
+      route: parent.record.route,
+      schedule: { kind: 'at', at: '2026-08-09T13:00:00.000Z' },
+      status: 'active',
+      title: 'Synthetic attached check',
+      vaultRoot: context.vaultRoot,
+    })
 
     await Promise.all([
+      appendAssistantCronRun(
+        paths,
+        createCronRun({
+          jobId: followUp.record.automationId,
+          outcome: 'delivered',
+          response: 'Was that quote useful?',
+          runId: 'cronrun_attached_check',
+          sessionId: 'session-current',
+          startedAt: '2026-08-09T13:00:00.000Z',
+        }),
+      ),
       appendAssistantCronRun(
         paths,
         createCronRun({
@@ -178,7 +219,7 @@ describe('assistant cron output history', () => {
         createCronRun({
           jobId: AUTOMATION_ID,
           outcome: 'delivered',
-          response: 'Prior session cadence question.',
+          response: 'Prior session cue.',
           runId: 'cronrun_prior_session_history',
           sessionId: 'session-prior',
         }),
@@ -218,25 +259,14 @@ describe('assistant cron output history', () => {
     expect(forwarded.instructions).toContain('Previously delivered quote.')
     expect(forwarded.instructions).not.toContain('Previous revision output.')
     expect(forwarded.instructions).not.toContain('Another automation output.')
-    expect(forwarded.instructions).not.toContain('Prior session cadence question.')
+    expect(forwarded.instructions).not.toContain('Was that quote useful?')
+    expect(forwarded.instructions).not.toContain('Prior session cue.')
     expect(forwarded.instructions).not.toContain(
       'Confirmed-output reminder cadence policy',
     )
     expect(input.instructions).toBe('Send a different Stoic quote every day.')
 
-    const reminderForwarded = await prepareAssistantCronNotificationInput(
-      {
-        ...input,
-        recurringReminderConversation: true,
-      },
-      { sessionId: 'session-current' },
-    )
-    expect(reminderForwarded.instructions).toContain(
-      'Confirmed-output reminder cadence policy',
-    )
-    expect(reminderForwarded.instructions).toContain(
-      'keep, change, or pause these interruptions',
-    )
+    expect(forwarded.instructions).not.toContain('keep, change, or pause')
   })
 
   it('uses a normal turn after retention retires the prior confirmed output', async () => {

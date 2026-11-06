@@ -85,11 +85,20 @@ The canonical event-kind list is `EVENT_KINDS` in
 Kind-specific required fields live in the Zod contracts and generated JSON
 Schemas. Do not update this document by guessing those fields from CLI options.
 
+Sleep sessions preserve optional provider classification (`main_sleep`, `short_sleep`,
+`nap`, or `unknown`) and provider state (`tentative` or `confirmed`). Missing state
+does not imply provider confirmation. Deploy compatible canonical readers before
+emitting new classification/state fields; a pre-extension strict reader cannot
+read these new records. After the first such write, the compatible reader is the
+rollback floor unless records are corrected through a compatible canonical owner.
+
 Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `evidence[]`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `evidence[]` stores bounded source pointers for imported clinical facts. Every evidence ref must include a canonical `sourceDocumentId` or vault-relative `rawRef`; it may also include `sourceLabel`, `page`, `chunkId`, text spans, a short excerpt, and confidence. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
+
+Blood type is one blood-test result with `slug: "blood-type"`, analyte `Blood type (ABO/Rh)` and a compact `textValue` such as `AB+` or `O-`. `vault-cli profile` reads and writes it; the parser in `@murphai/contracts` (`parseBloodType`) is shared by every reader.
 
 `clinical_assertion` events store bounded assertion facts such as NKDA/NKFA, denied social-history statements, normality assertions, negative screenings, not-applicable statements, no-known-medications, and no-known-family-history. They carry `assertion`, `assertedOn`, optional `domain`, optional `polarity`, optional `subject`, optional `assertionText`, optional coding fields, and optional source context/evidence. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
 

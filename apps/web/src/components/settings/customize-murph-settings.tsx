@@ -3,26 +3,18 @@
 import {
   assistantWebPersonalitySettingIds,
   assistantVoiceOptions,
-  defaultAssistantPersonaId,
-  resolveAssistantBasePersonaOption,
   resolveAssistantEffectiveStyle,
-  resolveAssistantPersonaParts,
-  type AssistantPersonaId,
   type AssistantWebPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
-import { IdCard, MessageSquareText, Mic2, SlidersHorizontal, Sparkles } from "lucide-react";
+import { IdCard, MessageSquareText, Mic2, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
   MurphAssistantStylePicker,
   type MurphAssistantStylePreferences,
 } from "@/src/components/murph/murph-assistant-style-picker";
-import {
-  MurphPersonaPicker,
-  type MurphPersonaPreferences,
-} from "@/src/components/murph/murph-persona-picker";
 import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
@@ -36,7 +28,6 @@ import { SettingsRow, SettingsRowList } from "./settings-row";
 import { stripSettingsQueryParam } from "./hosted-settings-utils";
 
 type CustomizeMurphAssistant = MurphAssistantStylePreferences & {
-  persona?: AssistantPersonaId | null;
   personality?: AssistantPersonalitySnapshot | null;
 };
 
@@ -72,21 +63,16 @@ export function CustomizeMurphSettings({
   const [style, setStyle] = useState<MurphAssistantStylePreferences>(
     assistant ?? DEFAULT_ASSISTANT_STYLE,
   );
-  const [persona, setPersona] = useState<AssistantPersonaId>(
-    assistant?.persona ?? defaultAssistantPersonaId,
-  );
   const [personality, setPersonality] = useState<AssistantPersonalitySnapshot | null>(
     assistant?.personality ?? null,
   );
   const [pickerStep, setPickerStep] = useState<AssistantStyleStep | null>(
     openVoiceLink ? "voice" : null,
   );
-  const [personaPickerOpen, setPersonaPickerOpen] = useState(false);
   const [styleLevelsOpen, setStyleLevelsOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
   const effectiveStyle = resolveAssistantEffectiveStyle({
-    persona,
     ...(style.tone ? { tone: style.tone } : {}),
     ...(style.voice ? { voice: style.voice } : {}),
   });
@@ -118,19 +104,9 @@ export function CustomizeMurphSettings({
           }
         />
         <SettingsRow
-          icon={<Sparkles className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-          label="Personality"
-          value={formatPersonalitySummary(persona)}
-          action={
-            <Button type="button" size="default" variant="ghost" onClick={() => setPersonaPickerOpen(true)}>
-              Customize
-            </Button>
-          }
-        />
-        <SettingsRow
           icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Style levels"
-          value={formatStyleLevelsSummary(personality, persona)}
+          value={formatStyleLevelsSummary(personality)}
           action={
             <Button type="button" size="default" variant="ghost" onClick={() => setStyleLevelsOpen(true)}>
               Customize
@@ -182,25 +158,8 @@ export function CustomizeMurphSettings({
           open
         />
       ) : null}
-      {personaPickerOpen ? (
-        <MurphPersonaPicker
-          initialPersona={persona}
-          initialTone={effectiveStyle.tone}
-          initialVoice={effectiveStyle.voice}
-          mode="personality"
-          onSaved={(preferences) => setPersona(preferences.persona)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setPersonaPickerOpen(false);
-            }
-          }}
-          open
-          savePreference={saveAssistantPersonaOnlyPreference}
-        />
-      ) : null}
       {styleLevelsOpen ? (
         <MurphPersonalitySettingsDialog
-          persona={persona}
           personality={personality}
           onSaved={setPersonality}
           onOpenChange={(open) => {
@@ -230,21 +189,10 @@ export function CustomizeMurphSettings({
   );
 }
 
-function formatPersonalitySummary(
-  persona: AssistantPersonaId,
-): string {
-  const parts = resolveAssistantPersonaParts(persona);
-  const main = resolveAssistantBasePersonaOption(parts.mainId).label;
-  return parts.supportingId
-    ? `${main} + ${resolveAssistantBasePersonaOption(parts.supportingId).label}`
-    : main;
-}
-
 function formatStyleLevelsSummary(
   personality: AssistantPersonalitySnapshot | null,
-  persona: AssistantPersonaId = defaultAssistantPersonaId,
 ): string {
-  const scores = resolveAssistantPersonalitySnapshotScores(personality, persona);
+  const scores = resolveAssistantPersonalitySnapshotScores(personality);
   return assistantWebPersonalitySettingIds
     .map((id) => `${PERSONALITY_DIAL_SUMMARY_LABELS[id]} ${scores[id]}`)
     .join(" · ");
@@ -258,7 +206,7 @@ function formatAssistantToneSummary(
   tone: AssistantTonePreference,
   custom: boolean,
 ): string {
-  return `${formatAssistantTone(tone)} · ${custom ? "Custom" : "Personality default"}`;
+  return `${formatAssistantTone(tone)} · ${custom ? "Custom" : "Default"}`;
 }
 
 function formatAssistantVoice(voice: AssistantVoiceOptionId): string {
@@ -269,26 +217,5 @@ function formatAssistantVoiceSummary(
   voice: AssistantVoiceOptionId,
   custom: boolean,
 ): string {
-  return `${formatAssistantVoice(voice)} · ${custom ? "Custom" : "Personality default"}`;
-}
-
-async function saveAssistantPersonaOnlyPreference(
-  preferences: MurphPersonaPreferences,
-): Promise<MurphPersonaPreferences> {
-  const response = await fetch("/api/settings/assistant-style", {
-    body: JSON.stringify({ persona: preferences.persona }),
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!response.ok) throw new Error("Assistant persona save failed.");
-  const body: unknown = await response.json();
-  if (
-    !body
-    || typeof body !== "object"
-    || Reflect.get(body, "assistantPersona") !== preferences.persona
-  ) {
-    throw new Error("Assistant persona save response was invalid.");
-  }
-  return preferences;
+  return `${formatAssistantVoice(voice)} · ${custom ? "Custom" : "Default"}`;
 }

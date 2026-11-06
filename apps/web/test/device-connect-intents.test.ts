@@ -36,9 +36,9 @@ describe("hosted device connect intents", () => {
       connectTarget: "whoop",
       memberId: "member_123",
       now: new Date("2026-05-10T12:00:00.000Z"),
-      provider: "whoop",
+      provider: "junction",
+      sourceProviderSlug: "whoop_v2",
       request: new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link"),
-      sourceProviderSlug: null,
     });
 
     const url = new URL(result.connectUrl);
@@ -47,7 +47,7 @@ describe("hosted device connect intents", () => {
     expect(url.search).toBe("");
     const fragment = new URLSearchParams(url.hash.slice(1));
     expect(fragment.get("deviceConnectIntent")).toBe(result.claim);
-    expect(fragment.get("connectProvider")).toBe("whoop");
+    expect(fragment.get("connectProvider")).toBe("junction");
     expect(fragment.get("connectSource")).toBe("whoop");
     expect(fragment.get("deviceConnectIntent")).toMatch(/^dc_[A-Za-z0-9_-]{32}$/u);
     expect(result.deviceConnectUrl).toBe(`https://join.example.test/device/connect/${result.claim}`);
@@ -57,8 +57,8 @@ describe("hosted device connect intents", () => {
         connectSourceId: "whoop",
         connectTarget: "whoop",
         memberId: "member_123",
-        provider: "whoop",
-        sourceProviderSlug: null,
+        provider: "junction",
+      sourceProviderSlug: "whoop_v2",
       }),
     });
     expect(mocks.tx.deviceConnectIntent.deleteMany).not.toHaveBeenCalled();

@@ -36,7 +36,7 @@ test("keeps the deletion disclosure visible until the visitor chooses to sign in
     expect(mocks.openDataPrivacyAuthDialog).not.toHaveBeenCalled();
     expect(rendered.container.textContent).toContain("Delete your Murph account");
     expect(rendered.container.textContent).toContain(
-      "external carrier, Telegram, Linq, or email systems cannot be recalled",
+      "external carrier, Telegram, Linq, or email systems can’t be recalled",
     );
     expect(rendered.container.querySelector("a[href='mailto:legal@justco.build']"))
       .not.toBeNull();

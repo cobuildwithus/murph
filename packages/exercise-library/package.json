@@ -28,14 +28,13 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js",
-    "typecheck": "pnpm generate && node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "pnpm generate && node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "generate": "pnpm --dir ../.. exec tsx --tsconfig packages/exercise-library/tsconfig.json packages/exercise-library/src/build.ts",
     "generate:check": "pnpm generate --check",
     "test:vitest": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/exercise-library/vitest.config.ts --no-coverage",
     "test:coverage": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/exercise-library/vitest.config.ts --coverage",
     "test": "pnpm test:vitest",
-    "verify": "pnpm typecheck && pnpm test && pnpm generate:check",
-    "prepack": "pnpm build"
+    "verify": "pnpm typecheck && pnpm test && pnpm generate:check"
   },
   "devDependencies": {
     "@types/node": "^24.12.4",
@@ -44,6 +43,6 @@
     "vitest": "^4.1.6"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   }
 }

@@ -655,10 +655,25 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("allows both existing and activation bootstrap paths", async () => {
+  it("requires activation bootstrap before device sync and allows initialized vaults", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
+      await expect(
+        requireHostedBootstrapForWake(
+          vaultRoot,
+          buildLegacyWake({
+            event: {
+              kind: "device-sync.wake",
+              reason: "connected",
+              userId: "member_123",
+            },
+            eventId: "evt_sync_before_activation",
+            occurredAt: "2026-04-08T00:05:00.000Z",
+          }),
+        ),
+      ).rejects.toThrow("requires member.activated bootstrap first");
+
       await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
       await expect(
         requireHostedBootstrapForWake(
@@ -738,7 +753,7 @@ describe("hosted runtime context coverage", () => {
         memberId: "member_123",
         occurredAt: "2026-04-08T00:25:00.000Z",
         preferences: {
-          persona: "navy-seal",
+          persona: "classic",
           personality: {
             humor: 8,
           },
@@ -753,7 +768,7 @@ describe("hosted runtime context coverage", () => {
       assert.equal(first.exists, true);
       assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
       assert.deepEqual(first.assistant, {
-        persona: "navy-seal",
+        persona: "classic",
         personality: {
           humor: 8,
         },
@@ -775,7 +790,7 @@ describe("hosted runtime context coverage", () => {
       const second = await readPreferencesDocument(vaultRoot);
       assert.equal(second.updatedAt, "2026-04-08T00:26:00.000Z");
       assert.deepEqual(second.assistant, {
-        persona: "navy-seal",
+        persona: "classic",
         personality: {
           detail: 7,
           humor: 8,

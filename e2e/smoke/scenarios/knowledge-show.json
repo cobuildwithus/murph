@@ -1,6 +1,6 @@
 {
   "id": "knowledge-show",
-  "command": "vault-cli knowledge show <slug> --vault <path> [--request-id <id>]",
+  "command": "vault-cli knowledge show <slug> --vault <path> [--if-exists] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

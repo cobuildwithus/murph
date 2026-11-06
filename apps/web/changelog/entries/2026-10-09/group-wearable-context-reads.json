@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-09",
+  "order": 100,
+  "item": {
+    "id": "group-wearable-context-reads",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable group wearable summaries",
+    "summary": "Murph more reliably reads dated wearable results alongside other shared context, such as timezones, in group chats.",
+    "details": "Freshness checks apply only to the requested wearable metrics. Other shared context stays readable, sharing permissions are unchanged, and a check does not confirm a completed device sync.",
+    "relevanceTags": [
+      "groups",
+      "wearables"
+    ],
+    "sourcePullRequests": []
+  }
+}

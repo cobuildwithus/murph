@@ -215,7 +215,7 @@ describe("shouldShowHomeDeviceSyncStep", () => {
   it("rejects when member access cannot be confirmed", async () => {
     mocks.findUniqueHostedMember.mockResolvedValueOnce({
       accountGroupMemberships: [],
-      billingStatus: "canceled",
+      billingStatus: "incomplete",
       suspendedAt: null,
       threadContainer: null,
     });

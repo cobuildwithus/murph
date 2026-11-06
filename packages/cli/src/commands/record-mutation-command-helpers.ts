@@ -1,5 +1,4 @@
 import { z } from 'incur'
-import { eventSourceSchema } from '@murphai/contracts'
 import {
   requestIdFromOptions,
   withBaseOptions,
@@ -29,6 +28,7 @@ interface EntityEditCommandInput {
 export interface EventBackedEntityEditCommandInput
   extends EntityEditCommandInput {
   dayKeyPolicy?: 'keep' | 'recompute'
+  expectedRevision?: number
 }
 
 interface EntityDeleteCommandInput {
@@ -98,32 +98,12 @@ export const eventBackedEditOptionShape = {
     .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected YYYY-MM-DD.')
     .optional()
     .describe('Set the explicit local day key in YYYY-MM-DD form.'),
-  source: eventSourceSchema
-    .optional()
-    .describe('Replace the event source (`manual`, `import`, `device`, or `derived`).'),
   tag: editTagOptionSchema,
   clearTitle: clearFieldOptionSchema('Clear the saved title.'),
   clearNote: clearFieldOptionSchema('Clear the saved note.'),
   clearTimeZone: clearFieldOptionSchema('Clear the saved explicit time zone.'),
   clearDayKey: clearFieldOptionSchema('Clear the saved day key.'),
-  clearSource: clearFieldOptionSchema('Clear the saved source.'),
   clearTags: clearFieldOptionSchema('Clear all saved tags.'),
-}
-
-export interface EventBackedTypedEditOptions {
-  title?: string
-  note?: string
-  occurredAt?: string
-  timeZone?: string
-  dayKey?: string
-  source?: string
-  tag?: string[]
-  clearTitle?: boolean
-  clearNote?: boolean
-  clearTimeZone?: boolean
-  clearDayKey?: boolean
-  clearSource?: boolean
-  clearTags?: boolean
 }
 
 export function createEntityEditCommandConfig<TResult, TInput extends EntityEditCommandInput = EntityEditCommandInput>(
@@ -199,6 +179,8 @@ export function createEventBackedEntityEditCommandConfig<TResult>(
         set: mergePatchLists(patch.set, extraPatch?.set),
         clear: mergePatchLists(patch.clear, extraPatch?.clear),
         dayKeyPolicy: normalizeDayKeyPolicy(normalizedOptions.dayKeyPolicy),
+        expectedRevision: typeof normalizedOptions.expectedRevision === 'number'
+          ? normalizedOptions.expectedRevision : undefined,
       }
     },
   })
@@ -398,13 +380,11 @@ export function buildEventBackedTypedEditPatch(
   appendTypedSet(set, 'occurredAt', stringOption(options.occurredAt))
   appendTypedSet(set, 'timeZone', stringOption(options.timeZone))
   appendTypedSet(set, 'dayKey', stringOption(options.dayKey))
-  appendTypedSet(set, 'source', stringOption(options.source))
   appendTypedSet(set, 'tags', stringArrayOption(options.tag))
   appendTypedClear(clear, 'title', booleanOption(options.clearTitle))
   appendTypedClear(clear, 'note', booleanOption(options.clearNote))
   appendTypedClear(clear, 'timeZone', booleanOption(options.clearTimeZone))
   appendTypedClear(clear, 'dayKey', booleanOption(options.clearDayKey))
-  appendTypedClear(clear, 'source', booleanOption(options.clearSource))
   appendTypedClear(clear, 'tags', booleanOption(options.clearTags))
 
   return {

@@ -124,8 +124,12 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     "Hosted mailbox import watermarks and compact quarantine status that must move with hosted runtime continuity.",
   ),
   definePortableAssistantFile(
+    ".runtime/operations/assistant/hosted-vault-share-publications.json",
+    "Hosted vault-share publication digests that move with hosted projection continuity and only suppress redundant deliveries.",
+  ),
+  definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-media-refs.json",
-    "Hosted media reference catalogue that lets workspace snapshots externalize bounded image and video bytes while preserving lazy materialization.",
+    "Hosted media reference catalogue for lazy image/video bytes and non-expiring closed integration-ingest history.",
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-system-mailbox.json",
@@ -246,9 +250,5 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   defineMachineLocalAssistantSubtree(
     ".runtime/operations/assistant/secrets",
     "Assistant local secret sidecars never travel in hosted snapshots.",
-  ),
-  definePortableAssistantFile(
-    ".runtime/operations/assistant/status.json",
-    "Assistant status snapshots move with hosted debugging continuity.",
   ),
 ] as const;

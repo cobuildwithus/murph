@@ -12,11 +12,8 @@ aliases:
 - 10000steps-setting-step-goal-2026-04-26
 categories:
 - daily-step-floor
-relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: parent_family
-  target: experiment_family:daily-step-floor
+relations: []
+
 source:
   kind: web_page
   title: Setting a Step Goal on the Website

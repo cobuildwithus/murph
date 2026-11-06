@@ -4,8 +4,6 @@ import { test } from "vitest";
 
 import * as queryRoot from "@murphai/query";
 import * as queryBrowser from "@murphai/query/browser";
-import * as queryBrowserBiomarkers from "@murphai/query/browser-biomarkers";
-import * as queryBrowserMurphAge from "@murphai/query/browser-murph-age";
 
 test("@murphai/query keeps browser-vault-only helpers on the browser subpath", () => {
   for (const exportName of [
@@ -13,27 +11,8 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
     "createBrowserVaultQueryClient",
     "createBrowserVaultReplica",
     "parseBrowserVaultReplica",
-    "selectBrowserVaultBiomarkerPanel",
-    "selectBrowserVaultExperimentResults",
   ]) {
     assert.equal(exportName in queryRoot, false);
     assert.equal(exportName in queryBrowser, true);
   }
-});
-
-test("@murphai/query exposes measured lab selectors through the biomarker browser subpath", () => {
-  for (const exportName of [
-    "selectBrowserVaultLabBiomarkerDetail",
-    "selectBrowserVaultMeasuredBiomarkers",
-  ]) {
-    assert.equal(exportName in queryRoot, false);
-    assert.equal(exportName in queryBrowserBiomarkers, true);
-  }
-});
-
-test("@murphai/query exposes Murph Age readiness through a narrow browser subpath", () => {
-  assert.equal("selectBrowserVaultMurphAgeReadiness" in queryRoot, false);
-  assert.equal("selectBrowserVaultMurphAgeReadiness" in queryBrowser, false);
-  assert.equal("selectBrowserVaultMurphAgeReadiness" in queryBrowserMurphAge, true);
-  assert.equal("createBrowserVaultQueryClient" in queryBrowserMurphAge, false);
 });

@@ -15,14 +15,13 @@ categories:
 - activity
 - wearable-metric
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:pmid-22866941
-- type: cites
-  target: source_artifact:pmid-25112481
-- type: cites
-  target: source_artifact:pmid-26334900
+  - type: cites
+    target: source_artifact:pmid-22866941
+  - type: cites
+    target: source_artifact:pmid-25112481
+  - type: cites
+    target: source_artifact:pmid-26334900
+
 measurementContexts:
 - wearable_activity_summary
 - self_report

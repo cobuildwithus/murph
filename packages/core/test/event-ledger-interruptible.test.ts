@@ -8,6 +8,7 @@ import { test, vi } from "vitest";
 
 import {
   MAX_EVENT_LEDGER_SHARD_BYTES,
+  readEventLedgerShardRows,
   visitEventLedgerShardRecordsInterruptible,
 } from "../src/event-ledger-storage.ts";
 import { VaultError } from "../src/errors.ts";
@@ -36,6 +37,47 @@ async function withShard(
 }
 
 for (const format of formats) {
+  for (const reader of ["visitor", "rows"] as const) {
+    test(`${format.name} event ${reader} yields without a signal and preserves rows`, async () => {
+      const expected = Array.from({ length: 1_024 }, (_, index) => ({
+        lineNumber: index * 2 + 1,
+        value: { index, text: "café 🌱" },
+      }));
+      const bytes = Buffer.from(expected.map(({ value }) => JSON.stringify(value)).join("\n\n") + "\n");
+      await withShard(bytes, format, async (vaultRoot) => {
+        let parsed = 0;
+        let observedAt = 0;
+        let observer: ReturnType<typeof setImmediate> | undefined;
+        const parse = JSON.parse;
+        const spy = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+          const value = parse(text, reviver);
+          if (text.startsWith('{"index":')) {
+            parsed += 1;
+            if (parsed === 1) observer = setImmediate(() => { observedAt = parsed; });
+          }
+          return value;
+        });
+        try {
+          const rows: Array<{ lineNumber: number; value: unknown }> = [];
+          if (reader === "rows") {
+            assert.deepEqual(await readEventLedgerShardRows({ vaultRoot, relativePath }), expected);
+          } else {
+            const result = await visitEventLedgerShardRecordsInterruptible({
+              vaultRoot, relativePath,
+              visit(value, lineNumber) { rows.push({ lineNumber, value }); },
+            });
+            assert.deepEqual(result, { interrupted: false, visitedCount: expected.length });
+            assert.deepEqual(rows, expected);
+          }
+          assert.ok(observedAt > 0 && observedAt <= 256, `observer ran after ${observedAt} parsed rows`);
+        } finally {
+          spy.mockRestore();
+          if (observer) clearImmediate(observer);
+        }
+      });
+    });
+  }
+
   test(`${format.name} event visitor preserves physical lines and UTF-8 decoding`, async () => {
     const bytes = Buffer.concat([
       Buffer.from('{"value":"café 🌱"}\r\n\n{"value":"'),
@@ -61,6 +103,7 @@ for (const format of formats) {
         { lineNumber: 4, value: { value: "last" } },
       ]);
       assert.equal(checks, 6);
+      assert.deepEqual(await readEventLedgerShardRows({ vaultRoot, relativePath }), visited);
     });
   });
 
@@ -96,6 +139,12 @@ for (const format of formats) {
           && error.details.lineNumber === 4,
       );
       assert.equal(visitedCount, 2);
+      await assert.rejects(
+        readEventLedgerShardRows({ vaultRoot, relativePath }),
+        (error: unknown) => error instanceof VaultError
+          && error.code === "VAULT_INVALID_JSONL"
+          && error.details.lineNumber === 4,
+      );
     });
   });
 }

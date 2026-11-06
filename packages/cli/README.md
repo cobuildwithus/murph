@@ -1,55 +1,12 @@
-# Murph - Personal Health Assistant
+# @murphai/murph
 
-Murph is your personal health assistant.
+Typed `vault-cli` commands for the hosted Murph runtime and operators. Members use hosted channels and the iOS app; this package does not install a local Murph product or setup wizard.
 
-Install this package to get the main `murph` command and the full local Murph experience: onboarding, vault setup, direct local assistant turns, inbox capture, parser tooling, and the always-on assistant loop.
+Runtime: Node `>= 24.22.1`.
 
-The repo implementation happens to live in `packages/cli`, but that is a maintainer detail. For users, `@murphai/murph` is the installable Murph package.
+[Repository](https://github.com/cobuildwithus/murph) · [Architecture](https://github.com/cobuildwithus/murph/blob/main/ARCHITECTURE.md)
 
-[Repository](https://github.com/cobuildwithus/murph) · [Architecture](https://github.com/cobuildwithus/murph/blob/main/ARCHITECTURE.md) · [Hosted control plane](https://github.com/cobuildwithus/murph/blob/main/apps/web/README.md) · [Hosted execution](https://github.com/cobuildwithus/murph/blob/main/apps/cloudflare/README.md)
-
-If you want a local, inspectable assistant that keeps durable truth in normal files you can read, this is the package you install.
-
-Runtime: Node `>= 24.14.1`.
-
-Supported host setup path: macOS and Linux.
-
-## Install
-
-```bash
-npm install -g @murphai/murph@latest
-# or
-pnpm add -g @murphai/murph@latest
-```
-
-## Quick start
-
-```bash
-murph onboard
-```
-
-`murph onboard` installs or reuses the local parser dependencies, initializes a vault, saves that vault as the default Murph vault for later commands, and walks through assistant, channel, and optional wearable setup.
-
-Once setup is complete, the main commands are:
-
-```bash
-murph assistant ask "Summarize my saved health context."
-murph run
-murph status
-```
-
-`vault-cli` is still available as a secondary alias for the operator surface, but `murph` is the primary command this package installs.
-
-## OpenClaw
-
-If you already run OpenClaw, install the first-party Murph bundle after `murph onboard`:
-
-```bash
-openclaw plugins install @murphai/openclaw-plugin
-openclaw gateway restart
-```
-
-That bundle teaches OpenClaw to call `vault-cli` directly against the same configured vault. It does not create a second Murph assistant runtime inside OpenClaw.
+## Vault operations
 
 When you need to read from the vault, use this chooser:
 
@@ -60,6 +17,26 @@ When you need to read from the vault, use this chooser:
 - `vault-cli memory show` plus targeted `vault-cli knowledge ...` reads for saved user context
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
+
+Clinical runtime imports save source statements as note events with a typed
+`clinicalFact` object. `clinical-note payload-schema` describes the fields for
+`clinical-note import-json --input @fact.json`; `show <event-id>` reads them back.
+Use `search query "<question or finding>"` to locate them, or
+`list --tag clinical-fact-family-history` to filter runtime facts by category.
+A null clinical date means unknown, even when the containing note has a
+documentation timestamp.
+Missing units stay absent, and source history does not establish a current
+diagnosis or a dose taken. Imports with the same external reference replay
+through the canonical event owner.
+
+Use `intake import answers.json --assessment-type clinical-observation` to
+preserve structured questionnaire answers or dated provider history without
+turning them into current diagnoses or medication use. Add
+`--questionnaire-slug <slug>` when the questionnaire is known and repeat
+`--related-id <canonical-id>` to link source records. `intake show <id>` returns
+the original structured responses; `search query "<question or finding>"`
+and `timeline` help retrieve them later. These options classify the supplied
+JSON; they do not extract facts, validate medical claims, or deduplicate imports.
 
 Use `memory show <id> --record-only` when verifying an exact known memory
 record. It returns that record and its metadata without the whole document;
@@ -129,12 +106,12 @@ source on the same automation; its activity cursor restarts at the edit time.
 ## What you get
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
-- direct local assistant turns, runtime automation, status, outbox, canonical memory, and canonical automation commands
+- canonical memory and automation commands used by the hosted assistant
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription through runtime services
 - optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
 
-`@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
+`@murphai/murph` ships the runtime and operator CLI. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
 
 ## From source
 
@@ -142,7 +119,8 @@ If you are developing from a checkout instead of installing the published packag
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm onboard --vault ./vault
+pnpm build
+pnpm vault-cli vault stats --vault ./vault
 ```
 
 For package-local CLI iteration, use the source-first test lane:
@@ -159,20 +137,14 @@ pnpm --dir packages/cli verify
 pnpm verify:cli
 ```
 
-If `pnpm` is not available yet, use:
-
-```bash
-./scripts/setup-host.sh --vault ./vault
-```
-
 ## Config defaults
 
 The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json`.
 
 Those incur config defaults are local CLI convenience only. Hosted execution does not snapshot or honor `~/.config/murph/config.json`; portable runtime behavior must live in canonical vault state or typed operator config under `~/.murph/config.json`.
 
-- `murph --config <path> ...` selects an explicit config file
-- `murph --no-config ...` disables config loading for a single run
+- `vault-cli --config <path> ...` selects an explicit config file
+- `vault-cli --no-config ...` disables config loading for a single run
 - the published package now ships Incur's native `config.schema.json` so editors can validate and autocomplete those config files
 
 Config files only supply command `options`, following incur's nested `commands` shape. For example:
@@ -197,51 +169,31 @@ To refresh the shipped schema artifact from the built CLI entrypoint during pack
 pnpm --dir packages/cli gen:config-schema
 ```
 
+`vault-cli memory set-demographics --age 39 --as-of 2025-12-31` saves the
+member's dated statement. Use `--birth-year 1986` for an explicit year and
+`--biological-sex female|male` only for explicitly stated biological sex.
+Omit fields to preserve them; `--clear-birth` clears all birth facts and
+`--clear-sex` clears sex. A conflicting saved DOB returns a rejected,
+unresolved receipt; a year never invents DOB month/day. Generic Identity
+memory corrections share this validation. The existing memory family is wired
+through the command registrar, manifest, lazy dispatcher and family routing;
+regenerate schema/types/skill hash with the command above after changes.
+
 ## Maintainer notes
 
-The package exports only the root CLI runtime entrypoint and exposes both `murph` and `vault-cli` bins from the same built entrypoint. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-cli` and are bundled into the public tarball when the CLI runtime needs them.
+The package exports only the root CLI runtime entrypoint and exposes the `vault-cli` binary. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-engine` and are bundled into the public tarball when the CLI runtime needs them.
 
 Machine-facing callers should rely on incur's native envelope via `--full-output --format json` instead of a Murph-specific wrapper contract.
 
-Current repo-local package responsibilities include:
+The CLI owns the hosted command graph, routing, and built `vault-cli` launcher.
+Assistant and shared usecase APIs live in workspace-private owner packages.
 
-- the published command graph and install surface
-- CLI-owned command routing, onboarding entry, and built binary launchers
-- device command surfaces that delegate to headless owner packages
-- release ownership for the public `@murphai/murph` package and bins
+## Hosted distribution
 
-Programmatic assistant, setup, and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
-
-## Release flow
-
-Release and publish actions remain user-operated. The monorepo release source of truth is `scripts/release-manifest.json`, and the normal entrypoints are:
-
-```bash
-pnpm release:check
-pnpm release:patch
-```
-
-Pre-release and exact-version flows use the same root script:
-
-```bash
-bash scripts/release.sh preminor --preid alpha
-bash scripts/release.sh 0.1.0-rc.1 --dry-run
-```
-
-The release flow bumps the five public packages in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish the public tarballs in dependency order. Workspace-private runtime packages remain in the monorepo and are bundled into the public tarballs when a public package still depends on them at runtime.
-
-Release `1.3.0` intentionally includes the breaking removal of the
-`@murphai/contracts` progress-card URL codec. Do not restore that public
-health-data URL representation as a compatibility shim; private attachment
-media is the supported path.
-
-npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo still publishes a small set of `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
-
-```bash
-pnpm release:trust:github -- --dry-run
-pnpm release:trust:github -- --yes
-```
-
-Those commands target the current publishable package set in `scripts/release-manifest.json` and bind each package to `cobuildwithus/murph` via `.github/workflows/release.yml`.
-
-If a package is already bound to the wrong workflow or repository in npm, revoke that package's existing trust entry with `npm trust list` and `npm trust revoke`, then rerun `pnpm release:trust:github -- --yes`.
+All workspace packages are private. npm publication, package release notes, and
+version/tag release scripts are retired. The public repository and Apache-2.0
+license remain. The Cloudflare runner assembles its CLI from the workspace with
+an explicit dependency closure in `apps/cloudflare/scripts/runner-bundle-contract.ts`.
+Package `files` lists remain inputs to that local runtime assembly. The runtime
+artifact verifier checks generated schemas, CLI entrypoints, and dependency
+boundaries without publishing or contacting the npm registry.

@@ -7,6 +7,7 @@ import type {
   AssistantGroupParticipantDisplayNameSource,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
+import { AssistantWorkspaceArtifactMaterializationError } from '../execution-context.js'
 import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
@@ -27,7 +28,7 @@ import {
   type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
-import { readAssistantInputMessageRef } from '../message-target-selection.js'
+import { isAssistantInputEventId } from '../input-store.js'
 import {
   formatAssistantPromptInstant,
   formatAssistantPromptUtcInstant,
@@ -45,8 +46,14 @@ const ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION = [
 ].join(' ')
 const RAW_ATTACHMENT_FILE_INSTRUCTION =
   'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.'
+const VIDEO_ATTACHMENT_FILE_INSTRUCTION =
+  'For requested video analysis, discover and use murph.analyze_video when available with this video message\'s exact Message ref. The tool reads the stored video for you; local playback is not a prerequisite. Ground the answer in its returned observations.'
 const PDF_ATTACHMENT_FILE_INSTRUCTION =
   'For PDFs, inspect the storedPath with local PDF tools when needed.'
+
+function renderRawAttachmentFileInstruction(kind: string): string {
+  return kind === 'video' ? VIDEO_ATTACHMENT_FILE_INSTRUCTION : RAW_ATTACHMENT_FILE_INSTRUCTION
+}
 
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
@@ -149,13 +156,14 @@ export function buildAssistantAutoReplyPrompt(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
-        messageRef: readAssistantInputMessageRef(entry),
+        // Source identity is independent of native reply/reaction eligibility.
+        messageRef: isAssistantInputEventId(entry.inputId) ? entry.inputId : null,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata, entry.conversation),
         speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: inputs.length,
         trustedHostedImageCompletion:
@@ -242,13 +250,14 @@ export async function prepareAssistantAutoReplyInput(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
-        messageRef: readAssistantInputMessageRef(entry),
+        // Source identity is independent of native reply/reaction eligibility.
+        messageRef: isAssistantInputEventId(entry.inputId) ? entry.inputId : null,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata, entry.conversation),
         speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: preparedInputs.length,
         trustedHostedImageCompletion:
@@ -366,7 +375,9 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
 
 function readAssistantInputGroupSenderHandle(
   metadata: AssistantInputSourceMetadata | null,
+  conversation: AssistantInputConversationRef,
 ): string | null {
+  if (metadata?.kind === 'linq' && conversation.threadIsDirect !== false) return null
   return metadata?.kind === 'linq' || metadata?.kind === 'telegram'
     ? normalizeNullableString(metadata.senderHandle)
     : null
@@ -391,7 +402,7 @@ function readAssistantInputGroupSpeakerLabel(
   >,
 ): AssistantInputGroupSpeakerLabel | null {
   const metadata = input.sourceMetadata
-  if (!readAssistantInputGroupSenderHandle(metadata)) {
+  if (!readAssistantInputGroupSenderHandle(metadata, input.conversation)) {
     return null
   }
   if (
@@ -669,7 +680,7 @@ function renderAttachmentEvidencePromptSection(
       chunks.push(status)
     }
     if (storedPathLine !== null) {
-      chunks.push(RAW_ATTACHMENT_FILE_INSTRUCTION)
+      chunks.push(renderRawAttachmentFileInstruction(attachment.kind))
       if (hasPdfAttachmentEvidencePath(attachment)) {
         chunks.push(PDF_ATTACHMENT_FILE_INSTRUCTION)
       }
@@ -762,6 +773,7 @@ function buildAssistantAutoReplyContextLines(
           : `${formatAssistantPromptUtcInstant(firstInput.occurredAt)} -> ${formatAssistantPromptUtcInstant(lastInput.occurredAt)}`
       }`
   return [
+    'Current inbound messages (in received order):',
     `Source: ${firstInput.source}`,
     occurredAt,
     `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
@@ -843,7 +855,7 @@ function renderPreparedAttachmentPromptSection(
     sections.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
   }
   if (hasRawStoredPath && !hasTextFragments) {
-    sections.push(RAW_ATTACHMENT_FILE_INSTRUCTION)
+    sections.push(renderRawAttachmentFileInstruction(attachment.kind))
   }
   if (richEvidenceCandidate && !hasTextFragments) {
     sections.push(
@@ -926,7 +938,8 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
       },
       vaultRoot: input.vaultRoot,
     })
-  } catch {
+  } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     input.onEvent?.({
       type: 'input.reply-progress',
       inputId: input.entry.inputId,

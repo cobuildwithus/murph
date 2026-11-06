@@ -26,6 +26,10 @@ describe("Linq instant start", () => {
     value: "+15551112222",
   });
 
+  it("keeps SMS closed until the image gateway rollout is ready", () => {
+    expect(isHostedLinqInstantStartEventCandidate({ event: buildMessageEvent({ service: "SMS" }), phonePrefixes: ["+1"] })).toBe(false);
+  });
+
   it("uses the longest configured E.164 phone prefix", () => {
     expect(resolveHostedLinqInstantStartPhonePrefix({
       phoneNumber: "+447700900123",
@@ -40,19 +44,22 @@ describe("Linq instant start", () => {
   it("recognizes a structurally eligible event before member lookup", () => {
     expect(isHostedLinqInstantStartEventCandidate({
       event: buildMessageEvent(),
+      smsEnabled: true,
       phonePrefixes: ["+1"],
     })).toBe(true);
     expect(isHostedLinqInstantStartEventCandidate({
       event: buildMessageEvent({ sender: "person@example.com" }),
+      smsEnabled: true,
       phonePrefixes: [],
     })).toBe(true);
     expect(isHostedLinqInstantStartEventCandidate({
       event: buildMessageEvent({ service: "SMS" }),
+      smsEnabled: true,
       phonePrefixes: ["+1"],
-    })).toBe(false);
+    })).toBe(true);
   });
 
-  it("admits a model-approved direct iMessage from an allowed phone prefix", () => {
+  it.each(["iMessage", "SMS", "rcs"])("admits a model-approved direct %s from an allowed phone prefix", (service) => {
     expect(phoneContact).not.toBeNull();
     if (!phoneContact) {
       throw new Error("Expected a valid phone contact fixture.");
@@ -60,8 +67,9 @@ describe("Linq instant start", () => {
 
     expect(isHostedLinqInstantStartEligible({
       admissionDecision: modelAllow,
-      event: buildMessageEvent(),
+      event: buildMessageEvent({ service }),
       participantContact: phoneContact,
+      smsEnabled: true,
       phonePrefixes: ["+1"],
     })).toBe(true);
   });
@@ -84,7 +92,7 @@ describe("Linq instant start", () => {
       buildMessageEvent(),
       ["+1"],
     ],
-    ["SMS", modelAllow, buildMessageEvent({ service: "SMS" }), ["+1"]],
+    ["unknown protocol", modelAllow, buildMessageEvent({ service: "other" }), ["+1"]],
     ["group chat", modelAllow, buildMessageEvent({ isGroup: true }), ["+1"]],
     ["own message", modelAllow, buildMessageEvent({ isFromMe: true }), ["+1"]],
     ["unsupported prefix", modelAllow, buildMessageEvent(), ["+44"]],
@@ -101,6 +109,7 @@ describe("Linq instant start", () => {
         admissionDecision,
         event,
         participantContact: phoneContact,
+        smsEnabled: true,
         phonePrefixes,
       })).toBe(false);
     },
@@ -119,8 +128,18 @@ describe("Linq instant start", () => {
       admissionDecision: modelAllow,
       event: buildMessageEvent({ sender: "person@example.com" }),
       participantContact: emailContact,
+      smsEnabled: true,
       phonePrefixes: [],
     })).toBe(true);
+    for (const service of ["SMS", "RCS"]) {
+      expect(isHostedLinqInstantStartEligible({
+        admissionDecision: modelAllow,
+        event: buildMessageEvent({ sender: "person@example.com", service }),
+        participantContact: emailContact,
+        smsEnabled: true,
+        phonePrefixes: [],
+      })).toBe(false);
+    }
   });
 });
 

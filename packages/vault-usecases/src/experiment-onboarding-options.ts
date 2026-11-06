@@ -2,7 +2,6 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
-  commonsProtocolRefSchema,
   experimentAnalysisPlanSchema,
   experimentExpectedDirectionsSchema,
   experimentFrontmatterSchema,
@@ -60,7 +59,6 @@ export interface ExperimentAssistantSupportOptions {
 
 const experimentSignalDirectionSchema = z.enum(['increase', 'decrease', 'stabilize'])
 type ExperimentFrontmatterValue = z.infer<typeof experimentFrontmatterSchema>
-type CommonsProtocolRefValue = z.infer<typeof commonsProtocolRefSchema>
 type ExperimentRunLoggingValue = z.infer<typeof experimentRunLoggingSchema>
 type ExperimentAnalysisPlanValue = z.infer<typeof experimentAnalysisPlanSchema>
 
@@ -70,10 +68,6 @@ export interface ApplyExperimentOnboardingRecordInput
   vault: string
   lookup: string
   status?: ExperimentStatus
-  protocolKey?: string
-  pageRevisionId?: string
-  runSpecRevisionId?: string
-  testPlanId?: string
   baselineStart?: string
   baselineEnd?: string
   baselineDays?: number
@@ -394,54 +388,6 @@ function compactObject<TRecord extends Record<string, unknown>>(record: TRecord)
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => value !== undefined),
   ) as TRecord
-}
-
-export function buildCommonsProtocolRefForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentFrontmatterValue['commonsProtocolRef'],
-): CommonsProtocolRefValue | undefined {
-  const touched =
-    input.protocolKey !== undefined ||
-    input.pageRevisionId !== undefined ||
-    input.runSpecRevisionId !== undefined ||
-    input.testPlanId !== undefined
-
-  if (!touched) {
-    return undefined
-  }
-
-  const key =
-    input.protocolKey === undefined
-      ? existing?.key
-      : normalizeProtocolKeyOption(input.protocolKey, 'protocol-key')
-  const pageRevisionId =
-    input.pageRevisionId === undefined
-      ? existing?.pageRevisionId
-      : normalizeSha256RevisionOption(input.pageRevisionId, 'page-revision-id')
-  const runSpecRevisionId =
-    input.runSpecRevisionId === undefined
-      ? existing?.runSpecRevisionId
-      : normalizeSha256RevisionOption(input.runSpecRevisionId, 'run-spec-revision-id')
-  const testPlanId =
-    input.testPlanId === undefined
-      ? existing?.testPlanId
-      : normalizeStableIdOption(input.testPlanId, 'test-plan-id')
-
-  if (!key || !pageRevisionId || !runSpecRevisionId) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'Applying a protocol reference requires --protocol-key, --page-revision-id, and --run-spec-revision-id unless the experiment already has them.',
-    )
-  }
-
-  return commonsProtocolRefSchema.parse(
-    compactObject({
-      key,
-      pageRevisionId,
-      runSpecRevisionId,
-      testPlanId,
-    }),
-  )
 }
 
 export function buildRunLoggingForOnboardingApply(
@@ -828,19 +774,6 @@ function normalizeHealthCommonsKeyOption(value: string, optionName: string) {
   return parsed.data
 }
 
-function normalizeProtocolKeyOption(value: string, optionName: string) {
-  const normalized = normalizeHealthCommonsKeyOption(value, optionName)
-
-  if (!normalized.startsWith('protocol_variant:')) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must be a Health Commons protocol_variant key.`,
-    )
-  }
-
-  return normalized
-}
-
 function normalizeHealthCommonsKeyListOption(
   values: readonly string[] | undefined,
   optionName: string,
@@ -896,16 +829,4 @@ function normalizeExpectedDirectionEntriesOption(
   return experimentExpectedDirectionsSchema.parse(
     [...next].map(([biomarkerKey, direction]) => ({ biomarkerKey, direction })),
   )
-}
-
-function normalizeSha256RevisionOption(value: string, optionName: string) {
-  const normalized = normalizeRequiredTextOption(value, optionName)
-  if (!/^sha256:[a-f0-9]{64}$/u.test(normalized)) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must use sha256:<64 lowercase hex>.`,
-    )
-  }
-
-  return normalized
 }

@@ -1,4 +1,4 @@
-"use server";
+import "server-only";
 
 import { resolveMurphTelegramBotUsername } from "@/src/lib/murph-contact-routing";
 

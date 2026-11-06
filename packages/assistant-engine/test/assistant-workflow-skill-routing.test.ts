@@ -21,10 +21,12 @@ describe('experiment support policy routing', () => {
 
   it('retains setup, safety, privacy, and canonical session safeguards in the entrypoint', async () => {
     const root = await readEntrypoint()
-    expect(root).toContain('## Protocol resolution')
+    expect(root).not.toContain('## Protocol resolution')
+    expect(root).toContain('## Designing the experiment')
     expect(root).toContain('## Creating the run')
     expect(root).toContain('Never activate a run with a blocking disposition')
-    expect(root).toContain('Treat omitted question ids as unanswered, not negative')
+    expect(root).toContain('do not treat missing answers as negative')
+    expect(root).toContain('Those records remain authoritative even when their former public source is absent.')
     expect(root).toContain('Session logging is private-only.')
     expect(root).toContain('create exactly one canonical occurrence for each confirmed set')
     expect(root).toContain('ask one narrow clarification and write nothing')

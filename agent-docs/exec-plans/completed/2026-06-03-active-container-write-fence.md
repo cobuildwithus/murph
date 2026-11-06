@@ -59,7 +59,7 @@ Updated: 2026-06-03
   - Preserve foreground runtime priority and existing write-fence ownership.
   - Keep secrets and direct personal identifiers out of code, logs, tests, docs,
     and generated artifacts.
-  - Preserve unrelated active hosted-runtime and Murph Age work.
+  - Preserve unrelated active hosted-runtime work.
 
 ## Risks and mitigations
 

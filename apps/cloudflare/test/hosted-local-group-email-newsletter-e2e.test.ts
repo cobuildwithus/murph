@@ -45,7 +45,7 @@ const newsletterSubject = "Hosted-local group health edition";
 const newsletterText = "The authorized group health edition is ready.";
 const newsletterHtml = `<p>${newsletterText}</p>`;
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const scheduledWaitMs = 240_000;
 const projectionScopes = [
   { projectionKind: "steps-days.v0" },
@@ -81,7 +81,7 @@ describe("hosted local group email newsletter e2e", () => {
     });
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: [
           ownerPhone,
           missingEmailPhone,

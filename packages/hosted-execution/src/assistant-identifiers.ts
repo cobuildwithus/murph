@@ -123,6 +123,8 @@ export function readHostedConversationAssistantIdentifierSecret(
     );
   }
 
+  if (wake.message.channel === "voice") return wake.message.callId;
+
   return wake.eventId;
 }
 

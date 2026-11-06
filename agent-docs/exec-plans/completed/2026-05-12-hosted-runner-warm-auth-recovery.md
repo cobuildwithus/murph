@@ -13,7 +13,7 @@ Fix hosted runner wake failures where a warm Cloudflare container reports HTTP 4
 ## Constraints
 
 - Do not print local env secrets, raw mailbox payloads, raw logs with message content, or direct personal identifiers.
-- Preserve unrelated active hosted runner and Murph Age working-tree edits.
+- Preserve unrelated active hosted runner working-tree edits.
 - Avoid broad runtime refactors; this task is a targeted recovery fix.
 
 ## Verification

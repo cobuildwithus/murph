@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "steps-from-your-device",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Your steps now come from the device you wear",
+    "summary": "If you wear a watch or ring and also use Apple Health, your daily steps now come from the device. Apple Health could miss steps or count some twice.",
+    "details": "On days the device was clearly off, Murph uses Apple Health instead. Group boards still compare one source at a time.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": [4606]
+  }
+}

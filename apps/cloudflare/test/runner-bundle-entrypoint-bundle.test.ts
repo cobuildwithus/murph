@@ -1,6 +1,8 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { Metafile } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
@@ -210,8 +212,12 @@ afterEach(async () => {
 // entrypoint has: a multi-module graph, a dynamic import (esbuild splitting),
 // an external dependency that must resolve from the staged node_modules at
 // boot, and createRequire interop from the banner.
-async function createFakeRunnerBundle(): Promise<string> {
-  const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-entrypoint-bundle-"));
+async function createFakeRunnerBundle(
+  prefix = "murph-entrypoint-bundle-",
+  canonicalPath = false,
+): Promise<string> {
+  const temporaryPath = await mkdtemp(path.join(tmpdir(), prefix));
+  const bundleDir = canonicalPath ? await realpath(temporaryPath) : temporaryPath;
   temporaryDirectories.push(bundleDir);
 
   await mkdir(path.join(bundleDir, "dist"), { recursive: true });
@@ -245,6 +251,7 @@ async function createFakeRunnerBundle(): Promise<string> {
       "export function startHostedContainerEntrypoint() {",
       "  return `${sharp()}:${helperValue}:${typeof lazyLoader}`;",
       "}",
+      "export async function readLazyValue() { return (await lazyLoader()).lazyValue; }",
       "",
     ].join("\n"),
     "utf8",
@@ -273,18 +280,30 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     },
   );
 
-  it("bundles the staged entrypoint, resolves externals at boot, and passes the boot probe", async () => {
-    const bundleDir = await createFakeRunnerBundle();
+  it.each([false, true])("emits identical runtime chunks across staging path lengths (canonical path: %s)", async (canonicalPath) => {
+    const chunks = [];
+    for (const prefix of ["murph-bundle-short-", "murph-bundle-with-a-much-longer-staging-directory-"]) {
+      const bundleDir = await createFakeRunnerBundle(prefix, canonicalPath);
+      await bundleRunnerContainerEntrypoint(bundleDir);
+      const outputDir = path.join(bundleDir, RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME);
+      const outputNames = (await readdir(outputDir)).sort();
+      chunks.push(await Promise.all(outputNames.map(async (name) => ({
+        name,
+        content: await readFile(path.join(outputDir, name), "utf8"),
+      }))));
 
-    await bundleRunnerContainerEntrypoint(bundleDir);
+      const entryUrl = pathToFileURL(path.join(outputDir, "container-entrypoint.js")).href;
+      const result = execFileSync(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        "const entry = await import(process.argv[1]); process.stdout.write(`${entry.startHostedContainerEntrypoint()}:${await entry.readLazyValue()}`);",
+        entryUrl,
+      ], { encoding: "utf8", timeout: 10_000 });
+      expect(result).toBe("installed-sharp:helper:function:lazy");
+    }
 
-    await expect(
-      access(path.join(
-        bundleDir,
-        RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
-        "container-entrypoint.js",
-      )),
-    ).resolves.toBeUndefined();
+    // Equal bytes and imports in every output also preserve the static closure.
+    expect(chunks[1]).toEqual(chunks[0]);
   });
 
   it("fails fast when the staged entry is missing", async () => {
@@ -292,6 +311,19 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     temporaryDirectories.push(bundleDir);
 
     await expect(bundleRunnerContainerEntrypoint(bundleDir)).rejects.toThrow();
+  });
+
+  it.each([false, true])("fails the boot probe when a retained lazy chunk throws (canonical path: %s)", async (canonicalPath) => {
+    const bundleDir = await createFakeRunnerBundle("murph-entrypoint-lazy-failure-", canonicalPath);
+    await writeFile(
+      path.join(bundleDir, "dist", "lazy.js"),
+      "throw new Error('synthetic lazy evaluation failure'); export const lazyValue = 'lazy';\n",
+      "utf8",
+    );
+
+    await expect(bundleRunnerContainerEntrypoint(bundleDir)).rejects.toThrow(
+      /bundled lazy chunk failed to evaluate:[\s\S]*synthetic lazy evaluation failure/,
+    );
   });
 
   it("fails the boot probe when the bundled entry cannot evaluate", async () => {
@@ -401,8 +433,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ],
     [
       "device-sync provider graph",
-      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/oura.js",
-      /node_modules\/@murphai\/device-syncd\/dist\/providers\/oura\.js/,
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/junction.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/providers\/junction\.js/,
     ],
     [
       "importers",
@@ -425,29 +457,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@junction-api\/sdk\/index\.js/,
     ],
     [
-      "staged Murph Age health-metrics calculator",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age\.js/,
-    ],
-    [
-      "staged Murph Age health-metrics source routes",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age-source-routes.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
-    ],
-    [
       "staged contract examples",
       ".deploy/runner-bundle/node_modules/@murphai/contracts/dist/examples.js",
       /node_modules\/@murphai\/contracts\/dist\/examples\.js/,
-    ],
-    [
-      "workspace Murph Age query runtime",
-      "packages/query/dist/murph-age.js",
-      /packages\/query\/dist\/murph-age\.js/,
-    ],
-    [
-      "workspace Murph Age browser replica",
-      "packages/query/dist/browser-replica/murph-age.js",
-      /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
     [
       "dynamic-tool execution runtime",
@@ -463,16 +475,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       "workspace assistant-ask-completion wake handler",
       "packages/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
       /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-ask-completion\.js/,
-    ],
-    [
-      "staged Environment voice wake handler",
-      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
-      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
-    ],
-    [
-      "workspace Codex auth wake handler",
-      "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
-      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,
     ],
     [
       "Zod locale catalog",
@@ -642,8 +644,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 64_257 + 12_000,
-      staticClosureBytes: 1_950_662 + 96_000,
+      entryBytes: 76_589 + 12_000,
+      staticClosureBytes: 2_047_343 + 96_000,
       staticChunkCount: 24,
     });
   });

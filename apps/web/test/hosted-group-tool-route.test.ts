@@ -23,7 +23,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-tool", () => ({
-  handleHostedRuntimeGroupTool: mocks.handleTool,
+  handleHostedRuntimeConversationTool: mocks.handleTool,
 }));
 vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
   handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
@@ -71,6 +71,62 @@ describe("hosted group tool route", () => {
     });
   });
 
+  it.each([
+    { query: "", enabled: false },
+    { query: "?gameMultiplayer=1", enabled: true },
+    { query: "?gameMultiplayer=true", enabled: false },
+  ])("gates group games on the signed query $query", async ({ query, enabled }) => {
+    const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+    mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
+    const request = new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${query}`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    });
+    expect((await route.POST(request)).status).toBe(200);
+    expect(mocks.requireJsonCallback).toHaveBeenCalledWith(request, expect.any(Object));
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({ gameMultiplayer: enabled, request: body }));
+  });
+
+  it("forwards the signed game runtime identity for the mutation transaction fence", async () => {
+    const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+    mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_group_runtime", request: body,
+      runtimeIdentity: { userId: "member_group_runtime", attemptId: "attempt-synthetic", generation: "7", workspaceVersion: "3" },
+    }));
+  });
+
+  it("forwards the signed runtime identity for the recap write fence", async () => {
+    const body = { action: "write_recap", origin: { kind: "game_recap", gameId: "synthetic-game", eventId: "game-recap:synthetic-game" },
+      recap: { pages: [], chatLine: "Synthetic chat line." }, priorChatLines: [] };
+    mocks.handleTool.mockResolvedValue({ action: "write_recap", result: { status: "ok", chatLine: "Synthetic chat line." } });
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_group_runtime", request: body,
+      runtimeIdentity: { userId: "member_group_runtime", attemptId: "attempt-synthetic", generation: "7", workspaceVersion: "3" },
+    }));
+  });
+
+  it("forwards the signed game bootstrap runtime identity without accepting a recipient", async () => {
+    const body = { action: "game_chat_bootstrap", gameId: "synthetic-game", eventId: "synthetic-event", operation: "recover" };
+    mocks.handleTool.mockResolvedValue({ action: "game_chat_bootstrap", result: { status: "needs_message" } });
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_group_runtime", request: body,
+      runtimeIdentity: { userId: "member_group_runtime", attemptId: "attempt-synthetic", generation: "7", workspaceVersion: "3" },
+    }));
+    expect(await response.json()).toMatchObject({ action: "game_chat_bootstrap", result: { status: "needs_message" } });
+  });
+
   it("accepts a valid read_shared callback larger than the former 8 KiB limit", async () => {
     const body = {
       action: "read_shared",
@@ -102,6 +158,7 @@ describe("hosted group tool route", () => {
       maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
     });
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      gameMultiplayer: false,
       includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_group_runtime",
@@ -291,6 +348,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      gameMultiplayer: false,
       includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_group_runtime",
@@ -519,6 +577,7 @@ describe("hosted group tool route", () => {
 
       expect(response.status).toBe(200);
       expect(mocks.handleTool).toHaveBeenCalledWith({
+        gameMultiplayer: false,
         includeMembershipAvailability: false,
         includeParticipantRosters: false,
         memberId: "member_group_runtime",

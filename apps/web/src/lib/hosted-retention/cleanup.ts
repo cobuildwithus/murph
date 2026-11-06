@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
+import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "../hosted-ops/operator-task-retention";
 import {
@@ -19,10 +20,11 @@ export const HOSTED_RUN_LOG_VERBOSE_RETENTION_MS = 7 * DAY_MS;
 // store so content retirement and the live-item read filter cannot drift.
 export { HOSTED_MAILBOX_RETENTION_MS };
 export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
-export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_TYPING_ALERT_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_RUNTIME_LEDGER_RETENTION_MS = 30 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
 // ceiling, so one hourly invocation can never open a long transaction against
 // the production pool. High-volume callback nonces keep the same small
@@ -66,12 +68,14 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredGroupParticipantObservationsDeleted: number;
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
+  expiredTypingAlertsDeleted: number;
+  expiredFinalReplyDeliveryAlertsDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
   expiredOperatorTaskResultsRetired: number;
+  expiredRuntimePutDrainsDeleted: number;
   expiredSensitiveActionChallengesDeleted: number;
   expiredSignupNotificationContextsRetired: number;
-  staleWebSessionsDeleted: number;
 }
 
 export interface HostedRuntimeSignalRetentionCleanupResult {
@@ -119,6 +123,9 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
+  const expiredTypingAlertsDeleted = await deleteExpiredTypingAlerts({ now, prisma });
+  const expiredFinalReplyDeliveryAlertsDeleted =
+    await deleteExpiredFinalReplyDeliveryAlerts({ now, prisma });
   const expiredAssistantRuntimeIssuesDeleted = await deleteExpiredAssistantRuntimeIssues({
     now,
     prisma,
@@ -131,10 +138,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
-  const staleWebSessionsDeleted = await deleteStaleHostedWebSessions({
-    now,
-    prisma,
-  });
+  const expiredRuntimePutDrainsDeleted = await deleteExpiredRuntimePutDrains({ now, prisma });
 
   return {
     compactedLinqProviderEventDiagnostics,
@@ -152,12 +156,14 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredGroupParticipantObservationsDeleted,
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
+    expiredTypingAlertsDeleted,
+    expiredFinalReplyDeliveryAlertsDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredOperatorTaskResultsRetired,
+    expiredRuntimePutDrainsDeleted,
     expiredSensitiveActionChallengesDeleted,
     expiredSignupNotificationContextsRetired,
-    staleWebSessionsDeleted,
   };
 }
 
@@ -330,7 +336,9 @@ async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
     WITH due AS (
       SELECT "user_id"
       FROM "hosted_workspace"
+      JOIN "hosted_member" AS "member" ON "member"."id" = "hosted_workspace"."user_id"
       WHERE "inbox_media_retention_wake_at" <= ${input.now}
+        AND ${hostedRuntimeMemberEligibleSql()}
       ORDER BY
         "inbox_media_retention_signal_attempted_at" ASC NULLS FIRST,
         "inbox_media_retention_wake_at" ASC,
@@ -864,6 +872,46 @@ export async function deleteExpiredIngressLatencyTraces(input: {
   `);
 }
 
+export async function deleteExpiredTypingAlerts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_TYPING_ALERT_RETENTION_MS);
+  // Keep unsent obligations. Sent identities outlive the seven-day trace scan,
+  // so retiring them cannot recreate an alert for an old message.
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT id FROM hosted_linq_alert
+      WHERE kind IN ('runtime_warm_typing_slow', 'runtime_cold_typing_slow')
+        AND status = 'sent' AND claimed_at < ${cutoff}
+      ORDER BY claimed_at, id
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM hosted_linq_alert AS alert USING doomed
+    WHERE alert.id = doomed.id
+  `);
+}
+
+export async function deleteExpiredFinalReplyDeliveryAlerts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_TYPING_ALERT_RETENTION_MS);
+  // Unsent obligations stay. The monitor's lookback is far shorter than this
+  // retention, so retiring a sent identity cannot recreate its alert.
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT id FROM hosted_linq_alert
+      WHERE kind = 'runtime_final_reply_delivery_slow'
+        AND status = 'sent' AND claimed_at < ${cutoff}
+      ORDER BY claimed_at, id
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM hosted_linq_alert AS alert USING doomed
+    WHERE alert.id = doomed.id
+  `);
+}
+
 // The rows already carry their own expiry; nothing was enforcing it.
 async function deleteExpiredAssistantRuntimeIssues(input: {
   now: Date;
@@ -908,6 +956,46 @@ async function deleteExpiredDeviceWebhookTraces(input: {
     USING doomed
     WHERE trace."provider" = doomed."provider"
       AND trace."trace_id" = doomed."trace_id"
+  `);
+}
+
+// A completed receipt only matters to its own attempt or its upload session,
+// expired sessions included. Attempt and snapshot identities are random and
+// never return, so outside both no later command can reuse it, and a late settle
+// finds nothing and fails closed. Media admission has no owner fence, so media
+// receipts stay.
+export async function deleteExpiredRuntimePutDrains(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_RUNTIME_LEDGER_RETENTION_MS);
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT drain."user_id", drain."write_id"
+      FROM "hosted_runtime_put_drain" AS drain
+      WHERE drain."completed_at" < ${cutoff}
+        AND drain."kind" IN ('replica', 'snapshot')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "hosted_runtime_owner" AS owner
+          WHERE owner."user_id" = drain."user_id"
+            AND owner."attempt_id" = drain."attempt_id"
+            AND owner."generation" = drain."generation"
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "hosted_runtime_snapshot_upload" AS upload
+          WHERE upload."user_id" = drain."user_id"
+            AND 'snapshot:' || upload."snapshot_id" = drain."write_id"
+        )
+      ORDER BY drain."completed_at" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF drain SKIP LOCKED
+    )
+    DELETE FROM "hosted_runtime_put_drain" AS drain
+    USING doomed
+    WHERE drain."user_id" = doomed."user_id"
+      AND drain."write_id" = doomed."write_id"
   `);
 }
 
@@ -1010,38 +1098,6 @@ async function runControlArtifactRetentionBatches(
   }
 
   return affected;
-}
-
-async function deleteStaleHostedWebSessions(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
-  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_web_session"
-      WHERE "expires_at" < ${cutoff}
-      ORDER BY "expires_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_web_session" AS web_session
-    USING doomed
-    WHERE web_session."id" = doomed."id"
-  `);
-  const revoked = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_web_session"
-      WHERE "revoked_at" < ${cutoff}
-      ORDER BY "revoked_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_web_session" AS web_session
-    USING doomed
-    WHERE web_session."id" = doomed."id"
-  `);
-  return expired + revoked;
 }
 
 export function normalizeHostedRetentionDate(value: Date | string): Date {

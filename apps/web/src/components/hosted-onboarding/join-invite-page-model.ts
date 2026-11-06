@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
-import { extractHostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
   buildJoinInvitePreviewStatus,
   parseJoinInvitePreviewStage,
@@ -12,7 +11,6 @@ import { readHostedMemberOwnsSubscription } from "@/src/lib/hosted-onboarding/ho
 import { isHostedMemberSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { redirect } from "next/navigation";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
-import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   readHostedFamilyBillingRecoveryForOwner,
@@ -43,19 +41,11 @@ export type JoinInviteLaunchConsentState =
 
 export interface JoinInvitePageModel {
   awaitingInviteSessionResolution: boolean;
-  expectedPrivyUserId: string | null;
   familyBillingRecovery: HostedFamilyBillingRecoveryState | null;
   inviteCode: string;
   launchConsent: JoinInviteLaunchConsentState;
   preview: boolean;
-  privySessionMatchesAppSession: boolean;
   status: HostedInviteStatusPayload;
-  telegramAccountForMessagingSetup: JoinInviteTelegramAccountSeed | null;
-}
-
-export interface JoinInviteTelegramAccountSeed {
-  telegramUserId: string;
-  username: string | null;
 }
 
 export async function buildJoinInvitePageModel(input: {
@@ -71,7 +61,6 @@ export async function buildJoinInvitePageModel(input: {
     const status = buildJoinInvitePreviewStatus(previewStage, input.inviteCode);
     return {
       awaitingInviteSessionResolution: false,
-      expectedPrivyUserId: null,
       familyBillingRecovery: null,
       inviteCode: input.inviteCode,
       launchConsent: {
@@ -80,16 +69,11 @@ export async function buildJoinInvitePageModel(input: {
         status: "preview",
       },
       preview: true,
-      privySessionMatchesAppSession: false,
       status,
-      telegramAccountForMessagingSetup: null,
     };
   }
 
-  const [authSnapshot, freshPrivySession] = await Promise.all([
-    getHostedPageAuthSnapshot(),
-    getHostedPrivySession().catch(() => null),
-  ]);
+  const authSnapshot = await getHostedPageAuthSnapshot();
   const status = await getHostedInviteStatus({
     authenticatedMember: authSnapshot.authenticatedMember,
     inviteCode: input.inviteCode,
@@ -133,44 +117,14 @@ export async function buildJoinInvitePageModel(input: {
           prisma: getPrisma(),
         })
       : null;
-  const expectedPrivyUserId = authSnapshot.session?.privyUserId ?? null;
-  const privySessionMatchesAppSession =
-    freshPrivySession !== null
-    && expectedPrivyUserId !== null
-    && freshPrivySession.identity.userId === expectedPrivyUserId;
-  const telegramAccountForMessagingSetup =
-    !launchConsent.gateActive
-    && status.stage === "checkout"
-    && status.messagingSetupRequired
-    && privySessionMatchesAppSession
-      ? sanitizeJoinInviteTelegramAccountSeed(extractHostedPrivyTelegramAccount({
-          linkedAccounts: freshPrivySession?.linkedAccounts ?? [],
-        }))
-      : null;
 
   return {
     awaitingInviteSessionResolution: !hasResolvedHostedInviteVerification(status),
-    expectedPrivyUserId,
     familyBillingRecovery,
     inviteCode: input.inviteCode,
     launchConsent,
     preview: false,
-    privySessionMatchesAppSession,
     status,
-    telegramAccountForMessagingSetup,
-  };
-}
-
-function sanitizeJoinInviteTelegramAccountSeed(
-  account: ReturnType<typeof extractHostedPrivyTelegramAccount>,
-): JoinInviteTelegramAccountSeed | null {
-  if (!account) {
-    return null;
-  }
-
-  return {
-    telegramUserId: account.telegramUserId,
-    username: account.username,
   };
 }
 

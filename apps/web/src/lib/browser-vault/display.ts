@@ -29,25 +29,6 @@ export function formatIsoDate(
   return new Intl.DateTimeFormat(DISPLAY_LOCALE, options).format(parsed);
 }
 
-export function formatIsoDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat(DISPLAY_LOCALE, {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(parsed);
-}
-
 export function formatNumber(
   value: number | null | undefined,
   options: Intl.NumberFormatOptions = { maximumFractionDigits: 1 },
@@ -104,22 +85,4 @@ export function formatConfidenceLabel(value: string | null | undefined): string 
 
 export function formatStatusLabel(value: string | null | undefined): string {
   return formatConfidenceLabel(value);
-}
-
-export function formatStreamLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown stream";
-  }
-
-  return value
-    .split(/[._-]/u)
-    .filter(Boolean)
-    .map((part) => {
-      if (part.length <= 3) {
-        return part.toUpperCase();
-      }
-
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(" ");
 }

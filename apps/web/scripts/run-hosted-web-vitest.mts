@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { parseCLI } from "vitest/node";
+
 import { hostedWebVitestProjectSpecs } from "../vitest-project-specs.mjs";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -66,6 +68,27 @@ export function buildHostedWebVitestArgs(
   const normalizedCallerArgs = callerArgs[0] === "--"
     ? callerArgs.slice(1)
     : [...callerArgs];
+  // Vitest's parser prints help/version output itself; leave those invocations
+  // to the child, which will not execute any tests.
+  const delimiter = normalizedCallerArgs.indexOf("--");
+  const optionArgs = delimiter === -1
+    ? normalizedCallerArgs
+    : normalizedCallerArgs.slice(0, delimiter);
+  const informational = optionArgs.some((arg) =>
+    ["--help", "-h", "--version", "-v"].includes(arg)
+  );
+  const databaseFile = !informational
+    ? parseCLI(["vitest", "run", ...normalizedCallerArgs]).filter
+      .find((fileArg) => /\.db\.test\.ts$/u.test(fileArg))
+    : undefined;
+  if (databaseFile) {
+    throw new Error(
+      `${JSON.stringify(path.basename(databaseFile))} is excluded from the hosted Web workspace. `
+      + "Run database tests separately from the repository root with "
+      + "pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage <database-test-file> "
+      + "and the test's documented local database configuration.",
+    );
+  }
   const args = [
     "run",
     "--config",

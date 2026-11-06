@@ -1,3 +1,19 @@
+import { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "../game-bootstrap-control.ts";
+import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
+import { parseHostedMailboxLane, parseHostedMailboxKind } from "./mailbox.ts";
+export {
+  parseHostedMailboxItem,
+  parseHostedMailboxFetchRequest,
+  parseHostedMailboxFetchResponse,
+  parseHostedMailboxLane,
+  parseHostedMailboxKind,
+} from "./mailbox.ts";
+import { parseHostedVoiceCallId } from "../voice-input.ts";
+import {
+  parseHostedGroupSharedReadOptions,
+  parseHostedGroupSharedDateCoverage,
+} from "../group-shared-history.ts";
+import { parseHostedGroupSharedFreshnessRequirements } from "../group-shared-freshness.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -7,11 +23,8 @@ import { parseHostedExecutionDailyMetricReportedPayload } from "../daily-metric.
 import { parseHostedExecutionGroupJournalFactPayload } from "../group-journal-fact.ts";
 import { parseHostedExecutionDeviceSyncExpectedConnectedAt } from "./device-sync.ts";
 import { parseAssistantUsageRecord } from "../assistant-usage.ts";
-import { parseHostedAssistantCustomInferenceOverride } from "../assistant-inference.ts";
 import {
-  isHostedAssistantProvider,
   parseHostedAssistantModelOverride,
-  parseHostedAssistantProviderOverride,
   parseHostedAssistantReasoningEffortOverride,
 } from "../assistant-model.ts";
 import { parseAssistantRuntimeIssueRecord } from "@murphai/runtime-state/node/assistant-runtime-issues";
@@ -37,6 +50,7 @@ import {
   HOSTED_STANDBY_ALLOCATION_OUTCOMES,
   HOSTED_STANDBY_ALLOCATION_REASONS,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
@@ -44,11 +58,7 @@ import {
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
-  HOSTED_MAILBOX_FETCH_CURSOR_MODES,
-  HOSTED_MAILBOX_KINDS,
-  HOSTED_MAILBOX_LANES,
   HOSTED_IDLE_CHECKPOINT_TRIGGERS,
-  HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -59,15 +69,7 @@ import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
-  type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
-  type HostedMailboxItem,
-  type HostedMailboxKind,
-  type HostedMailboxLane,
-  type HostedMailboxLaneConsumed,
   type HostedMailboxLaneCounterState,
-  type HostedMailboxLaneCursor,
-  type HostedMailboxLaneHighWater,
   type HostedMailboxLaneLag,
   type HostedMailboxPayload,
   type HostedMailboxPayloadFetchRequest,
@@ -91,6 +93,8 @@ import {
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceMilestoneEvent,
   type HostedRuntimeLatencyTraceProviderStartedEvent,
+  type HostedRuntimeLatencyTraceBatchRequest,
+  type HostedRuntimeLatencyTraceBatchResponse,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
   type HostedStandbyAllocationOutcome,
@@ -172,9 +176,6 @@ import {
   type HostedRuntimeGroupEmailEffectResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
-  type HostedCodexAuthUpdate,
-  type HostedCodexAuthUpdateResponse,
-  type HostedCodexAuthUpdateResponseStatus,
   type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
   type HostedIdleCheckpointTrigger,
@@ -198,6 +199,7 @@ import {
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
+  isHostedVaultShareRecentDateProjectionKind,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareSelectableProjectionScope,
@@ -210,6 +212,7 @@ import {
   requireBoolean,
   requireNonNegativeBigIntString,
   requireNonNegativeInteger,
+  requirePositiveInteger,
   requireNumber,
   requireObject,
   readOptionalStringArray,
@@ -323,89 +326,6 @@ const HOSTED_RUNNER_STATUS_REMOVED_FIELDS = [
   "timeline",
 ] as const;
 
-export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
-  const record = requireObject(value, "Hosted mailbox item");
-
-  return {
-    ...(record.causalSeq === undefined
-      ? // Legacy-v1 mailbox payloads predate causal tokens. Normalize that
-        // compatibility case once at the wire boundary; active rows use an
-        // explicit sequence or null and must never inherit the legacy anchor.
-        { causalSeq: "0" }
-      : {
-          causalSeq:
-            record.causalSeq === null
-              ? null
-              : requireNonNegativeBigIntString(
-                  record.causalSeq,
-                  "Hosted mailbox item causalSeq",
-                ),
-        }),
-    ...(record.consumedAt === undefined
-      ? {}
-      : {
-          consumedAt: readNullableString(
-            record.consumedAt,
-            "Hosted mailbox item consumedAt",
-          ),
-        }),
-    createdAt: requireString(record.createdAt, "Hosted mailbox item createdAt"),
-    dedupeKey: requireString(record.dedupeKey, "Hosted mailbox item dedupeKey"),
-    ...(record.expiresAt === undefined
-      ? {}
-      : {
-          expiresAt: readNullableString(
-            record.expiresAt,
-            "Hosted mailbox item expiresAt",
-          ),
-        }),
-    id: requireString(record.id, "Hosted mailbox item id"),
-    kind: parseHostedMailboxKind(record.kind),
-    lane: parseHostedMailboxLane(record.lane),
-    laneSeq: requireNonNegativeBigIntString(
-      record.laneSeq,
-      "Hosted mailbox item laneSeq",
-    ),
-    occurredAt: requireString(
-      record.occurredAt,
-      "Hosted mailbox item occurredAt",
-    ),
-    ...(record.payloadBytes === undefined
-      ? {}
-      : {
-          payloadBytes:
-            record.payloadBytes === null
-              ? null
-              : requireNonNegativeInteger(
-                  record.payloadBytes,
-                  "Hosted mailbox item payloadBytes",
-                ),
-        }),
-    ...(record.payloadInlineCiphertext === undefined
-      ? {}
-      : {
-          payloadInlineCiphertext: readNullableString(
-            record.payloadInlineCiphertext,
-            "Hosted mailbox item payloadInlineCiphertext",
-          ),
-        }),
-    ...(record.payloadRef === undefined
-      ? {}
-      : {
-          payloadRef: readNullableString(
-            record.payloadRef,
-            "Hosted mailbox item payloadRef",
-          ),
-        }),
-    payloadSchema: requireString(
-      record.payloadSchema,
-      "Hosted mailbox item payloadSchema",
-    ),
-    updatedAt: requireString(record.updatedAt, "Hosted mailbox item updatedAt"),
-    userId: requireString(record.userId, "Hosted mailbox item userId"),
-  };
-}
-
 export function parseHostedMailboxPayload(
   value: unknown,
 ): HostedMailboxPayload {
@@ -505,174 +425,6 @@ export function parseHostedMailboxLaneCounterState(
     ),
     userId: requireString(record.userId, "Hosted mailbox lane counter userId"),
   };
-}
-
-export function parseHostedMailboxFetchRequest(
-  value: unknown,
-): HostedMailboxFetchRequest {
-  const record = requireObject(value, "Hosted mailbox fetch request");
-
-  return {
-    ...(record.cursorMode === undefined || record.cursorMode === null
-      ? {}
-      : {
-          cursorMode: parseAllowedString(
-            record.cursorMode,
-            "Hosted mailbox fetch request cursorMode",
-            HOSTED_MAILBOX_FETCH_CURSOR_MODES,
-          ),
-        }),
-    lanes: requireArray(record.lanes, "Hosted mailbox fetch request lanes").map(
-      (entry, index) =>
-        parseHostedMailboxLaneCursor(
-          entry,
-          `Hosted mailbox fetch request lanes[${index}]`,
-        ),
-    ),
-    limitPerLane: requirePositiveInteger(
-      record.limitPerLane,
-      "Hosted mailbox fetch request limitPerLane",
-    ),
-    requestId: requireString(
-      record.requestId,
-      "Hosted mailbox fetch request requestId",
-    ),
-  };
-}
-
-export function parseHostedMailboxFetchResponse(
-  value: unknown,
-): HostedMailboxFetchResponse {
-  const record = requireObject(value, "Hosted mailbox fetch response");
-  if (!isHostedAssistantProvider(record.assistantProvider)) {
-    throw new TypeError("Hosted mailbox fetch response assistantProvider is invalid.");
-  }
-
-  return {
-    assistantProvider: record.assistantProvider,
-    ...(record.conversationUsageStatus === undefined
-      ? {}
-      : {
-          conversationUsageStatus: parseHostedMailboxConversationUsageStatus(
-            record.conversationUsageStatus,
-          ),
-        }),
-    ...(record.groupRunningBit === undefined
-      ? {}
-      : {
-          groupRunningBit:
-            record.groupRunningBit === null
-              ? null
-              : parseHostedGroupRunningBitProjection(record.groupRunningBit),
-        }),
-    ...(record.consumedSeqByLane === undefined ||
-    record.consumedSeqByLane === null
-      ? {}
-      : {
-          consumedSeqByLane: requireArray(
-            record.consumedSeqByLane,
-            "Hosted mailbox fetch response consumedSeqByLane",
-          ).map((entry, index) =>
-            parseHostedMailboxLaneConsumed(
-              entry,
-              `Hosted mailbox fetch response consumedSeqByLane[${index}]`,
-            ),
-          ),
-        }),
-    fetchedAt: requireString(
-      record.fetchedAt,
-      "Hosted mailbox fetch response fetchedAt",
-    ),
-    items: requireArray(
-      record.items,
-      "Hosted mailbox fetch response items",
-    ).map((entry) => parseHostedMailboxItem(entry)),
-    maxSeqByLane: requireArray(
-      record.maxSeqByLane,
-      "Hosted mailbox fetch response maxSeqByLane",
-    ).map((entry, index) =>
-      parseHostedMailboxLaneHighWater(
-        entry,
-        `Hosted mailbox fetch response maxSeqByLane[${index}]`,
-      ),
-    ),
-    userId: requireString(
-      record.userId,
-      "Hosted mailbox fetch response userId",
-    ),
-  };
-}
-
-function parseHostedGroupRunningBitProjection(
-  value: unknown,
-): NonNullable<HostedMailboxFetchResponse["groupRunningBit"]> {
-  const record = requireObject(
-    value,
-    "Hosted mailbox fetch response groupRunningBit",
-  );
-  const allowedKeys = new Set([
-    "expiresAt",
-    "publicAlias",
-    "requestedBit",
-    "schema",
-  ]);
-  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
-    throw new TypeError(
-      "Hosted mailbox fetch response groupRunningBit contains unknown fields.",
-    );
-  }
-  if (record.schema !== "murph.group-sponsorship-bit.v1") {
-    throw new TypeError(
-      "Hosted mailbox fetch response groupRunningBit schema is invalid.",
-    );
-  }
-  const expiresAt = requireString(
-    record.expiresAt,
-    "Hosted mailbox fetch response groupRunningBit expiresAt",
-  );
-  if (
-    !Number.isFinite(new Date(expiresAt).getTime()) ||
-    new Date(expiresAt).toISOString() !== expiresAt
-  ) {
-    throw new TypeError(
-      "Hosted mailbox fetch response groupRunningBit expiresAt must be canonical.",
-    );
-  }
-  const publicAlias = readNullableString(
-    record.publicAlias,
-    "Hosted mailbox fetch response groupRunningBit publicAlias",
-  );
-  const requestedBit = requireString(
-    record.requestedBit,
-    "Hosted mailbox fetch response groupRunningBit requestedBit",
-  );
-  if (
-    (publicAlias && [...publicAlias].length > 80) ||
-    [...requestedBit].length < 1 ||
-    [...requestedBit].length > 240
-  ) {
-    throw new TypeError(
-      "Hosted mailbox fetch response groupRunningBit text is out of bounds.",
-    );
-  }
-  return {
-    expiresAt,
-    publicAlias,
-    requestedBit,
-    schema: "murph.group-sponsorship-bit.v1",
-  };
-}
-
-function parseHostedMailboxConversationUsageStatus(
-  value: unknown,
-): "low" | null {
-  if (value === null || value === "low") {
-    return value;
-  }
-
-  throw new TypeError(
-    "Hosted mailbox fetch response conversationUsageStatus must be low or null.",
-  );
 }
 
 export function parseHostedRuntimeDeviceSyncBridgeEnvelope(
@@ -1188,6 +940,27 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
+  if (action === "game_chat_bootstrap") return hostedGameChatBootstrapRequestSchema.parse(record);
+  if (["read_game", "update_game", "game_photo", "write_recap"].includes(action)) return hostedGameToolRequestSchema.parse(record);
+  const parsed =
+    parseHostedRuntimeGroupConsultationRequest(record, action) ??
+    parseHostedRuntimeGroupJournalRequest(record, action) ??
+    parseHostedRuntimeGroupDisclosureRequest(record, action) ??
+    parseHostedRuntimeGroupSharedDataRequest(record, action) ??
+    parseHostedRuntimeGroupUsageReferralRequest(record, action) ??
+    parseHostedRuntimeGroupMembershipRequest(record, action) ??
+    parseHostedRuntimeGroupChatRequest(record, action, options) ??
+    parseHostedRuntimeGroupContactCardRequest(record, action, options);
+  if (parsed) {
+    return parsed;
+  }
+  throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupConsultationRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "ask") {
     const label = "Hosted runtime group tool ask request";
     assertAllowedObjectKeys(
@@ -1295,10 +1068,13 @@ export function parseHostedRuntimeGroupToolRequest(
       origin,
     };
   }
-  const journalRequest = parseHostedRuntimeGroupJournalRequest(record, action);
-  if (journalRequest) {
-    return journalRequest;
-  }
+  return null;
+}
+
+function parseHostedRuntimeGroupDisclosureRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
     const grantId = parseHostedRuntimeGroupDisclosureGrantId(
@@ -1367,6 +1143,13 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  return null;
+}
+
+function parseHostedRuntimeGroupSharedDataRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "read_participant_display_names") {
     assertAllowedObjectKeys(
       record,
@@ -1390,20 +1173,33 @@ export function parseHostedRuntimeGroupToolRequest(
       record,
       new Set([
         "action",
+        "freshness",
+        "includeCompanionPresence",
+        "participantId",
+        "history",
         "linqSenderHandles",
         "projectionScopes",
         "telegramSenderHandles",
       ]),
       "Hosted runtime group tool read_shared request",
     );
+    if (record.includeCompanionPresence !== undefined && record.includeCompanionPresence !== true) {
+      throw new TypeError("Invalid companion presence capability.");
+    }
     const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
+    const projectionScopes = parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+      record.projectionScopes,
+      "Hosted runtime group tool read_shared request projectionScopes",
+    );
     return {
       action,
+      ...(record.includeCompanionPresence === true ? { includeCompanionPresence: true as const } : {}),
       ...senderHandles,
-      projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
-        record.projectionScopes,
-        "Hosted runtime group tool read_shared request projectionScopes",
-      ),
+      ...parseHostedGroupSharedReadOptions(record, projectionScopes),
+      projectionScopes,
+      ...(record.freshness === undefined ? {} : {
+        freshness: parseHostedGroupSharedFreshnessRequirements(record.freshness, projectionScopes),
+      }),
     };
   }
   if (action === "prepare_email") {
@@ -1421,6 +1217,49 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "revoke_own_email_share") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "participant", "selfOptOut"]),
+      "Hosted runtime group tool revoke_own_email_share request",
+    );
+    if (
+      record.participant !== undefined &&
+      record.participant !== null &&
+      record.selfOptOut !== undefined &&
+      record.selfOptOut !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
+      );
+    }
+    if (record.participant !== undefined && record.participant !== null) {
+      return {
+        action,
+        participant: parseHostedRuntimeGroupToolParticipant(
+          record.participant,
+          "Hosted runtime group tool revoke_own_email_share request participant",
+        ),
+      };
+    }
+    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
+      return {
+        action,
+        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
+          record.selfOptOut,
+          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        ),
+      };
+    }
+    return { action };
+  }
+  return null;
+}
+
+function parseHostedRuntimeGroupUsageReferralRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "create_signup_referral_link") {
     const label =
       "Hosted runtime group tool create_signup_referral_link request";
@@ -1525,6 +1364,13 @@ export function parseHostedRuntimeGroupToolRequest(
       policyCodes,
     };
   }
+  return null;
+}
+
+function parseHostedRuntimeGroupMembershipRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "prepare_next_group") {
     assertAllowedObjectKeys(
       record,
@@ -1621,6 +1467,28 @@ export function parseHostedRuntimeGroupToolRequest(
     }
     return { action, membershipId };
   }
+  if (action === "create_join_link") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinLink"]),
+      "Hosted runtime group tool create_join_link request",
+    );
+    if (record.joinLink === undefined || record.joinLink === null) {
+      return { action };
+    }
+    return {
+      action,
+      joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
+    };
+  }
+  return null;
+}
+
+function parseHostedRuntimeGroupChatRequest(
+  record: Record<string, unknown>,
+  action: string,
+  options: { privateMediaDeliveryOrigin?: string | null },
+): HostedRuntimeGroupToolRequest | null {
   if (action === "update_display_name") {
     assertAllowedObjectKeys(
       record,
@@ -1640,20 +1508,6 @@ export function parseHostedRuntimeGroupToolRequest(
       updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
         record.updateDisplayName,
       ),
-    };
-  }
-  if (action === "create_join_link") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "joinLink"]),
-      "Hosted runtime group tool create_join_link request",
-    );
-    if (record.joinLink === undefined || record.joinLink === null) {
-      return { action };
-    }
-    return {
-      action,
-      joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
     };
   }
   if (action === "post_join_offer") {
@@ -1751,6 +1605,14 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  return null;
+}
+
+function parseHostedRuntimeGroupContactCardRequest(
+  record: Record<string, unknown>,
+  action: string,
+  options: { privateMediaDeliveryOrigin?: string | null },
+): HostedRuntimeGroupToolRequest | null {
   if (action === "share_contact_card") {
     const label = "Hosted runtime group tool share_contact_card request";
     assertAllowedObjectKeys(
@@ -1815,43 +1677,7 @@ export function parseHostedRuntimeGroupToolRequest(
       }),
     };
   }
-  if (action === "revoke_own_email_share") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "participant", "selfOptOut"]),
-      "Hosted runtime group tool revoke_own_email_share request",
-    );
-    if (
-      record.participant !== undefined &&
-      record.participant !== null &&
-      record.selfOptOut !== undefined &&
-      record.selfOptOut !== null
-    ) {
-      throw new TypeError(
-        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
-      );
-    }
-    if (record.participant !== undefined && record.participant !== null) {
-      return {
-        action,
-        participant: parseHostedRuntimeGroupToolParticipant(
-          record.participant,
-          "Hosted runtime group tool revoke_own_email_share request participant",
-        ),
-      };
-    }
-    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
-      return {
-        action,
-        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
-          record.selfOptOut,
-          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
-        ),
-      };
-    }
-    return { action };
-  }
-  throw new TypeError("Hosted runtime group tool action is not supported.");
+  return null;
 }
 
 function parseHostedRuntimeGroupUpdateDisplayNameRequest(
@@ -2440,7 +2266,7 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   assertAllowedObjectKeys(
     result,
-    new Set(["members", "requestedProjectionScopeKeys", "status"]),
+    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness", "dateCoverage"]),
     `Hosted runtime group tool read_shared ${status} response result`,
   );
   const requestedScopes =
@@ -2452,6 +2278,9 @@ function parseHostedRuntimeGroupSharedReadResult(
     "Hosted runtime group tool read_shared response members",
   );
   if (status === "none") {
+    if (result.freshness !== undefined || result.dateCoverage !== undefined) {
+      throw new TypeError("Shared freshness requires an authorized ok response.");
+    }
     if (rawMembers.length !== 0) {
       throw new TypeError(
         "Hosted runtime group tool read_shared none response members must be empty.",
@@ -2510,7 +2339,26 @@ function parseHostedRuntimeGroupSharedReadResult(
     return member;
   });
 
+  const dateCoverage = result.dateCoverage === undefined
+    ? undefined : parseHostedGroupSharedDateCoverage(result.dateCoverage);
+  if (dateCoverage && (requestedScopes.length !== 1 || members.length > 1
+    || result.freshness !== undefined
+    || !isHostedVaultShareRecentDateProjectionKind(requestedScopes[0]!.projectionScope.projectionKind))) {
+    throw new TypeError("Shared history coverage requires one health scope and at most one participant.");
+  }
+  if (dateCoverage) {
+    const dates = [...new Set(members.flatMap((member) => member.projections.flatMap((projection) =>
+      projection.records.map((record) => record.occurredAt.slice(0, 10))
+    )))].sort();
+    if (JSON.stringify(dates) !== JSON.stringify(dateCoverage.availableDates)) {
+      throw new TypeError("Shared history coverage must describe exactly the returned observations.");
+    }
+  }
   return {
+    ...(dateCoverage ? { dateCoverage } : {}),
+    ...(result.freshness === undefined ? {} : {
+      freshness: parseHostedGroupSharedFreshnessResult(result.freshness),
+    }),
     members,
     requestedProjectionScopeKeys: requestedScopes.map(
       ({ projectionScopeKey }) => projectionScopeKey,
@@ -2573,6 +2421,7 @@ function parseHostedRuntimeGroupSharedMember(
       "memberId",
       "participantId",
       "projections",
+      "companionLastContactAt",
     ]),
     label,
   );
@@ -2644,6 +2493,10 @@ function parseHostedRuntimeGroupSharedMember(
   });
 
   return {
+    ...(member.companionLastContactAt === undefined ? {} : {
+      companionLastContactAt: member.companionLastContactAt === null ? null
+        : parseHostedRuntimeGroupCanonicalTimestamp(member.companionLastContactAt, `${label}.companionLastContactAt`),
+    }),
     currentTurnHandles,
     displayName,
     memberId,
@@ -3012,6 +2865,8 @@ export function parseHostedRuntimeGroupToolResponse(
     "Hosted runtime group tool response action",
   );
 
+  if (action === "game_chat_bootstrap") return hostedGameChatBootstrapResponseSchema.parse(record);
+  if (["read_game", "update_game", "game_photo", "write_recap"].includes(action)) return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {
     const label = "Hosted runtime group tool ask_current_sender response";
     assertAllowedObjectKeys(record, new Set(["action", "result"]), label);
@@ -3044,6 +2899,32 @@ export function parseHostedRuntimeGroupToolResponse(
     new Set(["action", "result"]),
     "Hosted runtime group tool response",
   );
+  const parsed =
+    parseHostedRuntimeGroupConsultationResponse(record, action) ??
+    parseHostedRuntimeGroupDisclosureResponse(record, action) ??
+    parseHostedRuntimeGroupCurrentGroupResponse(record, action) ??
+    parseHostedRuntimeGroupPendingGroupResponse(record, action) ??
+    parseHostedRuntimeGroupChatNameResponse(record, action) ??
+    parseHostedRuntimeGroupUsageResponse(record, action) ??
+    parseHostedRuntimeGroupSharedDataResponse(record, action) ??
+    parseHostedRuntimeGroupUsageReferralResponse(record, action) ??
+    parseHostedRuntimeGroupMembershipResponse(record, action) ??
+    parseHostedRuntimeGroupSignupReferralResponse(record, action) ??
+    parseHostedRuntimeGroupChatParticipantsResponse(record, action) ??
+    parseHostedRuntimeGroupChatAvatarResponse(record, action) ??
+    parseHostedRuntimeGroupContactSharingResponse(record, action);
+  if (parsed) {
+    return parsed;
+  }
+  throw new TypeError(
+    "Hosted runtime group tool response action/status is not supported.",
+  );
+}
+
+function parseHostedRuntimeGroupConsultationResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "ask_member") {
     return {
       action,
@@ -3135,7 +3016,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupDisclosureResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "post_disclosure_request") {
     const result = requireObject(
       record.result,
@@ -3171,7 +3058,6 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
-
   if (action === "revoke_disclosure_grant") {
     const result = requireObject(
       record.result,
@@ -3207,7 +3093,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupCurrentGroupResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (
     action === "read_current" ||
     action === "create_join_link" ||
@@ -3375,7 +3267,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupPendingGroupResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (
     action === "prepare_next_group" ||
     action === "read_next_group" ||
@@ -3442,7 +3340,13 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     throw new TypeError(`${label} status is invalid.`);
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupChatNameResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_chat_name") {
     const label = "Hosted runtime group tool read_chat_name response result";
     const result = requireObject(record.result, label);
@@ -3507,7 +3411,13 @@ export function parseHostedRuntimeGroupToolResponse(
       "Hosted runtime group tool read_chat_name response status is invalid.",
     );
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupUsageResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_usage") {
     const result = requireObject(
       record.result,
@@ -3536,66 +3446,11 @@ export function parseHostedRuntimeGroupToolResponse(
         "remainingPercent",
       ].some((key) => Object.prototype.hasOwnProperty.call(usage, key));
       if (isLegacyUsageProjection) {
-        assertAllowedObjectKeys(
-          usage,
-          new Set([
-            "capacityState",
-            "fundingUrl",
-            "periodEnd",
-            "remainingPercent",
-          ]),
-          "Hosted runtime group tool read_usage legacy usage",
-        );
-        const capacityState = requireString(
-          usage.capacityState,
-          "Hosted runtime group tool read_usage legacy capacityState",
-        );
-        if (
-          capacityState !== "healthy" &&
-          capacityState !== "low" &&
-          capacityState !== "exhausted"
-        ) {
-          throw new TypeError(
-            "Hosted runtime group tool read_usage legacy capacityState is invalid.",
-          );
-        }
-        const periodEnd = requireString(
-          usage.periodEnd,
-          "Hosted runtime group tool read_usage legacy periodEnd",
-        );
-        const periodEndDate = new Date(periodEnd);
-        if (
-          !Number.isFinite(periodEndDate.getTime()) ||
-          periodEndDate.toISOString() !== periodEnd
-        ) {
-          throw new TypeError(
-            "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
-          );
-        }
-        const remainingPercent =
-          usage.remainingPercent === undefined
-            ? undefined
-            : requireNonNegativeInteger(
-                usage.remainingPercent,
-                "Hosted runtime group tool read_usage legacy remainingPercent",
-              );
-        if (remainingPercent !== undefined && remainingPercent > 100) {
-          throw new TypeError(
-            "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
-          );
-        }
-        const fundingUrl = readNullableString(
-          usage.fundingUrl,
-          "Hosted runtime group tool read_usage legacy fundingUrl",
-        );
         return {
           action,
           result: {
             status,
-            usage: {
-              fundingNeeded: capacityState !== "healthy",
-              fundingUrl,
-            },
+            usage: parseHostedRuntimeGroupLegacyUsageProjection(usage),
           },
         };
       }
@@ -3685,7 +3540,74 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupLegacyUsageProjection(
+  usage: Record<string, unknown>,
+): { fundingNeeded: boolean; fundingUrl: string | null } {
+  assertAllowedObjectKeys(
+    usage,
+    new Set([
+      "capacityState",
+      "fundingUrl",
+      "periodEnd",
+      "remainingPercent",
+    ]),
+    "Hosted runtime group tool read_usage legacy usage",
+  );
+  const capacityState = requireString(
+    usage.capacityState,
+    "Hosted runtime group tool read_usage legacy capacityState",
+  );
+  if (
+    capacityState !== "healthy" &&
+    capacityState !== "low" &&
+    capacityState !== "exhausted"
+  ) {
+    throw new TypeError(
+      "Hosted runtime group tool read_usage legacy capacityState is invalid.",
+    );
+  }
+  const periodEnd = requireString(
+    usage.periodEnd,
+    "Hosted runtime group tool read_usage legacy periodEnd",
+  );
+  const periodEndDate = new Date(periodEnd);
+  if (
+    !Number.isFinite(periodEndDate.getTime()) ||
+    periodEndDate.toISOString() !== periodEnd
+  ) {
+    throw new TypeError(
+      "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
+    );
+  }
+  const remainingPercent =
+    usage.remainingPercent === undefined
+      ? undefined
+      : requireNonNegativeInteger(
+          usage.remainingPercent,
+          "Hosted runtime group tool read_usage legacy remainingPercent",
+        );
+  if (remainingPercent !== undefined && remainingPercent > 100) {
+    throw new TypeError(
+      "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
+    );
+  }
+  const fundingUrl = readNullableString(
+    usage.fundingUrl,
+    "Hosted runtime group tool read_usage legacy fundingUrl",
+  );
+  return {
+    fundingNeeded: capacityState !== "healthy",
+    fundingUrl,
+  };
+}
+
+function parseHostedRuntimeGroupSharedDataResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_participant_display_names") {
     return {
       action,
@@ -3694,7 +3616,31 @@ export function parseHostedRuntimeGroupToolResponse(
       ),
     };
   }
+  if (action === "read_shared") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupSharedReadResult(record.result),
+    };
+  }
+  if (action === "prepare_email") {
+    const parsed = parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
+      result: record.result,
+    });
+    if (parsed.action !== "prepare_email") {
+      throw new TypeError(
+        "Hosted runtime group tool prepare_email response action is invalid.",
+      );
+    }
+    return { action, result: parsed.result };
+  }
+  return null;
+}
 
+function parseHostedRuntimeGroupUsageReferralResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (
     action === "arm_usage_referral" ||
     action === "cancel_usage_referral" ||
@@ -3754,27 +3700,13 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     throw new TypeError(`${label} status is not supported.`);
   }
+  return null;
+}
 
-  if (action === "read_shared") {
-    return {
-      action,
-      result: parseHostedRuntimeGroupSharedReadResult(record.result),
-    };
-  }
-
-  if (action === "prepare_email") {
-    const parsed = parseHostedRuntimeGroupEmailEffectResponse({
-      action: "prepare_email",
-      result: record.result,
-    });
-    if (parsed.action !== "prepare_email") {
-      throw new TypeError(
-        "Hosted runtime group tool prepare_email response action is invalid.",
-      );
-    }
-    return { action, result: parsed.result };
-  }
-
+function parseHostedRuntimeGroupMembershipResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "list_memberships") {
     const result = requireObject(
       record.result,
@@ -3869,7 +3801,52 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  if (action === "leave_membership") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool leave_membership response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool leave_membership response status",
+    );
+    if (
+      status === "left" ||
+      status === "already_left" ||
+      status === "owner_cannot_leave"
+    ) {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool leave_membership response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool leave_membership unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group tool leave_membership unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+  return null;
+}
 
+function parseHostedRuntimeGroupSignupReferralResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "create_signup_referral_link") {
     const label =
       "Hosted runtime group tool create_signup_referral_link response";
@@ -3911,47 +3888,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
-  if (action === "leave_membership") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool leave_membership response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool leave_membership response status",
-    );
-    if (
-      status === "left" ||
-      status === "already_left" ||
-      status === "owner_cannot_leave"
-    ) {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status"]),
-        "Hosted runtime group tool leave_membership response result",
-      );
-      return { action, result: { status } };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime group tool leave_membership unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group tool leave_membership unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
+function parseHostedRuntimeGroupChatParticipantsResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_chat_participants") {
     const result = requireObject(
       record.result,
@@ -3996,7 +3939,48 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool preflight_set_chat_avatar response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool preflight_set_chat_avatar response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool preflight_set_chat_avatar ok response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool preflight_set_chat_avatar unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+  return null;
+}
 
+function parseHostedRuntimeGroupChatAvatarResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "set_chat_avatar") {
     const result = requireObject(
       record.result,
@@ -4072,43 +4056,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
-  if (action === "preflight_set_chat_avatar") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool preflight_set_chat_avatar response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool preflight_set_chat_avatar response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status"]),
-        "Hosted runtime group tool preflight_set_chat_avatar ok response result",
-      );
-      return { action, result: { status } };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime group tool preflight_set_chat_avatar unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
+function parseHostedRuntimeGroupContactSharingResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "share_contact_card") {
     const result = requireObject(
       record.result,
@@ -4148,7 +4102,6 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
-
   if (action === "revoke_own_email_share") {
     const result = requireObject(
       record.result,
@@ -4207,10 +4160,7 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
-
-  throw new TypeError(
-    "Hosted runtime group tool response action/status is not supported.",
-  );
+  return null;
 }
 
 function parseHostedRuntimeUsageReferralSnapshot(
@@ -5779,129 +5729,6 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
   );
 }
 
-export function parseHostedCodexAuthUpdate(
-  value: unknown,
-): HostedCodexAuthUpdate {
-  const record = requireObject(value, "Hosted Codex auth update");
-  const phase = requireString(record.phase, "Hosted Codex auth update phase");
-  const attemptId = parseHostedCodexAuthAttemptId(record.attemptId);
-
-  if (phase === "device_code") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["attemptId", "phase", "userCode", "verificationUrl"]),
-      "Hosted Codex auth device-code update",
-    );
-    const userCode = requireString(
-      record.userCode,
-      "Hosted Codex auth update userCode",
-    );
-    if (userCode.length > 128) {
-      throw new TypeError("Hosted Codex auth update userCode is too long.");
-    }
-    const verificationUrl = requireString(
-      record.verificationUrl,
-      "Hosted Codex auth update verificationUrl",
-    );
-    assertHostedCodexAuthVerificationUrl(verificationUrl);
-    return {
-      attemptId,
-      phase,
-      userCode,
-      verificationUrl,
-    };
-  }
-
-  if (phase === "connected" || phase === "disconnected" || phase === "failed") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["attemptId", "phase"]),
-      "Hosted Codex auth terminal update",
-    );
-    return { attemptId, phase };
-  }
-
-  throw new TypeError("Hosted Codex auth update phase is not supported.");
-}
-
-export function parseHostedCodexAuthUpdateResponse(
-  value: unknown,
-): HostedCodexAuthUpdateResponse {
-  const record = requireObject(value, "Hosted Codex auth update response");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["applied", "status"]),
-    "Hosted Codex auth update response",
-  );
-  const applied = requireBoolean(
-    record.applied,
-    "Hosted Codex auth update response applied",
-  );
-  const status =
-    record.status === undefined
-      ? applied
-        ? "applied"
-        : "superseded"
-      : parseHostedCodexAuthUpdateResponseStatus(record.status);
-  if ((status === "superseded") === applied) {
-    throw new TypeError(
-      "Hosted Codex auth update response status conflicts with applied.",
-    );
-  }
-  return {
-    applied,
-    status,
-  };
-}
-
-function parseHostedCodexAuthUpdateResponseStatus(
-  value: unknown,
-): HostedCodexAuthUpdateResponseStatus {
-  const status = requireString(
-    value,
-    "Hosted Codex auth update response status",
-  );
-  if (
-    HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES.includes(
-      status as HostedCodexAuthUpdateResponseStatus,
-    )
-  ) {
-    return status as HostedCodexAuthUpdateResponseStatus;
-  }
-  throw new TypeError(
-    "Hosted Codex auth update response status is not supported.",
-  );
-}
-
-function parseHostedCodexAuthAttemptId(value: unknown): string {
-  const attemptId = requireString(value, "Hosted Codex auth update attemptId");
-  if (!/^hca_[A-Za-z0-9_-]{16,64}$/u.test(attemptId)) {
-    throw new TypeError("Hosted Codex auth update attemptId is invalid.");
-  }
-  return attemptId;
-}
-
-function assertHostedCodexAuthVerificationUrl(value: string): void {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new TypeError(
-      "Hosted Codex auth verificationUrl must be an absolute URL.",
-    );
-  }
-  if (url.protocol !== "https:" || url.username || url.password) {
-    throw new TypeError(
-      "Hosted Codex auth verificationUrl must use HTTPS without credentials.",
-    );
-  }
-  if (url.hostname !== "auth.openai.com") {
-    throw new TypeError(
-      "Hosted Codex auth verificationUrl must use the OpenAI auth host.",
-    );
-  }
-}
-
 function parseHostedRuntimeLinqExternalThreadRouteAuthority(
   value: unknown,
   label: string,
@@ -6414,6 +6241,22 @@ export function parseHostedRuntimeLatencyTraceEvent(
   );
 
   switch (type) {
+    case "delivery_committed": {
+      assertAllowedObjectKeys(record, new Set([
+        "type", "source", "at", "runtimeAttemptId", "mailboxItemIds", "checkpointPublicationExpectedBy",
+      ]), "Hosted runtime delivery committed event");
+      const mailboxItemIds = requireArray(record.mailboxItemIds, "Hosted runtime delivery mailboxItemIds")
+        .map((id) => requireString(id, "Hosted runtime delivery mailbox item id"));
+      if (mailboxItemIds.length === 0 || mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+        throw new TypeError("Hosted runtime delivery mailbox item count is invalid.");
+      }
+      return {
+        type, mailboxItemIds, source: parseHostedIngressLatencySource(record.source),
+        at: requireString(record.at, "Hosted runtime delivery at"),
+        runtimeAttemptId: requireString(record.runtimeAttemptId, "Hosted runtime delivery attempt"),
+        checkpointPublicationExpectedBy: requireString(record.checkpointPublicationExpectedBy, "Hosted runtime delivery checkpoint deadline"),
+      };
+    }
     case "assistant_input_staged":
       return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
     case "assistant_milestone":
@@ -6442,6 +6285,36 @@ export function parseHostedRuntimeLatencyTraceRequest(
   return {
     event: parseHostedRuntimeLatencyTraceEvent(record.event),
   };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchRequest(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchRequest {
+  const record = requireObject(value, "Hosted runtime latency batch request");
+  assertAllowedObjectKeys(record, new Set(["events"]), "Hosted runtime latency batch request");
+  const events = requireArray(record.events, "Hosted runtime latency batch events");
+  if (events.length === 0 || events.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch event count is invalid.");
+  }
+  return { events: events.map((value) => {
+    const event = parseHostedRuntimeLatencyTraceEvent(value);
+    if (event.type !== "assistant_milestone" && event.type !== "runtime_milestone") {
+      throw new TypeError("Hosted runtime latency batches require milestone events.");
+    }
+    return event;
+  }) };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchResponse(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchResponse {
+  const record = requireObject(value, "Hosted runtime latency batch response");
+  const results = requireArray(record.results, "Hosted runtime latency batch results");
+  if (results.length === 0 || results.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch result count is invalid.");
+  }
+  return { results: results.map((result) => result === null
+    ? null : parseHostedRuntimeLatencyTraceResponse(result)) };
 }
 
 export function parseHostedRuntimeLatencyTraceResponse(
@@ -6654,6 +6527,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       orchestrationLabel,
     );
     breakdown.orchestration = {
+      ...requireOptionalBoolean(orchestration, "ingressConversationIsGroup", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "temporalActivityStartedAtEpochMs",
@@ -6692,6 +6566,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "directEnsureHandlerDurationMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeStartedAtEpochMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeAttemptCount",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeRetryWaitMs",
         orchestrationLabel,
       ),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(
@@ -7024,6 +6913,26 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "runtimeInvocationPreparationElapsedMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationInputsWaitElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationAdmissionElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationFenceBindElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationJobPrepareElapsedMs",
+        orchestrationLabel,
+      ),
     };
   }
 
@@ -7156,6 +7065,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         wake,
         "foregroundImportStartedAtEpochMs",
+        wakeLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        wake,
+        "foregroundPrefetchPrepareElapsedMs",
+        wakeLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        wake,
+        "foregroundPrefetchWaitElapsedMs",
         wakeLabel,
       ),
       ...requireOptionalNonNegativeInteger(
@@ -7429,12 +7348,22 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ),
       ...requireOptionalNonNegativeInteger(
         assistant,
+        "telegramTypingAcceptedAtEpochMs",
+        assistantLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        assistant,
         "firstCodexOutputObservedAtEpochMs",
         assistantLabel,
       ),
       ...requireOptionalNonNegativeInteger(
         assistant,
         "firstCodexTextObservedAtEpochMs",
+        assistantLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        assistant,
+        "terminalReplyCommittedAtEpochMs",
         assistantLabel,
       ),
       ...requireOptionalNonNegativeInteger(
@@ -7775,10 +7704,10 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
   if (
     checkpointPublicationExpectedBy !== undefined &&
     checkpointPublicationExpectedBy !== null &&
-    milestone !== "terminal_non_reply_committed"
+    milestone !== "terminal_non_reply_committed" && milestone !== "terminal_reply_committed"
   ) {
     throw new TypeError(
-      "Hosted runtime latency trace checkpointPublicationExpectedBy requires terminal_non_reply_committed.",
+      "Hosted runtime latency trace checkpointPublicationExpectedBy requires a terminal completion milestone.",
     );
   }
 
@@ -7997,18 +7926,8 @@ export function parseHostedWorkspaceReadResponse(
   value: unknown,
 ): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
-  const hostedAssistantCustomInferenceOverride =
-    record.hostedAssistantCustomInferenceOverride === undefined ||
-    record.hostedAssistantCustomInferenceOverride === null
-      ? null
-      : parseHostedAssistantCustomInferenceOverride(
-          record.hostedAssistantCustomInferenceOverride,
-        );
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
-  );
-  const hostedAssistantProviderOverride = parseHostedAssistantProviderOverride(
-    record.hostedAssistantProviderOverride,
   );
   const hostedAssistantReasoningEffortOverride =
     parseHostedAssistantReasoningEffortOverride(
@@ -8037,19 +7956,21 @@ export function parseHostedWorkspaceReadResponse(
       record.fetchedAt,
       "Hosted workspace read response fetchedAt",
     ),
-    ...(hostedAssistantCustomInferenceOverride
-      ? { hostedAssistantCustomInferenceOverride }
-      : {}),
     ...(hostedAssistantModelOverride ? { hostedAssistantModelOverride } : {}),
-    ...(hostedAssistantProviderOverride
-      ? { hostedAssistantProviderOverride }
-      : {}),
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
     ...(hostedAssistantSubagentModelOverridesAllowed === null
       ? {}
       : { hostedAssistantSubagentModelOverridesAllowed }),
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace read response hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(hostedAssistantAstraAllowed === null ? {} : { hostedAssistantAstraAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace:
@@ -8565,6 +8486,12 @@ export function parseHostedWorkspaceInvocationRequest(
 ): HostedWorkspaceInvocationRequest {
   const record = requireObject(value, "Hosted workspace invocation request");
 
+  if (record.voiceCallId !== undefined
+    && ((record.processingMode != null && record.processingMode !== "default")
+      || record.assistantExecutionBlocked === true)) {
+    throw new TypeError("Voice reservation requires default processing mode.");
+  }
+
   for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
     rejectHostedWorkspaceInvocationRemovedField(
       record,
@@ -8574,6 +8501,15 @@ export function parseHostedWorkspaceInvocationRequest(
   }
 
   return {
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace invocation request hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(record.assistantExecutionBlocked === undefined
       ? {}
       : {
@@ -8594,15 +8530,15 @@ export function parseHostedWorkspaceInvocationRequest(
             "Hosted workspace invocation request budget",
           ),
         }),
-    ...(record.idleCheckpointDelayMs === undefined
+    ...(record.runnerIdleTtlMs === undefined
       ? {}
       : {
-          idleCheckpointDelayMs:
-            record.idleCheckpointDelayMs === null
+          runnerIdleTtlMs:
+            record.runnerIdleTtlMs === null
               ? null
               : requirePositiveInteger(
-                  record.idleCheckpointDelayMs,
-                  "Hosted workspace invocation request idleCheckpointDelayMs",
+                  record.runnerIdleTtlMs,
+                  "Hosted workspace invocation request runnerIdleTtlMs",
                 ),
         }),
     leaseGeneration: requireNonNegativeBigIntString(
@@ -8707,14 +8643,6 @@ export function parseHostedWorkspaceInvocationResult(
   };
 }
 
-export function parseHostedMailboxLane(value: unknown): HostedMailboxLane {
-  return parseAllowedString(value, "Hosted mailbox lane", HOSTED_MAILBOX_LANES);
-}
-
-export function parseHostedMailboxKind(value: unknown): HostedMailboxKind {
-  return parseAllowedString(value, "Hosted mailbox kind", HOSTED_MAILBOX_KINDS);
-}
-
 function parseHostedWorkspaceCheckpointReason(
   value: unknown,
 ): HostedWorkspaceCheckpointReason {
@@ -8814,56 +8742,6 @@ function parseHostedRuntimeDeviceSyncBridgeKind(
     "Hosted runtime device-sync bridge kind",
     HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
   );
-}
-
-function parseHostedMailboxLaneCursor(
-  value: unknown,
-  label: string,
-): HostedMailboxLaneCursor {
-  const record = requireObject(value, label);
-
-  return {
-    importedSeq: requireNonNegativeBigIntString(
-      record.importedSeq,
-      `${label}.importedSeq`,
-    ),
-    lane: parseHostedMailboxLane(record.lane),
-  };
-}
-
-function parseHostedMailboxLaneConsumed(
-  value: unknown,
-  label: string,
-): HostedMailboxLaneConsumed {
-  const record = requireObject(value, label);
-
-  return {
-    consumedSeq: requireNonNegativeBigIntString(
-      record.consumedSeq,
-      `${label}.consumedSeq`,
-    ),
-    lane: parseHostedMailboxLane(record.lane),
-  };
-}
-
-function parseHostedMailboxLaneHighWater(
-  value: unknown,
-  label: string,
-): HostedMailboxLaneHighWater {
-  const record = requireObject(value, label);
-
-  return {
-    lane: parseHostedMailboxLane(record.lane),
-    maxSeq: requireNonNegativeBigIntString(record.maxSeq, `${label}.maxSeq`),
-    ...(record.maxUpdatedAt === undefined
-      ? {}
-      : {
-          maxUpdatedAt: readNullableString(
-            record.maxUpdatedAt,
-            `${label}.maxUpdatedAt`,
-          ),
-        }),
-  };
 }
 
 function parseHostedMailboxLaneLag(
@@ -8967,16 +8845,6 @@ function parseNullableAllowedString<T extends string>(
   return parseAllowedString(value, label, allowed);
 }
 
-function requirePositiveInteger(value: unknown, label: string): number {
-  const parsed = requireNonNegativeInteger(value, label);
-
-  if (parsed === 0) {
-    throw new TypeError(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
-}
-
 function requireExactTrue(value: unknown, label: string): true {
   if (requireBoolean(value, label) !== true) {
     throw new TypeError(`${label} must be true.`);
@@ -9018,4 +8886,17 @@ function readNullableNonNegativeBigIntString(
   }
 
   return requireNonNegativeBigIntString(value, label);
+}
+
+function parseHostedGroupSharedFreshnessResult(value: unknown): { checkedAt: string; refreshStatus: "requested" | "not_needed" | "unavailable" } {
+  const record = requireObject(value, "Shared freshness response");
+  assertAllowedObjectKeys(record, new Set(["checkedAt", "refreshStatus"]), "Shared freshness response");
+  const refreshStatus = record.refreshStatus;
+  if (refreshStatus !== "requested" && refreshStatus !== "not_needed" && refreshStatus !== "unavailable") {
+    throw new TypeError("Shared freshness refreshStatus is invalid.");
+  }
+  return {
+    checkedAt: parseHostedRuntimeGroupCanonicalTimestamp(record.checkedAt, "Shared freshness checkedAt"),
+    refreshStatus,
+  };
 }

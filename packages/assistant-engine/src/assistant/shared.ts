@@ -29,7 +29,6 @@ export {
   normalizeNullableString,
 } from '@murphai/operator-config/text/shared'
 export {
-  isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '@murphai/operator-config/assistant/shared'
 

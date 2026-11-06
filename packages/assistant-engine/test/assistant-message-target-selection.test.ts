@@ -57,6 +57,15 @@ describe('accepted message target selection', () => {
     })
   })
 
+  it('keeps email source refs ineligible for native actions', async () => {
+    const fixture = await createTargetFixture({ channel: 'email', messageId: 'email-message-1' })
+    for (const action of ['native-reply', 'reaction'] as const) {
+      await expect(resolveTarget(fixture, action)).rejects.toMatchObject({
+        code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
+      })
+    }
+  })
+
   it.each(['sms', 'rcs', null])(
     'rejects Linq service %s for both actions',
     async (service) => {
@@ -412,7 +421,7 @@ async function resolveParticipant(
 
 async function createTargetFixture(input: {
   actorId?: string
-  channel: 'linq' | 'telegram'
+  channel: 'linq' | 'telegram' | 'email'
   externalThreadRouteAuthorityPresent?: boolean
   messageId: string
   providerThreadTarget?: string
@@ -465,7 +474,7 @@ async function createTargetFixture(input: {
                 : {}),
               service: input.service ?? null,
             }
-          : {
+          : input.channel === 'email' ? null : {
               ...(input.externalThreadRouteAuthorityPresent
                 ? { externalThreadRouteAuthorityPresent: true }
                 : {}),

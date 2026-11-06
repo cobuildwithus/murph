@@ -33,11 +33,9 @@ import {
 import {
   buildJunctionWearableHostedReplayPlan,
   collectJunctionWearableBrowserVaultSummaryFailures,
-  JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
   JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
   normalizeJunctionProviderSlugForComparison,
-  summarizeJunctionWearableBrowserVaultExperimentProgress,
   summarizeJunctionWearableBrowserVaultReplica,
   type JunctionWearableBrowserVaultReplicaSummary,
   type JunctionWearableHostedReplayDirtyResource,
@@ -64,9 +62,8 @@ import {
   buildSignedJunctionWebhookBody,
   createSignedJunctionSvixWebhook,
 } from "./helpers/junction-webhook-replay.js";
-import {
-  expectJunctionWearableBiomarkerExpectationsToMatchProduction,
-} from "./helpers/junction-wearable-biomarker-contract.js";
+
+import { waitForHostedJunctionReplayCompletion } from "./helpers/hosted-local-junction-replay-completion.js";
 
 const runId = randomUUID().replace(/-/gu, "").slice(0, 16);
 const userId = `member_local_junction_wearable_${runId}`;
@@ -84,7 +81,7 @@ const experimentActivityNudgeInstructions = [
   "Skip silently when the activity is already covered or no progress moment is useful.",
 ].join(" ");
 const experimentActivityNudgeReplyText = "Nice run — that's 1 of 6 for your running block.";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-sync";
 const junctionWebhookSecret = "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
 const linqApiToken = "linq-local-test-token";
@@ -281,7 +278,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(experimentAdherenceChatId)}/messages`;
-    const setupOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const setupOutboundBaseline = requireLinqStub().countAcceptedSends(replyPath);
     activeScenario.queueAssistantResponses(
       buildExperimentAdherenceSetupResponses(activityPlan),
       { matchInputContains: experimentSetupText },
@@ -296,7 +293,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       },
     ));
     expect(setupResponse.status).toBe(202);
-    const setupReply = await requireLinqStub().waitForAdditionalSend({
+    const setupReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: setupOutboundBaseline,
       expectedPath: replyPath,
       scenario: activeScenario,
@@ -333,7 +330,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       startAt: triggeredRunningStart.toISOString(),
     });
 
-    const nudgeOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const nudgeOutboundBaseline = requireLinqStub().countAcceptedSends(replyPath);
     const nudgeProviderBaseline = countAssistantResponsesApiRequests();
     activeScenario.queueAssistantResponses([
       buildAssistantProviderVaultCliCall([
@@ -390,7 +387,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId: experimentAdherenceUserId,
     });
 
-    const nudge = await requireLinqStub().waitForAdditionalSend({
+    const nudge = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: nudgeOutboundBaseline,
       expectedPath: replyPath,
       scenario: activeScenario,
@@ -399,37 +396,26 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(requireLinqStub().readObservedMessageText(nudge)).toBe(
       experimentActivityNudgeReplyText,
     );
+    const nudgePayload = JSON.parse(nudge.body) as { message: { idempotency_key?: string } };
+    expect(nudgePayload.message.idempotency_key?.length, "Activity nudge provider idempotency key length").toBeLessThanOrEqual(255);
+    expect(requireLinqStub().countAcceptedSends(replyPath), "Activity nudge must be accepted by the provider").toBe(nudgeOutboundBaseline + 1);
     const finalStatus = await activeScenario.waitForHostedIdle(
       experimentAdherenceUserId,
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(nudgeOutboundBaseline + 1);
-    expect(countAssistantResponsesApiRequests()).toBe(nudgeProviderBaseline + 2);
+    const nudgeProviderRequestCount = countAssistantResponsesApiRequests();
+    const nudgeProviderFailure = nudgeProviderRequestCount === nudgeProviderBaseline + 2
+      ? undefined
+      : await activeScenario.buildFailureMessage(experimentAdherenceUserId, [
+          "Hosted Junction activity nudge made an unexpected number of model requests.",
+        ]);
+    expect(nudgeProviderRequestCount, nudgeProviderFailure).toBe(nudgeProviderBaseline + 2);
 
     const nudgeProviderText = collectAssistantProviderRequestTextSince(nudgeProviderBaseline);
     expect(nudgeProviderText).toContain(experimentAdherenceSlug);
     expect(nudgeProviderText).toMatch(/"sensedSessions"\s*:\s*1/u);
     expect(nudgeProviderText).toMatch(/"completedSessions"\s*:\s*1/u);
-
-    const replicaRef = requireReplicaRef(finalStatus.workspace?.browserVaultReplicaRef ?? null);
-    const replica = await readBrowserVaultReplica({
-      replicaRef,
-      scenario: activeScenario,
-      userId: experimentAdherenceUserId,
-    });
-    expect(summarizeJunctionWearableBrowserVaultExperimentProgress({
-      experimentSlug: experimentAdherenceSlug,
-      replica,
-    })).toEqual({
-      activityKind: "running",
-      completedSessions: 1,
-      eventKind: "activity_session",
-      expectedSessionsByNow: expect.any(Number),
-      loggedSessions: 1,
-      sensedSessions: 1,
-      status: expect.stringMatching(/^(behind|on_track|met_minimum|met_target)$/u),
-      targetSessions: 6,
-    });
 
     const drainStatus = await activeScenario.readJunctionDeviceSyncReplayDrainStatus({
       connectionId: connection.connectionId,
@@ -439,10 +425,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(drainStatus.hasPendingDirtyConnectionForUser).toBe(false);
   }, 720_000);
 
-  it("imports direct-resource replay jobs through hosted device-sync and publishes /biomarkers data", async () => {
-    await expectJunctionWearableBiomarkerExpectationsToMatchProduction(
-      JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
-    );
+  it("imports direct-resource replay jobs through hosted device-sync and publishes metric query data", async () => {
+    const testDeadlineAtMs = Date.now() + 540_000;
 
     const replayPlan = requirePlan();
     const activeScenario = requireScenario();
@@ -484,8 +468,16 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId,
       { timeoutMs: 420_000 },
     );
-    const deviceSyncStatus = await activeScenario.waitForHostedCompletion(userId, {
-      timeoutMs: 420_000,
+    const deviceSyncStatus = await waitForHostedJunctionReplayCompletion({
+      assertNoJobFailures: (status) => assertNoHostedDeviceSyncJobFailures({
+        scenario: activeScenario,
+        status,
+        userId,
+      }),
+      connectionId: seed.connectionId,
+      deadlineAtMs: Math.min(testDeadlineAtMs, Date.now() + 420_000),
+      memberId: userId,
+      scenario: activeScenario,
     });
     if (deviceSyncStatus.lastErrorCode ?? null) {
       throw new Error(await activeScenario.buildFailureMessage(userId, [
@@ -534,7 +526,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId,
     });
     browserVaultSummary = summarizeJunctionWearableBrowserVaultReplica({
-      generatedAt: requireReplicaRef(replicaRef).generatedAt,
       replica,
     });
 
@@ -543,10 +534,9 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
     if (summaryFailures.length > 0) {
       throw new Error(await activeScenario.buildFailureMessage(userId, [
-        "Hosted Junction wearable direct-resource replay did not publish the expected browser-vault biomarker contract.",
+        "Hosted Junction wearable direct-resource replay did not publish the expected browser-vault metric contract.",
         ...summaryFailures,
         `browser-vault summary: ${JSON.stringify({
-          biomarkerPanels: browserVaultSummary.biomarkerPanels,
           metricRowsByKey: browserVaultSummary.metrics.metricRowsByKey,
           selectedMetricKeys: browserVaultSummary.metrics.selectedMetricKeys,
           sourceHealth: browserVaultSummary.sourceHealth,
@@ -678,8 +668,6 @@ function buildExperimentAdherenceSetupResponses(
       plan.baselineStart,
       "--status",
       "active",
-      "--custom",
-      "--no-public-protocol",
       "--baseline-start",
       plan.baselineStart,
       "--baseline-end",
@@ -928,7 +916,6 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     metricRowIds: collectBrowserVaultMetricRowIds(replica),
     metricRowSignatures: collectBrowserVaultMetricRowSignatures(replica),
     summary: summarizeJunctionWearableBrowserVaultReplica({
-      generatedAt: replicaRef.generatedAt,
       replica,
     }),
   };

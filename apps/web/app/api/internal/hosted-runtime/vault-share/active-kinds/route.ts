@@ -1,6 +1,8 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM,
+  requireHostedVaultShareSourceWorkspaceVersion,
   type HostedVaultShareActiveProjectionKindsResponse,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -23,6 +25,7 @@ import {
   readHostedVaultShareProjectionModeFromRequest,
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
   supportsHostedVaultShareDeferredProjectionWork,
+  supportsHostedVaultShareProjectionContentDigests,
 } from "@/src/lib/hosted-vault-share/supported-projection-scopes";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -34,8 +37,16 @@ export const GET = withJsonError(async (request: Request) => {
   });
   const prisma = getPrisma();
   const projectionMode = readHostedVaultShareProjectionModeFromRequest(request);
+  const requestedVersion = new URL(request.url).searchParams.get(
+    HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM,
+  );
+  const sourceWorkspaceVersion = requestedVersion === null
+    ? undefined
+    : requireHostedVaultShareSourceWorkspaceVersion(requestedVersion);
   const supportsDeferredProjectionWork =
     supportsHostedVaultShareDeferredProjectionWork(request);
+  const supportsProjectionContentDigests =
+    supportsHostedVaultShareProjectionContentDigests(request);
 
   try {
     await requireHostedRuntimeActiveAccess(grantorMemberId, { prisma });
@@ -63,6 +74,7 @@ export const GET = withJsonError(async (request: Request) => {
     grantorMemberId,
     prisma,
     projectionMode,
+    sourceWorkspaceVersion,
     supportedProjectionScopeKeys,
   });
   const generations = projectionWork.generations;
@@ -74,6 +86,11 @@ export const GET = withJsonError(async (request: Request) => {
     projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
   );
   const hasDeferredProjectionWork = projectionWork.hasDeferredProjectionWork;
+  const supportedGenerations = generations.filter((generation) =>
+    supportedScopeKeys.has(
+      buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
+    )
+  );
   requireHostedVaultShareDeferredProjectionWorkCapability({
     hasDeferredProjectionWork,
     supportsDeferredProjectionWork,
@@ -90,17 +107,34 @@ export const GET = withJsonError(async (request: Request) => {
         .localeCompare(buildHostedVaultShareProjectionScopeKey(right))
     ),
     generationTokensByProjectionScopeKey: Object.fromEntries(
-      generations
-        .filter((generation) =>
-          supportedScopeKeys.has(
-            buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
-          )
-        )
+      supportedGenerations
         .map((generation) => [
           buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
           generation.generationToken,
         ]),
     ),
+    ...(supportsProjectionContentDigests
+      ? {
+          publishedSourceWorkspaceVersionByProjectionScopeKey: Object.fromEntries(
+            supportedGenerations.flatMap((generation) => {
+              const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+                generation.projectionScope,
+              );
+              const sourceWorkspaceVersion =
+                projectionWork
+                  .publishedSourceWorkspaceVersionByProjectionScopeKey[
+                    projectionScopeKey
+                  ];
+              return sourceWorkspaceVersion === undefined
+                ? []
+                : [[
+                  projectionScopeKey,
+                  sourceWorkspaceVersion,
+                ] as const];
+            }),
+          ),
+        }
+      : {}),
   } satisfies HostedVaultShareActiveProjectionKindsResponse);
 });
 

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
-import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-picker-client";
+import { HomeInitialVisitContactPickerClient } from "./initial-visit-contact-picker-client";
 
 import { HostedMurphChatAction, resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
@@ -158,7 +158,7 @@ export default async function HomePage({
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
-  const shouldRenderInitialVisitPersonaPicker =
+  const shouldRenderInitialVisitContactPicker =
     completionDialog === null
     && initialVisitProjectionResult.status === "fulfilled"
     && initialVisitProjection?.state.status === "pending";
@@ -206,10 +206,9 @@ export default async function HomePage({
         <DeviceSyncCompletionDialog model={completionDialog} />
       ) : null}
 
-      {shouldRenderInitialVisitPersonaPicker ? (
-        <HomeInitialVisitPersonaPickerClient
+      {shouldRenderInitialVisitContactPicker ? (
+        <HomeInitialVisitContactPickerClient
           contactAction={initialVisitProjection.contactAction}
-          initialPreferences={initialVisitProjection.state.preferences}
         />
       ) : null}
 

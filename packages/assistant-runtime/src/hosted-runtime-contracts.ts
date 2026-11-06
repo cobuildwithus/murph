@@ -26,7 +26,6 @@ export type {
   HostedRuntimeMediaStore,
   HostedRuntimeMediaWriter,
   HostedRuntimeClinicalRecordsPort,
-  HostedRuntimeCodexAuthPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
@@ -44,11 +43,13 @@ export type {
   HostedRuntimeLabsToolPort,
   HostedRuntimeActionApprovalPort,
   HostedRuntimeLogPort,
+  HostedRuntimeMailboxFetchResponse,
   HostedRuntimeMailboxPort,
   HostedRuntimePhysicalNotePort,
   HostedRuntimePlatform,
   HostedRuntimePhoneCallPort,
   HostedRuntimePlanUsageToolPort,
+  HostedRuntimeUsageDiagnosticsPort,
   HostedRuntimeSubscriptionToolPort,
   HostedRuntimeProviderFileResponse,
   HostedRuntimeProviderTargetKind,
@@ -74,10 +75,12 @@ export {
   HOSTED_RUNTIME_MEDIA_READ_PURPOSES,
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
-  HostedRuntimeCanonicalCheckpointError,
   HostedRuntimeMediaReadError,
   HostedRuntimeMediaWriteError,
 } from "./hosted-runtime/platform.ts";
+export {
+  MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV,
+} from "@murphai/operator-config/hosted-assistant-config-constants";
 export {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
@@ -91,10 +94,6 @@ export {
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
-export {
-  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
-  type RuntimeLivenessPort,
-} from "./hosted-runtime/liveness.ts";
 export {
   parseHostedRuntimeAssistantResponseMedia,
   parseHostedRuntimeIssueRecordResponse,

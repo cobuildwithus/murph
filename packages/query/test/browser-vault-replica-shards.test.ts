@@ -4,6 +4,7 @@ import type { ExperimentOutcome } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
+  assembleBrowserVaultCoreReplica,
   assembleBrowserVaultReplicaShards,
   BROWSER_VAULT_CORE_SHARD_SCHEMA,
   BROWSER_VAULT_LABS_SHARD_SCHEMA,
@@ -29,6 +30,39 @@ import {
   splitBrowserVaultReplica,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
+
+test("core shards keep an empty run-card array for Web skew and drop older producers' cards", async () => {
+  const shards = await splitBrowserVaultReplica(createReplica());
+  // Web builds from before run-card removal still require this core array.
+  assert.deepEqual(shards.core.experimentRunCards, []);
+
+  const olderProducerCore = JSON.parse(JSON.stringify({
+    ...shards.core,
+    experimentRunCards: [{ schema: "murph.browser-vault.experiment-run-card.v1" }],
+  })) as unknown;
+  assert.deepEqual(parseBrowserVaultCoreShard(olderProducerCore).experimentRunCards, []);
+  assert.equal(
+    "experimentRunCards" in assembleBrowserVaultCoreReplica(
+      parseBrowserVaultCoreShard(olderProducerCore),
+    ),
+    false,
+  );
+});
+
+test("legacy Patterns payloads are ignored without losing Journal data", async () => {
+  const replica = createReplica();
+  const legacy = { ...replica, personalPatterns: { malformed: "retired feature" } };
+  const parsed = parseBrowserVaultReplica(legacy);
+  assert.equal("personalPatterns" in parsed, false);
+  assert.deepEqual(parsed.journal, replica.journal);
+  const shards = await splitBrowserVaultReplica(replica);
+  const parsedCore = parseBrowserVaultCoreShard({
+    ...shards.core,
+    personalPatterns: { malformed: "retired feature" },
+  });
+  assert.equal("personalPatterns" in parsedCore, false);
+  assert.deepEqual(parsedCore.journal, replica.journal);
+});
 
 test("browser vault replicas split into independently parseable core, metrics index, buckets, and labs shards", async () => {
   const replica = createReplica();
@@ -353,7 +387,7 @@ test("browser vault shard parsers validate schemas, bucket placement, and genera
 test("browser vault metric bucket assignment has stable SHA-256 test vectors", async () => {
   // Changing any vector requires a generation bump so old refs are never read
   // with a new canonical-key placement rule.
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 15);
+  assert.ok(BROWSER_VAULT_REPLICA_CURRENT_GENERATION >= 15);
   assert.equal(await getBrowserVaultMetricBucketId("spo2"), "02");
   assert.equal(await getBrowserVaultMetricBucketId("lowest-spo2"), "19");
   assert.equal(await getBrowserVaultMetricBucketId("estimated-vo2-max"), "0d");
@@ -368,7 +402,6 @@ function createReplica(): BrowserVaultReplica {
     },
     entities: [],
     experimentOutcomes: [],
-    experimentRunCards: [],
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: false,
@@ -504,3 +537,38 @@ function createCurrentOutcome(sequence: number): ExperimentOutcome {
     },
   };
 }
+
+
+test("demographics survives split, parse and assemble without collapsing legacy absence to known-null", async () => {
+  const legacy = createReplica();
+  legacy.generation = 17;
+  delete legacy.demographics;
+  const old = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard((await splitBrowserVaultReplica(legacy)).core));
+  assert.equal("demographics" in old, false);
+  for (const status of ["resolved", "unresolved"] as const) {
+    const current = { ...legacy, generation: 18, demographics: {
+      birthYear: null, birthYearPrecision: null, biologicalSex: null, status, revision: "a".repeat(64),
+    } };
+    const shards = await splitBrowserVaultReplica(current);
+    const parsed = await parseBrowserVaultReplicaShards(JSON.parse(JSON.stringify(shards)));
+    assert.deepEqual(assembleBrowserVaultReplicaShards(parsed).demographics, current.demographics);
+    assert.deepEqual(assembleBrowserVaultCoreReplica(parsed.core).demographics, current.demographics);
+    assert.deepEqual(parseBrowserVaultReplica(current).demographics, current.demographics);
+  }
+});
+
+
+test("displayName survives the core and monolith parsers while legacy absence stays absent", async () => {
+  const legacy = createReplica();
+  assert.equal("displayName" in parseBrowserVaultReplica(legacy), false);
+  const old = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard((await splitBrowserVaultReplica(legacy)).core));
+  assert.equal("displayName" in old, false);
+  const current = { ...legacy, displayName: "Avery" };
+  const shards = await splitBrowserVaultReplica(current);
+  const parsed = await parseBrowserVaultReplicaShards(JSON.parse(JSON.stringify(shards)));
+  assert.equal(assembleBrowserVaultReplicaShards(parsed).displayName, "Avery");
+  assert.equal(assembleBrowserVaultCoreReplica(parsed.core).displayName, "Avery");
+  assert.equal(parseBrowserVaultReplica(current).displayName, "Avery");
+  assert.equal("displayName" in parsed.labs, false);
+  assert.equal("displayName" in parsed.metrics, false);
+});

@@ -27,7 +27,6 @@ import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   extractCodexTraceUpdates,
   resolveMurphDynamicTools,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
 } from '@murphai/assistant-engine/assistant-codex'
@@ -77,7 +76,6 @@ test('buildCodexAppServerArgs keeps sandbox and approval out of process args', (
   const args = buildCodexAppServerArgs({
     approvalPolicy: 'never',
     configOverrides: ['mcp_servers.murph_memory.command="node"'],
-    oss: true,
     profile: 'primary',
     sandbox: 'read-only',
   })
@@ -87,44 +85,8 @@ test('buildCodexAppServerArgs keeps sandbox and approval out of process args', (
     'mcp_servers.murph_memory.command="node"',
     '--profile',
     'primary',
-    '--oss',
     'app-server',
   ])
-})
-
-test('resolveCodexDisplayOptions still honors config defaults and explicit overrides', async () => {
-  const configRoot = await createTempDir('assistant-codex-cli-config-')
-  const configPath = path.join(configRoot, 'config.toml')
-
-  await writeFile(
-    configPath,
-    [
-      '# comment',
-      'model = "root-model"',
-      'model_reasoning_effort = "medium"',
-      'profile = "daily"',
-      '[profiles.daily]',
-      'model = "daily-model"',
-      'model_reasoning_effort = "high"',
-    ].join('\n'),
-    'utf8',
-  )
-
-  assert.deepEqual(await resolveCodexDisplayOptions({ configPath }), {
-    model: 'daily-model',
-    reasoningEffort: 'high',
-  })
-  assert.deepEqual(
-    await resolveCodexDisplayOptions({
-      configPath,
-      model: 'manual-model',
-      profile: 'daily',
-    }),
-    {
-      model: 'manual-model',
-      reasoningEffort: 'high',
-    },
-  )
 })
 
 test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed assistant output', async () => {
@@ -170,11 +132,17 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     // The endpoint belongs to Codex's explicit shell setting, not its process
     // environment. Validate its shape without including the generated key in
     // assertion output or a snapshot; retain the exact environment below.
+    assert.deepEqual(args.slice(0, 4), [
+      '--config',
+      'features.instant_interrupt=true',
+      '--config',
+      'features.code_mode_interrupt=true',
+    ])
     assert.ok(
-      args.length === 3 && args[0] === '--config' && args[2] === 'app-server',
-      'Only the timing config override may precede app-server.',
+      args.length === 7 && args[4] === '--config' && args[6] === 'app-server',
+      'Only the steering defaults and timing override may precede app-server.',
     )
-    const timingSetting = /^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="(\d{5}):[a-f0-9]{32}"$/u.exec(args[1])
+    const timingSetting = /^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="(\d{5}):[a-f0-9]{32}"$/u.exec(args[5])
     assert.ok(timingSetting, 'Expected the private-safe CLI timing shell setting.')
     const timingPort = Number(timingSetting[1])
     assert.ok(timingPort >= 49_152 && timingPort <= 65_535, 'Expected an ephemeral UDP port.')
@@ -566,7 +534,7 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
   )
 })
 
-test('executeCodexAppServerTurn interrupts the child and records the provider thread when aborted', async () => {
+test('executeCodexAppServerTurn interrupts the native turn without stopping the child and records the provider thread', async () => {
   const workingDirectory = await createTempDir('assistant-codex-cli-abort-')
   const controller = new AbortController()
   let spawnedChild: MockChildProcess | null = null
@@ -616,6 +584,15 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
           }),
         )
         controller.abort()
+        const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
+        child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-abort-public',
+            turn: createCodexTurn('turn-abort-public', 'interrupted'),
+          },
+        }))
       })()
     })
 
@@ -648,16 +625,8 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
       turnId: 'turn-abort-public',
     },
   })
-  assert.deepEqual(child.kill.mock.calls, [
-    ['SIGINT'],
-    ['SIGKILL'],
-    ['SIGKILL'],
-  ])
-  assert.deepEqual(processGroupKill.mock.calls, [
-    [-1234, 'SIGINT'],
-    [-1234, 'SIGKILL'],
-    [-1234, 'SIGKILL'],
-  ])
+  assert.deepEqual(child.kill.mock.calls, [])
+  assert.deepEqual(processGroupKill.mock.calls, [])
 })
 
 test('extractCodexTraceUpdates stays usable through the public assistant-engine codex export', () => {
@@ -684,7 +653,7 @@ test('extractCodexTraceUpdates stays usable through the public assistant-engine 
 
 function createCodexTurn(
   id: string,
-  status: 'completed' | 'inProgress',
+  status: 'completed' | 'inProgress' | 'interrupted',
 ): Record<string, unknown> {
   const completed = status === 'completed'
   return {
@@ -870,11 +839,3 @@ function requireMockChildProcess(
   assert.ok(child)
   return child
 }
-
-test('resolveCodexDisplayOptions defaults to nulls when the config file is missing', async () => {
-  const configPath = path.join(homedir(), '.codex', 'definitely-missing-config.toml')
-  assert.deepEqual(await resolveCodexDisplayOptions({ configPath }), {
-    model: null,
-    reasoningEffort: null,
-  })
-})

@@ -24,6 +24,10 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- For a simple time-based walking plan, use the person's stated current activity, available window, and
+  chosen duration plus relevant saved context. Do not collect step counts, labs, body measurements, or
+  unrelated event history unless symptoms, a known condition, or the requested target makes them
+  decision-changing. Missing wearable coverage alone does not require more data reads or a step target.
 - When the user specifically asks for basal calories, go directly to
   `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
   Do not run `wearables day` first; basal calories are query-only and absent
@@ -57,8 +61,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
   `workout_swimming_stroke`. These resource aliases belong to the global
   metric index, not the narrower `wearables metric` summary catalog. Use the
   returned source and event ID as provenance; imported device observations may
-  be query-only and unavailable through `vault-cli show`. No returned entries
-  means missing coverage, not zero or proof the event did not happen.
+  be query-only and unavailable through `vault-cli show`. With no returned
+  entries, say none was recorded for that date; never report a zero.
 - Check steps, sedentary time, active minutes, workout days, work schedule, commute, sleep, fatigue, and pain flags.
 - Use the user's baseline; a 2,000-step jump can be easy for one user and too much for another.
 - Look for long unbroken sitting blocks, not just daily step total.
@@ -81,8 +85,8 @@ Ask: "Do you want more total steps, fewer long sitting blocks, or a simple movem
 - Daily movement can improve health even when formal workouts stay unchanged.
 - Treat changeable current-local-day totals as provisional and say "so far."
   A completed workout does not make the day's combined totals final.
-- A summary/workout mismatch is a read mismatch, not proof of failed provider
-  sync or import. State what each surface shows without inventing a cause.
+- When the day summary and workout list disagree, report what each shows
+  without inventing a cause such as a failed sync or import.
 
 ## Safety Boundaries
 

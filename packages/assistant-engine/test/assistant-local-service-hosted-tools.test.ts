@@ -14,6 +14,7 @@ import { createTempVaultContext } from './test-helpers.ts'
 import {
   createAssistantSession,
   createDeferred,
+  createDirectSharedPlan,
   createHostedMailboxSourceRef,
   createSharedPlan,
   loadLocalServiceModule,
@@ -308,10 +309,14 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
       targetKind: 'thread' as const,
     })),
   }
-  const sharedPlan = createSharedPlan()
+  const sharedPlan = createDirectSharedPlan()
+  const session = createAssistantSession({ binding: {
+    ...createAssistantSession().binding, channel: 'linq', threadIsDirect: true,
+  } })
   sharedPlan.conversationPolicy.audience.channel = 'linq'
   const releaseProviderTurn = createDeferred<void>()
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
     adapter: {
       startTypingIndicator: vi.fn(async () => ({
         refreshAfterMessage: refreshTypingAfterMessage,
@@ -340,6 +345,9 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
         kind: 'explicit-structured-history',
       },
     })
+    await providerInput.onProviderRequestStarted?.({
+      startedAt: new Date().toISOString(), providerRequestOrdinal: 0,
+    })
     await releaseProviderTurn.promise
     return {
       kind: 'succeeded',
@@ -355,7 +363,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
         route: {
           routeId: 'route-default',
         },
-        session: createAssistantSession(),
+        session,
       },
     }
   })

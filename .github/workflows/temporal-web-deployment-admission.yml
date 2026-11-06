@@ -7,7 +7,7 @@ on:
 
 # Vercel must configure the admission job below as a production Deployment
 # Check. The build may complete while this workflow runs, but the production
-# domains must not move until this exact-main compatibility proof succeeds.
+# domains must not move until this exact-candidate compatibility proof succeeds.
 # Its protected environment also owns the non-secret digest of the production
 # Temporal target expected by the private release proof.
 permissions:
@@ -15,31 +15,141 @@ permissions:
 
 concurrency:
   group: temporal-web-deployment-admission
-  cancel-in-progress: true
+  # Finish the active candidate; coalesce waiting pushes to the newest run.
+  cancel-in-progress: false
 
 jobs:
+  runner-base-ready:
+    name: Wait for exact native runner publication
+    runs-on: ubuntu-24.04
+    # Independent from the unchanged admission and App-token budgets below.
+    timeout-minutes: 100
+    steps:
+      - name: Check out image publication inputs
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup publication Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install public tooling
+        timeout-minutes: 8
+        run: pnpm install --frozen-lockfile
+
+      - name: Wait for fingerprinted native base image
+        timeout-minutes: 91
+        run: pnpm --dir apps/cloudflare runner:docker:base -- --wait-published
+
   admission:
     name: Temporal Web production admission
+    needs: runner-base-ready
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
-    # 15 minutes for setup, then the controller's 58-minute token budget, with
-    # two minutes left for runner cleanup and status publication.
-    timeout-minutes: 75
+    # Enforced pre-token budgets: 5m required setup + 15m optional artifact.
+    # Preserve the controller's 58m credential budget and 2m cleanup reserve.
+    timeout-minutes: 80
     permissions:
       contents: read
+      statuses: write
+    outputs:
+      attempt: ${{ steps.pending.outputs.attempt }}
     steps:
+      - name: Publish pending Web admission status
+        timeout-minutes: 1
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='Temporal Web production admission' \
+            -f description='Exact-candidate production admission is running.' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --silent
+          echo "attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
       - name: Check out exact public main revision
+        timeout-minutes: 2
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup Node
+        timeout-minutes: 1
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm for public integration Web build
+        id: public-pnpm
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          run_install: false
+
+      - name: Cache public integration dependencies
+        if: steps.public-pnpm.outcome == 'success'
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Only public source and synthetic build configuration enter this artifact.
+      # Build before minting the private token, so paid integration never waits
+      # for compilation and no private assets or credentials reach the archive.
+      - name: Build public hosted integration Web dist
+        if: steps.public-pnpm.outcome == 'success'
+        timeout-minutes: 12
+        id: public-web-build
+        continue-on-error: true
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
+          HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+          HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+          HOSTED_EMAIL_DOMAIN: mail.example.test
+          HOSTED_EMAIL_FROM_ADDRESS: assistant@mail.example.test
+          HOSTED_EMAIL_LOCAL_PART: assistant
+          HOSTED_EMAIL_SIGNING_SECRET: hosted-local-email-signing-key
+          HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+          MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB: "1"
+          MURPH_E2E_STREAM_DEV_LOGS: "1"
+          NEXT_DIST_DIR_MODE: smoke
+          NEXT_DIST_DIR_SUFFIX: murph-cloud-integration
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir packages/hosted-execution build
+          pnpm --dir apps/web build
+          node scripts/hosted-integration-web-artifact.mjs
+
+      - name: Publish public hosted integration Web dist
+        timeout-minutes: 1
+        if: steps.public-web-build.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: hosted-integration-web-v1-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            hosted-web-next-dist.tar.zst
+            hosted-web-build.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
       - name: Execute exact production wire projection
+        timeout-minutes: 1
         run: >-
           node scripts/temporal-compatibility-producer-fixtures.ts
           --output "${RUNNER_TEMP}/temporal-compatibility-producer-fixtures.json"
@@ -66,3 +176,34 @@ jobs:
           --sha "${GITHUB_SHA}"
           --fixtures "${RUNNER_TEMP}/temporal-compatibility-producer-fixtures.json"
           --request-id "temporal-web-deploy-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+  publish-status:
+    name: Publish Web admission commit status
+    needs: admission
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      # Vercel can retain a running imported check after check_run completion.
+      # Publish the completed job result through its supported status channel.
+      - name: Publish final Web admission status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMISSION_RESULT: ${{ needs.admission.result }}
+          ADMISSION_ATTEMPT: ${{ needs.admission.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Exact-candidate production admission did not succeed.'
+          if [[ "${ADMISSION_RESULT}" == 'success' && "${ADMISSION_ATTEMPT}" == "${GITHUB_RUN_ATTEMPT}" ]]; then
+            state=success
+            description='Exact-candidate production admission passed.'
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f "state=${state}" \
+            -f context='Temporal Web production admission' \
+            -f "description=${description}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --silent

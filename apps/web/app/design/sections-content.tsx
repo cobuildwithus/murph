@@ -1,18 +1,10 @@
 import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
 
-import {
-  BiomarkerBoundaryResultStudy,
-  BiomarkerDetailStudy,
-  BiomarkerIndexStudy,
-  BiomarkerPreparingStateStudy,
-  BiomarkerReferenceContextStudy,
-} from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
-import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
@@ -21,18 +13,15 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
-import { DeepCarouselSection } from "@/src/components/knowledge/deep-carousel-section";
 import {
   ReferralPageContent,
   ReferralRewardCards,
   ReferralRewardReceiptPreview,
 } from "@/src/components/referrals/referral-page-content";
-import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import { HOSTED_PUBLIC_REFERRAL_REWARDS } from "@/src/lib/hosted-growth/referral-program";
-import { ValidationSlide } from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -45,6 +34,8 @@ import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { CalendarLinkStudy } from "./calendar-link-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
+import { WearableConnectLinkStudy } from "./wearable-connect-link-study";
+import { ComputerHandoffStudy } from "./computer-handoff-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
   AppleHealthRelaySetupStudy,
@@ -53,6 +44,7 @@ import {
 } from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { GameInviteStudy } from "./game-invite-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
@@ -60,31 +52,18 @@ import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
-import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
-import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
+import { JoinInviteStudy } from "./join-invite-study";
 import { OpsUsageStudy } from "./ops-usage-study";
+import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
-import {
-  PersonaOnboardingStudy,
-  PersonaSettingsStudy,
-} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
-import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
-import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
-import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
-import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
-import { EnvironmentProgressStudy } from "./environment-progress-study";
-import { EnvironmentPrintStudy } from "./environment-print-study";
-import { PersonalPatternsStudy } from "./personal-patterns-study";
-import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
-import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -155,51 +134,17 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Knowledge topic depth">
-            <div
-              id="knowledge-topic-depth"
-              data-design-section="knowledge-topic-depth"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <DeepCarouselSection />
-            </div>
-          </StudySection>
 
           <Separator />
 
-          <StudySection title="Homepage background readiness and phone handoff">
-            <HomepageAuthWarmRuntimeStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage technical runtime · inference choice">
+          <StudySection title="Homepage technical runtime">
             <div
               id="homepage-technical-runtime"
               data-design-section="homepage-technical-runtime"
               className="-mx-5 sm:-mx-8 lg:-mx-12"
               inert
             >
-              <TechnicalCapabilitiesSection
-                customInferenceAvailable
-                veniceAvailable
-              />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage technical runtime · provider flags off">
-            <div
-              data-design-section="homepage-technical-runtime-minimal"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <TechnicalCapabilitiesSection
-                customInferenceAvailable={false}
-                veniceAvailable={false}
-              />
+              <TechnicalCapabilitiesSection />
             </div>
           </StudySection>
 
@@ -211,25 +156,13 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Homepage model provider FAQ">
+          <StudySection title="Homepage FAQ">
             <div
-              data-design-section="homepage-model-provider-faq"
+              data-design-section="homepage-faq"
               className="-mx-5 sm:-mx-8 lg:-mx-12"
               inert
             >
-              <FaqSection veniceAvailable />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Security model provider choice">
-            <div
-              data-design-section="security-model-provider-choice"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <ModelProviderSecuritySection />
+              <FaqSection />
             </div>
           </StudySection>
         </>
@@ -241,21 +174,18 @@ export function SectionsContent({
 
           <StudySection title="Settings model choice for Edge and Max">
             <div
-              id="settings-model-provider-save-controls"
-              data-design-section="settings-compact-provider-control"
+              id="settings-model-save-controls"
+              data-design-section="settings-model-control"
               className="max-w-5xl"
             >
               <ModelSettingsHoverPreview>
                 <HostedAssistantModelSettings
-                  availableModels={["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"]}
+                  availableModels={["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-6-astra"]}
                   canUpgradeToEdge={false}
                   configurationAvailable
-                  customInferenceAvailable
                   initialDormantSolPreference={false}
-                  initialModel="gpt-5.6-terra"
-                  initialProvider="openai"
+                  initialModel="gpt-6.1-terra"
                   solAvailable
-                  veniceAvailable
                 />
               </ModelSettingsHoverPreview>
             </div>
@@ -263,10 +193,18 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Settings inference routing, locked models, and endpoint">
-            <ModelSettingsHoverPreview>
-              <SettingsCustomInferenceStudy />
-            </ModelSettingsHoverPreview>
+          <StudySection title="Settings model choice without a paid subscription">
+            <div data-design-variant="pulse-models-locked" className="max-w-5xl">
+              <ModelSettingsHoverPreview>
+                <HostedAssistantModelSettings
+                  canUpgradeToEdge
+                  configurationAvailable
+                  initialDormantSolPreference={false}
+                  initialModel="gpt-6.1-terra"
+                  solAvailable={false}
+                />
+              </ModelSettingsHoverPreview>
+            </div>
           </StudySection>
 
           <Separator />
@@ -281,13 +219,13 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Stateless calendar link">
+          <StudySection title="Calendar invite link: a page off the calendar, and a broken link">
             <CalendarLinkStudy />
           </StudySection>
 
           <Separator />
 
-          <StudySection title="Secure approval pending and recorded states">
+          <StudySection title="File approval link: signed out, pending, and decided">
             <div id="action-approval-lifecycle">
               <ActionApprovalLifecycleStudy />
             </div>
@@ -315,25 +253,6 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Food Label Lab">
-            <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
-              <FoodLabelLabStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Environment full-width progressive voice capture">
-            <EnvironmentProgressStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Private Environment print report loading and ready states">
-            <EnvironmentPrintStudy />
-          </StudySection>
-
-          <Separator />
 
           <StudySection title="Private training dashboard">
             <div
@@ -343,12 +262,6 @@ export function SectionsContent({
             >
               <TrainingDashboardStudy />
             </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Patterns page">
-            <PersonalPatternsStudy />
           </StudySection>
         </>
       ) : null}
@@ -418,19 +331,6 @@ export function SectionsContent({
               inert
             >
               <IntegrationsSection authenticated={false} />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage local installation">
-            <div
-              id="homepage-local-installation"
-              data-design-section="homepage-local-installation"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
             </div>
           </StudySection>
 
@@ -648,24 +548,14 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Persona onboarding with stacked tone samples">
-            <div data-design-section="persona-onboarding">
-              <PersonaOnboardingStudy />
-              <Separator />
-              <PersonaSettingsStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Family plan invite acceptance">
+          <StudySection title="Family invite link: the ticket, three promises, and every way to accept">
             <FamilyInviteJoinStudy />
           </StudySection>
 
           <Separator />
 
-          <StudySection title="Family billing recovery and management on Join">
-            <JoinFamilyBillingRecoveryStudy />
+          <StudySection title="Sign up on Join: every stage, Family billing recovery, and the checkout return">
+            <JoinInviteStudy />
           </StudySection>
         </>
       ) : null}
@@ -682,8 +572,20 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Connected app authorization handoff">
+          <StudySection title="Connect a wearable link">
+            <WearableConnectLinkStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Connect an app link">
             <ConnectedAppAuthorizationStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Take over a browser link">
+            <ComputerHandoffStudy />
           </StudySection>
 
           <Separator />
@@ -744,12 +646,6 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
-            <BrowserVaultLoadingTransitionsStudy />
-          </StudySection>
-
-          <Separator />
-
           <StudySection title="Home onboarding steps">
             <HomeOnboardingStepsStudy />
           </StudySection>
@@ -760,7 +656,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Group join invites, source-aware sharing, and setup recovery">
+          <StudySection title="Group join link: names first, exact wording in Details, Leave group drawer">
             <GroupJoinStudy
               comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
                 resolveHostedGroupAccessOfferProjectionScopes(undefined),
@@ -770,14 +666,21 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Unknown iMessage group setup and recovery">
+          <StudySection title="Group start link: setup, recovery, and back to the group">
             <GroupStartStudy />
           </StudySection>
 
           <Separator />
 
-          <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
+          <StudySection title="Group sponsorship purchase, sponsor page, signed-out management, cancellation, and completion">
             <GroupUsageFundingStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Weekly game challenge invite link">
+            {/* Prize, dare, variable-duration, free daily artifact and legacy invite states. */}
+            <GameInviteStudy />
           </StudySection>
         </>
       ) : null}
@@ -786,7 +689,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
+          <StudySection title="Friend’s invite link: the ticket, shared authentication, recipient claim, and signed-in recovery states">
             <SignupReferralFlowStudy />
           </StudySection>
 
@@ -835,40 +738,17 @@ export function SectionsContent({
           >
             <OpsOperatorTaskStudy />
           </StudySection>
-        </>
-      ) : null}
-
-      {category === "messages" ? (
-        <>
-          <Separator />
-
-          <StudySection title="Private experiment results share">
-            <ExperimentResultsShareStudy />
-          </StudySection>
 
           <Separator />
 
-          <StudySection title="Private structured-review result">
-            <StructuredReviewResultsStudy />
+          <StudySection id="game-reports" title="Weekly game reports to review within 24 hours">
+            <OpsGameReportsStudy />
           </StudySection>
         </>
       ) : null}
 
       {category === "ops" ? (
         <>
-          <Separator />
-
-          <StudySection title="Pitch deck progress slide">
-            <div
-              id="pitch-progress-slide"
-              data-design-section="pitch-progress-slide"
-              className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <ValidationSlide />
-            </div>
-          </StudySection>
-
           <Separator />
 
           <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
@@ -879,49 +759,7 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "health" ? (
-        <>
-          <Separator />
 
-          <StudySection title="Biomarker preparing state">
-            <BiomarkerPreparingStateStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker index">
-            <BiomarkerIndexStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker result detail">
-            <div id="biomarker-result-range-bands">
-              <BiomarkerDetailStudy />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker reference context">
-            <BiomarkerReferenceContextStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Repeated-session experiment Results">
-            <ExperimentRepeatedResultsStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Biomarker boundary result · published comparator provenance">
-            <div id="biomarker-boundary-result">
-              <BiomarkerBoundaryResultStudy />
-            </div>
-          </StudySection>
-        </>
-      ) : null}
     </div>
   );
 }

@@ -19,7 +19,7 @@ export const SCREENSHOT_CATEGORIES = [
     id: "health",
     label: "Health and data",
     description:
-      "Connected sources, Environment, Patterns, training, experiments, and biomarkers.",
+      "Connected sources, Environment, Patterns, training, and experiments.",
   },
   {
     id: "messages",

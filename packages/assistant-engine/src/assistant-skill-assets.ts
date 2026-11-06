@@ -14,6 +14,12 @@ export const MURPH_ASSISTANT_SKILLS_ROOT_REF =
 
 export const ASSISTANT_SKILLS = [
   {
+    slug: 'bluetooth-device-help',
+    name: 'bluetooth-device-help',
+    triggerHint:
+      'Use for Bluetooth wearable connection help in the Murph iPhone app, starting with WHOOP: the Ask Murph handoff, a WHOOP that will not connect to Murph, pairing, discovery, permissions, or missing live heart rate. Clarify live Bluetooth versus saved-data sync when ambiguous; cloud sync and Apple Health imports keep their existing owners.',
+  },
+  {
     slug: 'murph-onboarding',
     name: 'murph-onboarding',
     triggerHint:
@@ -83,7 +89,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'aerobic-fitness',
     name: 'aerobic-fitness',
     triggerHint:
-      'Use for VO2 max, cardio fitness estimates, aerobic capacity, zone interpretation, cardiorespiratory health framing, and wearable cardio marker trends. Use running-cardio or competition-training when the user wants a concrete training plan.',
+      'Use for reported VO2 max values (text or device screenshots), cardio fitness estimates, aerobic capacity, zone interpretation, and wearable cardio trends. Use running-cardio or competition-training for a concrete training plan.',
   },
   {
     slug: 'daily-activity',
@@ -203,7 +209,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'journal-connected-context',
     name: 'journal-connected-context',
     triggerHint:
-      'Use for automatic private Journal context from newly connected calendars or narrow email travel confirmations, and when a member changes or stops that capture. Owns the private connection notice, new-account baseline, category filters, normalized Journal plans, reconciliation, follow-ups, and opt-outs.',
+      'Use for private Journal plans and upcoming context from active calendars and relevant email confirmations, and when a member corrects or stops that capture. Owns silent capture regardless of account age or old notice state, category filters, normalized Journal plans, reconciliation, follow-ups, opt-outs, and canonical facts for derived upcoming context.',
   },
   {
     slug: 'computer-use',
@@ -245,7 +251,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'self-management-experiments',
     name: 'self-management-experiments',
     triggerHint:
-      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes.',
+      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes. Ordinary goal setup with a chosen action belongs to goal-setup.',
   },
   {
     slug: 'physical-therapy',
@@ -257,7 +263,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'running-cardio',
     name: 'running-cardio',
     triggerHint:
-      'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+      'Use for running, structured walking workouts, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. Use daily-activity for ordinary walking breaks and everyday movement targets. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
   {
     slug: 'group-newsletter',
@@ -294,6 +300,60 @@ export const ASSISTANT_SKILLS = [
     name: 'music-generation',
     triggerHint:
       'Read before calling generate_song when an explicit current request or a complete independently authorized owning-flow contract indicates generated music is required. This registry entry routes to the active music-generation skill but never authorizes a call. The active skill may shape selection and prompt craft only after the authorization signal.',
+  },
+  {
+    slug: 'journal',
+    name: 'journal',
+    triggerHint:
+      'Use in a private conversation before writing a Journal note for a lived health fact, when correcting a saved Journal entry, and when the member asks whether something was saved or why it is missing from Journal.',
+  },
+  {
+    slug: 'health-records',
+    name: 'health-records',
+    triggerHint:
+      'Use in a private conversation before saving clinical documents and health files the member sends: lab reports, visit or discharge summaries, imaging reports, medication lists, allergy statements, PDFs, exports, audio or video, and photos kept to track a body change over time.',
+  },
+  {
+    slug: 'file-send',
+    name: 'file-send',
+    triggerHint:
+      'Use in a private conversation before calling send_vault_file, and on later turns when the member says they approved a file or asks whether it arrived.',
+  },
+  {
+    slug: 'reminders',
+    name: 'reminders',
+    triggerHint:
+      'Use in a private conversation before creating or changing a reminder, check-in, review, scheduled summary or other automation, including the reminder for a confirmed appointment.',
+  },
+  {
+    slug: 'product-feedback',
+    name: 'product-feedback',
+    triggerHint:
+      'Use in a private conversation before calling murph.submit_product_feedback, when the member is frustrated with Murph or asks for a feature, or when a Murph workflow is blocked, degraded, circular or manual.',
+  },
+  {
+    slug: 'assistant-style',
+    name: 'assistant-style',
+    triggerHint:
+      'Use in a private conversation before reading or changing how Murph sounds or runs for this member (personality, tone, voice, Humor, Push, Detail, Unhinged, model, provider, reasoning) and before offering a dial change.',
+  },
+  {
+    slug: 'habitat',
+    name: 'habitat',
+    triggerHint:
+      'Use in a private conversation before advising about the member\'s home, workspace, equipment or environment, and before saving durable facts about them.',
+  },
+  {
+    slug: 'lab-tests',
+    name: 'lab-tests',
+    triggerHint:
+      'Use in a private conversation before calling murph.labs, when someone asks which lab tests or panels to get, what a test costs or includes, or where to get blood drawn.',
+  },
+  {
+    slug: 'private-group-access',
+    name: 'private-group-access',
+    triggerHint:
+      'Use in a private conversation before acting on one of the member\'s group chats from there: asking or handing context to a joined group, choosing among groups, changing or revoking what a group can see, leaving a group, or explaining what membership shares.',
   },
 ] as const
 

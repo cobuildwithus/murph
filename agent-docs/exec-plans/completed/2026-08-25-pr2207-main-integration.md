@@ -6,7 +6,7 @@ Updated: 2026-08-25
 
 ## Goal
 
-Ship the Experiment, Habitat, progress-card, and Murph Age recovery slice on
+Ship the Experiment, Habitat, and progress-card recovery slice on
 current `main` with bounded factual diagnostics and no duplicate projector,
 journey policy, or validation owner.
 
@@ -15,13 +15,13 @@ journey policy, or validation owner.
 - Exclusive ownership is proven at clean local, remote, and PR head
   `dd89d35094e9bff6df05ba73f7ba826554130122`.
 - Review round one rejected an unrelated progress-card repair command and a
-  duplicate Murph Age Zod-error owner; both were deleted.
+  duplicate validation owner; both were deleted.
 - The required retrospective established the durable ownership rule: domain
   code reports bounded facts, while day-four and final-review callers choose
   their own continuation.
 - Review round three found operation-inferred Habitat source classification and
   shared issue-presence stage inference. Later commits classify from core-owned
-  facts, preserve owner-written stages, and centralize Murph Age public paths.
+  facts, preserve owner-written stages, and centralize public paths.
 - Review round four found that Habitat accepted impossible calendar dates at
   the CLI option boundary, then misclassified the downstream core rejection as
   stored-record corruption. The option owner now reuses `isStrictIsoDate` and
@@ -45,7 +45,7 @@ journey policy, or validation owner.
 
 - Current `main` owns the shared projector, CLI recovery guidance, and generic
   diagnostics.
-- Experiment, Habitat, progress-card, and Murph Age owners retain only stable
+- Experiment, Habitat, and progress-card owners retain only stable
   codes, truthful stages, terminality/retryability, finite public paths, and
   value-free domain facts they can prove.
 - Existing day-four and final-review automation callers retain their distinct

@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-16",
+  "order": 100,
+  "item": {
+    "id": "x-post-single-link",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Cleaner answers about X posts",
+    "summary": "When you share an X post, Murph answers about it without sending your link back, and links other posts only when the answer uses them.",
+    "details": "Ask for the link and Murph includes it. Murph still says when a post could not be found or a detail could not be confirmed, and tells you how it checked if you ask.",
+    "relevanceTags": [
+      "x",
+      "replies"
+    ],
+    "sourcePullRequests": [
+      4165,
+      4169
+    ]
+  }
+}

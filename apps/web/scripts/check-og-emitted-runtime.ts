@@ -91,7 +91,7 @@ const probeRoutes: ProbeRoute[] = [
     params: {},
     url: "http://localhost/opengraph-image",
   },
-  // The three cards whose routes once lived inside the (dashboard) route
+  // The cards whose routes once lived inside the (dashboard) route
   // group, where metadata images get hash-suffixed URLs that 404 the exact
   // URL pages advertise. Pinning the unhashed emitted entries makes any
   // return of the suffix fail the build instead of shipping broken previews.
@@ -102,26 +102,12 @@ const probeRoutes: ProbeRoute[] = [
     params: {},
     url: "http://localhost/connect/opengraph-image",
   },
-  {
-    entry: "server/app/biomarkers/[biomarkerId]/opengraph-image/route.js",
-    expectedHeight: 630,
-    expectedWidth: 1200,
-    params: { biomarkerId: "biomarker-probe" },
-    url: "http://localhost/biomarkers/biomarker-probe/opengraph-image",
-  },
-  {
-    entry: "server/app/experiments/[experimentId]/opengraph-image/route.js",
-    expectedHeight: 630,
-    expectedWidth: 1200,
-    params: { experimentId: "experiment-probe" },
-    url: "http://localhost/experiments/experiment-probe/opengraph-image",
-  },
   createIMessageCardProbe(),
+  createSleepCardProbe(),
 ];
 
 const requiredAssetNames = [
   "logo.svg",
-  "murph-mark.svg",
   "Fraunces-400.ttf",
   "Fraunces-600.ttf",
   "DMSans-400.ttf",
@@ -299,20 +285,11 @@ async function main(): Promise<void> {
  */
 function assertDeployedAssetLayout(relocatedRoot: string): void {
   const deployed = path.join(relocatedRoot, "apps/web/public/logo.svg");
-  const deployedMark = path.join(
-    relocatedRoot,
-    "apps/web/public/icons/murph-mark.svg",
-  );
   const workingDirectoryRelative = path.join(relocatedRoot, "public/logo.svg");
 
   if (!existsSync(deployed)) {
     throw new Error(
       `Expected the traced function to contain apps/web/public/logo.svg at ${deployed}.`,
-    );
-  }
-  if (!existsSync(deployedMark)) {
-    throw new Error(
-      `Expected the traced function to contain apps/web/public/icons/murph-mark.svg at ${deployedMark}.`,
     );
   }
   if (existsSync(workingDirectoryRelative)) {
@@ -485,4 +462,16 @@ function ignoreExisting(error: NodeJS.ErrnoException): void {
   if (error.code !== "EEXIST") {
     throw error;
   }
+}
+
+function createSleepCardProbe(): ProbeRoute {
+  const payload = `${Buffer.from(JSON.stringify({ schemaVersion: 8, card: {
+    kind: "sleep_summary", version: 1, localDate: "2026-11-03", bedtime: "00:18", wakeTime: "08:02",
+    totalSleepMinutes: 436, score: 85, stages: { deepMinutes: 141, remMinutes: 118, lightMinutes: 177 },
+    awakeMinutes: 28, efficiencyPercent: 94, hrv: { milliseconds: 66, method: "rmssd" }, restingHeartRate: 45, wakeUps: 3,
+  } })).toString("base64url")}.png`;
+  return {
+    entry: "server/app/imessage/card/v1/[payload]/route.js", expectedHeight: 780, expectedWidth: 1200,
+    params: { payload }, url: `http://localhost/imessage/card/v1/${payload}`,
+  };
 }

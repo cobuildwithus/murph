@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-triglycerides
 slug: lower-triglycerides
-title: Lower My Triglycerides
-summary: Lower triglycerides by addressing alcohol, food quality, activity, metabolic health, and treatment when levels are severe.
+title: Understand My Triglycerides
+summary: Understand triglyceride results, factors that affect them, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:lower-cholesterol
   outcomeKind: biomarker
-  goalPhrase: lower my triglycerides
+  goalPhrase: understand my triglycerides
   successSignals:
     - id: triglyceride_level
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my triglycerides.
+  startPrompt: Hey Murph, help me understand my triglycerides.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Severe upper-abdominal pain with vomiting needs urgent assessment, especially wi
 
 ## Related goals
 
-[Lower My Cholesterol](/goals/lower-cholesterol) · [Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Improve Fatty Liver Disease](/goals/improve-fatty-liver-disease)
+[Understand My Cholesterol](/goals/lower-cholesterol) · [Track My Blood Sugar](/goals/improve-blood-sugar-control) · [Understand Fatty Liver Disease](/goals/improve-fatty-liver-disease)

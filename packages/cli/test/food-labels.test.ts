@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { foodLabelResponse } from './fixtures/food-label-response.ts'
 
 import {
-  foodLabelSearchItemSchema,
   searchFoodLabels,
   searchFoodLabelsBatch,
 } from '../src/food-labels.js'
+import { hostedDataApiLabelSearchItemSchema } from '../src/hosted-data-api-labels.js'
 
 const hostedRuntimeEnv = {
   MURPH_DATA_API_KEY: 'signed-murph-data-api-credential',
@@ -223,9 +224,9 @@ const yogurtContaminantSummary = {
   ],
 }
 
-describe('foodLabelSearchItemSchema', () => {
+describe('hostedDataApiLabelSearchItemSchema', () => {
   it('accepts regulatory presence findings without lab-measurement metadata', () => {
-    const parsed = foodLabelSearchItemSchema.parse({
+    const parsed = hostedDataApiLabelSearchItemSchema.parse({
       id: 'fdc:2259794',
       dataOrigin: 'usda_branded',
       dataOriginId: '2259794',
@@ -290,7 +291,7 @@ describe('foodLabelSearchItemSchema', () => {
   })
 
   it('keeps legacy contaminant payloads valid when additive test metadata is absent', () => {
-    const parsed = foodLabelSearchItemSchema.parse({
+    const parsed = hostedDataApiLabelSearchItemSchema.parse({
       id: 'fdc:2259794',
       dataOrigin: 'usda_branded',
       dataOriginId: '2259794',
@@ -375,26 +376,19 @@ describe('searchFoodLabels', () => {
   })
 
   it('calls the internal foods API with the hosted provider credential', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      items: [
-        {
-          id: 'fdc:2259794',
-          dataOrigin: 'usda_branded',
-          dataOriginId: '2259794',
-          name: 'Plain Greek Yogurt',
-          brand: 'Example Dairy',
-          upc: '012345678905',
-          offMarket: false,
-          label: yogurtLabel,
-          contaminantSummary: yogurtContaminantSummary,
-        },
-      ],
-    }), {
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
+    const fetchMock = vi.fn<typeof fetch>(async () => foodLabelResponse([
+      {
+        id: 'fdc:2259794',
+        dataOrigin: 'usda_branded',
+        dataOriginId: '2259794',
+        name: 'Plain Greek Yogurt',
+        brand: 'Example Dairy',
+        upc: '012345678905',
+        offMarket: false,
+        label: yogurtLabel,
+        contaminantSummary: yogurtContaminantSummary,
       },
-      status: 200,
-    }))
+    ]))
 
     const result = await searchFoodLabels(
       {

@@ -96,6 +96,12 @@ Frontend work has no special implementation-model requirement.
 - Presentation studies render real production components with synthetic props,
   no live data/requests, and inert controls. Use the actual page for journey proof.
   Noindex/unlinked routes are not security boundaries.
+  Auth browser proofs use the homepage dialog and the existing non-production
+  `/join/<synthetic-code>?preview=messaging-setup` entry. Settings proofs use
+  `/test/better-auth-settings`, which returns 404 unless the server is in
+  development smoke mode and the request host is loopback. This fixture mounts
+  real settings controllers with synthetic account props; Playwright supplies
+  their API/provider responses. Never remove catalog `inert` for auth proof.
 - Inspect material states, accessibility, and viewports where behavior can differ.
   There is no screenshot quota; capture evidence that actually proves the claim.
 - Keep local data personas synthetic and on real query paths. Never bundle member

@@ -1,5 +1,6 @@
 import "server-only";
 
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import type { PrismaClient } from "@prisma/client";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
@@ -50,7 +51,6 @@ async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
     kind: "approval.passkey.enroll",
     memberId: input.session.member.id,
     prisma: input.prisma,
-    privyUserId: input.session.privyUserId,
   });
   return {
     proof,
@@ -84,8 +84,7 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
   request: Request;
   response: RegistrationResponseJSON;
 }): Promise<void> {
-  // The same approved factor is required again at completion. No enrollment
-  // session, separate permit service or primary-login shortcut is introduced.
+  // Existing protection requires its approved factor again at completion.
   const verified = await verifyEnrollmentAuthorization(input);
   const credential = await verifyApprovalPasskeyRegistration({
     message: verified.message,

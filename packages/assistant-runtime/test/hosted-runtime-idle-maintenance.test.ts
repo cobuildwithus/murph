@@ -11,11 +11,13 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 
 const compactWarmCodexThread = vi.fn();
+const runAssistantCodexResumeRetention = vi.fn();
 const runAssistantTranscriptContentRetention = vi.fn();
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
 vi.mock("@murphai/assistant-engine/assistant-store", () => ({
+  runAssistantCodexResumeRetention: (input: unknown) => runAssistantCodexResumeRetention(input),
   runAssistantTranscriptContentRetention: (input: unknown) =>
     runAssistantTranscriptContentRetention(input),
 }));
@@ -34,18 +36,23 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
 const archiveClosedEventLedgerShards = vi.fn();
+const archiveClosedAuditShards = vi.fn();
+const runMealPhotoMaintenance = vi.fn();
 const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
+  archiveClosedAuditShards: (input: unknown) => archiveClosedAuditShards(input),
   archiveClosedEventLedgerShards: (input: unknown) =>
     archiveClosedEventLedgerShards(input),
   archiveClosedIntegrationIngestShards: (input: unknown) =>
     archiveClosedIntegrationIngestShards(input),
+  runMealPhotoMaintenance: (input: unknown) => runMealPhotoMaintenance(input),
   runGeneratedImageCaptureRetention: (input: unknown) =>
     runGeneratedImageCaptureRetention(input),
 }));
 
 import {
+  appendJsonlRecord,
   initializeVault,
   readEventLedgerShardRecords,
   upsertEvent,
@@ -58,6 +65,7 @@ import {
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+  HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS,
   runHostedIdleCheckpointMaintenance,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
@@ -90,6 +98,8 @@ async function waitForAtomicArchiveTempFile(
 }
 
 beforeEach(() => {
+  runAssistantCodexResumeRetention.mockReset().mockResolvedValue(undefined);
+  runMealPhotoMaintenance.mockReset().mockResolvedValue({ thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, hasMore: false, nextEligibleAt: null });
   compactWarmCodexThread.mockReset();
   runAssistantTranscriptContentRetention.mockReset();
   runAssistantTranscriptContentRetention.mockResolvedValue({
@@ -155,6 +165,15 @@ beforeEach(() => {
     scannedShardCount: 0,
     sourceByteCount: 0,
   });
+  archiveClosedAuditShards.mockReset();
+  archiveClosedAuditShards.mockResolvedValue({
+    archivedByteCount: 0,
+    archivedShardCount: 0,
+    blockedShardCount: 0,
+    repairedShardCount: 0,
+    scannedShardCount: 0,
+    sourceByteCount: 0,
+  });
   runGeneratedImageCaptureRetention.mockReset();
   runGeneratedImageCaptureRetention.mockResolvedValue({
     blockedCaptureCount: 0,
@@ -181,7 +200,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -209,7 +228,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: " ",
         pendingWork: false,
         recordUsage: null,
@@ -229,17 +248,17 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   ])("records measured compact operations once: %j", async ({ kind, failFirstWrite }) => {
     const response = {
       responseId: "resp_compact_synthetic_1", inputTokens: 1400, cachedInputTokens: 900,
-      cacheWriteInputTokens: 100, outputTokens: 90, reasoningOutputTokens: 30, totalTokens: 1490,
+      cacheWriteInputTokens: 100, cacheWrite12hInputTokens: 40, outputTokens: 90, reasoningOutputTokens: 30, totalTokens: 1490,
     };
     compactWarmCodexThread.mockResolvedValue({
       kind, reason: "timeout", durationMs: 1200, threadContextTokensBefore: 140_000,
-      threadId: "thread_xyz", serviceTier: "flex", model: "gpt-5.6-terra",
+      threadId: "thread_xyz", serviceTier: "flex", model: "gpt-6.1-sol",
       usage: { cachedInputTokens: 1800, inputTokens: 2800, outputTokens: 180, totalTokens: 2980,
         source: "measured", responses: [response, { ...response, responseId: "resp_compact_synthetic_2" }] },
     });
     const recorded: AssistantUsageRecord[] = [];
     await runHostedIdleCheckpointMaintenance({
-      credentialSource: "platform", memberId: "member_1", model: "gpt-5.6-sol",
+      credentialSource: "platform", memberId: "member_1", model: "gpt-6.1-sol",
       providerName: "hosted-openai", pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);
@@ -252,9 +271,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(recorded[0]).toMatchObject({
       providerRequestId: response.responseId, providerRequestOutcome: kind === "failed" ? "failed" : "succeeded",
       cacheWriteTokens: 100, cachedInputTokens: 900, inputTokens: 1400, outputTokens: 90,
-      reasoningTokens: 30, totalTokens: 1490, requestedModel: "gpt-5.6-terra", servedModel: null,
+      reasoningTokens: 30, totalTokens: 1490, requestedModel: "gpt-6.1-sol", servedModel: null,
       tokenPricingBasis: "openai-flex", usageExtractionSourcePath: "rawResponse.completed.usage",
       usageExtractionVersion: "codex-idle-compaction-raw-v1",
+      rawUsageJson: { cacheWrite12hInputTokens: 40 },
     });
     expect(recorded[0]?.rawUsageJson).not.toHaveProperty("responseId");
   });
@@ -266,7 +286,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: "flex",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: 96_000,
         inputTokens: 140_000,
@@ -280,7 +300,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "member",
       memberId: "member_1",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       providerName: "openai-local-test",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -312,7 +332,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       outputTokens: 900,
       providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
-      requestedModel: "gpt-5.6-terra",
+      requestedModel: "gpt-6.1-sol",
       sessionId: "asst_real_session",
       tokenPricingBasis: "openai-flex",
       totalTokens: 140_900,
@@ -334,7 +354,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage,
@@ -351,6 +371,173 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(recordUsage).not.toHaveBeenCalled();
   });
 
+  it("does not retry unchanged cleanup failures inside the container idle window", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-07-05T00:00:00.000Z");
+    runInboxMediaRetention.mockRejectedValue(new Error("synthetic unavailable cleanup"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const wakes: number[] = [];
+    try {
+      let now = start;
+      while (now < start + 6 * 60 * 60 * 1000 && wakes.length < 100) {
+        vi.setSystemTime(now);
+        wakes.push(now);
+        const outcome = await runHostedIdleCheckpointMaintenance({
+          credentialSource: "platform", memberId: "member_synthetic_retention",
+          model: null, providerName: null, pendingWork: false,
+          recordUsage: null, resolveAssistantSessionId: null,
+          shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+        });
+        expect(outcome.nextWakeAt).toBeDefined();
+        now = Date.parse(outcome.nextWakeAt!);
+      }
+      expect(warn).toHaveBeenCalledTimes(6);
+      expect(wakes).toHaveLength(6);
+      expect(wakes[1]! - wakes[0]!).toBe(60 * 60 * 1000);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks an unchanged legacy migration blocker daily using the real retention owners", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-blocked-retention-"));
+    const now = Date.parse("2026-07-05T00:00:00.000Z");
+    const ledgerPath = "ledger/inbox-captures/2026/2026-06.jsonl";
+    const sourceDirectory = "raw/inbox/email/2026/06/cap_synthetic_legacy";
+    const envelopePath = `${sourceDirectory}/envelope.json`;
+    const actual = await vi.importActual<typeof import("@murphai/inboxd/retention")>(
+      "@murphai/inboxd/retention",
+    );
+    runInboxEnvelopeMigration.mockImplementation(actual.runInboxEnvelopeMigration);
+    runInboxTextRetention.mockImplementation(actual.runInboxTextRetention);
+    try {
+      await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+      await appendJsonlRecord({ vaultRoot, relativePath: ledgerPath, record: {
+        schemaVersion: "murph.inbox-capture.v1", captureId: "cap_synthetic_legacy",
+        identityKey: "email:self", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VB98",
+        source: "email", externalId: "synthetic-legacy", thread: { id: "synthetic", isDirect: true },
+        actor: { isSelf: false }, occurredAt: "2026-06-01T00:00:00.000Z",
+        recordedAt: "2026-06-01T00:00:00.000Z", raw: {}, sourceDirectory,
+        rawRefs: [envelopePath], attachments: [], text: "Synthetic old content", envelopePath,
+      } });
+      const original = await fs.readFile(path.join(vaultRoot, ledgerPath), "utf8");
+      vi.useFakeTimers({ toFake: ["Date"] });
+      for (let day = 0; day < 2; day += 1) {
+        vi.setSystemTime(now + day * 24 * 60 * 60 * 1000);
+        const outcome = await runHostedIdleCheckpointMaintenance({
+          credentialSource: "platform", memberId: "member_synthetic_retention",
+          model: null, providerName: null, pendingWork: false,
+          recordUsage: null, resolveAssistantSessionId: null,
+          shutdownSignal: null, vaultRoot, wakeSignal: null,
+        });
+        expect(outcome.nextWakeAt).toBe(new Date(now + (day + 1) * 24 * 60 * 60 * 1000).toISOString());
+        expect(await fs.readFile(path.join(vaultRoot, ledgerPath), "utf8")).toBe(original);
+      }
+    } finally {
+      vi.useRealTimers();
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not immediately continue a migration batch that applied nothing because it is blocked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxEnvelopeMigration.mockResolvedValue({
+      activeOperationCount: 0, blockerCount: 1, candidateBytes: 10,
+      candidateCount: 251, deletedBytes: 0, deletedCount: 0, hasMore: true,
+      hasWork: true, mismatchCount: 1, missingLedgerCount: 0,
+      mode: "apply", mutated: false, scannedEnvelopeCount: 252,
+    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_synthetic_retention",
+        model: null, providerName: null, pendingWork: false,
+        recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome.nextWakeAt).toBe("2026-07-06T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["2026-07-05T00:10:00.000Z", "2026-07-05T00:10:00.000Z"],
+    ["2026-07-07T00:00:00.000Z", "2026-07-06T00:00:00.000Z"],
+  ])("keeps real expiry %s scheduled alongside a blocked legacy capture", async (expiry, expected) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxTextRetention.mockResolvedValue({
+      expiredCaptures: 0, hasMoreEligibleCaptures: false,
+      legacyCapturesSkipped: 1, nextEligibleAt: expiry,
+    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_synthetic_retention",
+        model: null, providerName: null, pendingWork: false,
+        recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome.nextWakeAt).toBe(expected);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves an earlier expiry on failure and recovers without a stale retry wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const reportRetentionIssue = vi.fn(async () => { throw new Error("synthetic log outage"); });
+    runHostedPendingAssistantInputContentRetention.mockResolvedValueOnce({
+      inputsRetired: 0, inputsSuppressed: 0, nextEligibleAt: "2026-07-05T00:02:00.000Z",
+    });
+    runInboxMediaRetention.mockRejectedValueOnce(new Error("synthetic private fixture content"));
+    const input = {
+      credentialSource: "platform" as const, memberId: "member_synthetic_retention",
+      model: null, providerName: null, pendingWork: false,
+      recordUsage: null, reportRetentionIssue, resolveAssistantSessionId: null,
+      shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+    };
+    try {
+      const failed = await runHostedIdleCheckpointMaintenance(input);
+      expect(failed.nextWakeAt).toBe("2026-07-05T00:02:00.000Z");
+      expect(reportRetentionIssue).toHaveBeenCalledWith({
+        stage: "media", outcome: "failed", errorCode: "runtime_error",
+      });
+      vi.setSystemTime(new Date(failed.nextWakeAt!));
+      const recovered = await runHostedIdleCheckpointMaintenance(input);
+      expect(recovered.nextWakeAt).toBeUndefined();
+      expect(runInboxTextRetention).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("continues immediately when an unblocked migration batch makes progress", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxEnvelopeMigration.mockResolvedValue({
+      activeOperationCount: 0, blockerCount: 0, candidateBytes: 10,
+      candidateCount: 251, deletedBytes: 9, deletedCount: 250, hasMore: true,
+      hasWork: true, mismatchCount: 0, missingLedgerCount: 0,
+      mode: "apply", mutated: true, scannedEnvelopeCount: 251,
+    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_synthetic_retention",
+        model: null, providerName: null, pendingWork: false,
+        recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome.nextWakeAt).toBe("2026-07-05T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("runs inbox media retention during idle maintenance and keeps compaction fail-open", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
@@ -365,7 +552,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -386,7 +573,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       expect(outcome).toEqual({
         kind: "skipped",
         nextWakeAt: new Date(
-          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS,
         ).toISOString(),
         nextWakeReason: "inbox_media_retention",
         reason: "below_threshold",
@@ -405,7 +592,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -445,7 +632,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -497,7 +684,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       materializeRetentionCandidatePaths,
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       protectedAttachmentIds: ["att_pending"],
       protectedCaptureIds: ["cap_pending"],
@@ -553,7 +740,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -689,7 +876,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       generatedImageRetentionMaxCaptures: 7,
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -719,7 +906,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         generatedImageRetentionMaxCaptures: 0,
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         pendingWork: false,
         persistGeneratedImageRetention,
         providerName: "hosted-openai",
@@ -762,7 +949,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -801,7 +988,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -837,7 +1024,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -867,7 +1054,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: true,
       recordUsage: null,
@@ -902,7 +1089,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -941,7 +1128,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -982,7 +1169,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1032,7 +1219,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const interrupted = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1060,7 +1247,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const resumed = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1101,7 +1288,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       protectedAttachmentIds: ["att_active_01"],
       protectedCaptureIds: ["cap_active"],
@@ -1133,7 +1320,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: null,
         inputTokens: 140_000,
@@ -1147,7 +1334,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -1170,7 +1357,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       outputTokens: null,
       providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
-      requestedModel: "gpt-5.6-terra",
+      requestedModel: "gpt-6.1-sol",
       sessionId: "asst_real_session",
       surface: "hosted-runtime",
       tokenPricingBasis: "standard",
@@ -1188,7 +1375,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 120_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 120_000,
@@ -1201,7 +1388,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async () => {
@@ -1241,7 +1428,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1283,7 +1470,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1300,7 +1487,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: true,
         recordUsage: null,
@@ -1311,8 +1498,51 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     ).toEqual({ kind: "skipped", reason: "pending_work", threadContextTokensBefore: null });
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
     expect(archiveClosedEventLedgerShards).not.toHaveBeenCalled();
+    expect(archiveClosedAuditShards).not.toHaveBeenCalled();
     expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, "default", "system_mailbox", "inbox_media_retention"] as const)(
+    "retains every content cleanup and limits unrelated archives for %s processing",
+    async (processingMode) => {
+      const nextWakeAt = "2026-10-01T12:00:00.000Z";
+      runInboxTextRetention.mockResolvedValue({
+        expiredCaptures: 1,
+        hasMoreEligibleCaptures: false,
+        legacyCapturesSkipped: 0,
+        nextEligibleAt: nextWakeAt,
+      });
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_retention_scope",
+        model: null,
+        pendingWork: false,
+        processingMode,
+        providerName: null,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/synthetic-vault",
+        wakeSignal: null,
+      });
+      expect(outcome).toMatchObject({ nextWakeAt, nextWakeReason: "inbox_media_retention" });
+      for (const cleanup of [
+        runHostedPendingAssistantInputContentRetention,
+        runAssistantTranscriptContentRetention,
+        runInboxMediaRetention,
+        runGeneratedImageCaptureRetention,
+        runInboxEnvelopeMigration,
+        runInboxTextRetention,
+      ]) {
+        expect(cleanup).toHaveBeenCalledOnce();
+      }
+      const expectedArchiveCalls = processingMode === "inbox_media_retention" ? 0 : 1;
+      expect(archiveClosedEventLedgerShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedAuditShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    },
+  );
 
   it("archives closed event and integration shards only on a true idle checkpoint", async () => {
     compactWarmCodexThread.mockResolvedValue({
@@ -1324,7 +1554,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1340,9 +1570,12 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       vaultRoot: "/vault",
     });
     expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+    expect(archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.archiveCurrentMonth).toBe(true);
     const eventSignal = archiveClosedEventLedgerShards.mock.calls[0]?.[0]?.signal;
     const integrationSignal = archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal;
     expect(integrationSignal).toBe(eventSignal);
+    expect(archiveClosedAuditShards).toHaveBeenCalledOnce();
+    expect(archiveClosedAuditShards.mock.calls[0]?.[0]?.signal).toBe(eventSignal);
   });
 
   it("archives later healthy history after a long malformed event shard", async () => {
@@ -1377,6 +1610,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       archiveClosedEventLedgerShards.mockImplementation(
         actualCore.archiveClosedEventLedgerShards,
       );
+      archiveClosedAuditShards.mockImplementation(actualCore.archiveClosedAuditShards);
 
       compactWarmCodexThread.mockResolvedValue({
         kind: "skipped",
@@ -1387,7 +1621,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await expect(runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_event_archive",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         pendingWork: false,
         providerName: "hosted-openai",
         recordUsage: null,
@@ -1401,6 +1635,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         threadContextTokensBefore: 20_000,
       });
 
+      await expect(fs.access(path.join(vaultRoot, "audit/2020/2020-01.jsonl"))).rejects.toThrow();
+      await expect(fs.access(path.join(vaultRoot, "audit/2020/2020-01.jsonl.br"))).resolves.toBeUndefined();
       await expect(fs.access(malformedRawAbsolutePath)).resolves.toBeUndefined();
       await expect(fs.access(`${malformedRawAbsolutePath}.br`)).rejects.toThrow();
       await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
@@ -1456,7 +1692,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const maintenance = runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_event_archive_wake",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         pendingWork: false,
         providerName: "hosted-openai",
         recordUsage: null,
@@ -1499,7 +1735,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1529,7 +1765,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1560,7 +1796,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1576,9 +1812,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("aborts event archiving before later maintenance when a member-visible wake arrives", async () => {
+  it.each(["event", "audit"] as const)("aborts %s archiving before later maintenance when a member-visible wake arrives", async (family) => {
     const wakeSignal = createCoalescingRuntimeWakeSignal();
-    archiveClosedEventLedgerShards.mockImplementation(
+    const archive = family === "audit" ? archiveClosedAuditShards : archiveClosedEventLedgerShards;
+    archive.mockImplementation(
       async (input: { signal: AbortSignal }) =>
         await new Promise((_resolve, reject) => {
           input.signal.addEventListener("abort", () => reject(input.signal.reason), {
@@ -1591,7 +1828,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1624,7 +1861,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         runHostedIdleCheckpointMaintenance({
           credentialSource: "platform",
           memberId: "member_1",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           pendingWork: true,
           protectedCaptureIds: ["cap_pending"],
           providerName: "hosted-openai",
@@ -1692,7 +1929,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1710,7 +1947,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 110_000,
       threadId: "thread_orphan",
       serviceTier: null,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 110_000,
@@ -1723,7 +1960,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {

@@ -12,7 +12,7 @@ Murph's contact card ships with one canonical headshot (the hooded character). S
 The contact-card picker remains available immediately after website signup:
 
 1. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
-2. `/home?initialVisit=true` resolves the member's contact channel. Members with a text contact see the contact-card picker first; adding the card, skipping, or dismissing advances to the Murph personality picker. Members without a text contact start directly at the personality picker. Saving the personality opens the final Welcome to Murph dialog with the resolved messaging action; skipping or dismissing the personality picker ends the handoff without it.
+2. Pending `/home` onboarding resolves the member's contact channel. Members with a text contact see the contact-card picker; adding the card, skipping or dismissing completes account onboarding. Members without a text contact complete directly, without another setup dialog.
 3. The Settings customization section reopens the same picker so an existing
    member can save a fresh card with a different portrait.
 

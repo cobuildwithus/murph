@@ -12,6 +12,10 @@ describe("createHostedDeviceSyncRegistry", () => {
   it("matches the shared configured-provider registry assembly path", () => {
     const env: NodeJS.ProcessEnv = {
       NODE_ENV: "test",
+      JUNCTION_API_KEY: "sk_us_fixture_junction_key",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+      JUNCTION_CLIENT_USER_ID_SECRET: "junction-user-secret",
       WHOOP_CLIENT_ID: "whoop-client",
       WHOOP_CLIENT_SECRET: "whoop-secret",
       OURA_CLIENT_ID: "oura-client",
@@ -24,6 +28,6 @@ describe("createHostedDeviceSyncRegistry", () => {
     const sharedProviders = createConfiguredDeviceSyncRegistry(env).list().map((provider) => provider.provider);
 
     expect(hostedProviders).toEqual(sharedProviders);
-    expect(hostedProviders).toEqual(["oura", "whoop", "strava"]);
+    expect(hostedProviders).toEqual(["junction"]);
   });
 });

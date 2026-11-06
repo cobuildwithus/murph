@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -24,8 +23,6 @@ import {
   writeTextFileAtomic,
 } from '../shared.js'
 import {
-  assertAssistantCronJobId,
-  assertAssistantCronRunId,
   resolveAssistantOpaqueStateFilePath,
 } from '../state-ids.js'
 
@@ -366,14 +363,6 @@ export function buildAssistantCronTarget(
       : {}),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
   }
-}
-
-export function createAssistantCronJobId(): string {
-  return assertAssistantCronJobId(`cron_${randomUUID().replace(/-/gu, '')}`)
-}
-
-export function createAssistantCronRunId(): string {
-  return assertAssistantCronRunId(`cronrun_${randomUUID().replace(/-/gu, '')}`)
 }
 
 export function normalizeRequiredAssistantCronText(

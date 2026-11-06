@@ -11,6 +11,7 @@ import {
   recordHostedIngressRuntimeMilestone,
   recordHostedIngressTemporalSignalAccepted,
   readHostedIngressLatencyDashboard,
+  readHostedLinqProductionCanaryLatencyDiagnostics,
   type HostedIngressLatencyDashboardInput,
 } from "@/src/lib/hosted-runtime-latency/store";
 import {
@@ -64,6 +65,113 @@ type LatencyDashboardRow = {
   runtimeAttemptId?: string | null;
   temporalSignalAcceptedAt: Date | null;
 };
+
+describe("fixed-canary recent latency observation", () => {
+  const now = Date.parse("2026-09-10T12:01:00.000Z");
+  const at = (offsetMs: number) => new Date(now + offsetMs);
+  const row = () => ({
+    webhookReceivedAt: at(-31_000), acceptedAt: at(-30_000),
+    assistantInputStagedAt: at(-25_000), providerStartAt: at(-23_000),
+    linqDelivery: {
+      source: "runtime", attemptedAt: at(-5_000), acceptedAt: at(-4_000), deliveredAt: at(-2_000),
+    },
+  });
+  const read = async (rows: unknown[]) => {
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const prisma = { hostedIngressLatencyTrace: { findMany } };
+    const result = await readHostedLinqProductionCanaryLatencyDiagnostics({ prisma, memberId: "synthetic-canary" });
+    return { result, findMany };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+  });
+
+  it("reads only four projected rows for the authorized member in an indexed server-owned window", async () => {
+    const { result, findMany } = await read([row()]);
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      where: { userId: "synthetic-canary", source: "linq", acceptedAt: { gte: at(-600_000), lte: at(0) } },
+      orderBy: { acceptedAt: "desc" }, take: 4,
+      select: {
+        webhookReceivedAt: true, acceptedAt: true, assistantInputStagedAt: true, providerStartAt: true,
+        linqDelivery: { select: { source: true, attemptedAt: true, acceptedAt: true, deliveredAt: true } },
+      },
+    });
+    expect(result).toEqual({
+      status: "observed", failedTurnMatched: false, truncated: false,
+      traces: [{
+        stage: "delivery_observation", stale: false, incomplete: false, ageMs: 30_000,
+        ingressMs: 1_000, preRuntimeMs: 5_000, runtimeToProviderMs: 2_000, providerToDeliveryMs: 18_000,
+        deliveryAcceptMs: 1_000, deliveryReceiptMs: 2_000, deliveredAgeMs: 2_000,
+      }],
+    });
+    expect(runtimeLogMocks.listHostedRuntimeTurnTimingLogs).not.toHaveBeenCalled();
+  });
+
+  it("omits private fields even if the database fixture supplies extra data", async () => {
+    const value = row();
+    const { result } = await read([{
+      ...value, userId: "synthetic-private-member", mailboxItemId: "synthetic-private-mailbox",
+      runtimeAttemptId: "synthetic-private-attempt", phaseBreakdownJson: { content: "synthetic-private-content" },
+      linqDelivery: { ...value.linqDelivery, sourceRef: "synthetic-private-ref", providerMessageId: "synthetic-private-message" },
+    }]);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("synthetic-private");
+    expect(serialized).not.toContain("2026-");
+    expect(serialized).not.toContain(String(now));
+  });
+
+  it("keeps empty, multiple, truncated, stale, and incomplete evidence distinct", async () => {
+    expect((await read([])).result).toEqual({ status: "empty", failedTurnMatched: false, truncated: false, traces: [] });
+    expect((await read([row(), row()])).result).toMatchObject({ status: "ambiguous", truncated: false });
+    const truncated = (await read([row(), row(), row(), row()])).result;
+    expect(truncated).toMatchObject({ status: "ambiguous", truncated: true, failedTurnMatched: false });
+    expect(truncated.traces).toHaveLength(3);
+    const stale = { ...row(), acceptedAt: at(-121_000), webhookReceivedAt: at(-122_000) };
+    expect((await read([stale])).result.traces[0]).toMatchObject({ stale: true, ageMs: 121_000 });
+    const incomplete = { ...row(), assistantInputStagedAt: null, providerStartAt: null, linqDelivery: null };
+    expect((await read([incomplete])).result.traces[0]).toEqual({
+      stage: "pre_runtime", stale: false, incomplete: true, ageMs: 30_000, ingressMs: 1_000,
+    });
+    expect((await read([{ ...row(), linqDelivery: null }])).result.traces[0]).toMatchObject({
+      stage: "runtime_provider", incomplete: true,
+    });
+  });
+
+  it("recognizes instant delivery origin even when its continuation later starts a provider", async () => {
+    const value = row();
+    const { result } = await read([{
+      ...value, providerStartAt: at(-2_000),
+      linqDelivery: { ...value.linqDelivery, source: "hosted_web_instant_first_turn" },
+    }]);
+    expect(result.traces[0]).toEqual({
+      stage: "instant_reply", stale: false, incomplete: false, ageMs: 30_000, ingressMs: 1_000,
+      acceptedToDeliveryAttemptMs: 25_000, deliveryAcceptMs: 1_000, deliveryReceiptMs: 2_000, deliveredAgeMs: 2_000,
+    });
+    expect((await read([{ ...value, providerStartAt: null }])).result.traces[0]).toMatchObject({
+      stage: "delivery_observation", incomplete: true,
+    });
+  });
+
+  it.each([
+    { label: "negative", start: -29_000 },
+    { label: "overlong", start: -700_001 },
+    { label: "invalid", start: Number.NaN },
+  ])("omits $label intervals instead of fabricating zero-duration evidence", async ({ start }) => {
+    const { result } = await read([{ ...row(), webhookReceivedAt: at(start) }]);
+    expect(result.traces[0]).toMatchObject({ incomplete: true });
+    expect(result.traces[0]).not.toHaveProperty("ingressMs");
+  });
+
+  it("does not confuse a failed trace query with an empty successful observation", async () => {
+    const findMany = vi.fn().mockRejectedValue(new Error("synthetic-private-database-error"));
+    const prisma = { hostedIngressLatencyTrace: { findMany } };
+    await expect(readHostedLinqProductionCanaryLatencyDiagnostics({ prisma, memberId: "synthetic-canary" }))
+      .rejects.toThrow("synthetic-private-database-error");
+    expect(findMany).toHaveBeenCalledOnce();
+  });
+});
 
 describe("hosted runtime latency dashboard store", () => {
   beforeEach(() => {
@@ -865,6 +973,31 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.linqDeliveryId).toBe("delivery_latency_1");
   });
 
+  it("links a Web instant reply without inventing a runtime attempt and retains the link through later ingress writes", async () => {
+    const prisma = createLatencyWritePrisma({
+      deliveryLinkMatches: [true],
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T18:36:52.229Z")),
+    });
+    await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+      answeredMailboxItemIds: ["mailbox_latency_1"],
+      authenticatedUserId: "member_latency_1",
+      linqDeliveryId: "delivery_latency_1",
+      prisma,
+      replyRuntimeAttemptId: null,
+    })).resolves.toEqual({ matchedCount: 1, recorded: true });
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+      webhookReceivedAt: instant("2026-06-02T18:36:50.000Z"),
+    });
+    expect(prisma.readTrace()).toMatchObject({
+      linqDeliveryId: "delivery_latency_1",
+      replyRuntimeAttemptId: null,
+      runtimeAttemptId: null,
+    });
+  });
+
   it("links delivery after a restart without replacing the generation attempt", async () => {
     const prisma = createLatencyWritePrisma({
       deliveryLinkMatches: [true],
@@ -1076,7 +1209,7 @@ describe("hosted runtime latency dashboard store", () => {
         triggeredByWebDirect: true,
       },
     });
-    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO UPDATE");
   });
 
   it("merges direct ensure timing when a trace row already won creation", async () => {
@@ -1123,7 +1256,7 @@ describe("hosted runtime latency dashboard store", () => {
         directEnsureHandlerDurationMs: 42,
       },
     });
-    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO UPDATE");
   });
 
   it("stores retry_later as a bounded outcome without retry or error detail", async () => {
@@ -2987,7 +3120,7 @@ function createLatencyWritePrisma(input: {
         const traceId = query.values[2];
         const mailboxItemId = query.values[3];
         if (
-          typeof replyRuntimeAttemptId !== "string"
+          (replyRuntimeAttemptId !== null && typeof replyRuntimeAttemptId !== "string")
           || typeof linqDeliveryId !== "string"
           || typeof traceId !== "string"
           || typeof mailboxItemId !== "string"
@@ -3048,6 +3181,9 @@ function createLatencyWritePrisma(input: {
         mailboxItemId,
         mailboxLane,
         mailboxLaneSeq,
+        _ingressTypingAcceptedAt,
+        _webhookReceivedAt,
+        _phaseBreakdownJson,
         acceptedAt,
       ] = values;
       trace = createMutableLatencyTrace({

@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   logHostedTelegramAttachmentDownloadUnavailable: vi.fn(),
   createInboxParserService: vi.fn(),
   createInboxPipeline: vi.fn(),
-  createParsedInboxPipeline: vi.fn(),
   normalizeHostedEmailConversationCapture: vi.fn(),
   normalizeHostedLinqConversationCapture: vi.fn(),
   normalizeHostedTelegramConversationCapture: vi.fn(),
@@ -31,7 +30,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@murphai/inboxd/runtime", () => ({
   createInboxPipeline: mocks.createInboxPipeline,
-  createParsedInboxPipeline: mocks.createParsedInboxPipeline,
   openInboxRuntime: mocks.openInboxRuntime,
 }));
 
@@ -82,6 +80,8 @@ vi.mock("@murphai/hosted-execution/hosted-email", () => ({
 
 import {
   importHostedConversationMessageWakeIntoLocalInbox,
+  prepareHostedConversationAudioPairIntoLocalInbox,
+  HostedConversationInboxProjectionError,
 } from "../src/hosted-runtime/events/conversation.ts";
 
 function createRuntime() {
@@ -321,6 +321,47 @@ afterEach(() => {
 });
 
 describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
+  it("measures capture persistence separately from download and inbox opening", async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    mocks.normalizeHostedLinqConversationCapture.mockImplementationOnce(async () => {
+      now += 11;
+      return { source: "linq" };
+    });
+    const inboxRuntime = { close: vi.fn(), listAttachmentParseJobs: vi.fn(() => []) };
+    mocks.openInboxRuntime.mockImplementationOnce(async () => {
+      now += 7;
+      return inboxRuntime;
+    });
+    const close = vi.fn();
+    mocks.createInboxPipeline.mockImplementationOnce(async () => ({
+      close,
+      processCapture: async () => {
+        now += 19;
+        return { captureId: "capture_synthetic" };
+      },
+    }));
+    try {
+      const result = await importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntime(),
+        vaultRoot: "/tmp/synthetic-projection-timing",
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId: "evt_synthetic_timing",
+          linqMessage: {
+            chatId: "chat_synthetic", from: "+15551234567", isFromMe: false,
+            messageId: "msg_synthetic", parts: [],
+          },
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          phoneLookupKey: "15551234567", userId: "member_synthetic",
+        }),
+      });
+      expect(close).toHaveBeenCalledOnce();
+      expect(result.capturePersistMs).toBe(19);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("normalizes each hosted conversation wake directly before parsed inbox persistence", async () => {
     const baseRuntime = createRuntime();
     const providerFetch = vi.fn<typeof fetch>();
@@ -1497,3 +1538,100 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(mocks.openInboxRuntime).not.toHaveBeenCalled();
   });
 });
+
+// Pair shutdown/error tests use the local projection owner without real providers.
+describe("hosted audio pair owned resource boundaries", () => {
+  it("joins the sibling download but never persists or claims it after an earlier canonical failure", async () => {
+    const release = audioBoundaryDeferred();
+    const bothDownloadsStarted = audioBoundaryDeferred();
+    let downloads = 0;
+    mocks.normalizeHostedLinqConversationCapture.mockImplementation(async () => {
+      downloads += 1;
+      if (downloads === 2) {
+        bothDownloadsStarted.resolve();
+        await release.promise;
+      }
+      return { source: "linq" };
+    });
+    const processCapture = vi.fn(async () => { throw new Error("Synthetic canonical write failure."); });
+    const close = vi.fn();
+    mocks.createInboxPipeline.mockResolvedValueOnce({ processCapture, close });
+    let settled = false;
+    const operation = prepareHostedConversationAudioPairIntoLocalInbox({
+      wakes: [createAudioBoundaryWake(1), createAudioBoundaryWake(2)],
+      runtime: createRuntime(), vaultRoot: "synthetic-vault",
+    }).finally(() => { settled = true; });
+    void operation.catch(() => undefined);
+    try {
+      await bothDownloadsStarted.promise;
+      expect(settled).toBe(false);
+      expect(close).not.toHaveBeenCalled();
+      release.resolve();
+      const result = await operation;
+      expect(result.results[0].status).toBe("failed");
+      if (result.results[0].status === "failed") {
+        expect(result.results[0].error).toBeInstanceOf(HostedConversationInboxProjectionError);
+      }
+      expect(result.results[1]).toBeNull();
+      expect(processCapture).toHaveBeenCalledTimes(1);
+      expect(mocks.createInboxParserService).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      release.resolve();
+      await operation.catch(() => undefined);
+    }
+  });
+
+  it("closes a runtime opened during preemption only after both owned downloads settle", async () => {
+    const abort = new AbortController();
+    const release = audioBoundaryDeferred();
+    const opened = audioBoundaryDeferred();
+    const close = vi.fn();
+    const reason = new Error("Synthetic shutdown before capture persistence.");
+    mocks.normalizeHostedLinqConversationCapture.mockImplementation(async () => {
+      await release.promise;
+      return { source: "linq" };
+    });
+    mocks.openInboxRuntime.mockImplementationOnce(async () => {
+      abort.abort(reason);
+      opened.resolve();
+      return { close };
+    });
+    let settled = false;
+    const operation = prepareHostedConversationAudioPairIntoLocalInbox({
+      wakes: [createAudioBoundaryWake(1), createAudioBoundaryWake(2)],
+      runtime: createRuntime(), signal: abort.signal, vaultRoot: "synthetic-vault",
+    }).then(() => null, (error: unknown) => { settled = true; return error; });
+    try {
+      await opened.promise;
+      expect(settled).toBe(false);
+      expect(close).not.toHaveBeenCalled();
+      release.resolve();
+      expect(await operation).toBe(reason);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(mocks.createInboxPipeline).not.toHaveBeenCalled();
+      expect(mocks.createInboxParserService).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await operation;
+    }
+  });
+});
+
+function audioBoundaryDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function createAudioBoundaryWake(ordinal: number) {
+  return buildHostedExecutionLinqConversationMessageWake({
+    eventId: `event_audio_boundary_${ordinal}`, occurredAt: "2026-06-01T00:00:00.000Z",
+    userId: "member_audio_boundary", phoneLookupKey: "account_audio_boundary",
+    linqMessage: {
+      chatId: "thread_audio_boundary", from: "sender_audio_boundary", isFromMe: false, threadIsDirect: true,
+      messageId: `message_audio_boundary_${ordinal}`,
+      parts: [{ type: "voice_memo", attachmentId: `attachment_audio_boundary_${ordinal}`, mimeType: "audio/wav" }],
+    },
+  });
+}

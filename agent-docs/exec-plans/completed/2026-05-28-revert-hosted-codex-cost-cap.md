@@ -6,7 +6,7 @@ Goal (incl. success criteria):
 Constraints/Assumptions:
 - Do not expose personal identifiers, raw messages, raw health data, secrets, full local paths, or prompt contents in docs, logs, commits, or final output.
 - Keep the architecture simple: use Codex's normal resume/compaction path again instead of custom hosted resume-budget clearing.
-- Preserve unrelated Murph Age active work and unrelated working-tree edits.
+- Preserve unrelated working-tree edits.
 
 Key decisions:
 - Use a reverse patch for commit `f4a18ae23d294ffa45373b2142e32353d068f377`, excluding browser-vault refresh and Temporal coalescing files.

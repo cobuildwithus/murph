@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "device-history-empty-date-progress",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer pauses in device history imports",
+    "summary": "Device history imports keep moving through dates with no readings without unnecessary pauses between batches.",
+    "details": "Provider retry waits and priority for your conversations still apply. Import time depends on the history available from your device provider.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3623
+    ]
+  }
+}

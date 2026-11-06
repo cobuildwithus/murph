@@ -438,16 +438,32 @@ test("a planned baseline does not hide ordinary metric-window evidence", () => {
     })],
   });
 
+  const metricPoints = [
+    metricPoint({ date: "2026-04-01", recordId: "evt_baseline_window", value: 10 }),
+    metricPoint({ date: "2026-04-02", recordId: "evt_followup_window", value: 12 }),
+  ];
   const outcome = analyzeExperimentOutcome(vault, slug, {
     asOf: "2026-04-02",
-    metricPoints: [
-      metricPoint({ date: "2026-04-01", recordId: "evt_baseline_window", value: 10 }),
-      metricPoint({ date: "2026-04-02", recordId: "evt_followup_window", value: 12 }),
-    ],
+    metricPoints,
+  });
+  const progress = summarizeExperimentProgress(vault, slug, {
+    asOf: "2026-04-03",
+    metricPoints,
   });
 
   assert.equal(outcome.metricResults[0]?.baselineMean, 10);
   assert.equal(outcome.metricResults[0]?.interventionMean, 12);
+  assert.equal(progress.phase, "review_due");
+  assert.equal(progress.analysisReadiness.status, "ready");
+  assert.deepEqual(progress.dataCoverage, {
+    activityProviders: [],
+    baselineDaysAvailable: 1,
+    interventionDaysAvailable: 1,
+    primaryBiomarkerKey: outcomeKey,
+    primaryMetricDaysAvailable: 2,
+    status: "partial",
+    wearableProviders: [],
+  });
 });
 
 test("custom session fields become outcome points without global registration", () => {
@@ -595,7 +611,16 @@ test("derived metric outcomes retain their own identity and count source observa
   assert.equal(metric?.unit, "count");
 });
 
-test("structured review experiments close without fabricating metric deltas", () => {
+test.each([
+  ["active", "2026-04-14", "intervention", "partial"],
+  ["active", "2026-04-15", "review_due", "ready_for_review"],
+  ["completed", "2026-04-14", "completed", "ready_for_review"],
+] as const)("structured review experiments preserve evidence without fabricating metric deltas (%s on %s)", (
+  status,
+  asOf,
+  phase,
+  coverageStatus,
+) => {
   const slug = "movement-quality-review";
   const outcomeKey = "biomarker:movement-quality-review";
   const vault = createVaultReadModel({
@@ -604,7 +629,7 @@ test("structured review experiments close without fabricating metric deltas", ()
     entities: [
       makeExperiment({
         slug,
-        status: "completed",
+        status,
         runPlan: {
           interventionStart: "2026-04-01",
           interventionEnd: "2026-04-14",
@@ -663,14 +688,23 @@ test("structured review experiments close without fabricating metric deltas", ()
     ],
   });
 
-  const progress = summarizeExperimentProgress(vault, slug, { asOf: "2026-04-14" });
-  const outcome = analyzeExperimentOutcome(vault, slug, { asOf: "2026-04-14" });
+  const progress = summarizeExperimentProgress(vault, slug, { asOf });
+  const outcome = analyzeExperimentOutcome(vault, slug, { asOf });
 
   assert.deepEqual(progress.analysisReadiness, {
     status: "ready",
     blockingReasons: [],
   });
-  assert.equal(progress.dataCoverage.status, "ready_for_review");
+  assert.equal(progress.phase, phase);
+  assert.deepEqual(progress.dataCoverage, {
+    activityProviders: [],
+    baselineDaysAvailable: 1,
+    interventionDaysAvailable: 1,
+    primaryBiomarkerKey: outcomeKey,
+    primaryMetricDaysAvailable: 2,
+    status: coverageStatus,
+    wearableProviders: [],
+  });
   assert.deepEqual(outcome.metricResults, []);
   assert.deepEqual(outcome.structuredReview, {
     baseline: {
@@ -806,6 +840,28 @@ test("structured review readiness uses canonical evidence dates over anchor clai
       asOf: "2026-04-20",
     });
 
+    const beforeProgress = summarizeExperimentProgress(vault, slug, {
+      asOf: "2026-04-14",
+    });
+    const afterProgress = summarizeExperimentProgress(vault, slug, {
+      asOf: "2026-04-20",
+    });
+
+    assert.deepEqual(beforeProgress.dataCoverage, {
+      activityProviders: [],
+      baselineDaysAvailable: 1,
+      interventionDaysAvailable: 0,
+      primaryBiomarkerKey: outcomeKey,
+      primaryMetricDaysAvailable: 1,
+      status: "partial",
+      wearableProviders: [],
+    });
+    assert.deepEqual(afterProgress.dataCoverage, {
+      ...beforeProgress.dataCoverage,
+      interventionDaysAvailable: 1,
+      primaryMetricDaysAvailable: 2,
+      status: "ready_for_review",
+    });
     assert.equal(beforeEvidence.structuredReview?.status, "baseline_only");
     assert.deepEqual(beforeEvidence.structuredReview?.followup.recordIds, []);
     assert.equal(afterEvidence.structuredReview?.status, "ready_for_review");

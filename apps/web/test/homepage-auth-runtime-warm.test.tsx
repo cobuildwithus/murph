@@ -1,275 +1,54 @@
-import { act, createElement, useEffect, type ReactNode } from "react";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-
 import { renderClientComponent } from "./render-client-component";
+import type { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 
-const mocks = vi.hoisted(() => ({
-  authDialogProps: null as null | {
-    autoSendPastedPhoneNumber?: boolean;
-    onOpenChange: (open: boolean) => void;
-    open: boolean;
-    privyRuntime?: { kind: string };
-  },
-  panelPreload: vi.fn(),
-  runtimeFailuresRemaining: 0,
-  runtimeLoad: vi.fn(),
-  runtimeModuleLoad: vi.fn(),
-  runtimeMount: vi.fn(),
-  runtimeUnmount: vi.fn(),
-}));
-
+const mocks = vi.hoisted(() => ({ dialog: null as ComponentProps<typeof AuthDialog> | null, preload: vi.fn() }));
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
-  AuthDialog(props: {
-    autoSendPastedPhoneNumber?: boolean;
-    onOpenChange: (open: boolean) => void;
-    open: boolean;
-    privyRuntime?: { kind: string };
-  }) {
-    mocks.authDialogProps = props;
-    return createElement(
-      "div",
-      {
-        "data-auth-dialog-open": props.open ? "yes" : "no",
-        "data-auth-runtime": props.privyRuntime?.kind ?? "standalone",
-      },
-      props.open ? "Auth dialog" : null,
-    );
-  },
-  preloadHostedAuthPanelIsland: mocks.panelPreload,
+  AuthDialog(props: ComponentProps<typeof AuthDialog>) { mocks.dialog = props; return createElement("div", null, props.open ? "Auth dialog" : null); },
+  preloadHostedAuthPanelIsland: mocks.preload,
 }));
+vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({ subscribeBrowserVaultSessionInvalidation: () => () => {} }));
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({ navigateHostedAuthRedirect: vi.fn(), reloadCurrentHostedAuthDocument: vi.fn() }));
+vi.mock("next/link", () => ({ default: ({ children, href }: { children?: ReactNode; href: string }) => createElement("a", { href }, children) }));
+import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
+import { LandingAuthActions } from "@/app/auth-controls";
 
-vi.mock("@/src/components/hosted-onboarding/homepage-auth-runtime-loader", () => ({
-  async loadHomepageAuthRuntime() {
-    mocks.runtimeLoad();
-    if (mocks.runtimeFailuresRemaining > 0) {
-      mocks.runtimeFailuresRemaining -= 1;
-      throw new Error("transient runtime load failure");
-    }
-    const runtimeModule = await import(
-      "@/src/components/hosted-onboarding/hosted-auth-runtime"
-    );
-    return runtimeModule.HostedAuthRuntime;
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-runtime", () => {
-  mocks.runtimeModuleLoad();
-
-  return {
-    HostedAuthRuntime({
-      children,
-    }: {
-      children: (state: {
-        attempt: number;
-        kind: "configured";
-        restart: () => void;
-      }) => ReactNode;
-    }) {
-      useEffect(() => {
-        mocks.runtimeMount();
-        return () => mocks.runtimeUnmount();
-      }, []);
-
-      return children({
-        attempt: 1,
-        kind: "configured",
-        restart: () => {},
-      });
-    },
-  };
-});
-
-vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
-  subscribeBrowserVaultSessionInvalidation: () => () => {},
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
-  navigateHostedAuthRedirect: vi.fn(),
-  reloadCurrentHostedAuthDocument: vi.fn(),
-}));
-
-vi.mock("next/link", () => ({
-  default(props: {
-    children?: ReactNode;
-    href: string;
-  }) {
-    return createElement("a", { href: props.href }, props.children);
-  },
-}));
-
-let cleanupRender: (() => Promise<void>) | null = null;
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.authDialogProps = null;
-  mocks.runtimeFailuresRemaining = 0;
-});
-
-afterEach(async () => {
-  if (cleanupRender) {
-    await cleanupRender();
-    cleanupRender = null;
-  }
-  vi.useRealTimers();
-});
-
-test("waits for focus intent before warming one shared runtime and reuses it on click", async () => {
-  vi.useFakeTimers();
-  const { HomepageAuthRuntimeProvider } = await import(
-    "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
-  );
-  const { LandingAuthActions } = await import("@/app/auth-controls");
-  const rendered = await renderClientComponent(
-    createElement(
-      HomepageAuthRuntimeProvider,
-      { authenticated: false },
-      createElement(LandingAuthActions, {
-        authLabel: "Get started",
-        authenticated: false,
-        context: "hero",
-      }),
-    ),
-    { location: bareHomepageLocation() },
-  );
-  cleanupRender = rendered.cleanup;
-
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({ open: false });
-  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBe(true);
-  expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10_000);
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeLoad).not.toHaveBeenCalled();
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("focusin", { bubbles: true }),
-    );
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
-  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
-  expect(mocks.panelPreload).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({
-    open: false,
-    privyRuntime: { kind: "configured" },
-  });
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
-  expect(mocks.runtimeUnmount).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({
-    open: true,
-    privyRuntime: { kind: "configured" },
-  });
-});
-
-test("leaves authenticated homepage children on the ordinary root auth owner", async () => {
-  vi.useFakeTimers();
-  const { HomepageAuthRuntimeProvider } = await import(
-    "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
-  );
-  const rendered = await renderClientComponent(
-    createElement(
-      HomepageAuthRuntimeProvider,
-      { authenticated: true },
-      createElement("p", null, "Authenticated homepage"),
-    ),
-    { location: bareHomepageLocation(), requireButton: false },
-  );
-  cleanupRender = rendered.cleanup;
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2_500);
-  });
-  await flushRuntimeLoad();
-
-  expect(rendered.container.textContent).toContain("Authenticated homepage");
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toBeNull();
-});
-
-test("keeps a standalone auth session stable and retries a failed intent load", async () => {
-  vi.useFakeTimers();
-  mocks.runtimeFailuresRemaining = 1;
-  const { HomepageAuthRuntimeProvider } = await import(
-    "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
-  );
-  const { LandingAuthActions } = await import("@/app/auth-controls");
-  const rendered = await renderClientComponent(
-    createElement(
-      HomepageAuthRuntimeProvider,
-      { authenticated: false },
-      createElement(LandingAuthActions, {
-        authLabel: "Get started",
-        authenticated: false,
-        context: "hero",
-      }),
-    ),
-    { location: bareHomepageLocation() },
-  );
-  cleanupRender = rendered.cleanup;
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("pointerdown", { bubbles: true }),
-    );
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeLoad).toHaveBeenCalledTimes(1);
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-  expect(rendered.container.textContent).toContain("Get started");
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeLoad).toHaveBeenCalledTimes(2);
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({ open: true });
-  expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
-
-  await act(async () => {
-    mocks.authDialogProps?.onOpenChange(false);
-    await Promise.resolve();
-  });
-
-  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
-  expect(mocks.authDialogProps).toMatchObject({
-    open: false,
-    privyRuntime: { kind: "configured" },
-  });
-});
-
-async function flushRuntimeLoad() {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+let cleanup: (() => Promise<void>) | null = null;
+beforeEach(() => { vi.clearAllMocks(); mocks.dialog = null; });
+afterEach(async () => { await cleanup?.(); cleanup = null; });
+async function render() {
+  const rendered = await renderClientComponent(createElement(HomepageAuthRuntimeProvider, { authenticated: false },
+    createElement(LandingAuthActions, { authLabel: "Get started", authenticated: false, context: "hero" })));
+  cleanup = rendered.cleanup;
+  return rendered;
 }
 
-function bareHomepageLocation() {
-  return {
-    hash: "",
-    href: "https://example.test/",
-    origin: "https://example.test",
-    pathname: "/",
-    search: "",
-  };
-}
+test("focus warms code without opening authentication; click opens the shared dialog", async () => {
+  const rendered = await render();
+  expect(mocks.preload).not.toHaveBeenCalled();
+  expect(mocks.dialog?.open).toBe(false);
+  await act(async () => { rendered.button.dispatchEvent(new rendered.window.Event("focusin", { bubbles: true })); });
+  expect(mocks.preload).toHaveBeenCalledOnce();
+  expect(mocks.dialog?.open).toBe(false);
+  await act(async () => { rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true })); });
+  expect(mocks.dialog).toMatchObject({ open: true, autoSendPastedPhoneNumber: true, requireLaunchConsentOnCompletion: true });
+});
+
+test("a first click works without preloading and close permits a fresh dialog", async () => {
+  const rendered = await render();
+  await act(async () => { rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true })); });
+  expect(mocks.dialog?.open).toBe(true);
+  await act(async () => { mocks.dialog!.onOpenChange(false); });
+  expect(mocks.dialog?.open).toBe(false);
+  await act(async () => { rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true })); });
+  expect(mocks.dialog?.open).toBe(true);
+});
+
+test("authenticated homepage children keep their existing root session owner", async () => {
+  const rendered = await renderClientComponent(createElement(HomepageAuthRuntimeProvider, { authenticated: true }, createElement("p", null, "Your account")), { requireButton: false });
+  cleanup = rendered.cleanup;
+  expect(rendered.container.textContent).toContain("Your account");
+  expect(mocks.dialog).toBeNull();
+  expect(mocks.preload).not.toHaveBeenCalled();
+});

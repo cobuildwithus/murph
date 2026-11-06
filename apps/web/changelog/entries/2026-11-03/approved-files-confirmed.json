@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 90,
+  "item": {
+    "id": "approved-files-confirmed",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph knows when your approved file arrives",
+    "summary": "After you approve a file Murph prepared, like a ZIP of your vault, Murph now knows it was sent and says so if you ask.",
+    "details": "Asking for the file again starts a fresh copy with a new approval, instead of pointing you back to the one you already approved.",
+    "relevanceTags": [
+      "privacy",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4508
+    ]
+  }
+}

@@ -18,7 +18,7 @@ import {
   runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import {
   assertPreparedHostedMemberDirectRouteTx,
@@ -68,6 +68,7 @@ export async function ingestCompanionMealPhoto(input: {
     userId: input.memberId,
   });
   const envelope = buildHostedExecutionMealPhotoCapturedWake({
+    uploadId: input.upload.uploadId,
     byteLength: staged.byteLength,
     captureId: input.upload.captureId,
     capturedAt: input.upload.capturedAt,
@@ -109,10 +110,20 @@ export async function ingestCompanionMealPhoto(input: {
       userId: input.memberId,
     });
     if (appended.dedupeConflict) {
+      if (appended.captureReceipt) {
+        // The first request may also have lost its post-commit wake response.
+        await signalAcceptedMealPhoto({
+          expectedUserId: input.memberId,
+          mailboxItemId: appended.item.id,
+        });
+      }
       throw hostedOnboardingError({
         code: "MEAL_PHOTO_DEDUPE_CONFLICT",
         httpStatus: 422,
         message: "Meal photo upload conflicts with an earlier capture.",
+        ...(appended.captureReceipt
+          ? { details: { captureReceipt: appended.captureReceipt } }
+          : {}),
       });
     }
   } catch (error) {
@@ -138,7 +149,7 @@ export async function ingestCompanionMealPhoto(input: {
 
   // Re-signal exact duplicates too: an earlier request may have committed the
   // mailbox row and then lost its runtime wake response.
-  await signalHostedMailboxAppendRuntime({
+  await signalAcceptedMealPhoto({
     expectedUserId: input.memberId,
     mailboxItemId: appended.item.id,
   });
@@ -147,6 +158,20 @@ export async function ingestCompanionMealPhoto(input: {
     accepted: true,
     duplicate: appended.duplicate,
   };
+}
+
+async function signalAcceptedMealPhoto(
+  input: Parameters<typeof signalHostedMailboxAppendRuntime>[0],
+): Promise<void> {
+  try {
+    await signalHostedMailboxAppendRuntime(input);
+  } catch (error) {
+    // The photo is durably accepted. Inactive runtime access is expected for
+    // lapsed members; the existing sweeper resumes pending work after recovery.
+    if (!isHostedOnboardingError(error) || error.code !== "HOSTED_RUNTIME_USER_INACTIVE") {
+      throw error;
+    }
+  }
 }
 
 async function deleteUnclaimedStaging(input: {

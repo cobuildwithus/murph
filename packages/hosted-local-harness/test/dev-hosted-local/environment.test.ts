@@ -208,6 +208,8 @@ describe("mergeCloudflareLocalEnv", () => {
       config: localConfig,
       existing: {
         HOSTED_APP_SESSION_HMAC_KEY: "web-only-key",
+        HOSTED_BETTER_AUTH_SECRET: "synthetic-auth",
+        HOSTED_AUTH_STORAGE_KEY: "synthetic-storage",
         HOSTED_CRYPTO_ENV: "local",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
@@ -273,6 +275,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
     expect(merged.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(merged.HOSTED_BETTER_AUTH_SECRET).toBeUndefined();
+    expect(merged.HOSTED_AUTH_STORAGE_KEY).toBeUndefined();
   });
 
   it("preserves an existing hosted-local log fingerprint secret", () => {
@@ -1163,12 +1167,6 @@ describe("buildHostedLocalDevOverrides", () => {
     );
   });
 
-  it("preserves an explicit wake fetch proof key override", () => {
-    const overrides = buildHostedLocalDevOverrides(localConfig, {
-    });
-
-  });
-
   it("derives web callback verifier keys from the current local signing key", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -1325,7 +1323,7 @@ describe("buildWranglerVarArgs", () => {
   it("emits only allowlisted non-empty values", () => {
     expect(
       buildWranglerVarArgs({
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
@@ -1341,6 +1339,8 @@ describe("buildWranglerVarArgs", () => {
       }),
     ).toEqual([
       "--var",
+      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:1000",
+      "--var",
       "HOSTED_WEB_BASE_URL:http://localhost:3000",
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
@@ -1352,8 +1352,6 @@ describe("buildWranglerVarArgs", () => {
       "MURPH_HOSTED_LOCAL_PROFILE:dev",
       "--var",
       "NODE_ENV:test",
-      "--var",
-      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:250",
       "--var",
       "HOSTED_EXECUTION_RUNNER_HOST_ALIAS:127.0.0.1",
       "--var",
@@ -1386,6 +1384,7 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         HOSTED_EXECUTION_STANDBY_TARGET: "3",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+        HOSTED_RUNTIME_POSTGRES_ENABLED: "true",
       }),
     ).toEqual([
       "--var",
@@ -1454,7 +1453,7 @@ describe("buildWranglerEnvFileText", () => {
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
-    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,exa,hosted-email,linq,mapbox,telegram"');
+    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
@@ -1508,7 +1507,7 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         VENICE_API_KEY: "local-venice-key",
       }),
-    ).toContain('VENICE_API_KEY="local-venice-key"');
+    ).not.toContain('VENICE_API_KEY');
     expect(
       buildWranglerEnvFileText({
         MURPH_DATA_API_KEY: "local-data-api-key",
@@ -1524,7 +1523,6 @@ describe("buildWranglerEnvFileText", () => {
   it("includes hosted provider optional env inspected by the Worker", () => {
     const text = buildWranglerEnvFileText({
       ELEVENLABS_API_KEY: "elevenlabs-secret",
-      EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
       HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
@@ -1537,7 +1535,6 @@ describe("buildWranglerEnvFileText", () => {
     });
 
     expect(text).toContain('ELEVENLABS_API_KEY="elevenlabs-secret"');
-    expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
     expect(text).toContain('HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS="CUSTOM_API_KEY"');
     expect(text).toContain('HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT="bundle-fingerprint"');
@@ -1770,8 +1767,8 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.analytics_engine_datasets).toEqual([
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
+        binding: "HOSTED_STANDBY_ANALYTICS",
+        dataset: "murph_hosted_standby_inventory",
       },
     ]);
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
@@ -1805,8 +1802,6 @@ describe("buildWranglerLocalDevConfig", () => {
       },
       max_instances: 0,
     });
-    expect(containers[4]).toMatchObject({ class_name: "SmallRunnerContainer", max_instances: 1,
-      image_vars: { HOSTED_RUNNER_CONTAINER_CLASS: "SmallRunnerContainer" } });
   });
 
   it("uses an isolated worker name for worktree-scoped dev runs", () => {
@@ -2012,7 +2007,6 @@ describe("buildWranglerLocalDevConfig", () => {
       required: expect.arrayContaining([
         "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
-        "VENICE_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({

@@ -13,13 +13,8 @@ aliases:
 - candidate:withdrawal-safety-screening:003
 categories:
 - alcohol-abstinence
-relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
+relations: []
+
 source:
   kind: guideline
   title: 'Alcohol-use disorders: diagnosis, assessment and management of harmful drinking and alcohol dependence'

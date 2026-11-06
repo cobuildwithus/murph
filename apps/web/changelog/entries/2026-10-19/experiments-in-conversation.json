@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-10-19",
+  "order": 100,
+  "item": {
+    "id": "experiments-in-conversation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Run experiments with Murph in conversation",
+    "summary": "The experiment website and public protocol library have retired. You can still plan and run a private experiment with Murph.",
+    "details": "Ask Murph to set up a measured comparison, log sessions, review progress, or discuss results. Your saved experiments and their history remain available to Murph.",
+    "relevanceTags": [
+      "experiments"
+    ],
+    "sourcePullRequests": [
+      4216
+    ],
+    "tryIt": {
+      "label": "Plan an experiment",
+      "prompt": "Help me plan a private experiment to test a change in my routine."
+    }
+  }
+}

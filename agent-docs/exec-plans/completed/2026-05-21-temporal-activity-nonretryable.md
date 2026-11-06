@@ -17,7 +17,7 @@ Success criteria:
 ## Constraints
 
 - Preserve unrelated dirty hosted Temporal cleanup, Cloudflare runner, MinIO,
-  and Murph Age work.
+  work.
 - Do not move policy decisions into the workflow.
 - Keep web and Temporal env readers separate.
 - Do not print or store secrets, raw request bodies, user IDs, or local paths.

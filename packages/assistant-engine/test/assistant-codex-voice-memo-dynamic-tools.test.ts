@@ -8,7 +8,9 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  parseGenerateVoiceMemoArguments,
 } from '../src/assistant-codex/dynamic-tools/generate-voice-memo.ts'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -33,6 +35,30 @@ function createLinqRuntime(
 }
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
+  it('advertises expressive cues only for an available v4 voice tool and preserves cue text', () => {
+    for (const modelId of ['eleven_v4', 'eleven_multilingual_v2', undefined]) {
+      const tool = resolveMurphDynamicTools({
+        voiceMemoGenerationAvailable: true,
+        voiceMemoModelId: modelId,
+      }).find((candidate) => candidate.name === 'generate_voice_memo')!
+      const schema = JSON.stringify(tool.inputSchema)
+      expect(schema.includes('[yawning]')).toBe(modelId === 'eleven_v4')
+      expect(schema.includes('without bracketed audio directions')).toBe(modelId !== 'eleven_v4')
+      expect(tool.description).toContain('The voice configured for the running turn is authoritative')
+      expect(schema).toContain("Write the spoken text in the user's requested language")
+      expect(schema).toContain('Language choice never authorizes a voice change or personal memory access outside a private conversation')
+      expect(tool.inputSchema).toMatchObject({
+        properties: { text: { maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH } },
+      })
+    }
+    expect(resolveMurphDynamicTools({ voiceMemoModelId: 'eleven_v4' })
+      .some((tool) => tool.name === 'generate_voice_memo')).toBe(false)
+    expect(parseGenerateVoiceMemoArguments({ text: '[yawning] Time to wind down.' })).toEqual({
+      ok: true,
+      args: { text: '[yawning] Time to wind down.', userRequestedVoiceOptionId: null },
+    })
+  })
+
   it('keeps accompanying text optional and non-duplicative in the model-visible contract', () => {
     expect(ELEVENLABS_TTS_MAX_TEXT_LENGTH).toBe(1_000)
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text.maxLength).toBe(
@@ -126,9 +152,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(generateAndUpload).not.toHaveBeenCalled()
   })
 
-  it('returns the full URL validation reason without executing invalid public media', async () => {
-    const privateUrl =
-      'http://synthetic-private.example.test/catalog/private-file.png?token=private'
+  it.each([
+    'http://synthetic-private.example.test/catalog/private-file.png?token=private',
+    'https://synthetic-private.example.test/_next/image?url=https%3A%2F%2Fcdn.example.test%2Fprivate-file.png&w=800&q=75',
+  ])('returns actionable URL recovery without executing invalid public media: %s', async (privateUrl) => {
     const request = readTestMurphDynamicToolRequest({
       id: 15,
       method: 'item/tool/call',
@@ -172,6 +199,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(feedback).not.toContain('private-file.png')
     expect(feedback).not.toContain('token=private')
     expect(feedback).not.toContain('"received"')
+    expect(feedback).toContain('without credentials, query strings, or fragments')
+    expect(feedback).toContain('original public image URL')
+    expect(feedback).toContain('send_vault_file')
+    expect(feedback).toContain('approval')
     expect(result.responseMediaPatch).toBeUndefined()
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
@@ -489,26 +520,18 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 })
 
 describe('murph.generate_song dynamic tool execution', () => {
-  it('forces the trusted turn duration before song generation', async () => {
+  it('preserves the requested duration for ordinary song generation', async () => {
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
     >(async () => ({
       attachmentId: 'attachment_song_policy',
-      filename: 'sponsor-song.mp3',
+      filename: 'synthetic-song.mp3',
       ok: true,
     }))
-    const generateSongTurnState = {
-      attemptCount: 0,
-      policy: {
-        maxAttempts: 1,
-        requiredDurationSeconds: 15,
-      },
-    }
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: vi.fn<typeof fetch>(),
-      generateSongTurnState,
       nextUsageOrdinal: vi.fn(() => 99),
       progressDelivery: null,
       request: {
@@ -524,59 +547,11 @@ describe('murph.generate_song dynamic tool execution', () => {
 
     expect(generateAndUpload).toHaveBeenCalledTimes(1)
     expect(generateAndUpload.mock.calls[0]?.[0]?.generation).toMatchObject({
-      durationMs: 15_000,
+      durationMs: 30_000,
       kind: 'elevenlabs_music',
     })
-    expect(generateSongTurnState.attemptCount).toBe(1)
     expect(result.rpcResult.success).toBe(true)
   })
 
-  it('does not retry a failed creative song generation attempt', async () => {
-    const generateAndUpload = vi.fn<
-      LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => ({
-      failure: {
-        detail: 'ELEVENLABS_API_REQUEST_FAILED (http 503)',
-        kind: 'generation_failed',
-      },
-      ok: false,
-    }))
-    const generateSongTurnState = {
-      attemptCount: 0,
-      policy: {
-        maxAttempts: 1,
-        requiredDurationSeconds: 15,
-      },
-    }
-    const input = {
-      env: {},
-      fetchImpl: vi.fn<typeof fetch>(),
-      generateSongTurnState,
-      nextUsageOrdinal: vi.fn(() => 99),
-      progressDelivery: null,
-      request: {
-        args: {
-          durationSeconds: 15,
-          instrumental: false,
-          prompt: 'A bright, original group theme.',
-        },
-        kind: 'generate-song' as const,
-      },
-      voiceMemoRuntime: createLinqRuntime(generateAndUpload),
-    }
 
-    const first = await executeMurphDynamicToolRequest(input)
-    const second = await executeMurphDynamicToolRequest(input)
-
-    expect(first.rpcResult.success).toBe(false)
-    expect(second.rpcResult).toEqual({
-      success: false,
-      contentItems: [{
-        type: 'inputText',
-        text: 'song generation attempt limit reached for this turn; no song ran',
-      }],
-    })
-    expect(generateAndUpload).toHaveBeenCalledTimes(1)
-    expect(generateSongTurnState.attemptCount).toBe(1)
-  })
 })

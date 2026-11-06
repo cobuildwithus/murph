@@ -13,14 +13,8 @@ aliases:
   - "Physical Activity Guidelines for Americans, 2nd edition"
 categories:
   - "aerobic-base-training"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block"
-  -
-    type: "parent_family"
-    target: "experiment_family:aerobic-base-training"
 source:
   kind: "guideline"
   title: "Physical Activity Guidelines for Americans, 2nd edition"

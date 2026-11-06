@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { HostedGroupStartClient } from "@/src/components/hosted-groups/group-start-client";
+import { LinkPageFrame } from "@/src/components/link-page/link-page-shell";
 import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
@@ -27,11 +28,11 @@ export default async function HostedGroupStartPage() {
     : false;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-16">
+    <LinkPageFrame>
       <HostedGroupStartClient
         activeAccess={activeAccess}
         authenticated={auth.authenticated}
       />
-    </main>
+    </LinkPageFrame>
   );
 }

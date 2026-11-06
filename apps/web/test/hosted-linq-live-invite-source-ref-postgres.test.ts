@@ -9,8 +9,10 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  claimHostedLinqDeliveryProviderDispatchTx,
+  markHostedLinqDeliveryAcceptedTx,
+  releaseHostedLinqSignupSuppressionAfterDeletionTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
-  readHostedLinqInviteSignupLiveAttemptsTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   buildHostedLinqInviteSignupEffectId,
@@ -173,64 +175,29 @@ describe.skipIf(!runPostgresProof)(
         });
         await planClient.query('ANALYZE "hosted_linq_delivery"');
 
-        const exactIdentityQuery = await captureLiveInviteFactsQuery({
-          dayUtc,
-          memberId,
-          sourceEventDigest: exactDigest,
-        });
         const memberDayQuery = await captureLiveInviteFactsQuery({
           dayUtc,
           memberId,
         });
-        expect(exactIdentityQuery.text.match(/EXISTS \(/gu)).toHaveLength(2);
         expect(memberDayQuery.text.match(/EXISTS \(/gu)).toHaveLength(1);
 
-        const exactFacts = await planClient.query<{
-          anyIdentityLive: boolean;
-          sameIdentityStillLive: boolean;
-        }>({
-          text: exactIdentityQuery.text,
-          values: exactIdentityQuery.values,
-        });
-        expect(exactFacts.rows).toEqual([{
-          anyIdentityLive: true,
-          sameIdentityStillLive: false,
-        }]);
         const memberDayFacts = await planClient.query<{
           anyIdentityLive: boolean;
-          sameIdentityStillLive: boolean;
         }>({
           text: memberDayQuery.text,
           values: memberDayQuery.values,
         });
         expect(memberDayFacts.rows).toEqual([{
           anyIdentityLive: true,
-          sameIdentityStillLive: false,
         }]);
 
-        const exactPlanResult = await planClient.query<{
-          "QUERY PLAN": unknown;
-        }>({
-          text:
-            `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${exactIdentityQuery.text}`,
-          values: exactIdentityQuery.values,
-        });
-        expectBoundedLiveInvitePlan({
-          expectedIndexNodeCount: 2,
-          plan: readPostgreSqlExplainRoot(exactPlanResult.rows),
-          requiresExactIdentityCondition: true,
-        });
         const memberDayPlanResult = await planClient.query<{
           "QUERY PLAN": unknown;
         }>({
           text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${memberDayQuery.text}`,
           values: memberDayQuery.values,
         });
-        expectBoundedLiveInvitePlan({
-          expectedIndexNodeCount: 1,
-          plan: readPostgreSqlExplainRoot(memberDayPlanResult.rows),
-          requiresExactIdentityCondition: false,
-        });
+        expectBoundedLiveInvitePlan(readPostgreSqlExplainRoot(memberDayPlanResult.rows));
 
         await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
           dayUtc,
@@ -255,7 +222,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("serializes concurrent digest failures and releases daily suppression only after the last live identity", async () => {
+    it.each(["same", "different"])("serializes concurrent %s-identity failures and releases daily suppression only after the last live attempt", async (identity) => {
       const suffix = randomUUID();
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -269,9 +236,10 @@ describe.skipIf(!runPostgresProof)(
         sourceEventDigest: "c".repeat(32),
       });
       const secondEffectId = buildHostedLinqInviteSignupEffectId({
+        attempt: identity === "same" ? 2 : 1,
         memberId,
         occurredAt: dayUtc,
-        sourceEventDigest: "d".repeat(32),
+        sourceEventDigest: (identity === "same" ? "c" : "d").repeat(32),
       });
       const firstDeliveryId = `hld_live_invite_failure_${suffix}_first`;
       const secondDeliveryId = `hld_live_invite_failure_${suffix}_second`;
@@ -579,17 +547,15 @@ function buildReceipt(input: {
 async function captureLiveInviteFactsQuery(input: {
   dayUtc: string;
   memberId: string;
-  sourceEventDigest?: string;
 }): Promise<Prisma.Sql> {
   let capturedQuery: Prisma.Sql | null = null;
-  await readHostedLinqInviteSignupLiveAttemptsTx({
+  await hasHostedLinqInviteSignupLiveDeliveryTx({
     ...input,
     prisma: {
       $queryRaw: (query: Prisma.Sql) => {
         capturedQuery = query;
         return Promise.resolve([{
           anyIdentityLive: false,
-          sameIdentityStillLive: false,
         }]);
       },
     } as never,
@@ -600,16 +566,12 @@ async function captureLiveInviteFactsQuery(input: {
   return capturedQuery;
 }
 
-function expectBoundedLiveInvitePlan(input: {
-  expectedIndexNodeCount: number;
-  plan: PostgreSqlExplainPlanNode;
-  requiresExactIdentityCondition: boolean;
-}): void {
+function expectBoundedLiveInvitePlan(plan: PostgreSqlExplainPlanNode): void {
   const indexNodes = collectPostgreSqlPlanNodes(
-    input.plan,
+    plan,
     (node) => node["Index Name"] === LIVE_INVITE_SOURCE_REF_INDEX,
   );
-  expect(indexNodes).toHaveLength(input.expectedIndexNodeCount);
+  expect(indexNodes).toHaveLength(1);
   expect(indexNodes.every((node) =>
     (node["Actual Rows"] ?? 0) <= 2
   )).toBe(true);
@@ -617,11 +579,8 @@ function expectBoundedLiveInvitePlan(input: {
     node["Index Cond"]?.includes("~>=~") === true
     && node["Index Cond"]?.includes("~<~") === true
   )).toBe(true);
-  expect(indexNodes.some((node) =>
-    node["Index Cond"]?.includes("= ANY") === true
-  )).toBe(input.requiresExactIdentityCondition);
   expect(collectPostgreSqlPlanNodes(
-    input.plan,
+    plan,
     (node) => node["Node Type"] === "Seq Scan"
       && node["Relation Name"] === "hosted_linq_delivery",
   )).toHaveLength(0);
@@ -732,4 +691,91 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   const effectiveHost = (hostOverrides[0] || parsed.hostname).toLowerCase();
   return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(effectiveHost)
     || effectiveHost.startsWith("/");
+}
+
+
+describe.skipIf(!runPostgresProof)("signup suppression owner", () => {
+  it.each([false, true])("failure releases only without another live identity (B live: %s)", async (bLive) => withSuppressionFixture(async (f) => {
+    await f.claim("a");
+    await f.accept("a");
+    if (bLive) await f.claim("b");
+    await f.receipt("a", "failed");
+    const afterFailure = await f.read();
+    expect(afterFailure.onboardingLinkSentAt !== null).toBe(bLive);
+    if (!bLive) {
+      await f.claim("b");
+      expect((await f.read()).onboardingLinkSentAt).toBeNull();
+    }
+    expect((await f.read()).signupLinkReminderSentAt).toEqual(f.reminderAt);
+  }));
+
+  it("catches up delivered-before-accepted and accepted no-op through the owner", async () => withSuppressionFixture(async (f) => {
+    await f.claim("a");
+    await f.receipt("a", "delivered");
+    expect((await f.read()).onboardingLinkSentAt).toBeNull();
+    const accepted = await f.accept("a");
+    expect(accepted).toMatchObject({ deliveryStatus: "delivered", restoreOnboardingLink: { memberId: f.memberId } });
+    expect((await f.read()).onboardingLinkSentAt).not.toBeNull();
+    await f.prisma.hostedLinqDailyState.update({ where: f.dailyWhere, data: { onboardingLinkSentAt: null } });
+    expect(await f.accept("a")).toMatchObject({ deliveryStatus: "delivered", restoreOnboardingLink: null });
+    const marker = await f.read();
+    expect(marker.onboardingLinkSentAt).not.toBeNull();
+    expect(marker.signupLinkReminderSentAt).toEqual(f.reminderAt);
+  }));
+
+  it("privacy deletion preserves suppression until all identities are gone and keeps reminders", async () => withSuppressionFixture(async (f) => {
+    await f.claim("a"); await f.accept("a");
+    await f.claim("b"); await f.accept("b");
+    const before = await f.read();
+    const remove = (key: "a" | "b") => f.prisma.$transaction(async prisma => {
+      const deliveries = await prisma.hostedLinqDelivery.findMany({ where: { sourceRef: f.effect(key) }, select: { sourceRef: true } });
+      await prisma.hostedLinqDelivery.deleteMany({ where: { sourceRef: f.effect(key) } });
+      await releaseHostedLinqSignupSuppressionAfterDeletionTx({ deliveries, prisma });
+    });
+    await remove("a");
+    expect(await f.read()).toEqual(before);
+    await remove("b");
+    expect(await f.read()).toMatchObject({ onboardingLinkSentAt: null, signupLinkReminderSentAt: f.reminderAt });
+  }));
+});
+
+async function withSuppressionFixture(run: (f: Awaited<ReturnType<typeof seedSuppressionFixture>>) => Promise<void>) {
+  const f = await seedSuppressionFixture();
+  try { await run(f); } finally {
+    await f.prisma.hostedLinqAlert.deleteMany({ where: { eventId: { in: f.eventKeys } } });
+    await f.prisma.hostedLinqProviderEvent.deleteMany({ where: { eventId: { in: f.eventKeys } } });
+    await f.prisma.hostedLinqDelivery.deleteMany({ where: { source: f.source } });
+    await f.prisma.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: createHostedPhoneLookupKey(f.phone)! } });
+    await f.prisma.hostedMember.delete({ where: { id: f.memberId } });
+    await f.prisma.$disconnect();
+  }
+}
+async function seedSuppressionFixture() {
+  const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const nonce = randomUUID();
+  const source = `suppression-proof-${nonce}`;
+  const memberId = `suppression-member-${nonce}`;
+  const phone = buildTestPhoneNumber(nonce, 0n);
+  const dayUtc = new Date("2026-08-01T00:00:00Z");
+  const reminderAt = new Date("2026-08-01T10:00:00Z");
+  const eventKeys: string[] = [];
+  await prisma.hostedMember.create({ data: { id: memberId } });
+  await prisma.hostedLinqDailyState.create({ data: { dayUtc, memberId, firstSeenAt: dayUtc, lastSeenAt: dayUtc, signupLinkReminderSentAt: reminderAt } });
+  const dailyWhere = { memberId_dayUtc: { dayUtc, memberId } };
+  const read = () => prisma.hostedLinqDailyState.findUniqueOrThrow({ where: dailyWhere,
+    select: { onboardingLinkSentAt: true, signupLinkReminderSentAt: true } });
+  const effect = (key: "a" | "b") => buildHostedLinqInviteSignupEffectId({ memberId, occurredAt: dayUtc, sourceEventDigest: key.repeat(32) });
+  const message = (key: "a" | "b") => `${source}-message-${key}`;
+  const claim = (key: "a" | "b") => prisma.$transaction(prisma => claimHostedLinqDeliveryProviderDispatchTx({
+    idempotencyKey: effect(key), sourceRef: effect(key), source, template: "invite_signup", status: "provider_dispatch_started", prisma,
+  }));
+  const accept = (key: "a" | "b") => markHostedLinqDeliveryAcceptedTx({ idempotencyKey: effect(key), messageId: message(key), prisma });
+  const receipt = (key: "a" | "b", status: "failed" | "delivered") => {
+    const eventId = `${source}-event-${key}-${status}`;
+    eventKeys.push(createHostedLinqProviderEventLookupKey(eventId)!);
+    return prisma.$transaction(prisma => ingestHostedLinqProviderEventTx({ prisma, event: buildReceipt({
+      eventId, messageId: message(key), occurredAt: new Date("2026-08-01T12:10:00Z"), phoneNumber: phone, status,
+    }) }));
+  };
+  return { prisma, source, memberId, phone, eventKeys, dailyWhere, reminderAt, read, effect, claim, accept, receipt };
 }

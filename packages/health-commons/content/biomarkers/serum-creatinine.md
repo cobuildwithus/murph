@@ -53,11 +53,8 @@ biomarker:
       - "diet change"
       - "weight change"
       - "illness"
-relations:
+relations: []
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
 communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20

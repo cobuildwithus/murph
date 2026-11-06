@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "device-sync-through-background-wakes",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Device updates keep moving",
+    "summary": "Connected-device updates avoid unnecessary pauses when background work receives a repeated wake-up.",
+    "details": "New messages still take priority, while repeated background signals no longer stop a sync before it starts.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3708
+    ]
+  }
+}

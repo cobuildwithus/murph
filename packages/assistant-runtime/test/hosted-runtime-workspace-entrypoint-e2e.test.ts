@@ -37,7 +37,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -116,7 +115,8 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test.each([false, true])("e2e preserves device-sync follow-up wake alongside a future connection retry: %s", async (futureConnectionRetry) => {
+describe("hosted workspace runtime entrypoint", () => {
+  test.each([false, true])("e2e leaves provider cadence to Web while preserving a future connection retry: %s", async (futureConnectionRetry) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -125,6 +125,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
     const firstNextWakeAt = "2026-04-27T00:01:00.000Z";
     const secondNow = "2026-04-27T00:01:01.000Z";
     const secondNextWakeAt = "2026-04-27T00:02:00.000Z";
+    const expectedWakeAt = futureConnectionRetry ? "2099-01-01T00:00:00.000Z" : null;
+    const expectedWakeReason = futureConnectionRetry ? "device-sync.reconcile" : null;
     const firstDeviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId,
       nextReconcileAt: firstNextWakeAt,
@@ -197,10 +199,10 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       const firstCheckpoint = firstCheckpointRequests.at(-1);
       assert.ok(firstCheckpoint);
       assert.equal(firstDeviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(firstResult.status, "scheduled");
-      assert.equal(firstResult.nextWakeAt, firstNextWakeAt);
-      assert.equal(firstCheckpoint.nextWakeAt, firstNextWakeAt);
-      assert.equal(firstCheckpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(firstResult.status, futureConnectionRetry ? "scheduled" : "idle");
+      assert.equal(firstResult.nextWakeAt, expectedWakeAt);
+      assert.equal(firstCheckpoint.nextWakeAt, expectedWakeAt);
+      assert.equal(firstCheckpoint.nextWakeReason, expectedWakeReason);
 
       vi.setSystemTime(new Date(secondNow));
       const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -239,7 +241,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
               workspace: createWorkspaceState({
                 snapshotRef: firstCheckpoint.snapshotRef,
                 nextWakeAt: firstCheckpoint.nextWakeAt,
-                nextWakeReason: "device-sync.reconcile",
+                nextWakeReason: firstCheckpoint.nextWakeReason,
                 version: "1",
               }),
             }),
@@ -248,13 +250,14 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
         },
       );
 
-      const secondCheckpoint = secondCheckpointRequests.at(-1);
-      assert.ok(secondCheckpoint);
-      assert.equal(secondDeviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(secondResult.status, "scheduled");
-      assert.equal(secondResult.nextWakeAt, secondNextWakeAt);
-      assert.equal(secondCheckpoint.nextWakeAt, secondNextWakeAt);
-      assert.equal(secondCheckpoint.nextWakeReason, "device-sync.reconcile");
+      // Restoring after provider cadence passes must not create device work.
+      assert.equal(secondDeviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(secondResult.status, futureConnectionRetry ? "scheduled" : "idle");
+      assert.equal(secondResult.nextWakeAt, expectedWakeAt);
+      // Settle the restored recording journal in the next ordinary save.
+      assert.equal(secondCheckpointRequests.length, 1);
+      assert.equal(secondCheckpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(secondCheckpointRequests[0]?.nextWakeAt, expectedWakeAt);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -271,7 +274,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
     const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
     const yieldedRetryWakeAt = "2026-04-27T00:00:30.000Z";
     const followUpWakeAt = "2026-04-27T00:11:00.000Z";
-    const idleCheckpointDelayMs = 90_000;
+    const runnerIdleTtlMs = 90_000;
     const runtimeTransitionTimeoutMs = 15_000;
     const shutdownController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -285,6 +288,9 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       }),
     ];
     const foregroundImported = createDeferred<void>();
+    // Device work publishes a status checkpoint whose response replaces the pending wake.
+    // Park it until the retry phase ends so the wake and checkpoint order below are fixed.
+    const retryPhaseFinished = createDeferred<void>();
     let pendingInputId: string | null = null;
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       async onFetchSnapshot() {
@@ -296,7 +302,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
         }));
         runtimeWakeSignal.notify();
         await withRealTimeout(
-          foregroundImported.promise,
+          retryPhaseFinished.promise,
           runtimeTransitionTimeoutMs,
           () => events.join(","),
         );
@@ -310,8 +316,6 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const firstPhaseFinished = createDeferred<void>();
-      const secondPhaseFinished = createDeferred<void>();
       let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,
@@ -330,7 +334,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_device_sync_pending_retry",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -401,7 +405,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
               vaultRoot,
             });
             shutdownController.abort();
-            firstPhaseFinished.resolve();
+            retryPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               progressed: true,
@@ -413,7 +417,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       );
 
       await withRealTimeout(
-        firstPhaseFinished.promise,
+        retryPhaseFinished.promise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
@@ -498,10 +502,10 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       const followUpCheckpoint = followUpCheckpointRequests.at(-1);
       assert.ok(followUpCheckpoint);
       assert.equal(followUpDeviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(followUpResult.status, "scheduled");
-      assert.equal(followUpResult.nextWakeAt, followUpWakeAt);
-      assert.equal(followUpCheckpoint.nextWakeAt, followUpWakeAt);
-      assert.equal(followUpCheckpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(followUpResult.status, "idle");
+      assert.equal(followUpResult.nextWakeAt, null);
+      assert.equal(followUpCheckpoint.nextWakeAt, null);
+      assert.equal(followUpCheckpoint.nextWakeReason, null);
     } finally {
       shutdownController.abort();
       vi.useRealTimers();
@@ -541,7 +545,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_projection_stall_preempt",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             workspaceVersion: "0",
           },
         }),
@@ -723,7 +727,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 25;
+    const runnerIdleTtlMs = 25;
     const runtimeTransitionTimeoutMs = 15_000;
     const abortReason = new Error("pending retry observed before idle checkpoint");
     const runtimeAbortController = new AbortController();
@@ -756,7 +760,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_pending_retry_system_mailbox_gate",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             workspaceVersion: "0",
           },
         }),
@@ -873,10 +877,10 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
     const timedParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
         ...createWorkspaceRunRequest(),
-        idleCheckpointDelayMs: 180_000,
+        runnerIdleTtlMs: 180_000,
       },
     });
-    assert.equal(timedParsed.request.idleCheckpointDelayMs, 180_000);
+    assert.equal(timedParsed.request.runnerIdleTtlMs, 180_000);
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({

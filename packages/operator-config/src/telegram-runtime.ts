@@ -3,9 +3,7 @@ import {
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
-import {
-  type AssistantMessageReaction,
-} from './assistant-cli-contracts.js'
+import type { AssistantMessageReaction } from './assistant-cli-contracts.js'
 
 import {
   createLinkedAbortSignal,
@@ -38,6 +36,7 @@ export type TelegramFetchImplementation = (
 ) => Promise<TelegramFetchResponse>
 
 export type TelegramTypingIndicatorHandle = {
+  isActive?: () => boolean
   stop(): Promise<void>
 }
 
@@ -306,6 +305,7 @@ export async function startTelegramTypingSession(
   })
 
   return {
+    isActive: () => !linkedStopSignal.signal.aborted && failure === null,
     async stop() {
       linkedStopSignal.controller.abort()
       linkedStopSignal.cleanup()

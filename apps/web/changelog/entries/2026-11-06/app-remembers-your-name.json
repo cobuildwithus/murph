@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "app-remembers-your-name",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "The app remembers the name you gave Murph",
+    "summary": "If you've already told Murph your first name, the app opens straight to Home instead of asking again, and a name you change in the app now saves to Murph too.",
+    "details": "It only uses a single-word name, and if it can't find yours quickly, it asks as before.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4675, 4676]
+  }
+}

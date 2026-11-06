@@ -2,11 +2,11 @@
 
 Generated: 2026-06-21
 
-Canonical source: `feature-status.csv`. This file explains the 24 rows with missing automated story coverage and the 4 rows marked dead/unreachable. The remaining dead/unreachable rows are also missing automated story coverage, so the triage covers 24 unique feature rows.
+Canonical source: `feature-status.csv`. This file explains the 21 rows with missing automated story coverage and the 4 rows marked dead/unreachable. The remaining dead/unreachable rows are also missing automated story coverage, so the triage covers 21 unique feature rows.
 
 ## Summary
 
-- Missing-test rows: 24
+- Missing-test rows: 21
 - Dead/unreachable rows: 4
 - Unique rows investigated: 24
 - Superseded device-sync settings rows removed from the tracker: 2
@@ -25,7 +25,6 @@ Most missing rows are existing static marketing, internal design, or deck/securi
 - Client behavior coverage gap: 1
 - Internal design route coverage gap: 4
 - Static marketing content coverage gap: 6
-- Pitch route interaction coverage gap: 3
 - Security page content coverage gap: 3
 
 ## Row Findings
@@ -50,9 +49,6 @@ Most missing rows are existing static marketing, internal design, or deck/securi
 | home-persona-phone-demos | inventoried | missing | Static marketing content coverage gap | Missing coverage: persona phone demos are static marketing examples; tests do not assert persona cards, mock result tiles, or image rendering. | Add section-level render assertions if the persona examples are maintained content; otherwise keep as accepted marketing-copy gap. | apps/web/src/components/landing/personas-section.tsx; apps/web/src/components/landing/phone-mock.tsx |
 | home-security-teaser | inventoried | missing | Static marketing content coverage gap | Missing coverage: security teaser section and /security CTA are not separately asserted by the root-page tests. | Add a root-page assertion for the security teaser CTA if this cross-link is contractually important. | apps/web/src/components/landing/security-teaser-section.tsx; apps/web/test/page.test.ts |
 | home-trust-pillars | inventoried | missing | Static marketing content coverage gap | Missing coverage: trust-pillar card titles and bodies are not asserted by existing landing tests. | Add one section-level content assertion if trust copy should be guarded. | apps/web/src/components/landing/trust-section.tsx; apps/web/test/page.test.ts |
-| pitch-product-step-panels | inventoried | missing | Pitch route interaction coverage gap | Missing coverage: pitch route test covers the deck shell and first slide only; product slide panel toggles are not clicked or asserted. | Add a client test that navigates to the product slide and exercises the product-step toggle state. | apps/web/app/pitch/_components/slides.tsx; apps/web/test/pitch-and-biomarkers-pages.test.tsx |
-| pitch-team-achievement-toggle | inventoried | missing | Pitch route interaction coverage gap | Missing coverage: pitch route test covers the deck shell and first slide only; team card toggles and achievement panel state are not clicked or asserted. Personal identifiers remain omitted from audit artifacts. | Add an interaction test using non-identifying selectors/labels, or keep omitted if the team slide is volatile deck content. | apps/web/app/pitch/_components/slides.tsx; apps/web/test/pitch-and-biomarkers-pages.test.tsx |
-| pitch-ask-live-link | inventoried | missing | Pitch route interaction coverage gap | Missing coverage: pitch route test covers the deck shell and first slide only; ask slide CTA/link and trajectory cells are not asserted. | Add pitch deck navigation assertions for the ask slide if investor-deck links are release-critical. | apps/web/app/pitch/_components/slides.tsx; apps/web/test/pitch-and-biomarkers-pages.test.tsx |
 | security-promises | inventoried | missing | Security page content coverage gap | Missing coverage: SecurityPage tests cover metadata, nav, and install command only; promise cards are not asserted. | Add promise-card assertions if the trust promises are maintained product copy. | apps/web/app/security/page.tsx; apps/web/test/page.test.ts; apps/web/test/route-metadata-pages.test.ts |
 | security-hosted-architecture-diagram | inventoried | missing | Security page content coverage gap | Missing coverage: SecurityPage tests cover metadata, nav, and install command only; hosted architecture diagram and legend are not asserted. | Add a render assertion for the hosted architecture diagram if the diagram is release-critical. | apps/web/app/security/page.tsx; apps/web/test/page.test.ts; apps/web/test/route-metadata-pages.test.ts |
 | security-encryption-details | inventoried | missing | Security page content coverage gap | Missing coverage: SecurityPage tests cover metadata, nav, and install command only; encryption detail cards/meta are not asserted. | Add section-level assertions if /security is treated as contractual trust copy. | apps/web/app/security/page.tsx; apps/web/test/page.test.ts; apps/web/test/route-metadata-pages.test.ts |
@@ -62,4 +58,4 @@ Most missing rows are existing static marketing, internal design, or deck/securi
 1. Resolve the true reachability decisions first: passkey settings and design-gallery-only overview components. These are inventory/product-scope questions, not just missing tests.
 2. Add tiny tests for operational surfaces if they are supported health endpoints: Linq GET health and Telegram GET health.
 3. Add one populated fixture test for provider source health on `/signals`. This is a real data branch rather than static copy.
-4. Treat homepage, security, design, and pitch rows as lower-risk content coverage unless those pages are release-critical contracts.
+4. Treat homepage, security, and design rows as lower-risk content coverage unless those pages are release-critical contracts.

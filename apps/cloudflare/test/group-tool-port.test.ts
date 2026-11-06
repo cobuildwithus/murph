@@ -305,6 +305,17 @@ it("preserves the configured control timeout for required group-tool actions", a
   ).toBe(true);
 });
 
+it.each(hostedGroupToolTransports)("opts into group games over $mode without changing old Web request JSON", async ({ create }) => {
+  const response = { action: "read_game", result: { status: "ok", state: { games: [] } } };
+  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(response));
+  const port = createHostedRuntimeGroupToolPort({ boundUserId: "synthetic-room", fetchImpl, timeoutMs: 5_000, transport: create() });
+  const request = { action: "read_game" as const, includePlayers: true as const, origin: { kind: "accepted_input" as const, assistantInputId: "ain_synthetic" } };
+  await expect(port.request(request)).resolves.toEqual(response);
+  const [target, options] = fetchImpl.mock.calls[0];
+  expect(new URL(target instanceof Request ? target.url : target).searchParams.get("gameMultiplayer")).toBe("1");
+  expect(JSON.parse(String(options?.body))).toEqual(request);
+});
+
 function createDelayedEmptyBody(delayMs: number): {
   stream: ReadableStream<Uint8Array>;
   wasCanceled(): boolean;

@@ -1,6 +1,7 @@
-import { constants as fsConstants, readFileSync, statSync } from 'node:fs'
-import { access, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { constants as fsConstants, readFileSync, statSync } from 'node:fs'
+import { access,  stat } from 'node:fs/promises'
+
 import path from 'node:path'
 
 import {
@@ -10,23 +11,6 @@ import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
-
-interface CodexDisplayConfigProfile {
-  model: string | null
-  reasoningEffort: string | null
-}
-
-interface CodexDisplayConfig {
-  defaultProfile: string | null
-  model: string | null
-  profiles: Record<string, CodexDisplayConfigProfile>
-  reasoningEffort: string | null
-}
-
-export interface CodexDisplayOptions {
-  model: string | null
-  reasoningEffort: string | null
-}
 
 export async function resolveCodexChildEnv(input: {
   codexHome?: string | null
@@ -67,7 +51,46 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   ]
 }
 
-export function hasHostedCodexModelCatalogFlexTier(input: {
+// Only the hosted catalog contract removes Codex's overriding mode messages.
+// An explicit different catalog must retain thread-level instructions.
+export function supportsCodexTurnDeveloperInstructions(input: {
+  configOverrides?: readonly string[]
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  const catalog = normalizeNullableString(
+    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+  )
+  if (!catalog) return false
+  const override = input.configOverrides?.filter(isCodexModelCatalogJsonConfigOverride).at(-1)
+  return override === undefined || override === `model_catalog_json=${JSON.stringify(catalog)}`
+}
+
+// Murph turn steering is a product default, not an inherited upstream default:
+// an admitted follow-up preempts unfinished generation in the same turn, and an
+// interrupted turn stops its code-mode cells and their nested tool calls. These
+// stay CLI-layer process overrides so user config isolation cannot drop them.
+const CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES = [
+  'features.instant_interrupt=true',
+  'features.code_mode_interrupt=true',
+] as const
+
+export function withCodexAppServerSteeringFeatureOverrides(
+  configOverrides: readonly string[],
+): readonly string[] {
+  const missing = CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES.filter((feature) =>
+    !configOverrides.some((override) =>
+      readCodexConfigOverrideKey(override) === readCodexConfigOverrideKey(feature)
+    )
+  )
+  return missing.length === 0 ? configOverrides : [...configOverrides, ...missing]
+}
+
+function readCodexConfigOverrideKey(override: string): string {
+  return override.split('=', 1)[0]!.trim()
+}
+
+export function hasHostedCodexModelCatalogServiceTier(input: {
+  serviceTier: 'flex' | 'priority'
   env?: NodeJS.ProcessEnv
   model?: string | null
 }): boolean {
@@ -96,45 +119,9 @@ export function hasHostedCodexModelCatalogFlexTier(input: {
       : []
     return serviceTiers
       .map(readRecord)
-      .some((tier) => tier?.id === 'flex')
+      .some((tier) => tier?.id === input.serviceTier)
   } catch {
     return false
-  }
-}
-
-export async function resolveCodexDisplayOptions(input: {
-  configPath?: string
-  model?: string | null
-  profile?: string | null
-}): Promise<CodexDisplayOptions> {
-  const explicitModel = normalizeNullableString(input.model)
-  const explicitProfile = normalizeNullableString(input.profile)
-  const config = await readCodexDisplayConfig(input.configPath)
-  const activeProfileName = explicitProfile ?? config.defaultProfile
-  const activeProfile = activeProfileName
-    ? config.profiles[activeProfileName] ?? null
-    : null
-
-  return {
-    model: explicitModel ?? activeProfile?.model ?? config.model,
-    reasoningEffort:
-      activeProfile?.reasoningEffort ?? config.reasoningEffort,
-  }
-}
-
-async function readCodexDisplayConfig(
-  configPath = path.join(homedir(), '.codex', 'config.toml'),
-): Promise<CodexDisplayConfig> {
-  try {
-    const raw = await readFile(configPath, 'utf8')
-    return parseCodexDisplayConfig(raw)
-  } catch {
-    return {
-      defaultProfile: null,
-      model: null,
-      reasoningEffort: null,
-      profiles: {},
-    }
   }
 }
 
@@ -198,72 +185,4 @@ async function assertAccessibleCodexHomeDirectory(
       'Configured Codex home is not a directory. Check --codexHome.',
     )
   }
-}
-
-function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
-  const config: CodexDisplayConfig = {
-    defaultProfile: null,
-    model: null,
-    reasoningEffort: null,
-    profiles: {},
-  }
-
-  let activeProfile: string | null = null
-
-  for (const rawLine of raw.split(/\r?\n/u)) {
-    const line = rawLine.trim()
-    if (line.length === 0 || line.startsWith('#')) {
-      continue
-    }
-
-    const profileSectionMatch = /^\[profiles\.([^\]]+)\]$/u.exec(line)
-    if (profileSectionMatch) {
-      activeProfile = profileSectionMatch[1] ?? null
-      if (activeProfile && !config.profiles[activeProfile]) {
-        config.profiles[activeProfile] = {
-          model: null,
-          reasoningEffort: null,
-        }
-      }
-      continue
-    }
-
-    if (/^\[.*\]$/u.test(line)) {
-      activeProfile = null
-      continue
-    }
-
-    const stringAssignmentMatch =
-      /^([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$/u.exec(line)
-    if (!stringAssignmentMatch) {
-      continue
-    }
-
-    const [, key, value] = stringAssignmentMatch
-    const normalizedValue = normalizeNullableString(value)
-
-    if (activeProfile) {
-      const profile = config.profiles[activeProfile]
-      if (!profile) {
-        continue
-      }
-
-      if (key === 'model') {
-        profile.model = normalizedValue
-      } else if (key === 'model_reasoning_effort') {
-        profile.reasoningEffort = normalizedValue
-      }
-      continue
-    }
-
-    if (key === 'model') {
-      config.model = normalizedValue
-    } else if (key === 'model_reasoning_effort') {
-      config.reasoningEffort = normalizedValue
-    } else if (key === 'profile') {
-      config.defaultProfile = normalizedValue
-    }
-  }
-
-  return config
 }

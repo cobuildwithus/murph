@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-04",
+  "order": 200,
+  "item": {
+    "id": "linq-on-it-tapback",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph taps back when it's on it",
+    "summary": "Ask for something that takes a moment, like a reminder, a sleep check, a plan, or a look at a photo, and Murph now reacts to your message with an emoji within about a second so you know it's working. Ask it to change something, like your step goal or a workout in your plan, and you get a thumbs up.",
+    "details": "You get one reaction per run of messages, and none for quick notes, small talk, thanks, or hard news. When Murph reacts, it skips the separate \"working on it\" text. In one-on-one iMessage chats.",
+    "relevanceTags": ["messaging", "conversation"],
+    "sourcePullRequests": [4574, 4576, 4579, 4588]
+  }
+}

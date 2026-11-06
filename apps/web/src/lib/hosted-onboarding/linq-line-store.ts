@@ -166,14 +166,9 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     throw new TypeError("Hosted Linq line upsert requires a valid phone number.");
   }
 
-  await acquireHostedLinqLinePhoneLockTx({
-    phoneNumber: normalizedPhoneNumber,
-    prisma: input.prisma,
-  });
-
   const providerStatus = normalizeNullableString(input.providerStatus);
   const phoneNumberEncrypted = encryptHostedLinqLinePhoneNumber(normalizedPhoneNumber);
-  const existingLines = await input.prisma.hostedLinqLine.findMany({
+  const existingLineQuery = {
     where: {
       phoneNumberLookupKey: {
         in: lookupKeyReadCandidates,
@@ -182,7 +177,18 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     select: {
       phoneNumberLookupKey: true,
     },
-  });
+  } satisfies Prisma.HostedLinqLineFindManyArgs;
+  let existingLines = await input.prisma.hostedLinqLine.findMany(existingLineQuery);
+  if (existingLines.length === 0) {
+    // Only creation needs the phone lock. Existing rows may already be locked
+    // by proactive capacity, so taking it there would invert the lock order.
+    await acquireHostedLinqLinePhoneLockTx({
+      phoneNumber: normalizedPhoneNumber,
+      prisma: input.prisma,
+    });
+    // A concurrent creator may have used a readable legacy key while we waited.
+    existingLines = await input.prisma.hostedLinqLine.findMany(existingLineQuery);
+  }
   const targetLookupKey =
     chooseHostedLinqLineWriteLookupKey(existingLines, lookupKeyReadCandidates, lookupKey)
     ?? lookupKey;
@@ -572,6 +578,7 @@ export async function listHostedLinqHealthyProactiveLines(input: {
   const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
   const rows = await input.prisma.hostedLinqLine.findMany({
     where: {
+      assignmentWeight: { gt: 0 },
       configuredAt: { not: null },
       egressPolicy: "enabled",
       healthStatus: "healthy",
@@ -783,6 +790,7 @@ export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   const incremented = await input.prisma.hostedLinqLine.updateMany({
     where: {
       ...requiredLineStateWhere,
+      assignmentWeight: { gt: 0 },
       phoneNumberLookupKey: input.phoneNumberLookupKey,
       proactiveConversationCount: {
         lt: input.limit,
@@ -802,6 +810,7 @@ export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   const started = await input.prisma.hostedLinqLine.updateMany({
     where: {
       ...requiredLineStateWhere,
+      assignmentWeight: { gt: 0 },
       phoneNumberLookupKey: input.phoneNumberLookupKey,
       OR: [
         { proactiveConversationDayUtc: null },
@@ -833,6 +842,7 @@ export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
 
 function buildHostedLinqAssignableHomeLineWhere(): Prisma.HostedLinqLineWhereInput {
   return {
+    assignmentWeight: { gt: 0 },
     configuredAt: { not: null },
     egressPolicy: "enabled",
     healthStatus: { in: ["healthy", "unknown"] },

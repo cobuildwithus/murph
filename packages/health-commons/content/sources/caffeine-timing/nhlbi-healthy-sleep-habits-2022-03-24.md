@@ -12,11 +12,8 @@ aliases:
 - source_artifact:nhlbi-healthy-sleep-habits-2022-03-24
 categories:
 - caffeine-timing
-relations:
-- type: related_protocol
-  target: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
-- type: parent_family
-  target: experiment_family:caffeine-timing
+relations: []
+
 source:
   kind: guideline
   title: Healthy Sleep Habits

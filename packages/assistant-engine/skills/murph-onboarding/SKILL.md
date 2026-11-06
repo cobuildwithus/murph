@@ -21,9 +21,7 @@ should start problem-solving before the foundation is understood.
 Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
 Do not create a second context-collection lifecycle. This skill may create only
-the scheduled early-stall check-in defined in the injected onboarding
-instructions and the post-completion
-first-personal-read one-shot defined in
+the post-completion first-personal-read one-shot defined in
 `references/return-launch-completion.md`. A separate managed owner may
 invoke this skill through the finite three-day recovery window defined there;
 never create, replace, extend, or reschedule that owner.
@@ -31,8 +29,8 @@ never create, replace, extend, or reschedule that owner.
 ## Progressive disclosure
 
 The injected onboarding instructions own the visible opening exchanges: asking
-minimal identity, delegating supplied identity persistence, attempting the
-early-stall check-in, and asking what matters to the member. Follow them without
+minimal identity, delegating supplied identity persistence, and asking what
+matters to the member. Follow them without
 reading this file or a stage reference when their transcript conditions hold.
 
 For other onboarding turns, read this top-level router first. It owns the goal,
@@ -49,7 +47,7 @@ reference that owns the next decision:
   that add or confirm canonical context (including none or negative facts),
   skip/decline/deferral interpretation, scheduled recovery, or cross-stage
   follow-up. A turn that only asks a foundation question may stay in the
-  aspiration reference. Opening identity persistence and its check-in do not
+  aspiration reference. Opening identity persistence does not
   require either reference.
 - Read `references/return-launch-completion.md` after the foundation resolves,
   for the capability tour, thread choice, behavioral-fit questions, first-value

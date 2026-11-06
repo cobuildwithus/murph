@@ -42,7 +42,7 @@ not a hosted foreground deadline.
 A focused real-Codex journey uses the production context refresh and system-prompt
 builder after a weight observation is corrected to an unrelated metric. It
 confirms blood-test presence without claiming an unlisted body measurement exists
-or proving its absence. The `gpt-5.6-terra` local-subscription run passed with one
+or proving its absence. The `gpt-6.1-sol` local-subscription run passed with one
 provider request, no tool/command actions, and no canonical writes. Three prior
 subscription attempts failed before provider action; no auth material was copied.
 Thirteen focused tests pass. Fourteen baseline/candidate differential cases,
@@ -561,7 +561,7 @@ docker run --rm --platform linux/amd64 --network none \
   --mount "type=bind,src=$PWD/.artifacts/container-efficiency,dst=/bench,readonly" \
   --mount "type=bind,src=$PWD/scripts/container-resource-probe.mjs,dst=/resource-probe.mjs,readonly" \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.158.0-live1 \
   --import /resource-probe.mjs --expose-gc /bench/context-refresh.mjs
 ```
 

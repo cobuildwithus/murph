@@ -14,6 +14,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./event-read": {
+      "types": "./dist/event-read.d.ts",
+      "default": "./dist/event-read.js"
     }
   },
   "files": [
@@ -22,13 +26,15 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
+    "@murphai/runtime-state": "workspace:*",
+    "sharp": "0.35.5"
   }
 }

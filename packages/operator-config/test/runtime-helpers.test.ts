@@ -2,11 +2,7 @@ import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
 
-import {
-  resolveDeviceSyncBaseUrl,
-  resolveDeviceSyncControlToken,
-  createDeviceSyncClient,
-} from '../src/device-sync-client.ts'
+
 import { readEnvValue } from '../src/env-values.ts'
 import {
   createAbortError,
@@ -295,11 +291,13 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
     },
   )
 
+  assert.equal(handle.isActive?.(), true)
   await vi.advanceTimersByTimeAsync(4_000)
   assert.equal(fetchImplementation.mock.calls.length, 2)
   assert.equal(seenSignals[1]?.aborted, false)
 
   await handle.stop()
+  assert.equal(handle.isActive?.(), false)
 
   assert.equal(seenSignals[1]?.aborted, true)
 })
@@ -1155,8 +1153,10 @@ test('startTelegramTypingSession rethrows background refresh failures on stop', 
     },
   )
 
+  assert.equal(handle.isActive?.(), true)
   await vi.advanceTimersByTimeAsync(4_000)
 
+  assert.equal(handle.isActive?.(), false)
   await assert.rejects(
     () => handle.stop(),
     (error) =>
@@ -1370,92 +1370,5 @@ test('fetchJsonResponse forwards the timeout signal and wraps transport failures
         url: 'https://example.test/resource',
       }),
     (error) => error === wrapped,
-  )
-})
-
-test('device sync client helpers trim env values, send bearer auth, and map control-plane failures', async () => {
-  assert.equal(
-    resolveDeviceSyncBaseUrl(
-      ' http://127.0.0.1:8788/ ',
-      {},
-    ),
-    'http://127.0.0.1:8788',
-  )
-  assert.equal(
-    resolveDeviceSyncControlToken(null, {
-      DEVICE_SYNC_CONTROL_TOKEN: ' env-token ',
-    }),
-    'env-token',
-  )
-
-  const observedAuthHeaders: string[] = []
-  const successClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788/',
-    controlToken: 'control-token-for-tests',
-    fetchImpl: async (_input, init) => {
-      observedAuthHeaders.push(new Headers(init?.headers).get('authorization') ?? '')
-      return new Response(JSON.stringify({ accounts: [] }), {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        status: 200,
-      })
-    },
-  })
-
-  assert.deepEqual(await successClient.listAccounts(), {
-    accounts: [],
-  })
-  assert.deepEqual(observedAuthHeaders, ['Bearer control-token-for-tests'])
-
-  const authClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          error: {
-            code: 'CONTROL_PLANE_AUTH_REQUIRED',
-            message: 'Device sync control routes require a valid bearer token.',
-          },
-        }),
-        { status: 401 },
-      ),
-  })
-
-  await assert.rejects(
-    () => authClient.listProviders(),
-    (error) =>
-      error instanceof VaultCliError &&
-      error.code === 'CONTROL_PLANE_AUTH_REQUIRED' &&
-      /DEVICE_SYNC_CONTROL_TOKEN/u.test(error.message),
-  )
-
-  const invalidClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () => new Response('[]', { status: 200 }),
-  })
-
-  await assert.rejects(
-    () => invalidClient.listProviders(),
-    (error) =>
-      error instanceof VaultCliError &&
-      error.code === 'device_sync_invalid_response' &&
-      /invalid JSON payload/u.test(error.message) &&
-      error.context?.retryable === false &&
-      error.context?.stage === 'response' &&
-      error.context?.baseUrl === undefined &&
-      error.context?.path === undefined,
-  )
-
-  assert.throws(
-    () =>
-      createDeviceSyncClient({
-        baseUrl: 'https://device-sync.example.test',
-        controlToken: 'control-token-for-tests',
-      }),
-    (error) =>
-      error instanceof VaultCliError &&
-      error.code === 'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED' &&
-      /loopback base URLs/u.test(error.message),
   )
 })

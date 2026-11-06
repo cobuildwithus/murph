@@ -17,6 +17,7 @@ export const HOSTED_STRIPE_BILLING_SCENARIO_METADATA_KEY =
 const STRIPE_POLL_INTERVAL_MS = 1_000;
 const STRIPE_POLL_TIMEOUT_MS = 120_000;
 const STRIPE_FIXTURE_TIMEOUT_MS = 120_000;
+const STRIPE_FIXTURE_OUTPUT_LIMIT_BYTES = 8_192;
 const CLEANUP_PAGE_LIMIT = 100;
 const CHECKOUT_FIXTURE_PATH = fileURLToPath(new URL(
   "../fixtures/stripe/complete-checkout-session.json",
@@ -26,7 +27,6 @@ const CHECKOUT_FIXTURE_PATH = fileURLToPath(new URL(
 export interface HostedStripeBillingCatalog {
   accountId: string;
   portalConfigurationId: string;
-  privyAppId: string;
   priceIds: {
     edge: string;
     familyEdge: string;
@@ -53,6 +53,8 @@ export interface HostedStripeSubscriptionTruth {
   currentPeriodEnd: Date | null;
   currentPeriodStart: Date | null;
   customerDefaultPaymentMethodPresent: boolean;
+  latestInvoiceBillingReason: string | null;
+  latestInvoiceId: string | null;
   latestInvoicePaid: boolean;
   latestInvoiceStatus: string | null;
   pendingUpdatePresent: boolean;
@@ -99,7 +101,6 @@ export class HostedStripeBillingSandbox {
   readonly stripe: Stripe;
   readonly accountId: string;
   readonly portalConfigurationId: string;
-  readonly privyAppId: string;
   readonly priceIds: HostedStripeBillingCatalog["priceIds"];
 
   private readonly secretKey: string;
@@ -115,7 +116,6 @@ export class HostedStripeBillingSandbox {
     this.runId = input.runId;
     this.accountId = input.accountId;
     this.portalConfigurationId = input.portalConfigurationId;
-    this.privyAppId = input.privyAppId;
     this.priceIds = { ...input.priceIds };
     this.secretKey = input.secretKey;
     this.stripe = new Stripe(input.secretKey, {
@@ -131,7 +131,6 @@ export class HostedStripeBillingSandbox {
     return {
       additionalEnv: {
         NODE_ENV: process.env.NODE_ENV,
-        NEXT_PUBLIC_PRIVY_APP_ID: this.privyAppId,
         HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
           this.portalConfigurationId,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY:
@@ -153,7 +152,6 @@ export class HostedStripeBillingSandbox {
       },
       webProcessEnvOverrides: {
         NODE_ENV: process.env.NODE_ENV,
-        NEXT_PUBLIC_PRIVY_APP_ID: this.privyAppId,
         STRIPE_SECRET_KEY: this.secretKey,
       },
     };
@@ -227,8 +225,15 @@ export class HostedStripeBillingSandbox {
     memberId: string;
     plan: "edge" | "pulse";
     scenario: string;
+    useTestClock?: boolean;
   }): Promise<HostedStripeSubscriptionFixture> {
-    const customer = await this.createCustomer({ scenario: input.scenario });
+    const testClock = input.useTestClock
+      ? await this.createTestClock(input.scenario)
+      : null;
+    const customer = await this.createCustomer({
+      scenario: input.scenario,
+      testClockId: testClock?.id,
+    });
     const paymentMethod = await this.callStripe("payment_method.attach", () =>
       this.stripe.paymentMethods.attach("pm_card_visa", {
         customer: customer.id,
@@ -266,8 +271,60 @@ export class HostedStripeBillingSandbox {
       customerId: customer.id,
       paymentMethodId: paymentMethod.id,
       subscriptionId: subscription.id,
-      testClockId: null,
+      testClockId: testClock?.id ?? null,
     };
+  }
+
+  async createTestClock(scenario: string): Promise<Stripe.TestHelpers.TestClock> {
+    const clock = await this.callStripe("test_clock.create", () =>
+      this.stripe.testHelpers.testClocks.create({
+        frozen_time: Math.floor(Date.now() / 1_000),
+        name: `murph-${buildHostedStripeRunCorrelationToken(this.runId)}-${scenario}`,
+      })
+    );
+    assertTestClockOwnership(clock, this.runId);
+    this.tracked.testClockIds.add(clock.id);
+    return clock;
+  }
+
+  async advanceTestClock(input: {
+    frozenTime: Date;
+    testClockId: string;
+  }): Promise<Date> {
+    const frozenTime = input.frozenTime.getTime() / 1_000;
+    if (
+      !Number.isSafeInteger(frozenTime)
+      || !this.tracked.testClockIds.has(input.testClockId)
+    ) {
+      throw new HostedStripeBillingLiveError(
+        "Stripe clock advancement requires an owned clock and an exact Unix second.",
+      );
+    }
+    const clock = await this.callStripe("test_clock.retrieve.before_advance", () =>
+      this.stripe.testHelpers.testClocks.retrieve(input.testClockId)
+    );
+    assertTestClockOwnership(clock, this.runId);
+    if (clock.status !== "ready" || frozenTime <= clock.frozen_time) {
+      throw new HostedStripeBillingLiveError(
+        "Stripe clock advancement requires a ready clock and a later frozen time.",
+      );
+    }
+    await this.callStripe("test_clock.advance", () =>
+      this.stripe.testHelpers.testClocks.advance(clock.id, { frozen_time: frozenTime })
+    );
+    const advanced = await this.callStripe("test_clock.wait_for_advance", () =>
+      waitForOwnedStripeTestClock({
+        runId: this.runId,
+        stripe: this.stripe,
+        testClockId: clock.id,
+      })
+    );
+    if (advanced.frozen_time !== frozenTime) {
+      throw new HostedStripeBillingLiveError(
+        "Stripe clock completed at an unexpected frozen time.",
+      );
+    }
+    return new Date(advanced.frozen_time * 1_000);
   }
 
   async adoptCheckoutSession(
@@ -433,6 +490,8 @@ export class HostedStripeBillingSandbox {
         : null,
       customerDefaultPaymentMethodPresent:
         readExpandedCustomerDefaultPaymentMethod(subscription) !== null,
+      latestInvoiceBillingReason: invoice?.billing_reason ?? null,
+      latestInvoiceId: invoice?.id ?? null,
       latestInvoicePaid: invoice?.status === "paid",
       latestInvoiceStatus: invoice?.status ?? null,
       pendingUpdatePresent: subscription.pending_update !== null,
@@ -661,6 +720,9 @@ export class HostedStripeBillingSandbox {
     try {
       return await run();
     } catch (error) {
+      if (error instanceof HostedStripeBillingLiveError) {
+        throw error;
+      }
       throw new HostedStripeBillingLiveError(
         `Stripe operation ${operation} failed (${formatStripeErrorDetails(
           readStripeErrorDetails(error),
@@ -708,11 +770,21 @@ async function runOfficialStripeCheckoutFixture(input: {
   sourceEnv: NodeJS.ProcessEnv;
 }): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("stripe", ["fixtures", CHECKOUT_FIXTURE_PATH], {
-      env: buildStripeFixtureChildEnvironmentForTest(input),
-      shell: false,
-      stdio: "ignore",
-    });
+    let child;
+    try {
+      child = spawn("stripe", ["fixtures", CHECKOUT_FIXTURE_PATH], {
+        env: buildStripeFixtureChildEnvironmentForTest(input),
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      reject(new HostedStripeBillingLiveError(
+        "Official Stripe Checkout fixture could not start (process=startup_error).",
+      ));
+      return;
+    }
+    const readStdout = collectStripeFixtureOutput(child.stdout);
+    const readStderr = collectStripeFixtureOutput(child.stderr);
     let timedOut = false;
     const timeout = globalThis.setTimeout(() => {
       timedOut = true;
@@ -721,21 +793,101 @@ async function runOfficialStripeCheckoutFixture(input: {
     child.once("error", () => {
       globalThis.clearTimeout(timeout);
       reject(new HostedStripeBillingLiveError(
-        "Official Stripe Checkout fixture could not start.",
+        "Official Stripe Checkout fixture could not start (process=startup_error).",
       ));
     });
-    child.once("exit", (code, signal) => {
+    child.once("exit", () => {
       globalThis.clearTimeout(timeout);
+    });
+    child.once("close", (code, signal) => {
       if (!timedOut && signal === null && code === 0) {
         resolve();
         return;
       }
+      // CLI 1.45.1 writes progress to stdout and RequestError to stderr.
+      // Read them after close; never infer ordering across the two pipes or
+      // search the private error body for status/progress lookalikes.
+      const stdout = readStdout();
+      const stderr = readStderr();
+      const lastRun = [...stdout.text.matchAll(
+        /^Running fixture for:[^\n]*(?:\n|$)/gmu,
+      )].at(-1)?.[0] ?? "";
+      const step = stdout.state === "complete"
+        ? /^Running fixture for: (payment_page|payment_method|payment_page_confirm)\r?\n$/u
+          .exec(lastRun)?.[1] ?? "unknown"
+        : "unknown";
+      const requestError = /^Request failed, status=([3-5][0-9]{2}), body=/u
+        .exec(stderr.text);
+      const status = requestError?.[1] ?? "unknown";
+      const details = formatStripeFixtureRejection(
+        stderr.state === "complete" && requestError
+          ? stderr.text.slice(requestError[0].length)
+          : null,
+      );
+      const response = status === "unknown" ? "not_observed" : "http_rejection";
+      const processState = signal !== null ? "signal" : code === null ? "unknown" : "exit";
+      const exitCode = code !== null && Number.isInteger(code) && code >= 0 && code <= 255
+        ? code : "unknown";
       reject(new HostedStripeBillingLiveError(
-        timedOut
-          ? "Official Stripe Checkout fixture timed out."
-          : "Official Stripe Checkout fixture failed.",
+        `Official Stripe Checkout fixture ${timedOut ? "timed out" : "failed"} `
+        + `(step=${step}, response=${response}, http_status=${status}, `
+        + `${details}, process=${processState}, exit_code=${exitCode}, `
+        + `stdout=${stdout.state}, stderr=${stderr.state}).`,
       ));
     });
+  });
+}
+
+function formatStripeFixtureRejection(body: string | null): string {
+  const unknownDetails = "error_type=unknown, error_code=unknown, error_param=unknown";
+  if (body === null) return unknownDetails;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      !parsed
+      || typeof parsed !== "object"
+      || Array.isArray(parsed)
+      || !("error" in parsed)
+    ) {
+      return unknownDetails;
+    }
+    const error = parsed.error;
+    if (!error || typeof error !== "object" || Array.isArray(error)) {
+      return unknownDetails;
+    }
+    const type = [
+      "api_error", "card_error", "idempotency_error", "invalid_request_error",
+    ].find((value) => "type" in error && error.type === value) ?? "unknown";
+    const code = [
+      "parameter_missing", "parameter_unknown", "parameter_invalid_integer",
+      "resource_missing", "card_declined", "authentication_required",
+      "payment_intent_unexpected_state",
+    ].find((value) => "code" in error && error.code === value) ?? "unknown";
+    const param = [
+      "expected_amount", "payment_method",
+    ].find((value) => "param" in error && error.param === value) ?? "unknown";
+    return `error_type=${type}, error_code=${code}, error_param=${param}`;
+  } catch {
+    // JSON.parse errors can include private response text; discard them.
+    return unknownDetails;
+  }
+}
+
+function collectStripeFixtureOutput(stream: NodeJS.ReadableStream) {
+  const bytes = Buffer.alloc(STRIPE_FIXTURE_OUTPUT_LIMIT_BYTES);
+  let length = 0;
+  let truncated = false;
+  stream.on("data", (chunk: Buffer) => {
+    // Copy only the prefix; retaining a subarray could retain the whole chunk.
+    // Keep draining after the cap so a full pipe cannot block the child.
+    const copied = chunk.copy(bytes, length);
+    length += copied;
+    truncated ||= copied < chunk.length;
+  });
+  return () => ({
+    text: bytes.toString("utf8", 0, length),
+    state: truncated ? "truncated" : length === 0 ? "empty"
+      : bytes[length - 1] === 10 ? "complete" : "partial",
   });
 }
 
@@ -920,6 +1072,18 @@ async function cleanupTrackedStripeResources(input: {
     testClocksDeleted: 0,
   };
 
+  // A failed scenario can leave clock-owned subscriptions mid-advancement.
+  // Settle that provider operation before canceling or deleting its resources.
+  for (const testClockId of input.tracked.testClockIds) {
+    await ignoreMissingStripeResource(async () => {
+      await waitForOwnedStripeTestClock({
+        runId: input.runId,
+        stripe: input.stripe,
+        testClockId,
+      });
+    });
+  }
+
   const runPaymentMethods = await input.stripe.paymentMethods.list({
     limit: CLEANUP_PAGE_LIMIT,
     type: "card",
@@ -984,22 +1148,53 @@ async function cleanupTrackedStripeResources(input: {
 
   for (const testClockId of input.tracked.testClockIds) {
     await ignoreMissingStripeResource(async () => {
-      const clock = await input.stripe.testHelpers.testClocks.retrieve(testClockId);
-      if (!clock.name?.startsWith(
-        `murph-${buildHostedStripeRunCorrelationToken(input.runId)}-`,
-      )) {
-        throw new HostedStripeBillingLiveError(
-          "Refused to delete a Stripe Test Clock not owned by this run.",
-        );
-      }
-      if (clock.status === "ready") {
-        await input.stripe.testHelpers.testClocks.del(clock.id);
-        summary.testClocksDeleted += 1;
-      }
+      const clock = await waitForOwnedStripeTestClock({
+        runId: input.runId,
+        stripe: input.stripe,
+        testClockId,
+      });
+      await input.stripe.testHelpers.testClocks.del(clock.id);
+      summary.testClocksDeleted += 1;
     });
   }
 
   return summary;
+}
+
+function assertTestClockOwnership(
+  clock: Stripe.TestHelpers.TestClock,
+  runId: string,
+): void {
+  if (
+    clock.livemode
+    || !clock.name?.startsWith(`murph-${buildHostedStripeRunCorrelationToken(runId)}-`)
+  ) {
+    throw new HostedStripeBillingLiveError(
+      "Refused to mutate a Stripe Test Clock not owned by this test run.",
+    );
+  }
+}
+
+async function waitForOwnedStripeTestClock(input: {
+  runId: string;
+  stripe: Stripe;
+  testClockId: string;
+}): Promise<Stripe.TestHelpers.TestClock> {
+  const deadline = Date.now() + STRIPE_POLL_TIMEOUT_MS;
+  while (true) {
+    const clock = await input.stripe.testHelpers.testClocks.retrieve(input.testClockId);
+    assertTestClockOwnership(clock, input.runId);
+    if (clock.status === "ready") {
+      return clock;
+    }
+    if (clock.status === "internal_failure") {
+      throw new HostedStripeBillingLiveError("Stripe Test Clock entered internal_failure.");
+    }
+    if (Date.now() >= deadline) {
+      throw new HostedStripeBillingLiveError("Timed out waiting for Stripe Test Clock readiness.");
+    }
+    await delay(STRIPE_POLL_INTERVAL_MS);
+  }
 }
 
 function assertCheckoutOwnership(

@@ -1256,7 +1256,8 @@ function createWhoopProvider(input: {
     descriptor: {
       ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
       connection: {
-        ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.connection,
+        kind: "oauth2",
+        callbackPath: "/synthetic/callback",
         defaultScopes: ["offline"],
       },
     },

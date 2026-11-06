@@ -45,6 +45,9 @@ const DELETED_COMMONS_COMMANDS = [
   'commons search',
   'commons get',
   'commons source list',
+  'commons protocol list',
+  'commons protocol show',
+  'commons protocol explore',
 ] as const
 let inProcessCliProcessStateQueue: Promise<void> = Promise.resolve()
 
@@ -126,7 +129,6 @@ async function runSourceEntrypointRawFromCwd(
       process.stderr.write = createProcessWriteInterceptor(stderr)
 
       await runMurphCliEntrypoint(args, {
-        argv0: 'vault-cli',
         exit(code = 0) {
           exitCode = code
         },
@@ -472,6 +474,7 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
   assert.doesNotMatch(help, /^  chat\s+/mu)
+  assert.doesNotMatch(help, /^\s+age\s+/mu)
   assert.match(help, /commons\s+Read-only Health Commons commands/u)
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
@@ -524,16 +527,28 @@ test('built CLI discovery surfaces remain available', async () => {
   ) as {
     commands: Array<{ name: string }>
   }
+  const compactManifest = JSON.parse(
+    await runRawCli(['--llms', '--format', 'json'], { env: builtCliEnv }),
+  ) as {
+    commands: Array<{ name: string }>
+  }
   const completions = await runRawCli(['completions', 'bash'], {
     env: builtCliEnv,
   })
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
+  assert.doesNotMatch(help, /^\s+age\s+/mu)
   assert.equal('query' in schema.args.properties, true)
   assert.equal(
     manifest.commands.some((command) => command.name === 'search query'),
     true,
   )
+  for (const discovery of [manifest, compactManifest]) {
+    assert.equal(
+      discovery.commands.some((command) => /^age(?: |$)/u.test(command.name)),
+      false,
+    )
+  }
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
 
@@ -1667,7 +1682,7 @@ test('published config schema artifact stays on the native incur shape', async (
             properties?: {
               commands?: {
                 properties?: {
-                  ask?: {
+                  onboarding?: {
                     properties?: {
                       options?: {
                         properties?: {
@@ -1690,8 +1705,9 @@ test('published config schema artifact stays on the native incur shape', async (
     schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.show?.properties?.options?.properties?.requestId,
   )
   assert.ok(
-    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.ask?.properties?.options?.properties?.model,
+    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.onboarding
   )
+  assert.equal(Object.hasOwn(schema.properties?.commands?.properties ?? {}, 'age'), false)
   assert.equal(schemaText.includes('"x-incur-'), false)
 })
 
@@ -2170,7 +2186,7 @@ test('clinical import descriptors expose scaffolds and payload schemas', () => {
   }
 })
 
-test('experiment descriptor describes the explicit start source choice', () => {
+test('experiment descriptor describes a private start without a public catalog', () => {
   const descriptor = vaultCliCommandDescriptors.find(
     (candidate) => candidate.id === 'experiment',
   )
@@ -2184,69 +2200,31 @@ test('experiment descriptor describes the explicit start source choice', () => {
   )
 
   assert.notEqual(startCommand, undefined, 'expected experiment start descriptor')
-  assert.match(startCommand?.description ?? '', /Health Commons protocol/u)
-  assert.match(startCommand?.description ?? '', /no-public-protocol fallback/u)
-  assert.doesNotMatch(startCommand?.description ?? '', /protocol key is supplied/u)
+  assert.match(startCommand?.description ?? '', /private typed experiment run/u)
+  assert.doesNotMatch(startCommand?.description ?? '', /Health Commons|protocol/u)
 })
 
-test('murph age descriptor exposes metadata-only input readiness', () => {
-  const descriptor = vaultCliCommandDescriptors.find(
-    (candidate) => candidate.id === 'murph-age',
-  )
+test('retired age commands follow the existing unsupported-command behavior', async () => {
+  const cli = createVaultCli()
+  for (const leaf of [
+    '',
+    'report',
+    'scaffold',
+    'preview',
+    'preview-view',
+    'calculate',
+    'calculate-bundle',
+    'inputs',
+    'model-cards',
+    'evidence',
+  ]) {
+    const args = leaf ? ['age', leaf] : ['age']
+    const result = await runJsonCli(cli, [...args, '--no-config'])
 
-  if (!descriptor || !('leafCommands' in descriptor) || !descriptor.leafCommands) {
-    throw new Error('The Murph Age descriptor is missing leaf commands.')
+    assert.equal(result.exitCode, 1, args.join(' '))
+    assert.equal(result.envelope.ok, false, args.join(' '))
+    assert.match(result.envelope.error?.code ?? '', /^COMMAND_NOT_FOUND$/iu, args.join(' '))
   }
-
-  const inputsCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age inputs',
-  )
-
-  if (!inputsCommand) {
-    throw new Error('expected age inputs descriptor')
-  }
-  assert.match(inputsCommand.description, /metadata-only/u)
-  assert.equal('hint' in inputsCommand, true)
-  assert.match(String(('hint' in inputsCommand ? inputsCommand.hint : '') ?? ''), /does not calculate an age/u)
-  assert.equal('output' in inputsCommand, true)
-
-  const scaffoldCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age scaffold',
-  )
-
-  if (!scaffoldCommand) {
-    throw new Error('expected age scaffold descriptor')
-  }
-  assert.match(scaffoldCommand.description, /research-preview JSON payload/u)
-  assert.match(String(('hint' in scaffoldCommand ? scaffoldCommand.hint : '') ?? ''), /Wearable values/u)
-  assert.equal('output' in scaffoldCommand, true)
-
-  const previewCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age preview',
-  )
-
-  if (!previewCommand) {
-    throw new Error('expected age preview descriptor')
-  }
-  assert.match(previewCommand.description, /submitted JSON payload/u)
-  assert.match(String(('hint' in previewCommand ? previewCommand.hint : '') ?? ''), /research-only/u)
-  assert.equal('output' in previewCommand, true)
-
-  const modelCardsCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age model-cards',
-  )
-
-  if (!modelCardsCommand) {
-    throw new Error('expected age model-cards descriptor')
-  }
-  assert.match(modelCardsCommand.description, /metadata-only/u)
-  assert.match(modelCardsCommand.description, /model-card/u)
-  assert.equal('hint' in modelCardsCommand, true)
-  assert.match(
-    String(('hint' in modelCardsCommand ? modelCardsCommand.hint : '') ?? ''),
-    /does not expose model internals/u,
-  )
-  assert.equal('output' in modelCardsCommand, true)
 })
 
 test('workout descriptor does not expose the removed workout measurement alias', () => {
@@ -2618,6 +2596,15 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   )
 })
 
+test('food search-labels help explains both query forms without the output schema', async () => {
+  const help = await runSourceCliRaw(['food', 'search-labels', '--help'])
+  assert.match(help, /--query/u)
+  assert.match(help, /never both/u)
+  assert.match(help, /rolled oats/u)
+  assert.ok(Buffer.byteLength(help) < 8_000)
+  assert.doesNotMatch(help, /contaminantSummary/u)
+})
+
 test('food search-labels schema exposes hosted label lookup inputs', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['food', 'search-labels', '--schema', '--format', 'json']),
@@ -2631,8 +2618,9 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
     }
   }
 
-  assert.deepEqual(schema.args.required, ['query'])
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal(schema.args.properties.query?.maxLength, 256)
+  assert.match(String(schema.options.properties.query?.description ?? ''), /Alternative to the positional query/u)
   assert.match(
     String(schema.args.properties.query?.description ?? ''),
     /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
@@ -2702,35 +2690,7 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   )
 })
 
-test('model schema explains preset-gated non-interactive updates', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['model', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, {
-        description?: string
-      }>
-    }
-  }
 
-  assert.match(
-    String(schema.options.properties.preset?.description ?? ''),
-    /only accepts Codex/u,
-  )
-  assert.equal('providerPreset' in schema.options.properties, false)
-  assert.equal('baseUrl' in schema.options.properties, false)
-  assert.equal('apiKeyEnv' in schema.options.properties, false)
-  assert.equal('headersJson' in schema.options.properties, false)
-  assert.equal('modelProvider' in schema.options.properties, true)
-  assert.match(
-    String(schema.options.properties.modelProvider?.description ?? ''),
-    /Codex model provider/u,
-  )
-  assert.match(
-    String(schema.options.properties.profile?.description ?? ''),
-    /Only applies with `--preset codex`/u,
-  )
-})
 
 test('blood-test list schema exposes targeted text, date-range, and status filters', async () => {
   const schema = JSON.parse(
@@ -2912,11 +2872,69 @@ test('knowledge commands expose the expected schema', async () => {
   assert.deepEqual(logTailSchema.options.required, ['limit'])
 })
 
-test('knowledge upsert persists assistant-authored pages through the built CLI boundary', async () => {
+for (const kind of ['provider', 'food', 'recipe'] as const) {
+  test(`${kind} lifecycle persists through fresh built CLI processes`, async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-${kind}-lifecycle-`))
+    const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
+      runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
+    type SavedRecord = { lookupId: string; path: string; created: boolean }
+    type ShownRecord = { entity: { id: string; path: string; data: { title: string } } }
+    try {
+      requireData(await runFreshCli(['init', '--vault', vaultRoot]))
+      const created = requireData(await runFreshCli<SavedRecord>([
+        kind, 'save', 'Synthetic initial record', '--slug', 'synthetic-initial',
+        '--vault', vaultRoot,
+      ]))
+      assert.equal(created.created, true)
+      const shown = requireData(await runFreshCli<ShownRecord>([
+        kind, 'show', created.lookupId, '--vault', vaultRoot,
+      ]))
+      assert.equal(shown.entity.id, created.lookupId)
+      assert.equal(shown.entity.data.title, 'Synthetic initial record')
+
+      const updated = requireData(await runFreshCli<SavedRecord>([
+        ...(kind === 'food'
+          ? [kind, 'rename', created.lookupId, '--title', 'Synthetic updated record']
+          : [kind, 'save', 'Synthetic updated record', '--id', created.lookupId]),
+        '--slug', 'synthetic-updated', '--vault', vaultRoot,
+      ]))
+      assert.equal(updated.created, false)
+      assert.equal(updated.lookupId, created.lookupId)
+      assert.notEqual(updated.path, created.path)
+      const persisted = await readFile(path.join(vaultRoot, updated.path), 'utf8')
+      assert.match(persisted, /Synthetic updated record/u)
+      await assert.rejects(readFile(path.join(vaultRoot, created.path), 'utf8'), { code: 'ENOENT' })
+
+      const reopened = requireData(await runFreshCli<ShownRecord>([
+        kind, 'show', created.lookupId, '--vault', vaultRoot,
+      ]))
+      assert.equal(reopened.entity.path, updated.path)
+      assert.equal(reopened.entity.data.title, 'Synthetic updated record')
+      const listed = requireData(await runFreshCli<{ items: Array<{ id: string }> }>([
+        kind, 'list', '--vault', vaultRoot,
+      ]))
+      assert.deepEqual(listed.items.map((item) => item.id), [created.lookupId])
+
+      const rejected = await runFreshCli([
+        kind, 'save', 'Rejected update', '--id', created.lookupId,
+        '--slug', '../outside', '--vault', vaultRoot,
+      ])
+      assert.equal(rejected.ok, false)
+      assert.equal(await readFile(path.join(vaultRoot, updated.path), 'utf8'), persisted)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  }, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
+}
+
+test('knowledge lifecycle survives fresh built CLI processes and rejected source writes', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-'))
 
+  const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
+    runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
+
   try {
-    requireData(await runCli(['init', '--vault', vaultRoot]))
+    requireData(await runFreshCli(['init', '--vault', vaultRoot]))
     await mkdir(path.join(vaultRoot, 'research', '2026', '04'), {
       recursive: true,
     })
@@ -2959,7 +2977,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     const upserted = requireData(
-      await runCli<{
+      await runFreshCli<{
         bodyLength: number
         page: {
           librarySlugs: string[]
@@ -2989,7 +3007,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.deepEqual(upserted.page.sourcePaths, ['research/2026/04/sleep-note.md'])
 
     const shown = requireData(
-      await runCli<{
+      await runFreshCli<{
         page: {
           body: string
           markdown: string
@@ -2999,6 +3017,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
         'knowledge',
         'show',
         'sleep-quality',
+        '--raw',
         '--vault',
         vaultRoot,
       ]),
@@ -3011,7 +3030,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.match(shown.page.markdown, /relatedSlugs:/u)
 
     const log = requireData(
-      await runCli<{
+      await runFreshCli<{
         entries: Array<{
           action: string
           block: string
@@ -3035,7 +3054,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.match(log.entries[0]?.block ?? '', /slug: `sleep-quality`/u)
 
     requireData(
-      await runCli<{
+      await runFreshCli<{
         page: {
           librarySlugs: string[]
         }
@@ -3055,20 +3074,60 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     const replaced = requireData(
-      await runCli<{
+      await runFreshCli<{
         page: {
           librarySlugs: string[]
+          sourcePaths: string[]
+          markdown: string
         }
       }>([
         'knowledge',
         'show',
         'sleep-quality',
+        '--raw',
         '--vault',
         vaultRoot,
       ]),
     )
 
     assert.deepEqual(replaced.page.librarySlugs, ['sleep-duration'])
+
+    assert.deepEqual(replaced.page.sourcePaths, ['research/2026/04/sleep-note.md'])
+    const pagePath = path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md')
+    const persistedPage = await readFile(pagePath, 'utf8')
+    assert.equal(replaced.page.markdown, persistedPage)
+    assert.match(persistedPage, /Refreshed note/u)
+    assert.doesNotMatch(persistedPage, /Magnesium may help/u)
+
+    const searched = requireData(await runFreshCli<{
+      hits: Array<{ slug: string }>
+    }>(['knowledge', 'search', 'Refreshed', '--vault', vaultRoot]))
+    assert.deepEqual(searched.hits.map((hit) => hit.slug), ['sleep-quality'])
+
+    const listed = requireData(await runFreshCli<{
+      pages: Array<{ slug: string }>
+    }>(['knowledge', 'list', '--vault', vaultRoot]))
+    assert.deepEqual(listed.pages.map((page) => page.slug), ['sleep-quality'])
+
+    const indexPath = path.join(vaultRoot, 'derived/knowledge/index.md')
+    const logPath = path.join(vaultRoot, 'derived/knowledge/log.md')
+    const persistedIndex = await readFile(indexPath, 'utf8')
+    const persistedLog = await readFile(logPath, 'utf8')
+    const rejected = await runFreshCli([
+      'knowledge', 'upsert', '--vault', vaultRoot,
+      '--slug', 'sleep-quality', '--body', 'Must not replace the valid page.',
+      '--source-path', 'derived/knowledge/pages/sleep-quality.md',
+    ])
+    assert.equal(rejected.ok, false)
+    if (rejected.ok) throw new Error('Invalid source unexpectedly accepted')
+    assert.equal(rejected.error.code, 'knowledge_forbidden_source_path')
+    assert.equal(await readFile(pagePath, 'utf8'), persistedPage)
+    assert.equal(await readFile(indexPath, 'utf8'), persistedIndex)
+    assert.equal(await readFile(logPath, 'utf8'), persistedLog)
+    const afterRejection = requireData(await runFreshCli<{
+      page: { markdown: string }
+    }>(['knowledge', 'show', 'sleep-quality', '--raw', '--vault', vaultRoot]))
+    assert.equal(afterRejection.page.markdown, persistedPage)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -3125,6 +3184,7 @@ test('knowledge append-section appends one dated page section through the built 
       'knowledge',
       'show',
       'weekly-health-insights',
+      '--raw',
       '--vault',
       vaultRoot,
     ])
@@ -3223,78 +3283,6 @@ test('knowledge upsert rejects whitespace-only bodies through the CLI boundary',
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
-
-test('root run alias keeps the same command schema as assistant run', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['run', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'run', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
-test('root status alias keeps the same command schema as assistant status', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['status', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'status', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
-test('root doctor alias keeps the same command schema as assistant doctor', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['doctor', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'doctor', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
-test('root stop alias keeps the same command schema as assistant stop', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['stop', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'stop', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
 test('automation save and edit schemas expose typed automation fields and a separate JSON import fallback', async () => {
@@ -3522,76 +3510,6 @@ test('memory show schema accepts an optional memory id and compact projection', 
   assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('assistant session list schema emits the normalized session output shape', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'session', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    output: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('stateRoot' in schema.output.properties, true)
-  assert.equal('sessions' in schema.output.properties, true)
-  assert.equal('limit' in schema.options.properties, true)
-  assert.equal('filters' in schema.output.properties, true)
-  assert.equal('count' in schema.output.properties, true)
-  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'filters', 'sessions', 'count'])
-
-  const sessions = schema.output.properties.sessions as {
-    items?: {
-      properties?: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const sessionVariant = sessions.items
-
-  assert.notEqual(sessionVariant, undefined)
-  assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('target' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerOptions' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('model' in (sessionVariant?.properties ?? {}), true)
-  assert.equal('resumeThreadId' in (sessionVariant?.properties ?? {}), true)
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('assistant session show schema emits the normalized session output shape', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'session', 'show', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    output: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('sessionId' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['sessionId'])
-  assert.equal('stateRoot' in schema.output.properties, true)
-  assert.equal('session' in schema.output.properties, true)
-  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'session'])
-
-  const session = schema.output.properties.session as {
-    properties?: Record<string, unknown>
-    required?: string[]
-  }
-  const sessionVariant = session
-
-  assert.notEqual(sessionVariant, undefined)
-  assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('target' in (sessionVariant?.properties ?? {}), true)
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
 test('automation help points operators at canonical automations', async () => {
   const saveHelp = await runSourceCliRaw(['automation', 'save', '--help'])
   const saveDiscovery = await runSourceCliRaw(['automation', 'save', '--llms-full'])
@@ -3812,12 +3730,71 @@ test('owned date-range list help reuses consistent date and limit descriptions',
       help,
       /--to <string>\s+Optional inclusive upper date bound in YYYY-MM-DD form\./u,
     )
+  }
+  for (const help of [journalListHelp, eventListHelp]) {
     assert.match(
       help,
-      /--limit <number>\s+Maximum number of results to return\./u,
+      /--limit <number>\s+Maximum number of results to return, from 1 to 200\. \(default: 10\)/u,
     )
   }
+  assert.match(
+    workoutListHelp,
+    /--limit <number>\s+Maximum number of results to return\. Defaults to 5\./u,
+  )
 }, INCUR_HELP_TIMEOUT_MS)
+
+test('event list help discloses the enforced limit cap and rejects oversized limits before reading', async () => {
+  const help = await runSourceCliRaw(['event', 'list', '--help'])
+  assert.match(
+    help,
+    /--limit <number>\s+Maximum number of results to return, from 1 to 200\. \(default: 10\)/u,
+  )
+
+  const schema = JSON.parse(
+    await runSourceCliRaw(['event', 'list', '--schema', '--format', 'json']),
+  ) as { options: { properties: { limit: Record<string, unknown> } } }
+  assert.equal(schema.options.properties.limit.maximum, 200)
+  assert.equal(schema.options.properties.limit.default, 10)
+
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-event-list-limit-'))
+  const vaultRoot = path.join(tempRoot, 'vault')
+  try {
+    await initializeVault({ vaultRoot })
+    const before = await snapshotVaultFiles(vaultRoot)
+
+    const oversized = await runJsonCli(
+      createVaultCli(),
+      ['event', 'list', '--limit', '201', '--vault', vaultRoot],
+    )
+    assert.equal(oversized.exitCode, 1)
+    assertSafeInputValidationEnvelope(oversized.envelope, {
+      code: 'too_big',
+      missing: false,
+      path: 'limit',
+    })
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+
+    for (const [limitArgs, expectedLimit] of [
+      [['--limit', '200'], 200],
+      [['--limit', '1'], 1],
+      [[], 10],
+    ] as const) {
+      const result = await runJsonCli<{ filters: { limit?: number }; items: unknown[] }>(
+        createVaultCli(),
+        ['event', 'list', ...limitArgs, '--vault', vaultRoot],
+      )
+      assert.equal(result.exitCode, null)
+      assert.equal(result.envelope.ok, true)
+      if (result.envelope.ok) {
+        assert.equal(result.envelope.data.filters.limit, expectedLimit)
+        assert.deepEqual(result.envelope.data.items, [])
+      }
+    }
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+}, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
 
 test('command schema reflects only domain-specific options', async () => {
   const schema = JSON.parse(
@@ -3895,6 +3872,7 @@ test('compact llms json manifest remains available', async () => {
   }
 
   assert.equal(manifest.version, 'incur.v1')
+  assert.equal(manifest.commands.some((command) => /^age(?: |$)/u.test(command.name)), false)
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
   assert.equal(manifest.commands.some((command) => command.name === 'chat'), false)
   assert.equal(
@@ -3906,11 +3884,7 @@ test('compact llms json manifest remains available', async () => {
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'commons protocol show'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'commons protocol explore'),
+    manifest.commands.some((command) => command.name === 'commons goal show'),
     true,
   )
   for (const deletedCommand of DELETED_COMMONS_COMMANDS) {
@@ -3972,14 +3946,7 @@ test('full llms json manifest remains available for schema-rich commands', async
     manifest.commands.some((command) => command.name === 'search query'),
     true,
   )
-  const ageInputsCommand = manifest.commands.find(
-    (command) => command.name === 'age inputs',
-  )
-  assert.notEqual(ageInputsCommand, undefined)
-  assert.match(
-    String(ageInputsCommand?.description ?? ''),
-    /metadata-only/u,
-  )
+  assert.equal(manifest.commands.some((command) => /^age(?: |$)/u.test(command.name)), false)
   const automationSaveCommand = manifest.commands.find(
     (command) => command.name === 'automation save',
   )
@@ -3997,19 +3964,7 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.doesNotMatch(String(automationSaveCommand?.description ?? ''), /update/u)
   assert.doesNotMatch(String(automationImportCommand?.description ?? ''), /bulk-edit/u)
   assert.equal(
-    manifest.commands.some((command) => command.name === 'age model-cards'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'age preview'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'age scaffold'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'commons protocol list'),
+    manifest.commands.some((command) => command.name === 'commons knowledge search'),
     true,
   )
   for (const deletedCommand of DELETED_COMMONS_COMMANDS) {

@@ -118,14 +118,6 @@ import {
   type HostedGroupSponsorshipMonthlyCapMinor,
 } from "../hosted-groups/group-sponsorship-contract";
 import {
-  assertHostedGroupSponsorshipRequestMatchesTx,
-  createHostedGroupSponsorshipMomentTx,
-  hasHostedGroupSponsorshipCustomizationAuthority,
-  hostedGroupSponsorshipRequestMatchesTx,
-  parseHostedGroupSponsorshipDraft,
-  type HostedGroupSponsorshipDraft,
-} from "../hosted-groups/group-sponsorship-store";
-import {
   readHostedConfiguredGroupSponsorshipOfferCodes,
 } from "../hosted-groups/group-sponsorship-policy";
 import { hasHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
@@ -177,14 +169,6 @@ class HostedGroupUsageCreditCustomerRequiredError extends Error {
   }
 }
 
-function canContinueHostedUsageCreditPurchase(
-  status: HostedUsageCreditPurchaseStatus,
-): boolean {
-  return status === HostedUsageCreditPurchaseStatus.created
-    || status === HostedUsageCreditPurchaseStatus.checkout_open
-    || status === HostedUsageCreditPurchaseStatus.payment_pending;
-}
-
 export interface HostedUsageCreditCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedUsageCreditOfferCode;
@@ -218,7 +202,6 @@ interface HostedGroupUsageCreditCheckoutInput
   joinCode: string;
   monthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   payerMemberId: string;
-  sponsorship?: HostedGroupSponsorshipDraft | null;
   sponsorshipKind?: HostedGroupSponsorshipCheckoutKind;
 }
 
@@ -233,7 +216,6 @@ export interface HostedGroupSponsorshipCheckoutRequest {
   monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor | null;
   offerCode: HostedGroupSponsorshipOfferCode;
   recoveryOnly: boolean;
-  sponsorship: HostedGroupSponsorshipDraft | null;
   sponsorshipKind: HostedGroupSponsorshipCheckoutKind;
 }
 
@@ -312,6 +294,7 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
       key !== "monthlyCapMinor" &&
       key !== "offerCode" &&
       key !== "recoveryOnly" &&
+      // A tab opened before personalization was removed still sends this key.
       key !== "sponsorship" &&
       key !== "sponsorshipKind"
     ) ||
@@ -368,7 +351,6 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
     monthlyCapMinor,
     offerCode,
     recoveryOnly: base.recoveryOnly,
-    sponsorship: parseHostedGroupSponsorshipDraft(value.sponsorship),
     sponsorshipKind,
   };
 }
@@ -421,7 +403,6 @@ export async function createHostedGroupUsageCreditCheckout(
   };
   const checkoutInput = {
     clientRequestKey: input.clientRequestKey,
-    groupSponsorship: input.sponsorship ?? null,
     groupSponsorshipKind: input.sponsorshipKind ?? "one_time",
     groupSponsorshipMonthlyCapMinor: input.monthlyCapMinor ?? null,
     now: input.now,
@@ -493,7 +474,6 @@ export async function createHostedFamilyMemberUsageCreditCheckout(
 
 async function createHostedUsageCreditCheckoutForTarget(input: {
   clientRequestKey: string;
-  groupSponsorship?: HostedGroupSponsorshipDraft | null;
   groupSponsorshipKind?: HostedGroupSponsorshipCheckoutKind;
   groupSponsorshipMonthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor | null;
   groupStripeCustomerId?: string;
@@ -646,25 +626,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
             targetConflict: false,
           };
         }
-        const sponsorshipInput = {
-          draft: input.groupSponsorship ?? null,
-          purchaseId: recoveredPurchase.id,
-          tx,
-        };
-        if (canContinueHostedUsageCreditPurchase(recoveredPurchase.status)) {
-          await assertHostedGroupSponsorshipRequestMatchesTx(sponsorshipInput);
-        } else if (
-          !(await hostedGroupSponsorshipRequestMatchesTx(sponsorshipInput))
-        ) {
-          return {
-            kind: "purchase" as const,
-            purchase: recoveredPurchase,
-            recovered: true,
-            requestKeyMatched: true,
-            selectionConflict: "sponsorship" as const,
-            targetConflict: false,
-          };
-        }
       }
       return {
         kind: "purchase" as const,
@@ -742,11 +703,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
               targetConflict: false,
             };
           }
-          await assertHostedGroupSponsorshipRequestMatchesTx({
-            draft: input.groupSponsorship ?? null,
-            purchaseId: existingActive.id,
-            tx,
-          });
         }
         return {
           kind: "purchase" as const,
@@ -960,25 +916,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         updatedAt: now,
       },
     });
-    if (target.kind === "group") {
-      const customContentAuthorized =
-        await hasHostedGroupSponsorshipCustomizationAuthority({
-          containerMemberId: target.beneficiaryMemberId,
-          now,
-          participantMemberId: target.payerMemberId,
-          prisma: tx,
-        });
-      await createHostedGroupSponsorshipMomentTx({
-        authorizedDraft: customContentAuthorized
-          ? input.groupSponsorship ?? null
-          : null,
-        beneficiaryMemberId: target.beneficiaryMemberId,
-        creatorMemberId: target.payerMemberId,
-        offerCode: offer.code,
-        purchaseId,
-        tx,
-      });
-    }
     return {
       kind: "purchase" as const,
       purchase: created,

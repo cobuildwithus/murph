@@ -51,7 +51,6 @@ apps/web/.next-smoke/
 apps/web/.next-smoke*/
 apps/web/.swc/
 packages/health-commons/generated/
-scripts/murph-age/
 
 *.log
 *.tsbuildinfo

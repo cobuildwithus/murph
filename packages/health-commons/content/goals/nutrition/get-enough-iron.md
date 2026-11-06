@@ -92,4 +92,4 @@ Unexplained iron deficiency, especially in men or postmenopausal adults, needs e
 
 ## Related goals
 
-[Eat Well as a Vegetarian](/goals/eat-well-vegetarian) · [Eat Well as a Vegan](/goals/eat-well-vegan) · [Recover From Iron-Deficiency Anemia](/goals/recover-from-iron-deficiency-anemia)
+[Eat Well as a Vegetarian](/goals/eat-well-vegetarian) · [Eat Well as a Vegan](/goals/eat-well-vegan) · [Understand My Iron-Deficiency Anemia](/goals/recover-from-iron-deficiency-anemia)

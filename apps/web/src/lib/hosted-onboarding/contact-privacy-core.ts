@@ -26,10 +26,10 @@ export type HostedBlindIndexKind =
   | "external-thread"
   | "external-thread-identity"
   | "group-disclosure-permission"
+  | "game-audience"
   | "linq-chat"
   | "linq-message"
   | "phone"
-  | "privy-user"
   | "stripe-billing-event"
   | "stripe-checkout-session"
   | "stripe-customer"
@@ -37,6 +37,7 @@ export type HostedBlindIndexKind =
   | "stripe-subscription"
   | "stripe-subscription-item"
   | "stripe-subscription-schedule"
+  | "telegram-poll"
   | "telegram-message"
   | "telegram-username"
   | "telegram-user"
@@ -86,6 +87,11 @@ export function createHostedPhoneLookupKey(value: string | null | undefined): st
   return createHostedLookupKey("phone", normalizePhoneNumber(value));
 }
 
+/** Exact normalized handle set, serialized by the game audience owner. */
+export function createHostedGameAudienceLookupKeys(value: string): { current: string; candidates: string[] } {
+  return { current: createHostedLookupKey("game-audience", value)!, candidates: createHostedLookupKeyReadCandidates("game-audience", value) };
+}
+
 export function createHostedPhoneLookupKeyReadCandidates(
   value: string | null | undefined,
 ): string[] {
@@ -130,20 +136,6 @@ export function createHostedEmailLookupKeyReadCandidates(
   return createHostedLookupKeyReadCandidates("email", normalizeHostedEmailAddress(value));
 }
 
-export function createHostedPrivyUserLookupKey(value: string | null | undefined): string | null {
-  return createHostedLookupKey("privy-user", normalizeHostedOpaqueInput(value));
-}
-
-export function createHostedPrivyUserLookupKeyReadCandidates(
-  value: string | null | undefined,
-): string[] {
-  return createHostedLookupKeyReadCandidates("privy-user", normalizeHostedOpaqueInput(value));
-}
-
-export function createHostedWalletAddressLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value)?.toLowerCase() ?? null;
-  return createHostedLookupKey("wallet-address", normalized);
-}
 
 export function createHostedLinqChatLookupKey(value: string | number | null | undefined): string | null {
   return createHostedLookupKey("linq-chat", normalizeHostedOpaqueInput(value));
@@ -531,4 +523,12 @@ function readHostedPrivacyKeyring(): {
   readVersions: readonly string[];
 } {
   return readHostedContactPrivacyKeyring(process.env);
+}
+
+export function createHostedTelegramPollLookupKey(value: string): string | null {
+  return createHostedLookupKey("telegram-poll", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedTelegramPollLookupKeyReadCandidates(value: string): string[] {
+  return createHostedLookupKeyReadCandidates("telegram-poll", normalizeHostedOpaqueInput(value));
 }

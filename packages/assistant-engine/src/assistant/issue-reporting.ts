@@ -37,6 +37,26 @@ export interface AssistantRuntimeIssueInput {
   summary: string
 }
 
+// Phone-start failures may precede any phone row. Keep independent space for
+// their only durable evidence, with at most ten issues collected or persisted.
+export function appendAssistantRuntimeIssueInput(
+  issues: AssistantRuntimeIssueInput[],
+  issue: AssistantRuntimeIssueInput,
+): void {
+  const phoneFailure = isPhoneCallFailureIssue(issue)
+  const count = issues.filter((existing) => isPhoneCallFailureIssue(existing) === phoneFailure).length
+  if (count < (phoneFailure ? 2 : 8)) {
+    issues.push(issue)
+  }
+}
+
+function isPhoneCallFailureIssue(issue: AssistantRuntimeIssueInput): boolean {
+  return issue.component === 'assistant.codex-dynamic-tool'
+    && issue.operation === 'create-phone-call'
+    && issue.issueKind === 'tool_error'
+    && issue.errorCode === 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+}
+
 const ISSUE_CAPTURE_ENV = 'MURPH_ASSISTANT_PRIVATE_ISSUES'
 const STRING_MAX_LENGTH = 180
 const SUMMARY_MAX_LENGTH = 240
@@ -121,7 +141,11 @@ export function recordAssistantRuntimeIssueInputsBestEffort(input: {
     return
   }
 
-  for (const issue of input.issues.slice(0, 8)) {
+  const issues: AssistantRuntimeIssueInput[] = []
+  for (const issue of input.issues) {
+    appendAssistantRuntimeIssueInput(issues, issue)
+  }
+  for (const issue of issues) {
     const write = recordAssistantRuntimeIssue({
       issue,
       policy: input.policy,

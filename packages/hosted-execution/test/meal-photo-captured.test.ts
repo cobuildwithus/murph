@@ -10,8 +10,9 @@ const CAPTURE_ID = "a".repeat(64);
 const SHA256 = "b".repeat(64);
 
 describe("meal-photo.captured hosted execution wake", () => {
-  it("builds and parses a typed system mailbox wake", () => {
+  it.each([undefined, "2f1c1fdc-c7b0-4d90-b902-8e6295959243", CAPTURE_ID])("round-trips legacy and upload-linked wakes (%s)", uploadId => {
     const wake = buildHostedExecutionMealPhotoCapturedWake({
+      ...(uploadId === undefined ? {} : { uploadId }),
       byteLength: 1024,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
@@ -27,6 +28,9 @@ describe("meal-photo.captured hosted execution wake", () => {
     });
 
     expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    for (const invalid of [null, "", "x".repeat(129), 123]) {
+      expect(() => parseHostedExecutionWake({ ...wake, mealPhoto: { ...wake.mealPhoto, uploadId: invalid } })).toThrow();
+    }
     expect(isHostedSystemWake(wake)).toBe(true);
     expect(isHostedMailboxKind(wake.kind)).toBe(true);
   });

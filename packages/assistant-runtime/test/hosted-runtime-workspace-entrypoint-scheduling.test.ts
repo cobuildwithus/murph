@@ -45,7 +45,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -126,8 +125,132 @@ import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
+import {
+  compactHostedConversationMailboxHandledItemSelection,
+  hasHostedPendingAssistantInputWakeCandidate,
+  inspectHostedPendingAssistantInputWakeCandidate,
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("converges a restored terminal-only index after an empty import advances consumption", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-consumed-convergence-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const farWakeAt = new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+      await upsertAutomation({
+        automationId: "automation_01J00000000000000000000001", continuityPolicy: "fresh",
+        instructions: "Send the synthetic scheduled reminder.", now: new Date(TEST_NOW),
+        route: {
+          channel: "linq", deliveryTarget: "synthetic_consumed_chat", identityId: null,
+          participantId: null, threadId: "synthetic_consumed_chat", threadIsDirect: true,
+        },
+        schedule: { kind: "at", at: farWakeAt }, status: "active",
+        title: "Synthetic consumption reminder", vaultRoot,
+      });
+      let unacknowledgedInputId = "";
+      for (let seq = 1; seq <= 65; seq += 1) {
+        const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+          item: createMailboxItem({ id: `mailbox_consumed_${seq}`, laneSeq: String(seq) }),
+          vaultRoot,
+        });
+        await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId, vaultRoot });
+        await recordHostedMailboxAssistantInputItem({
+          inputId, mailboxItemId: `mailbox_consumed_${seq}`, vault: vaultRoot,
+        });
+        if (seq === 65) unacknowledgedInputId = inputId;
+      }
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.conversation = "65";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      assert.deepEqual(await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }), {
+        hasCandidate: false, indexComplete: false,
+      });
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      artifactBytesByHash.set(initialSnapshot.hash, initialSnapshot.bytes);
+      let workspace = createWorkspaceState({
+        snapshotRef: initialSnapshot.snapshotRef,
+        nextWakeAt: farWakeAt, nextWakeReason: "assistant",
+        nextDefaultProcessingWakeAt: TEST_NOW, nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "65",
+          hostedMailboxConversationConsumedSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+      });
+      // Restore the published checkpoint again: acknowledgment must survive a
+      // new invocation, while terminal but unacknowledged input remains retained.
+      for (let invocation = 0; invocation < 2; invocation += 1) {
+        const checkpointCountBeforeInvocation = checkpointRequests.length;
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({ request: {
+            runnerIdleTtlMs: 1, workspaceVersion: workspace.version,
+          } }),
+          {
+            vaultRoot,
+            platform: createPlatform({
+              artifactBytesByHash,
+              mailboxPort: createMailboxPort({
+                events, items: [],
+                consumedSeqByLane: [{ lane: "conversation", consumedSeq: "64" }],
+              }),
+              workspacePort: createWorkspacePort({ events, checkpointRequests, workspace }),
+            }),
+            async importItem() { throw new Error("An empty mailbox must not import items."); },
+            // Isolate the steady-state empty pass from assistant post-checkpoint
+            // work, which can independently request a near-term continuation.
+            async runAssistantPhase() {
+              return {
+                progressed: false, runtimeProjectionCheckpointRequested: true,
+                nextWakeAt: farWakeAt, nextWakeReason: "assistant",
+              };
+            },
+            async createCheckpointSnapshot() {
+              const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+          },
+        );
+        assert.ok(checkpointRequests.length > checkpointCountBeforeInvocation);
+        const checkpoint = checkpointRequests.at(-1);
+        assert.ok(checkpoint);
+        assert.equal(checkpoint.nextDefaultProcessingWakeAt, farWakeAt,
+          "An acknowledged terminal index must not re-arm the 30-second maintenance wake.");
+        assert.equal(checkpoint.redactedStatus?.hostedMailboxConversationConsumedSeq, "64",
+          "The assistant phase must preserve the freshly observed consumption floor.");
+        assert.equal(checkpoint.systemMailboxProgressGeneration, "7");
+        assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [unacknowledgedInputId]);
+        assert.deepEqual(checkpoint.handledConversationMailboxItemIds, ["mailbox_consumed_65"]);
+        workspace = createWorkspaceState({
+          ...workspace,
+          snapshotRef: checkpoint.snapshotRef,
+          redactedStatus: checkpoint.redactedStatus,
+          nextDefaultProcessingWakeAt: checkpoint.nextDefaultProcessingWakeAt,
+          version: String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n),
+        });
+      }
+      const freshInputId = await stagePendingLinqAssistantInputForMailboxItem({
+        item: createMailboxItem({ id: "mailbox_consumed_fresh", laneSeq: "66" }),
+        vaultRoot,
+      });
+      await compactHostedConversationMailboxHandledItemSelection({ consumedThroughSeq: "64", vaultRoot });
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [unacknowledgedInputId, freshInputId]);
+      assert.equal(await hasHostedPendingAssistantInputWakeCandidate({ vaultRoot }), true,
+        "Fresh unconsumed foreground input must remain runnable after acknowledgment compaction.");
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
   test("clears a stale delivery projection while the same workspace drains device work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-stale-delivery-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
@@ -158,7 +281,7 @@ describe("hosted workspace runtime entrypoint", () => {
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          request: { idleCheckpointDelayMs: 1, processingMode: "default" },
+          request: { runnerIdleTtlMs: 1, processingMode: "default" },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
         {
@@ -216,7 +339,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPasses = 0;
     try {
       await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1 } }),
+        createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 1 } }),
         {
           vaultRoot,
           platform: createPlatform({
@@ -263,7 +386,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const imported: string[] = [];
     const importObserved = createDeferred<void>();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
@@ -275,7 +398,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
             },
           }),
           {
@@ -337,7 +460,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         "workspace.read",
         "mailbox.fetch",
       ]);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1_000);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
@@ -372,9 +495,70 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
           hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+          hostedMailboxSystemModelFreeWakeAt: null,
+          hostedMailboxSystemModelFreeWakeVersion: "1",
         },
         status: "budget_exhausted",
       });
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    { limit: 1, decline: false, expectedPairs: 0 },
+    { limit: 2, decline: false, expectedPairs: 1 },
+    { limit: 2, decline: true, expectedPairs: 1 },
+  ])("reserves/refunds audio pair slots through the workspace owner: $limit/$decline", async ({ limit, decline, expectedPairs }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-audio-budget-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    let pairCalls = 0;
+    const items = [1, 2, 3].map((ordinal) => createMailboxItem({
+      id: `mailbox_audio_budget_${ordinal}`, laneSeq: String(ordinal), causalSeq: String(ordinal),
+    }));
+    const importItem: HostedWorkspaceRuntimeJobOptions["importItem"] = Object.assign(
+      async (item: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]) => {
+        imported.push(item.item.id);
+        return { status: "imported" as const };
+      },
+      {
+        importAudioPair: async (
+          pair: readonly [Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0], Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]],
+          context?: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[1],
+        ) => {
+          pairCalls += 1;
+          assert.ok(context); // Both wrappers must forward the runtime import context.
+          if (decline) return null;
+          imported.push(...pair.map((item) => item.item.id));
+          return [{ status: "imported" }, { status: "imported" }] as const;
+        },
+      },
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      const result = await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { budget: { maxMailboxItems: limit }, runnerIdleTtlMs: 1 } }),
+        {
+          vaultRoot, importItem,
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "b".repeat(64), size: 512 }) };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items }),
+            workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState({ version: "0" }) }),
+          }),
+          async runAssistantPhase() { return { progressed: false, redactedStatus: { hostedAssistantProgressed: false } }; },
+        },
+      ), 15_000, () => events.join(","));
+      assert.equal(pairCalls, expectedPairs);
+      assert.deepEqual(imported, items.slice(0, limit).map((item) => item.id));
+      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, String(limit));
+      assert.equal(result.redactedStatus?.hostedMailboxImportedCount, limit);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -490,7 +674,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     const imported: string[] = [];
     const dueAssistantWakeAt = new Date(Date.parse(TEST_NOW) - 1_000).toISOString();
     const assistantObserved = createDeferred<void>();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     let assistantPhaseCalls = 0;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -503,7 +687,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
             },
           }),
           {
@@ -573,7 +757,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         "mailbox.fetch",
         "assistant:1",
       ]);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1_000);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
@@ -738,7 +922,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
   test("binds provider batches to stored input ids and conversation activity", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const conversationActivity: string[] = [];
+    const conversationActivity: number[] = [];
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
@@ -791,7 +975,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             ],
           });
           assert.equal(input.currentAssistantInputId?.(), null);
-          assert.deepEqual(conversationActivity, ["uncertain"]);
+          assert.deepEqual(conversationActivity, []);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             turnId: "turn_hosted_runtime_test",
@@ -807,7 +991,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantInputId?.(), null);
-          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+          assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
 
           const systemInputId = await stageAssistantInputEventForMailboxItem({
             causalSeq: "43",
@@ -834,7 +1018,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             ],
           });
           await genericRelease?.();
-          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+          assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
           return { progressed: false };
         },
         vaultRoot,
@@ -843,345 +1027,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       await removeTempRoot(vaultRoot);
     }
   });
-
-  test("hands a pending turn to a fresh invocation before servicing a later wake", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(TEST_NOW));
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-handoff-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    let assistantPhaseCount = 0;
-    let providerEgressCount = 0;
-
-    try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_provider_handoff",
-            idleCheckpointDelayMs: 180_000,
-            leaseGeneration: "1",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "a".repeat(64),
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            return {
-              assistantInputId: await stageAssistantInputEventForMailboxItem({
-                item: item.item,
-                vaultRoot,
-              }),
-              status: "imported",
-            };
-          },
-          platform: createPlatform({
-            assistantConfigurationToolPort: {
-              async request() {
-                return {
-                  action: "read",
-                  result: {
-                    availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-                    availableProviders: ["openai", "venice"],
-                    availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                    configurationAvailable: true,
-                    dormantSolPreference: false,
-                    model: "gpt-5.6-terra",
-                    provider: "venice",
-                    reasoningEffort: "low",
-                    solAvailable: false,
-                  },
-                };
-              },
-            },
-            mailboxPort: createMailboxPort({ assistantProvider: "venice", events: [], items: mailboxItems }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              checkpointWorkspace: (request) => {
-                mailboxItems.push(createMailboxItem({
-                  id: "mailbox_item_provider_handoff_retry",
-                  laneSeq: "1",
-                }));
-                runtimeWakeSignal.notify();
-                return createWorkspaceState({
-                  nextWakeAt: request.nextWakeAt ?? null,
-                  nextWakeReason: request.nextWakeReason ?? null,
-                  redactedStatus: request.redactedStatus ?? null,
-                  snapshotRef: request.snapshotRef,
-                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-                });
-              },
-              events: [],
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          runtimeWakeSignal,
-          async runAssistantPhase(input) {
-            assistantPhaseCount += 1;
-            if (assistantPhaseCount > 1) {
-              throw new Error(
-                "A stale-provider invocation must checkpoint before servicing another wake.",
-              );
-            }
-            try {
-              await input.beforeProviderAcceptedInputs?.({
-                turnId: "turn_hosted_runtime_test",
-                acceptedInputs: [{ id: "system_provider_handoff", source: "system" }],
-              });
-            } catch (error) {
-              assert.equal(
-                error instanceof Error ? error.name : null,
-                "AssistantActiveTurnInputUnavailableError",
-              );
-              return {
-                checkpointReason: "canonical_runtime_commit",
-                nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
-                progressed: true,
-              };
-            }
-            providerEgressCount += 1;
-            return { progressed: false };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.equal(providerEgressCount, 0);
-      assert.equal(assistantPhaseCount, 1);
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(checkpointRequests.length, 1);
-    } finally {
-      vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("uses an empty mailbox's provider fact without rereading unavailable settings", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(TEST_NOW));
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    let providerEgressCount = 0;
-
-    try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_provider_authority_unavailable",
-            idleCheckpointDelayMs: 180_000,
-            leaseGeneration: "1",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            throw new Error("Provider authority deferral must not checkpoint.");
-          },
-          async importItem() {
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            assistantConfigurationToolPort: {
-              async request() {
-                throw new Error("control plane unavailable");
-              },
-            },
-            mailboxPort: createMailboxPort({ events: [], items: [] }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events: [],
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          async runAssistantPhase(input) {
-            try {
-              await input.beforeProviderAcceptedInputs?.({
-                turnId: "turn_hosted_runtime_test",
-                acceptedInputs: [{ id: "system_provider_authority", source: "system" }],
-              });
-            } catch (error) {
-              assert.equal(
-                error instanceof Error ? error.name : null,
-                "AssistantActiveTurnInputUnavailableError",
-              );
-              return { progressed: false };
-            }
-            providerEgressCount += 1;
-            return { progressed: false };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.equal(providerEgressCount, 1);
-      assert.equal(result.status, "idle");
-      assert.equal(checkpointRequests.length, 0);
-    } finally {
-      vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("hands a detached ask to a fresh invocation after an acknowledged provider update", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-provider-handoff-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const prepareStarted = createDeferred<void>();
-    const prepareRelease = createDeferred<void>();
-    const idleMaintenanceCallCount =
-      mocks.runHostedIdleCheckpointMaintenance.mock.calls.length;
-    const askItem = createMailboxItem({
-      dedupeKey: "ask_event_detached_provider_handoff",
-      id: "mailbox_item_detached_provider_handoff",
-      kind: "assistant.ask.requested",
-      lane: "system",
-      laneSeq: "1",
-    });
-    let completionCalls = 0;
-    let providerEgressCount = 0;
-
-    mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
-      events.push("ask.started");
-      await askInput.beforeProviderEntry?.();
-      providerEgressCount += 1;
-      return { answer: "stale answer", outcome: "answered" };
-    });
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const result = await withRealTimeout(
-        runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            request: {
-              attemptId: "attempt_detached_provider_handoff",
-              idleCheckpointDelayMs: 180_000,
-              leaseGeneration: "1",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
-            },
-          }),
-          {
-            async createCheckpointSnapshot() {
-              return {
-                snapshotRef: createSnapshotFixtureRef({
-                  hash: "b".repeat(64),
-                  size: 512,
-                }),
-              };
-            },
-            async importItem(item) {
-              events.push("ask.imported");
-              return await enqueueHostedSystemMailboxItem({
-                item,
-                vaultRoot,
-                wake: createAssistantAskRequestedWake({
-                  eventId: askItem.dedupeKey,
-                }),
-              });
-            },
-            platform: createPlatform({
-              assistantAskPort: {
-                async request(request) {
-                  if (request.action === "complete") {
-                    events.push("ask.completed");
-                    completionCalls += 1;
-                    return { action: "complete", status: "completed" };
-                  }
-                  events.push("ask.prepared");
-                  prepareStarted.resolve();
-                  await prepareRelease.promise;
-                  return {
-                    action: "prepare",
-                    question: "What did the group decide?",
-                    status: "ready",
-                    targetLabel: "100 Club",
-                  };
-                },
-              },
-              assistantConfigurationToolPort: {
-                async request() {
-                  return {
-                    action: "update",
-                    result: {
-                      appliesAt: "next_turn",
-                      availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-                      availableProviders: ["openai", "venice"],
-                      availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                      configurationAvailable: true,
-                      dormantSolPreference: false,
-                      model: "gpt-5.6-terra",
-                      provider: "venice",
-                      reasoningEffort: "low",
-                      requiredPlan: null,
-                      solAvailable: false,
-                      status: "updated",
-                    },
-                  };
-                },
-              },
-              mailboxPort: createMailboxPort({ events, items: [askItem] }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events: [],
-                workspace: createWorkspaceState({ version: "0" }),
-              }),
-            }),
-            async runAssistantPhase(input) {
-              events.push("foreground");
-              await prepareStarted.promise;
-              await input.runtime.platform.assistantConfigurationToolPort?.request({
-                action: "update",
-                assistantInputId: "ain_synthetic_provider_update",
-                provider: "venice",
-              });
-              prepareRelease.resolve();
-              return { progressed: false };
-            },
-            runtimeWakeSignal,
-            vaultRoot,
-          },
-        ),
-        30_000,
-        () => JSON.stringify({
-          checkpointCount: checkpointRequests.length,
-          completionCalls,
-          events,
-          providerEgressCount,
-        }),
-      );
-
-      assert.equal(providerEgressCount, 0);
-      assert.equal(completionCalls, 0);
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeReason, "assistant");
-      assert.ok(result.nextWakeAt);
-      assert.equal(
-        mocks.runHostedIdleCheckpointMaintenance.mock.calls[
-          idleMaintenanceCallCount
-        ]?.[0].pendingWork,
-        true,
-      );
-      assert.equal(checkpointRequests.length, 1);
-      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-      assert.equal(pending.length, 1);
-      assert.equal(pending[0]?.itemId, askItem.id);
-      assert.equal(pending[0]?.status, "pending");
-      assert.equal(pending[0]?.nextAttemptAt, null);
-    } finally {
-      prepareRelease.resolve();
-      await removeTempRoot(vaultRoot);
-    }
-  }, 45_000);
 
   test("keeps device-sync ownership when invocation projections tie on wake time", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -1308,7 +1153,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           const baseHash = sha256HostedBundleHex(baseBundle);
           const snapshotRef = createSnapshotFixtureRef({ hash: baseHash, size: baseBundle.byteLength });
           const result = await runHostedWorkspaceRuntimeJobInProcess(
-            createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1, processingMode } }),
+            createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 1, processingMode } }),
             {
               async createCheckpointSnapshot() {
                 return { snapshotRef: createSnapshotFixtureRef({
@@ -1379,7 +1224,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             workspaceVersion: "0",
           },
         }),
@@ -1690,7 +1535,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_stale_supersede",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "3",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1830,8 +1675,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         ),
         `fresh due assistant wake missing from checkpoints: ${JSON.stringify(persistedWakes)}`,
       );
-      assert.equal(assistantPass, 3, events.join(","));
-      assert.equal(result.nextWakeAt, null);
+      assert.equal(assistantPass, 2, events.join(","));
+      assert.equal(result.nextWakeAt, freshDueWakeAt);
     } finally {
       foregroundAfterCheckpointGate.resolve();
       await resultPromise?.catch(() => undefined);
@@ -1839,1021 +1684,74 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test.each([
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: false,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "no-signal reconciliation",
-    },
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: true,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "empty checkpoint runtime recheck",
-    },
-    {
-      checkpointConversation: true,
-      checkpointConversationInputAhead: true,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: false,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "conversation input hint",
-    },
-    {
-      checkpointConversation: true,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: true,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "retained checkpoint wake",
-    },
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: false,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: true,
-      handoff: "no-signal reconciliation after a status commit",
-    },
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: true,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: true,
-      generatedImageRetention: false,
-      handoff: "system-only runtime control",
-    },
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: true,
-      checkpointTrustedCompletion: false,
-      checkpointTrustedCompletionRetry: true,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "retried trusted completion quiet window",
-    },
-    {
-      checkpointAssistantInputRetry: "conversation" as const,
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: false,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "retried conversation input quiet window",
-    },
-    {
-      checkpointAssistantInputRetry: "hosted-image" as const,
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: false,
-      checkpointRuntimeWake: false,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "retried hosted image completion quiet window",
-    },
-    {
-      checkpointConversation: false,
-      checkpointConversationInputAhead: false,
-      checkpointFreshTerminalConversation: true,
-      checkpointRuntimeWake: true,
-      checkpointTrustedCompletion: false,
-      checkpointSystemControl: false,
-      generatedImageRetention: false,
-      handoff: "fresh terminal conversation quiet window",
-    },
-  ])("older due assistant carry honors $handoff before persisting a later reminder", async (
-    {
-      checkpointAssistantInputRetry,
-      checkpointConversation,
-      checkpointConversationInputAhead,
-      checkpointFreshTerminalConversation,
-      checkpointRuntimeWake,
-      checkpointTrustedCompletion,
-      checkpointTrustedCompletionRetry,
-      checkpointSystemControl,
-      generatedImageRetention,
-    },
-  ) => {
-    // The predecessor already received its one hot attempt. A later reminder
-    // appears before checkpoint; when conversation input arrives while that
-    // checkpoint commits, it must retain foreground priority.
-    const workspaceRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-workspace-entrypoint-"),
-    );
-    const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
-    const vaultRoot = path.join(workspaceRoot, "live-vault");
-    const artifactBytesByHash = new Map<string, Uint8Array>();
+  test("retirement preserves a canonical later reminder behind an unserviced due wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-reminder-retirement-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
-    const olderDueWakeAt = new Date(Date.parse(TEST_NOW) - 60_000).toISOString();
-    const reconciliationWakeAt = TEST_NOW;
-    const reminderWakeAt = new Date(
-      Date.parse(TEST_NOW) + 5 * 60_000,
-    ).toISOString();
-    const reminderAutomationId = "automation_01JQ8PWXP5A68SQM1W0GYM41V7";
-    const runtimeAbortController = new AbortController();
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const olderWakeHotAttemptComplete = createDeferred<void>();
-    const olderWakePersisted = createDeferred<void>();
-    const reminderCreated = createDeferred<void>();
-    const reminderWakePersisted = createDeferred<void>();
-    const assistantInputRetryFailed = createDeferred<void>();
-    const assistantInputRetryHandled = createDeferred<void>();
-    const freshTerminalConversationHandled = createDeferred<void>();
-    const trustedCompletionHandled = createDeferred<void>();
-    const trustedCompletionRetryFailed = createDeferred<void>();
-    const firstCheckpointConversationHandled = createDeferred<void>();
-    const secondCheckpointConversationHandled = createDeferred<void>();
-    const mailboxItems = [
-      createMailboxItem({
-        id: "mailbox_item_entrypoint_assistant_carry_mask_001",
-        laneSeq: "1",
-      }),
-    ];
-    let assistantPass = 0;
-    let assistantInputRetryAttempts = 0;
-    let assistantInputRetryId: string | null = null;
-    let freshTerminalConversationInputId: string | null = null;
-    let reminderReconciled = false;
-    let snapshotCount = 0;
-    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
-
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const dueAt = new Date(Date.parse(TEST_NOW) - 60_000).toISOString();
+    const reminderAt = new Date(Date.parse(TEST_NOW) + 300_000).toISOString();
+    const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41V7";
+    let passes = 0;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
     try {
-      vi.setSystemTime(new Date(TEST_NOW));
-      let initialSnapshotRef: HostedWorkspaceState["snapshotRef"] = null;
-      if (generatedImageRetention) {
-        const recordedAt = "2026-04-01T00:00:00.000Z";
-        const sourceImagePath = path.join(workspaceRoot, "generated-image-source.webp");
-        await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
-        await writeFile(sourceImagePath, "generated image bytes");
-        await addCaptureWithLookup({
-          attachments: [{ role: "media_1", sourcePath: sourceImagePath }],
-          draft: {
-            note: "Assistant-generated image saved for later visual reuse.",
-            occurredAt: recordedAt,
-            recordedAt,
-            source: "derived",
-            tags: ["assistant-generated-image", "generated-image"],
-            title: "Generated image",
-          },
-          lookupAttachmentRole: "media_1",
-          lookupKey: "generated:assistant-carry-status-commit",
-          rawImport: {
-            importKind: "capture",
-            importedAt: recordedAt,
-            provenance: {
-              family: "capture",
-              generatedImage: { schema: "murph.generated-image.v1" },
-              mediaCount: 1,
-            },
-            source: "murph.generate_image",
-          },
-          vaultRoot: sourceVaultRoot,
-        });
-        await rm(sourceImagePath);
-        assert.deepEqual(
-          (await readHostedSystemMailboxState(sourceVaultRoot)).pending,
-          [],
-        );
-        const baseBundle = await snapshotHostedBundleRoots({
-          kind: "vault",
-          roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
-        });
-        assert.ok(baseBundle);
-        const baseHash = sha256HostedBundleHex(baseBundle);
-        artifactBytesByHash.set(baseHash, baseBundle);
-        initialSnapshotRef = createSnapshotFixtureRef({
-          hash: baseHash,
-          size: baseBundle.byteLength,
-        });
-      } else {
-        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      }
-
-      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_assistant_carry_mask",
-            idleCheckpointDelayMs,
-            leaseGeneration: "3",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 25 } }),
         {
-          async createCheckpointSnapshot(snapshotInput) {
-            snapshotCount += 1;
-            events.push(
-              `snapshot:${snapshotCount}:`
-              + `${snapshotInput.reason}:${Date.now()}`,
-            );
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: `${snapshotCount}`.repeat(64).slice(0, 64),
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item, context) {
-            events.push(`mailbox.importItem:${item.item.id}`);
-            if (
-              item.item.id
-                === "mailbox_item_entrypoint_assistant_carry_mask_fresh_terminal"
-            ) {
-              freshTerminalConversationInputId =
-                await stagePendingLinqAssistantInputForMailboxItem({
-                  causalSeq: item.item.laneSeq,
-                  item: item.item,
-                  vaultRoot,
-                });
-              assert.ok(context?.onConversationInputStaged);
-              context.onConversationInputStaged("linq");
-              return {
-                assistantInputId: freshTerminalConversationInputId,
-                status: "imported",
-              };
-            }
-            if (
-              item.item.id
-                === "mailbox_item_entrypoint_assistant_carry_mask_input_retry"
-            ) {
-              assistantInputRetryId = checkpointAssistantInputRetry === "hosted-image"
-                ? await stagePendingHostedImageCompletionInputForMailboxItem({
-                    item: item.item,
-                    vaultRoot,
-                  })
-                : await stagePendingLinqAssistantInputForMailboxItem({
-                    causalSeq: item.item.laneSeq,
-                    item: item.item,
-                    vaultRoot,
-                  });
-              if (checkpointAssistantInputRetry === "conversation") {
-                assert.ok(context?.onConversationInputStaged);
-                context.onConversationInputStaged("linq");
-              }
-              return {
-                assistantInputId: assistantInputRetryId,
-                status: "imported",
-              };
-            }
-            if (item.item.lane === "system") {
-              if (item.item.kind === "assistant.notification.requested") {
-                if (checkpointTrustedCompletionRetry) {
-                  events.push("trusted-completion:retryable-failed");
-                  trustedCompletionRetryFailed.resolve();
-                }
-                return { status: "imported" };
-              }
-              return await importRuntimeControlSystemMailboxItemForTest({
-                item: item.item,
-                vaultRoot,
-              });
-            }
-            if (
-              item.item.id === "mailbox_item_entrypoint_assistant_carry_mask_003"
-              || item.item.id === "mailbox_item_entrypoint_assistant_carry_mask_004"
-            ) {
-              assert.ok(context?.onConversationInputStaged);
-              context.onConversationInputStaged("linq");
-            }
-            return { status: "imported" };
-          },
+          vaultRoot,
           platform: createPlatform({
-            artifactBytesByHash,
-            mailboxPort: createMailboxPort({
-              events,
-              items: mailboxItems,
-            }),
+            mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
             workspacePort: createWorkspacePort({
-              checkpointRequests,
-              checkpointResponse(request) {
-                const workspace = createWorkspaceState({
-                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
-                  nextWakeAt: request.nextWakeAt ?? null,
-                  nextWakeReason: request.nextWakeReason ?? null,
-                  redactedStatus: request.redactedStatus ?? null,
-                  snapshotRef: request.snapshotRef,
-                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-                });
-                if (request.reason === "canonical_runtime_commit") {
-                  events.push(
-                    `workspace.checkpoint:canonical_runtime_commit:${request.nextWakeAt ?? "none"}`,
-                  );
-                }
-                const idleCheckpointCount = checkpointRequests.filter(
-                  (checkpointRequest) => checkpointRequest.reason === "idle_shutdown",
-                ).length;
-                if (request.reason === "idle_shutdown" && idleCheckpointCount === 1) {
-                  events.push("runtime-wake:persisted-older-assistant");
-                  if (checkpointConversation) {
-                    mailboxItems.push(createMailboxItem({
-                      id: "mailbox_item_entrypoint_assistant_carry_mask_003",
-                      laneSeq: "3",
-                    }));
-                  }
-                  if (checkpointFreshTerminalConversation) {
-                    mailboxItems.push(createMailboxItem({
-                      id:
-                        "mailbox_item_entrypoint_assistant_carry_mask_"
-                        + "fresh_terminal",
-                      laneSeq: "3",
-                    }));
-                  }
-                  if (checkpointSystemControl) {
-                    mailboxItems.push(createMailboxItem({
-                      id: "mailbox_item_entrypoint_assistant_carry_mask_system_001",
-                      kind: "runtime.manual-requested",
-                      lane: "system",
-                      laneSeq: "1",
-                    }));
-                  }
-                  if (
-                    checkpointTrustedCompletion
-                    && !checkpointTrustedCompletionRetry
-                  ) {
-                    mailboxItems.push(createMailboxItem({
-                      dedupeKey:
-                        "assistant.notification.requested:phone-call-result:"
-                        + "assistant_carry_mask:generation:1",
-                      id:
-                        "mailbox_item_entrypoint_assistant_carry_mask_"
-                        + "trusted_completion_001",
-                      kind: "assistant.notification.requested",
-                      lane: "system",
-                      laneSeq: "1",
-                    }));
-                  }
-                  olderWakePersisted.resolve();
-                  if (checkpointRuntimeWake) {
-                    runtimeWakeSignal.notify(Date.now());
-                  }
-                }
-                if (request.nextWakeAt === reminderWakeAt) {
-                  reminderWakePersisted.resolve();
-                }
-                return {
-                  conversationInputAhead:
-                    request.reason === "idle_shutdown"
-                    && idleCheckpointCount === 1
-                    && checkpointConversationInputAhead,
-                  checkpointed: true,
-                  workspace,
-                };
-              },
               events,
-              workspace: createWorkspaceState({
-                snapshotRef: initialSnapshotRef,
-                version: "0",
-              }),
+              checkpointRequests,
+              workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
-          runtimeWakeSignal,
+          async importItem() { return { status: "imported" }; },
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "e".repeat(64), size: 512 }) };
+          },
           async runAssistantPhase(input) {
-            assistantPass += 1;
-            const presentedWakeAt = input.workspace?.nextWakeAt ?? "none";
-            events.push(`assistant:${assistantPass}:${presentedWakeAt}:${Date.now()}`);
-
-            if (
-              freshTerminalConversationInputId !== null
-              && !events.includes("fresh-terminal-conversation:handled")
-            ) {
-              const release = await input.beforeProviderAcceptedInputs?.({
-                turnId: "turn_hosted_runtime_test",
-                acceptedInputs: [{
-                  id: freshTerminalConversationInputId,
-                  source: "assistant-input",
-                }],
-              });
-              assert.ok(release);
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: freshTerminalConversationInputId,
-                vaultRoot,
-              });
-              await release?.();
-              events.push("fresh-terminal-conversation:handled");
-              freshTerminalConversationHandled.resolve();
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: reconciliationWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
-
-            if (
-              assistantInputRetryId !== null
-              && !events.includes("assistant-input-retry:handled")
-            ) {
-              assistantInputRetryAttempts += 1;
-              const release = await input.beforeProviderAcceptedInputs?.({
-                turnId: "turn_hosted_runtime_test",
-                acceptedInputs: [{
-                  id: assistantInputRetryId,
-                  source: "assistant-input",
-                }],
-              });
-              await release?.();
-              events.push(
-                `assistant-input-retry:attempt:${assistantInputRetryAttempts}`,
-              );
-              if (assistantInputRetryAttempts === 1) {
-                if (checkpointAssistantInputRetry === "hosted-image") {
-                  assistantInputRetryFailed.resolve();
-                }
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  invocationLocalAssistantWakeAt: olderDueWakeAt,
-                  nextWakeAt: olderDueWakeAt,
-                  nextWakeReason: "assistant",
-                  progressed: true,
-                };
-              }
-              if (
-                assistantInputRetryAttempts === 2
-                && checkpointAssistantInputRetry === "conversation"
-              ) {
-                assistantInputRetryFailed.resolve();
-                return { progressed: false };
-              }
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: assistantInputRetryId,
-                vaultRoot,
-              });
-              events.push("assistant-input-retry:handled");
-              assistantInputRetryHandled.resolve();
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: reconciliationWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
-
-            const handlesTrustedCompletion =
-              (checkpointTrustedCompletion || checkpointTrustedCompletionRetry)
-              && events.includes(
-                "mailbox.importItem:"
-                + "mailbox_item_entrypoint_assistant_carry_mask_"
-                + "trusted_completion_001",
-              )
-              && !events.includes("trusted-completion:handled");
-            if (handlesTrustedCompletion) {
-              events.push("trusted-completion:handled");
-              trustedCompletionHandled.resolve();
-              if (checkpointTrustedCompletionRetry) {
-                reminderReconciled = true;
-              }
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                foregroundPrioritySystemCompletionProcessed: true,
-                nextWakeAt: checkpointTrustedCompletionRetry
-                  ? reminderWakeAt
-                  : reconciliationWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
-
-            if (assistantPass === 1) {
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                invocationLocalAssistantWakeAt: olderDueWakeAt,
-                nextWakeAt: olderDueWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
-
-            if (assistantPass === 2) {
-              olderWakeHotAttemptComplete.resolve();
-              return { progressed: false };
-            }
-
-            if (assistantPass === 3) {
-              assert.equal(presentedWakeAt, "none");
+            passes += 1;
+            if (passes === 1) {
               await upsertAutomation({
-                automationId: reminderAutomationId,
+                automationId,
                 continuityPolicy: "fresh",
                 instructions: "Send the scheduled reminder.",
                 now: new Date(TEST_NOW),
                 route: {
-                  channel: "linq",
-                  deliveryTarget: "synthetic_direct_chat",
-                  identityId: null,
-                  participantId: null,
-                  threadId: "synthetic_direct_chat",
-                  threadIsDirect: true,
+                  channel: "linq", deliveryTarget: "synthetic_direct_chat",
+                  identityId: null, participantId: null,
+                  threadId: "synthetic_direct_chat", threadIsDirect: true,
                 },
-                schedule: {
-                  at: reminderWakeAt,
-                  kind: "at",
-                },
+                schedule: { at: reminderAt, kind: "at" },
                 status: "active",
                 title: "Synthetic reminder",
                 vaultRoot: input.restored.vaultRoot,
               });
-              reminderCreated.resolve();
-              if (checkpointTrustedCompletionRetry) {
-                mailboxItems.push(createMailboxItem({
-                  dedupeKey:
-                    "assistant.notification.requested:usage-referral-reward:"
-                    + "assistant_carry_mask_retry",
-                  id:
-                    "mailbox_item_entrypoint_assistant_carry_mask_"
-                    + "trusted_completion_001",
-                  kind: "assistant.notification.requested",
-                  lane: "system",
-                  laneSeq: "1",
-                }));
-                runtimeWakeSignal.notify(Date.now());
-                // This scenario requires a staged retry before checkpointing.
-                // Hold the model phase until staging; delivery may now cancel it.
-                await trustedCompletionRetryFailed.promise;
-              }
-              if (checkpointAssistantInputRetry) {
-                mailboxItems.push(createMailboxItem({
-                  id:
-                    "mailbox_item_entrypoint_assistant_carry_mask_input_retry",
-                  laneSeq: "3",
-                }));
-                runtimeWakeSignal.notify(Date.now());
-              }
               return {
-                checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: reconciliationWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
+                progressed: true, checkpointReason: "assistant_runtime_commit",
+                invocationLocalAssistantWakeAt: dueAt,
+                nextWakeAt: dueAt, nextWakeReason: "assistant",
               };
             }
-
-            if (presentedWakeAt === reconciliationWakeAt) {
-              if (generatedImageRetention) {
-                const refresh = await refreshAssistantContextSnapshotBestEffort({
-                  now: () => new Date(Date.now()).toISOString(),
-                  vaultRoot: input.restored.vaultRoot,
-                });
-                assert.equal(refresh.refreshed, true);
-                assert.deepEqual(refresh.pendingDirtyDomains, []);
-              }
-              reminderReconciled = true;
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: reminderWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
-
-            if (
-              checkpointConversation
-              || checkpointTrustedCompletion
-              || checkpointTrustedCompletionRetry
-            ) {
-              const handlingSecondConversation = events.includes(
-                "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
-              );
-              const expectedMailboxItemId = handlingSecondConversation
-                ? "mailbox_item_entrypoint_assistant_carry_mask_004"
-                : "mailbox_item_entrypoint_assistant_carry_mask_003";
-              assert.ok(
-                events.includes(
-                  `mailbox.importItem:${expectedMailboxItemId}`,
-                ),
-                events.join(","),
-              );
-              if (handlingSecondConversation) {
-                secondCheckpointConversationHandled.resolve();
-              } else {
-                firstCheckpointConversationHandled.resolve();
-              }
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: reminderReconciled
-                  ? reminderWakeAt
-                  : reconciliationWakeAt,
-                nextWakeReason: "assistant",
-                progressed: true,
-              };
-            }
-
-            return {
-              checkpointReason: "assistant_runtime_commit",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              progressed: true,
-            };
+            assert.equal(passes, 2, "retirement must not re-enter assistant service");
+            // No schedule was computed: this wake has not been serviced.
+            return { progressed: false };
           },
-          signal: runtimeAbortController.signal,
-          vaultRoot,
         },
       );
-
-      await withRealTimeout(
-        olderWakeHotAttemptComplete.promise,
-        15_000,
-        () => events.join(","),
-      );
-      await waitForFakeTimerScheduled(() => events.join(","));
-      mailboxItems.push(createMailboxItem({
-        id: "mailbox_item_entrypoint_assistant_carry_mask_002",
-        laneSeq: "2",
-      }));
-      runtimeWakeSignal.notify(Date.parse(TEST_NOW));
-      await withRealTimeout(reminderCreated.promise, 15_000, () => events.join(","));
-      if (checkpointAssistantInputRetry) {
-        await withRealTimeout(
-          assistantInputRetryFailed.promise,
-          15_000,
-          () => events.join(","),
-        );
-      }
-      await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-      await withRealTimeout(olderWakePersisted.promise, 15_000, () => events.join(","));
-      if (checkpointTrustedCompletionRetry) {
-        await withRealTimeout(
-          trustedCompletionRetryFailed.promise,
-          15_000,
-          () => events.join(","),
-        );
-      }
-      if (checkpointFreshTerminalConversation) {
-        await withRealTimeout(
-          freshTerminalConversationHandled.promise,
-          15_000,
-          () => events.join(","),
-        );
-        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-        await waitForFakeTimerScheduled(() => events.join(","));
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-        await vi.advanceTimersByTimeAsync(1);
-      }
-      if (generatedImageRetention) {
-        assert.deepEqual(
-          (await readHostedSystemMailboxState(vaultRoot)).pending,
-          [],
-        );
-        const cronStatus = await getAssistantCronStatus(vaultRoot);
-        assert.equal(cronStatus.dueJobs, 0);
-        assert.equal(cronStatus.nextRunAt, reminderWakeAt);
-        const firstIdleCheckpointIndex = checkpointRequests.findIndex(
-          (request) => request.reason === "idle_shutdown",
-        );
-        const retentionCanonicalWrite = checkpointRequests
-          .slice(0, firstIdleCheckpointIndex)
-          .filter((request) => request.reason === "canonical_runtime_commit")
-          .at(-1);
-        assert.ok(retentionCanonicalWrite);
-        assert.equal(retentionCanonicalWrite.nextWakeAt, olderDueWakeAt);
-        assert.equal(retentionCanonicalWrite.nextWakeReason, "assistant");
-        const firstSnapshotIndex = events.findIndex((event) =>
-          event.startsWith("snapshot:1:idle_shutdown:")
-        );
-        assert.notEqual(firstSnapshotIndex, -1, events.join(","));
-        assert.ok(
-          requireEventIndex(
-            events,
-            `workspace.checkpoint:canonical_runtime_commit:${olderDueWakeAt}`,
-          ) < firstSnapshotIndex,
-          events.join(","),
-        );
-      }
-
-      const persistedDispatchIndex = events.indexOf(
-        "runtime-wake:persisted-older-assistant",
-      );
-      assert.notEqual(persistedDispatchIndex, -1, events.join(","));
-
-      if (checkpointTrustedCompletion || checkpointTrustedCompletionRetry) {
-        await withRealTimeout(
-          trustedCompletionHandled.promise,
-          15_000,
-          () => events.join(","),
-        );
-        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-        await waitForFakeTimerScheduled(() => events.join(","));
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-
-        await vi.advanceTimersByTimeAsync(1_000);
-        mailboxItems.push(createMailboxItem({
-          id: "mailbox_item_entrypoint_assistant_carry_mask_004",
-          laneSeq: "3",
-        }));
-        runtimeWakeSignal.notify(Date.now());
-        await withRealTimeout(
-          secondCheckpointConversationHandled.promise,
-          15_000,
-          () => events.join(","),
-        );
-        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-        await waitForFakeTimerScheduled(() => events.join(","));
-
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-        await vi.advanceTimersByTimeAsync(1);
-      }
-
-      if (checkpointAssistantInputRetry) {
-        await withRealTimeout(
-          assistantInputRetryHandled.promise,
-          15_000,
-          () => events.join(","),
-        );
-        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-        await waitForFakeTimerScheduled(() => events.join(","));
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-        await vi.advanceTimersByTimeAsync(1);
-        await withRealTimeout(
-          (async () => {
-            while (!events.some((event) => event.startsWith("snapshot:2:"))) {
-              await new Promise<void>((resolve) => setImmediate(resolve));
-            }
-          })(),
-          15_000,
-          () => events.join(","),
-        );
-        const secondSnapshotIndex = events.findIndex((event) =>
-          event.startsWith("snapshot:2:")
-        );
-        assert.equal(
-          events[secondSnapshotIndex],
-          `snapshot:2:idle_shutdown:${
-            Date.parse(TEST_NOW) + 2 * idleCheckpointDelayMs
-          }`,
-        );
-        assert.ok(
-          requireEventIndex(events, "assistant-input-retry:handled")
-            < secondSnapshotIndex,
-          events.join(","),
-        );
-        return;
-      }
-
-      if (checkpointConversation) {
-        await withRealTimeout(
-          firstCheckpointConversationHandled.promise,
-          15_000,
-          () => events.join(","),
-        );
-        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-        await waitForFakeTimerScheduled(() => events.join(","));
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-
-        await vi.advanceTimersByTimeAsync(1_000);
-        mailboxItems.push(createMailboxItem({
-          id: "mailbox_item_entrypoint_assistant_carry_mask_004",
-          laneSeq: "4",
-        }));
-        runtimeWakeSignal.notify(Date.now());
-        await withRealTimeout(
-          secondCheckpointConversationHandled.promise,
-          15_000,
-          () => events.join(","),
-        );
-        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-        await waitForFakeTimerScheduled(() => events.join(","));
-
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-        assert.equal(
-          events.some((event) => event.startsWith("snapshot:2:")),
-          false,
-          events.join(","),
-        );
-        await vi.advanceTimersByTimeAsync(1);
-      }
-
-      await withRealTimeout(
-        reminderWakePersisted.promise,
-        15_000,
-        () => JSON.stringify({ checkpointRequests, events }, null, 2),
-      );
-      const persistedWakes = checkpointRequests
-        .filter((request) => request.reason === "idle_shutdown")
-        .map((request) => [request.nextWakeAt, request.nextWakeReason]);
-      assert.deepEqual(persistedWakes.slice(0, 2), [
-        [olderDueWakeAt, "assistant"],
-        [reminderWakeAt, "assistant"],
-      ]);
-      const secondSnapshotIndex = events.findIndex((event) =>
-        event.startsWith("snapshot:2:")
-      );
-      assert.notEqual(secondSnapshotIndex, -1, events.join(","));
-      if (checkpointTrustedCompletion || checkpointTrustedCompletionRetry) {
-        const trustedCompletionImportIndex = requireEventIndex(
-          events,
-          "mailbox.importItem:"
-          + "mailbox_item_entrypoint_assistant_carry_mask_"
-          + "trusted_completion_001",
-        );
-        const trustedCompletionHandledIndex = requireEventIndex(
-          events,
-          "trusted-completion:handled",
-        );
-        const reconciliationAssistantIndex = events.findIndex((event) =>
-          event.startsWith("assistant:")
-          && event.includes(`:${reconciliationWakeAt}:`)
-        );
-        if (checkpointTrustedCompletionRetry) {
-          assert.ok(
-            trustedCompletionImportIndex < persistedDispatchIndex,
-            events.join(","),
-          );
-        } else {
-          assert.ok(
-            trustedCompletionImportIndex > persistedDispatchIndex,
-            events.join(","),
-          );
-        }
-        assert.ok(trustedCompletionHandledIndex > trustedCompletionImportIndex, events.join(","));
-        if (checkpointTrustedCompletionRetry) {
-          assert.ok(
-            reconciliationAssistantIndex < trustedCompletionHandledIndex,
-            events.join(","),
-          );
-        } else {
-          assert.ok(
-            reconciliationAssistantIndex >= trustedCompletionHandledIndex,
-            events.join(","),
-          );
-        }
-        assert.ok(reconciliationAssistantIndex < secondSnapshotIndex, events.join(","));
-        assert.ok(
-          requireEventIndex(
-            events,
-            "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
-          ) < secondSnapshotIndex,
-          events.join(","),
-        );
-        assert.equal(
-          events[secondSnapshotIndex],
-          `snapshot:2:idle_shutdown:${
-            Date.parse(TEST_NOW)
-            + idleCheckpointDelayMs
-            + 1_000
-            + idleCheckpointDelayMs
-          }`,
-        );
-        return;
-      }
-      if (checkpointFreshTerminalConversation) {
-        assert.equal(
-          events[secondSnapshotIndex],
-          `snapshot:2:idle_shutdown:${
-            Date.parse(TEST_NOW) + 2 * idleCheckpointDelayMs
-          }`,
-        );
-        assert.ok(
-          requireEventIndex(
-            events,
-            "mailbox.importItem:"
-            + "mailbox_item_entrypoint_assistant_carry_mask_fresh_terminal",
-          ) < secondSnapshotIndex,
-          events.join(","),
-        );
-        assert.ok(
-          requireEventIndex(events, "fresh-terminal-conversation:handled")
-            < secondSnapshotIndex,
-          events.join(","),
-        );
-        return;
-      }
-      if (!checkpointConversation) {
-        assert.equal(
-          events[secondSnapshotIndex],
-          `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + idleCheckpointDelayMs}`,
-        );
-        const reconciliationAssistantIndex = events.findIndex((event) =>
-          event.includes(`:${reconciliationWakeAt}:`)
-        );
-        assert.ok(
-          reconciliationAssistantIndex > persistedDispatchIndex,
-          events.join(","),
-        );
-        assert.ok(reconciliationAssistantIndex < secondSnapshotIndex, events.join(","));
-        const systemControlImportIndex = events.indexOf(
-          "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_system_001",
-        );
-        if (checkpointSystemControl) {
-          assert.ok(systemControlImportIndex > persistedDispatchIndex, events.join(","));
-          assert.ok(systemControlImportIndex < reconciliationAssistantIndex, events.join(","));
-        } else {
-          assert.equal(systemControlImportIndex, -1, events.join(","));
-          assert.equal(
-            events.slice(persistedDispatchIndex + 1).some((event) =>
-              event.startsWith("mailbox.importItem:")
-            ),
-            false,
-            events.join(","),
-          );
-        }
-        return;
-      }
-      const firstForegroundAssistantIndex = events.findIndex((event) =>
-        event.startsWith("assistant:4:")
-      );
-      const secondForegroundAssistantIndex = events.findIndex((event) =>
-        event.startsWith("assistant:6:")
-      );
-      const reconciliationAssistantIndex = events.findIndex((event) =>
-        event.includes(`:${reconciliationWakeAt}:`)
-      );
-      assert.notEqual(firstForegroundAssistantIndex, -1, events.join(","));
-      assert.notEqual(secondForegroundAssistantIndex, -1, events.join(","));
-      assert.notEqual(reconciliationAssistantIndex, -1, events.join(","));
-      assert.equal(
-        events[secondSnapshotIndex],
-        `snapshot:2:idle_shutdown:${
-          Date.parse(TEST_NOW) + idleCheckpointDelayMs + 1_000 + idleCheckpointDelayMs
-        }`,
-      );
-      assert.ok(
-        requireEventIndex(
-          events,
-          "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_003",
-        ) < secondSnapshotIndex,
-        events.join(","),
-      );
-      assert.ok(
-        firstForegroundAssistantIndex < secondSnapshotIndex,
-        events.join(","),
-      );
-      assert.ok(
-        reconciliationAssistantIndex < secondSnapshotIndex,
-        events.join(","),
-      );
-      assert.ok(
-        requireEventIndex(
-          events,
-          "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
-        ) < secondSnapshotIndex,
-        events.join(","),
-      );
-      assert.ok(
-        secondForegroundAssistantIndex < secondSnapshotIndex,
-        events.join(","),
-      );
+      assert.equal(passes, 2);
+      assert.equal(checkpointRequests.filter((request) => request.reason === "idle_shutdown").length, 1);
+      assert.equal(result.nextWakeAt, dueAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      const reminder = await showAutomation({ automationId, vaultRoot });
+      assert.equal(reminder?.status, "active");
+      assert.deepEqual(reminder?.schedule, { kind: "at", at: reminderAt });
     } finally {
-      runtimeAbortController.abort();
       vi.useRealTimers();
-      await resultPromise?.catch(() => undefined);
-      await removeTempRoot(workspaceRoot);
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -2871,7 +1769,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_stale_device_wake_preserved",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "3",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3013,28 +1911,50 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
   test.each([
     {
+      assistantWakeAt: null,
       checkpointed: false,
       expectedWorkspaceVersion: "0",
       label: "no-progress",
     },
     {
+      assistantWakeAt: null,
       checkpointed: true,
       expectedWorkspaceVersion: "1",
       label: "post-checkpoint",
     },
-  ])(
-    "schedules one delayed continuation in the $label path when forced browser-vault refresh maintenance times out",
-    async ({ checkpointed, expectedWorkspaceVersion, label }) => {
+    {
+      assistantWakeAt: TEST_NOW,
+      checkpointed: true,
+      expectedWorkspaceVersion: "1",
+      label: "post-checkpoint with due assistant work",
+    },
+    {
+      assistantWakeAt: new Date(Date.parse(TEST_NOW) + 30_000).toISOString(),
+      checkpointed: true,
+      expectedWorkspaceVersion: "1",
+      label: "post-checkpoint with earlier future assistant work",
+    },
+  ].flatMap((scenario) => [false, true].map((withSourceReadTiming) => ({
+    ...scenario,
+    withSourceReadTiming,
+  }))))(
+    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out (source timing: $withSourceReadTiming)",
+    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label, withSourceReadTiming }) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const attemptId = `attempt_synthetic_browser_vault_marker_force_${label}`;
       const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const events: string[] = [];
+      let assistantPhaseCalls = 0;
       const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
 
+      const sourceReadAtDeadline = withSourceReadTiming
+        ? { step: "read_model_construction" as const, elapsedMs: 11_000 }
+        : undefined;
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
+        ...(sourceReadAtDeadline ? { sourceReadAtDeadline } : {}),
         attempt: "initial",
         configuredTimeoutMs: 30_000,
         currentStepElapsedMs: 12_000,
@@ -3079,10 +1999,13 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               }),
             }),
             async runAssistantPhase() {
+              assistantPhaseCalls += 1;
               return checkpointed
                 ? {
                     browserVaultReplicaRefreshRequested: true,
                     checkpointReason: "assistant_runtime_commit" as const,
+                    nextWakeAt: assistantWakeAt,
+                    nextWakeReason: assistantWakeAt ? "assistant" : null,
                     progressed: true as const,
                   }
                 : {
@@ -3106,9 +2029,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         );
         expect(checkpointRequests).toHaveLength(checkpointed ? 1 : 0);
         expect(result.status).toBe("scheduled");
-        expect(result.nextWakeAt).toBe(retryAt);
+        expect(result.nextWakeAt).toBe(assistantWakeAt ?? retryAt);
+        expect(assistantPhaseCalls).toBe(1);
         expect(result.nextWakeReason).toBe("assistant");
-        expect(result.immediateRecheckRequested).toBeUndefined();
+        expect(result.immediateRecheckRequested).toBe(assistantWakeAt ? true : undefined);
         const refreshLog = readCapturedRuntimePhaseLogs({
           attemptId,
           spy: consoleInfo,
@@ -3125,6 +2049,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           browserVaultRefreshConfiguredTimeoutMs: 30_000,
           browserVaultRefreshCurrentStepElapsedMs: 12_000,
           browserVaultRefreshElapsedMs: 30_000,
+          ...(sourceReadAtDeadline ? {
+            browserVaultRefreshSourceReadStep: "read_model_construction",
+            browserVaultRefreshSourceReadStepElapsedMs: 11_000,
+          } : {}),
           browserVaultRefreshStage: "replica_write",
           browserVaultRefreshStatus: "deferred_timeout",
           browserVaultRefreshStep: "replica_write",
@@ -3184,7 +2112,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_browser_refresh_browser_only_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             workspaceVersion: "0",
           },
         }),
@@ -3327,7 +2255,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -3374,7 +2302,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
         ...(input.nextWakeReason === "device-sync.reconcile"
-          ? ["snapshot:idle_shutdown", "workspace.checkpoint"]
+          ? ["workspace.checkpoint"]
           : []),
       ];
       assert.deepEqual(events, expectedEvents);
@@ -3383,7 +2311,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 3 : 1);
       const terminalCheckpoint = checkpointRequests.at(-1);
-      assert.equal(terminalCheckpoint?.reason, "idle_shutdown");
+      assert.equal(terminalCheckpoint?.reason, shouldRunDeviceSync ? "canonical_runtime_commit" : "idle_shutdown");
       assert.equal(terminalCheckpoint?.nextWakeAt, null);
       assert.equal(terminalCheckpoint?.nextWakeReason, null);
       if (shouldRunDeviceSync) {

@@ -53,7 +53,8 @@ const OURA_TARGET = {
   connectSourceId: "oura",
   connectTarget: "oura",
   label: "Oura",
-  provider: "oura",
+  provider: "junction",
+      sourceProviderSlug: "oura",
 } as const;
 
 const REQUEST = new Request(
@@ -100,18 +101,18 @@ describe("startHostedDeviceSyncConnection", () => {
       target: OURA_TARGET,
     })).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
-      callbackProofCookie: expect.stringContaining("murph-device-sync-oura="),
+      callbackProofCookie: expect.stringContaining("murph-device-sync-junction="),
     });
 
     expect(mocks.prepareConnectionStart).toHaveBeenCalledWith("member_a", OURA_TARGET);
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_a",
-      "oura",
+      "junction",
       "/device-sync/connect/complete?source=connect",
       {
         connectSourceId: "oura",
         connectTarget: "oura",
-        sourceProviderSlug: null,
+        sourceProviderSlug: "oura",
       },
     );
   });
@@ -135,7 +136,7 @@ describe("startHostedDeviceSyncConnection", () => {
       target: OURA_TARGET,
     })).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
-      callbackProofCookie: expect.stringContaining("murph-device-sync-oura="),
+      callbackProofCookie: expect.stringContaining("murph-device-sync-junction="),
     });
 
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(

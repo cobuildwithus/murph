@@ -5,24 +5,16 @@ import {
   JUNCTION_PROVIDER_FILTER_ENV_KEYS,
   JUNCTION_REGION_ENV_KEYS,
   JUNCTION_WEBHOOK_SECRET_ENV_KEYS,
-  OURA_CLIENT_ID_ENV_KEYS,
-  OURA_CLIENT_SECRET_ENV_KEYS,
-  STRAVA_CLIENT_ID_ENV_KEYS,
-  STRAVA_CLIENT_SECRET_ENV_KEYS,
-  WHOOP_CLIENT_ID_ENV_KEYS,
-  WHOOP_CLIENT_SECRET_ENV_KEYS,
 } from "./config/provider-env.ts";
 import {
   optionalEnv,
   parseCsvEnv,
-  readOptionalCredentialPair,
 } from "./config/provider-config-helpers.ts";
 import { assertValidJunctionClientConfig } from "./config/junction-client-config.ts";
 
 export {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
-  listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceSyncConnectTargetKey,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
@@ -35,7 +27,6 @@ export {
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   listDefaultJunctionLinkProviderSlugs,
-  listDirectDeviceConnectRouteEntries,
   listJunctionDeviceConnectRouteEntries,
   listJunctionLinkDeviceConnectRouteEntries,
   canonicalizeJunctionProviderSlug,
@@ -44,17 +35,14 @@ export {
   normalizeJunctionProviderSlug,
   resolveDeviceConnectSourceIdForJunctionProviderSlug,
   resolveDeviceConnectSourceById,
-  resolveDirectDeviceConnectRouteByProvider,
   resolveJunctionDeviceConnectRouteByProviderSlug,
   resolveJunctionLinkDeviceConnectRouteByProviderSlug,
-  type DeviceConnectDirectRoute,
   type DeviceConnectJunctionLinkRoute,
   type DeviceConnectJunctionSdkRoute,
   type DeviceConnectRoute,
   type DeviceConnectRouteEntry,
   type DeviceConnectSource,
   type DeviceConnectUnavailableRoute,
-  type DirectDeviceConnectProvider,
 } from "./config/connect-routes.ts";
 export {
   configuredDeviceSyncProviderKeys,
@@ -90,16 +78,6 @@ export function readConfiguredDeviceSyncConnectTargetConfigs(
 
   if (junctionConfig) {
     configs.junction = junctionConfig;
-  }
-
-  if (readOptionalCredentialPair(env, OURA_CLIENT_ID_ENV_KEYS, OURA_CLIENT_SECRET_ENV_KEYS, "Oura")) {
-    configs.oura = {};
-  }
-  if (readOptionalCredentialPair(env, WHOOP_CLIENT_ID_ENV_KEYS, WHOOP_CLIENT_SECRET_ENV_KEYS, "WHOOP")) {
-    configs.whoop = {};
-  }
-  if (readOptionalCredentialPair(env, STRAVA_CLIENT_ID_ENV_KEYS, STRAVA_CLIENT_SECRET_ENV_KEYS, "Strava")) {
-    configs.strava = {};
   }
 
   return configs;

@@ -10,14 +10,14 @@ export function createRunnerReleaseProvider(input: {
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const request = async (operation: string, pathname: string, method = "GET", body?: unknown, privateRequestValues: readonly string[] = []): Promise<Record<string, unknown>> => {
+  const request = async (operation: string, pathname: string, method = "GET", body?: unknown, privateRequestValues: readonly string[] = [], contentType = "application/json"): Promise<Record<string, unknown>> => {
     let response: Response;
     try {
       response = await fetchImpl(
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(input.accountId)}${pathname}`,
         {
           method,
-          headers: { Authorization: `Bearer ${input.apiToken}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+          headers: { Authorization: `Bearer ${input.apiToken}`, ...(body === undefined ? {} : { "Content-Type": contentType }) },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           cache: "no-store",
           signal: AbortSignal.timeout(30_000),
@@ -134,6 +134,31 @@ export function createRunnerReleaseProvider(input: {
       const response = await request("Read Worker version", `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
     },
+    async readRecentWorkerVersionIds(workerName: string): Promise<string[]> {
+      const response = await request("Read recent Worker versions",
+        `/workers/scripts/${encodeURIComponent(workerName)}/versions?per_page=2`, "GET", undefined, [workerName]);
+      const items = isObjectRecord(response.result) ? response.result.items : undefined;
+      const invalid = () => unavailable("Recent Worker version metadata is invalid.");
+      if (!Array.isArray(items) || items.length === 0 || items.length > 2) throw invalid();
+      const ids = new Set<string>();
+      for (const item of items) {
+        if (!isObjectRecord(item) || typeof item.id !== "string" || !item.id.trim()
+          || item.id !== item.id.trim() || ids.has(item.id)) throw invalid();
+        ids.add(item.id);
+      }
+      return [...ids];
+    },
+    async removeRetiredInferenceSecrets(input: { workerName: string; versionMessage: string; versionTag: string }): Promise<string> {
+      const response = await request("Retire inference secrets",
+        `/workers/workers/${encodeURIComponent(input.workerName)}/versions/latest`, "PATCH", {
+          env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null },
+          annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
+        }, [input.workerName, input.versionMessage, input.versionTag], "application/merge-patch+json");
+      const version = response.result;
+      if (!isObjectRecord(version) || typeof version.id !== "string" || !version.id.trim()
+        || version.id !== version.id.trim()) throw unavailable("Worker secret retirement returned invalid version metadata.");
+      return version.id;
+    },
     async retireApplication(input: { applicationId: string; name: string; namespaceId: string }): Promise<void> {
       const pathname = `/containers/applications/${encodeURIComponent(input.applicationId)}`;
       const live = (await request("Read retiring application", pathname)).result;
@@ -176,7 +201,6 @@ export function createRunnerReleaseProvider(input: {
       name: string;
       namespaceId: string;
       specification: RunnerApplicationSpecification;
-      rolloutStepPercentage?: number | readonly number[];
     }): Promise<"created" | "modified" | "unchanged"> {
       const desired = { ...input.specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
       if (input.applicationId === null) {
@@ -197,11 +221,10 @@ export function createRunnerReleaseProvider(input: {
       // A matching application target without distribution evidence is a lost
       // PATCH/POST pair. Preserve its version and complete the existing target.
       if (!matches) await request("Modify application", pathname, "PATCH", input.specification);
-      const steps = input.rolloutStepPercentage ?? 100;
+      // One step: connection-age grace, not percentage cohorts, paces replacement.
+      // Native steps were never health gates, and each step can wait out the grace.
       await request("Start application rollout", `${pathname}/rollouts`, "POST", {
-        description: "Update runner image", strategy: "rolling", kind: "full_auto",
-        ...(typeof steps === "number" ? { step_percentage: steps }
-          : { steps: steps.map(percentage => ({ step_size: { percentage }, description: `Roll out to ${percentage}% of instances` })) }),
+        description: "Update runner image", strategy: "rolling", kind: "full_auto", step_percentage: 100,
         target_configuration: input.specification.configuration,
       });
       return "modified";
@@ -210,13 +233,11 @@ export function createRunnerReleaseProvider(input: {
       name: string;
       specification: RunnerApplicationSpecification;
       listApplications: (name: string) => Promise<unknown>;
-      rolloutStepCount?: number;
     }): Promise<void> {
-      // Each native step can spend fifteen minutes draining, plus grace/startup.
-      const steps = input.rolloutStepCount ?? 1;
-      if (!Number.isInteger(steps) || steps < 1 || steps > 4) throw unavailable();
-      const attempts = 150 * steps;
-      for (let attempt = 0; attempt < attempts; attempt++) {
+      // A young shell becomes eligible once it passes the grace period, then
+      // may drain for fifteen minutes; ten more cover startup and observation.
+      const deadline = Date.now() + (input.specification.rollout_active_grace_period + 25 * 60) * 1000;
+      for (;;) {
         const result = await input.listApplications(input.name);
         if (!Array.isArray(result) || result.length !== 1 || !isObjectRecord(result[0])) throw unavailable();
         const live = result[0];
@@ -225,7 +246,8 @@ export function createRunnerReleaseProvider(input: {
           const rollout = await readMatchingRollout(live.id, live, input.specification);
           if (rollout?.status === "completed" || (!rollout && live.version === 1)) return;
         }
-        if (attempt < attempts - 1) await delay(10_000);
+        if (Date.now() >= deadline) break;
+        await delay(10_000);
       }
       throw new Error("Native runner rollout did not converge; the compatible Worker and pending image remain selected.");
     },

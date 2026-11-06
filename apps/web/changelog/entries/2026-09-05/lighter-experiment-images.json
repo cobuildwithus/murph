@@ -14,10 +14,6 @@
     ],
     "sourcePullRequests": [
       2910
-    ],
-    "tryIt": {
-      "label": "Browse experiments",
-      "href": "/experiments"
-    }
+    ]
   }
 }

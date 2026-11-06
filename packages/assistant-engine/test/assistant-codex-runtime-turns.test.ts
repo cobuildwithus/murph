@@ -1,5 +1,6 @@
 import {
   cliTimingLaunchArgs,
+  codexSteeringLaunchArgs,
   CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   MockChildProcess,
   asRecord,
@@ -43,10 +44,8 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
-  executeCodexManagedAccountOperation,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
@@ -656,7 +655,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           }))
           child.stdout.write(jsonLine({
             method: 'model/rerouted',
-            params: { toModel: 'gpt-5.6-terra' },
+            params: { toModel: 'gpt-6-sol' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/started',
@@ -667,7 +666,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           }))
           child.stdout.write(jsonLine({
             method: 'model/rerouted',
-            params: { toModel: 'gpt-5.6-sol' },
+            params: { toModel: 'gpt-6.1-sol' },
           }))
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
@@ -738,25 +737,25 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     )).toEqual([
       {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-sol' },
+        params: { toModel: 'gpt-6.1-sol' },
       },
     ])
     expect(onTraceEvent).toHaveBeenCalledWith(expect.objectContaining({
       rawEvent: {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-sol' },
+        params: { toModel: 'gpt-6.1-sol' },
       },
       updates: [{
         kind: 'status',
         mode: 'replace',
         streamKey: 'status:model-reroute',
-        text: 'Switched to gpt-5.6-sol.',
+        text: 'Switched to gpt-6.1-sol.',
       }],
     }))
     expect(onTraceEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       rawEvent: {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-terra' },
+        params: { toModel: 'gpt-6-sol' },
       },
     }))
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
@@ -766,6 +765,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
     const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')
     const progressDelivery = createProgressDeliveryMock()
+    const receiptTraces: Record<string, unknown>[] = []
     const spawnedChildren: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(spawnedChildren)
 
@@ -866,6 +866,12 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
             },
           })
 
+          for (const staleTurnId of ['turn-local-stale-turn-id-1', undefined]) {
+            child.stdout.write(jsonLine({
+              method: 'item/agentMessage/delta',
+              params: { itemId: 'stale-item', delta: 'Stale output', threadId: 'thread-local-stale-turn-id', turnId: staleTurnId },
+            }))
+          }
           child.stdout.write(jsonLine({
             method: 'item/agentMessage/delta',
             params: { itemId: 'assistant-local-stale-turn-id-2', delta: 'Current turn survived stale output', threadId: 'thread-local-stale-turn-id', turnId: 'turn-local-stale-turn-id-2' },
@@ -911,12 +917,20 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       executeCodexAppServerTurn({
         ...stableInput,
         prompt: 'second local turn should ignore stale same-thread output after start',
+        onTraceEvent: (event) => {
+          const raw = event.rawEvent as Record<string, unknown>
+          if (raw.codexTimingStage === 'provider-output-received' || raw.codexTimingStage === 'turn-completed') receiptTraces.push(raw)
+        },
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Current turn survived stale output',
       sessionId: 'thread-local-stale-turn-id',
       turnId: 'turn-local-stale-turn-id-2',
     })
+    expect(receiptTraces).toEqual([
+      expect.objectContaining({ codexTimingStage: 'provider-output-received', codexTimingReceiptKind: 'assistant', codexTimingProviderReceiptCount: 1 }),
+      expect.objectContaining({ codexTimingStage: 'turn-completed', codexTimingProviderReceiptCount: 1 }),
+    ])
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
@@ -2152,7 +2166,98 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     )
   })
 
-  it('emits metadata-only Codex transport diagnostics for stream retry and fallback', async () => {
+  it.each([false, true])('records bound warm transport warnings without admitting unscoped events (sink throws: %s)', async (sinkThrows) => {
+    const workingDirectory = await createTempDir('assistant-codex-warm-transport-work-')
+    const codexHome = await createTempDir('assistant-codex-warm-transport-home-')
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+    const onTraceEvent = vi.fn((event) => {
+      if (sinkThrows && asRecord(event.rawEvent).schema === CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA) {
+        throw new Error('Synthetic diagnostic sink failure')
+      }
+    })
+    const progressDelivery = createProgressDeliveryMock()
+    const threadId = 'thread-warm-transport'
+    const warningText = 'Falling back from WebSockets to HTTPS transport. idle timeout waiting for websocket; synthetic-private-endpoint'
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_981
+      children.push(child)
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          for (const ordinal of [1, 2]) {
+            await writeWarmTurnStarted({ child, requestCount: ordinal, threadId, turnId: `turn-warm-${ordinal}` })
+            const emitWarning = (params: Record<string, unknown>) =>
+              child.stdout.write(jsonLine({ method: 'warning', params }))
+            if (ordinal === 2) {
+              emitWarning({ threadId, message: warningText }) // before turn/started
+            }
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: { threadId, turn: { id: `turn-warm-${ordinal}` } },
+            }))
+            if (ordinal === 2) {
+              emitWarning({ threadId: 'unrelated-thread', message: warningText })
+              emitWarning({ message: warningText })
+              emitWarning({ threadId, message: 'Unrelated synthetic private warning' })
+              emitWarning({ threadId, turnId: 'turn-warm-1', message: warningText })
+              emitWarning({ threadId, message: warningText })
+              child.stdout.write(jsonLine({
+                method: 'item/agentMessage/delta',
+                params: { threadId, delta: 'Unscoped output must stay private' },
+              }))
+              child.stdout.write(jsonLine({
+                method: 'turn/completed',
+                params: { threadId, turn: { status: 'completed' } },
+              }))
+            }
+            child.stdout.write(jsonLine({
+              method: 'item/agentMessage/delta',
+              params: { threadId, turnId: `turn-warm-${ordinal}`, itemId: `reply-${ordinal}`, delta: 'Scoped reply' },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: { threadId, turn: { id: `turn-warm-${ordinal}`, status: 'completed' } },
+            }))
+          }
+        })()
+      })
+      return child
+    })
+    const stable = { workingDirectory, codexHome, approvalPolicy: 'never', sandbox: 'workspace-write' as const, env: { PATH: '/custom/bin' } }
+    await executeCodexAppServerTurn({ ...stable, prompt: 'Synthetic first turn' })
+    await expect(executeCodexAppServerTurn({
+      ...stable, prompt: 'Synthetic second turn', onTraceEvent, progressDelivery, providerRequestOrdinal: 7,
+    })).resolves.toMatchObject({ finalMessage: 'Scoped reply', turnId: 'turn-warm-2' })
+    const diagnostics = onTraceEvent.mock.calls.map(([event]) => asRecord(event.rawEvent))
+      .filter(event => event.schema === CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA)
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      codexTransportEventKind: 'transport-fallback',
+      codexTransportIdleTimeout: true,
+      codexTransportWarmReused: true,
+      codexTransportScope: 'thread',
+      codexTransportProviderRequestOrdinal: 7,
+      codexTransportElapsedMs: expect.any(Number),
+      codexTransportTurnCorrelation: expect.any(Number),
+      codexTransportTurnIdPresent: true,
+    })
+    expect(diagnostics[0]?.codexTransportElapsedMs).toBeGreaterThanOrEqual(0)
+    expect(JSON.stringify(diagnostics)).not.toContain('synthetic-private-endpoint')
+    expect(JSON.stringify(diagnostics)).not.toContain(threadId)
+    expect(JSON.stringify(onTraceEvent.mock.calls)).not.toContain('Unscoped output must stay private')
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(codexMocks.spawn).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { timeoutMessage: 'idle timeout waiting for websocket', timeoutPhase: 'websocket-read', transport: 'websocket' },
+    { timeoutMessage: 'idle timeout sending websocket request', timeoutPhase: 'websocket-send', transport: 'websocket' },
+    { timeoutMessage: 'timeout waiting for websocket response acknowledgement', timeoutPhase: 'websocket-ack', transport: 'websocket' },
+    { timeoutMessage: 'idle timeout waiting for SSE', timeoutPhase: 'http-read', transport: 'http' },
+  ])('emits metadata-only Codex transport diagnostics for $timeoutPhase and fallback', async ({ timeoutMessage, timeoutPhase, transport }) => {
     const workingDirectory = await createTempDir('assistant-codex-transport-diagnostics-')
     const onTraceEvent = vi.fn()
 
@@ -2207,7 +2312,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
                     },
                   },
                   additionalDetails:
-                    'stream disconnected before completion: idle timeout waiting for websocket at https://api.openai.com/v1/responses',
+                    `stream disconnected before completion: ${timeoutMessage} at https://api.openai.com/v1/responses`,
                 },
                 threadId: 'thread-transport',
                 turnId: 'turn-transport',
@@ -2280,6 +2385,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       type: 'assistant.codex.transport_diagnostics',
       codexTransportAdditionalDetailsPresent: true,
       codexTransportEventKind: 'stream-idle-timeout',
+      codexTransportTimeoutPhase: timeoutPhase,
       codexTransportFallbackActivated: false,
       codexTransportIdleTimeout: true,
       codexTransportRetryExhausted: false,
@@ -2289,7 +2395,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexTransportStreamDisconnected: true,
       codexTransportTerminalAfterProviderAction: false,
       codexTransportThreadIdPresent: true,
-      codexTransportTransport: 'websocket',
+      codexTransportTransport: transport,
       codexTransportTurnIdPresent: true,
       codexTransportWillRetry: true,
     })
@@ -2893,6 +2999,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       details: {
         actionKind: 'command.execution',
         commandFamily: 'cat',
+        commandAttribution: 'recognized',
         commandOrdinal: 1,
         diagnosticRole: 'completion',
         durationMsBucket: '5_30s',
@@ -3489,6 +3596,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         details: {
           actionKind: 'command.execution',
           commandFamily: 'search',
+          commandAttribution: 'recognized',
           commandOrdinal: 1,
           diagnosticRole: 'completion',
           durationMsBucket: 'unknown',
@@ -3649,7 +3757,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      [...cliTimingLaunchArgs, 'app-server'],
+      [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
       expect.objectContaining({
         cwd: tmpdir(),
         env: expect.objectContaining({
@@ -3670,7 +3778,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const child = new MockChildProcess()
 
       expect(command).toBe(codexCommand)
-      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
+      expect(args).toEqual([...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         env: expect.objectContaining({
           CODEX_HOME: explicitCodexHome,
@@ -3739,7 +3847,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      [...cliTimingLaunchArgs, 'app-server'],
+      [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })
@@ -3791,7 +3899,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
         '/tmp/attacker-controlled-codex',
-        [...cliTimingLaunchArgs, 'app-server'],
+        [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
         expect.any(Object),
       )
     } finally {
@@ -3844,7 +3952,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      [...cliTimingLaunchArgs, 'app-server'],
+      [...codexSteeringLaunchArgs, ...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })

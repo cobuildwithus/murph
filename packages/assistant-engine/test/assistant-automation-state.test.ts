@@ -7,7 +7,6 @@ import type { AssistantInputCursor } from '@murphai/operator-config/assistant-cl
 import {
   hasAssistantAutoReplyChannel,
   normalizeAssistantAutoReplyChannels,
-  reconcileAssistantAutoReplyState,
   sameAssistantAutoReplyState,
 } from '../src/assistant/automation-state.js'
 import {
@@ -515,41 +514,6 @@ test('enableAssistantAutoReplyChannelLocal preserves concurrent managed channel 
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
-
-test('reconcileAssistantAutoReplyState preserves existing cursors and seeds new channels', () => {
-  const latestCursor = {
-    createdAt: null,
-    inputId: 'cap-latest',
-    occurredAt: '2026-04-10T00:00:00.000Z',
-    sourceKind: 'inbox-capture' as const,
-  }
-  const current = [
-    autoReplyState('telegram', {
-        captureId: 'cap-telegram',
-        occurredAt: '2026-04-09T00:00:00.000Z',
-      }),
-  ]
-
-  assert.deepEqual(
-    reconcileAssistantAutoReplyState({
-      current,
-      enabledChannels: ['email', 'telegram'],
-      eligibleAfter: latestCursor,
-      enabledAt: '2026-04-10T00:00:00.000Z',
-    }),
-    [
-      {
-        channel: 'email',
-        enabledAt: '2026-04-10T00:00:00.000Z',
-        eligibleAfter: latestCursor,
-      },
-      autoReplyState('telegram', {
-          captureId: 'cap-telegram',
-          occurredAt: '2026-04-09T00:00:00.000Z',
-        }),
-    ],
-  )
 })
 
 test('hasAssistantAutoReplyChannel reports channel membership', () => {

@@ -105,6 +105,12 @@ export function getHostedRuntimeLogPool(): PgPool {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   });
+  hostedRuntimeLogPool.on("connect", (client) => {
+    client.on("error", () => {
+      // pg-pool removes its idle listener on checkout; prevent uncaught errors.
+      // Statements reject on failure, and the pool already logs idle errors.
+    });
+  });
   console.info("Hosted runtime log database pool configured.", {
     maxConnections: max,
   });

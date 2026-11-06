@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "murph.commons.artifact-manifest.v1",
-  "manifestKey": "artifact_manifest:skin-photobiomodulation/research-artifacts",
-  "description": "Rights-safe manifest for the red-near-infrared-skin-texture-photoaging research seam. The canonical ledger marked all extracted records needsArtifactManifestEntry=false; PDFs and other copyrighted artifacts are not committed or queued for upload without separate rights review.",
-  "artifacts": []
-}

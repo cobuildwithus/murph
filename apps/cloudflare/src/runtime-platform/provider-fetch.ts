@@ -26,8 +26,10 @@ import {
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER,
 } from "../runner-outbound/headers.ts";
-import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/write-fence.ts";
+import { DEFAULT_LINQ_API_BASE_URL, readAllowedHostedLinqOperation } from "../runner-egress-linq-policy.ts";
+import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/headers.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
   HostedRuntimeControlPlaneRejectedError,
@@ -36,6 +38,8 @@ import {
   isInternalAuthorityRejectedStatus,
 } from "./authority-headers.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
+import { observeHostedRuntimeFetchTransport } from "./fetch-transport-diagnostics.ts";
 import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 export function createCloudflareHostedInternalFetch(
@@ -73,6 +77,7 @@ export function createCloudflareHostedInternalFetch(
       && url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
       && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
       && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+    let workspaceAttemptId: string | undefined;
     if (!hasSuppliedWorkspaceSnapshotWriteFence && !hasSuppliedLatencyTraceWriteFence) {
       const lease = await options.readCurrentLease?.() ?? null;
       if (!lease) {
@@ -81,6 +86,7 @@ export function createCloudflareHostedInternalFetch(
         );
       }
       writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+      workspaceAttemptId = lease.attemptId;
     }
 
     return await fetchCloudflareHostedInternalRequest({
@@ -90,6 +96,7 @@ export function createCloudflareHostedInternalFetch(
       injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
       request,
       url,
+      workspaceAttemptId,
     });
   }) as typeof fetch;
 }
@@ -128,6 +135,7 @@ async function fetchCloudflareHostedInternalRequest(input: {
   injectBoundUserIdHeader: boolean;
   request: Request;
   url: URL;
+  workspaceAttemptId?: string;
 }): Promise<Response> {
   if (input.injectBoundUserIdHeader) {
     input.headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, input.boundUserId);
@@ -149,27 +157,21 @@ async function fetchCloudflareHostedInternalRequest(input: {
     userIdPresent: input.boundUserId.length > 0,
   };
 
-  emitHostedExecutionStructuredLog({
-    component: "assistant-delivery",
-    details,
-    message: "Hosted runtime internal request started.",
-    phase: "outbox",
-    userId: input.boundUserId,
-  });
-
   try {
     const response = await input.fetchImpl(internalRequest);
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: {
-        ...details,
-        ok: response.ok ? "true" : "false",
-        status: String(response.status),
-      },
-      message: "Hosted runtime internal request completed.",
-      phase: "outbox",
-      userId: input.boundUserId,
-    });
+    if (!response.ok) {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          ...details,
+          ok: "false",
+          status: String(response.status),
+        },
+        message: "Hosted runtime internal request completed.",
+        phase: "outbox",
+        userId: input.boundUserId,
+      });
+    }
     if (isInternalAuthorityRejectedStatus(response.status)) {
       const error = new HostedRuntimeInternalAuthorityRejectedError({
         description: readHostedRuntimeInternalRequestDescription({
@@ -185,6 +187,7 @@ async function fetchCloudflareHostedInternalRequest(input: {
         details: {
           ...details,
           responseStatus: response.status,
+          workspaceAttemptId: input.workspaceAttemptId ?? null,
         },
         error,
         level: "warn",
@@ -210,7 +213,10 @@ async function fetchCloudflareHostedInternalRequest(input: {
     if (!isHostedRuntimeInternalAuthorityRejectedError(error)) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
-        details,
+        details: {
+          ...details,
+          workspaceAttemptId: input.workspaceAttemptId ?? null,
+        },
         error,
         level: "warn",
         message: "Hosted runtime internal request failed.",
@@ -279,6 +285,7 @@ export function createCloudflareHostedProviderFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
   options: {
+    fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
     injectBoundUserIdHeader?: boolean;
     providerFetchBaseUrlSource?: Readonly<Record<string, unknown>>;
     providerFetchBaseUrls?: readonly string[];
@@ -286,6 +293,7 @@ export function createCloudflareHostedProviderFetch(
   },
 ): typeof fetch {
   const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
+  const transportDiagnostics = options.fetchTransportDiagnostics ?? null;
   const internalFetch = createCloudflareHostedInternalFetch(
     boundUserId,
     normalizedFetchImpl,
@@ -309,15 +317,37 @@ export function createCloudflareHostedProviderFetch(
     headers.delete(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
     headers.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
     headers.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
+    headers.delete(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER);
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
-    const lease = await options.readCurrentLease?.() ?? null;
-    if (lease?.providerEgressToken) {
-      headers.set(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER, lease.providerEgressToken);
-    }
 
+    const correlationId = isHostedLinqTypingStart(request, url, options.providerFetchBaseUrlSource)
+      ? crypto.randomUUID() : null;
+    if (correlationId) headers.set(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER, correlationId);
     const providerRequest = new Request(request, { headers });
+    const startedAt = performance.now();
+    const startedAtEpochMs = Date.now();
+    const timingDetails = (): Record<string, string | number> => correlationId ? {
+      providerFetchCorrelationId: correlationId,
+      providerRuntimeStartedAtEpochMs: startedAtEpochMs,
+      providerRuntimeResumedAtEpochMs: Date.now(),
+      providerRuntimeRoundTripMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    } : {};
     try {
-      return await normalizedFetchImpl(providerRequest);
+      // Claimed at initiation so the invocation's first-started typing start is kept.
+      const recordTypingStart = correlationId ? transportDiagnostics?.claimTypingStart() : null;
+      const response = await (recordTypingStart
+        ? observeHostedRuntimeFetchTransport(
+          () => normalizedFetchImpl(providerRequest),
+          (timing, outcome) => recordTypingStart(timing, outcome.response),
+        )
+        : normalizedFetchImpl(providerRequest));
+      if (correlationId) emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: { ...timingDetails(), providerOperation: "typing_start", responseStatus: response.status },
+        message: "Hosted runtime typing fetch resumed.",
+        phase: "outbox",
+      });
+      return response;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
@@ -325,6 +355,7 @@ export function createCloudflareHostedProviderFetch(
           host: normalizeCloudflareHostedFetchHostname(url.hostname),
           method: readHostedRunnerDiagnosticMethod(providerRequest.method),
           operation: "provider_fetch",
+          ...timingDetails(),
           ...buildHostedRuntimeSafeErrorMetadata(error),
         },
         level: "warn",
@@ -335,6 +366,18 @@ export function createCloudflareHostedProviderFetch(
       throw error;
     }
   }) as typeof fetch;
+}
+
+function isHostedLinqTypingStart(
+  request: Request, url: URL, source?: Readonly<Record<string, unknown>>,
+): boolean {
+  const configured = source?.LINQ_API_BASE_URL;
+  const base = parseAllowedCloudflareHostedProviderFetchBaseUrl(
+    typeof configured === "string" && configured.trim() ? configured.trim() : DEFAULT_LINQ_API_BASE_URL,
+    source,
+  );
+  if (!base || url.origin !== base.origin || !isCloudflareHostedProviderFetchPathWithinBase(url, base)) return false;
+  return readAllowedHostedLinqOperation(request.method, url.pathname.slice(normalizeCloudflareHostedProviderFetchBasePath(base).length)) === "typing_start";
 }
 
 const CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS = [
@@ -625,13 +668,6 @@ function readHostedRuntimeInternalRequestLogPath(url: URL): string {
     && /^\/meal-photos\/[a-f0-9]{40}$/u.test(url.pathname)
   ) {
     return "/meal-photos/REDACTED";
-  }
-
-  if (
-    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort
-    && /^\/environment-voice\/[a-f0-9]{40}$/u.test(url.pathname)
-  ) {
-    return "/environment-voice/REDACTED";
   }
 
   return url.pathname;

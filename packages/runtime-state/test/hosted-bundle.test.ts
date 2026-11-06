@@ -2210,6 +2210,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       path.join(assistantRuntimeRoot, "hosted-system-mailbox.json"),
       "{\"schema\":\"murph.hosted-system-mailbox-state.v1\",\"version\":1,\"pending\":[{\"itemId\":\"mailbox_item_1\",\"status\":\"pending\"}]}\n",
     );
+    await writeFile(
+      path.join(assistantRuntimeRoot, "hosted-vault-share-publications.json"),
+      "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
+    );
     await writeFile(path.join(assistantRuntimeRoot, "outbox", "intent_1.json"), "{\"intent\":\"deliver\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "quarantine", "secrets", "session_1.json"), "{\"secret\":true}\n");
@@ -2398,7 +2402,13 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         path: ".runtime/operations/assistant/hosted-system-mailbox.json",
         root: "vault",
       },
-      { expected: "{\"status\":\"running\"}\n", path: ".runtime/operations/assistant/status.json", root: "vault" },
+      {
+        expected:
+          "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
+        path: ".runtime/operations/assistant/hosted-vault-share-publications.json",
+        root: "vault",
+      },
+      { expected: null, path: ".runtime/operations/assistant/status.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/diagnostics/events.jsonl", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/diagnostics/events.jsonl.old", root: "vault" },
       { expected: "{\"status\":\"healthy\"}\n", path: ".runtime/operations/assistant/diagnostics/snapshot.json", root: "vault" },
@@ -2652,8 +2662,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "{\"schema\":\"murph.hosted-system-mailbox-state.v1\",\"version\":1,\"pending\":[{\"itemId\":\"mailbox_item_1\",\"status\":\"pending\"}]}\n",
     );
     assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "status.json"), "utf8"),
-      "{\"status\":\"running\"}\n",
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "hosted-vault-share-publications.json"), "utf8"),
+      "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "status.json"), "utf8"),
+      { code: "ENOENT" },
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "diagnostics", "events.jsonl"), "utf8"),
@@ -4767,7 +4781,7 @@ test("runtime-state portability defaults operational paths to machine-local unle
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/status.json")).toMatchObject({
     classification: "operational",
-    portability: "portable",
+    portability: "machine_local",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/indexes.json")).toMatchObject({
     classification: "operational",
@@ -4778,6 +4792,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/hosted-mailbox.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/hosted-vault-share-publications.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
   });

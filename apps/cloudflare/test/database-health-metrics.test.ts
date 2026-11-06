@@ -134,6 +134,109 @@ describe("PlanetScale database health metrics", () => {
     expect(observation.snapshot.serverPoolStates).toBeNull();
   });
 
+  it.each([
+    ["absent", 0, 0, 0, 0, 0],
+    ["wrong branch", 0, 0, 0, 0, 0],
+    ["replica", 1, 0, 1, 0, 0],
+    ["missing role", 1, 0, 0, 1, 0],
+    ["empty role", 1, 0, 0, 1, 0],
+    ["unknown role", 1, 0, 0, 1, 0],
+    ["missing pod", 1, 1, 0, 0, 1],
+    ["empty pod", 1, 1, 0, 0, 1],
+  ] as const)(
+    "reports count-only PgBouncer provenance for %s series without changing unknown values",
+    (shape, branch, primary, replica, unrecognizedRole, primaryMissingPod) => {
+      const completeBody = buildMetricsBody({ branchId: BRANCH_ID });
+      const complete = parsePlanetScaleDatabaseMetricObservation(completeBody, BRANCH_ID);
+      const body = completeBody.split("\n").map((line) => {
+        if (!line.startsWith("planetscale_pgbouncer_current_connections{")) {
+          return line;
+        }
+        switch (shape) {
+          case "absent":
+            return "";
+          case "wrong branch":
+            return line.replace(BRANCH_ID, "synthetic-private-other-branch");
+          case "replica":
+            return line.replace('planetscale_role="primary"', 'planetscale_role="replica"');
+          case "missing role":
+            return line.replace(',planetscale_role="primary"', "");
+          case "empty role":
+            return line.replace('planetscale_role="primary"', 'planetscale_role=""');
+          case "unknown role":
+            return line.replace('planetscale_role="primary"', 'planetscale_role="synthetic-private-role"');
+          case "missing pod":
+            return line.replace(',planetscale_pod="pod-primary"', "");
+          case "empty pod":
+            return line.replace('planetscale_pod="pod-primary"', 'planetscale_pod=""');
+        }
+      }).join("\n");
+      const observation = parsePlanetScaleDatabaseMetricObservation(body, BRANCH_ID);
+
+      expect(observation.missingMetrics).toEqual(["planetscale_pgbouncer_current_connections"]);
+      expect(observation.pgbouncerCurrentConnectionSeries).toEqual({
+        branch,
+        primary,
+        replica,
+        unrecognizedRole,
+        primaryMissingPod,
+      });
+      expect(JSON.stringify(observation.pgbouncerCurrentConnectionSeries))
+        .not.toContain("synthetic-private-");
+      expect(observation.postgresStateSeries).toEqual(complete.postgresStateSeries);
+      expect(observation.snapshot).toEqual({
+        ...complete.snapshot,
+        serverConnections: null,
+        serverPoolCapacity: null,
+        serverPoolSaturationRatio: null,
+      });
+      expect(() => parsePlanetScaleDatabaseMetrics(body, BRANCH_ID))
+        .toThrow("required_metrics_missing");
+    },
+  );
+
+  it.each([0, 10])(
+    "counts mixed PgBouncer series while preserving a complete primary value of %s",
+    (serverConnections) => {
+      const branchId = "synthetic-private-branch";
+      const pod = "synthetic-private-pod";
+      const completeBody = buildMetricsBody({ branchId, serverConnections })
+        .replaceAll("pod-primary", pod)
+        .replace('planetscale_container="pgbouncer"', 'planetscale_container="synthetic-private-container"');
+      const complete = parsePlanetScaleDatabaseMetricObservation(completeBody, branchId);
+      const metric = "planetscale_pgbouncer_current_connections";
+      const labels = `planetscale_database_branch_id="${branchId}"`;
+      const body = [
+        completeBody,
+        `${metric}{${labels},planetscale_role="primary",planetscale_pod="${pod}",planetscale_container="synthetic-private-second-container"} 0`,
+        `${metric}{${labels},planetscale_role="replica"} 900`,
+        `${metric}{${labels},planetscale_role="synthetic-private-role",planetscale_pod=""} 800`,
+        `${metric}{${labels}} 700`,
+        `${metric}{planetscale_database_branch_id="synthetic-private-other-branch",planetscale_role="primary"} 600`,
+      ].join("\n");
+      const observation = parsePlanetScaleDatabaseMetricObservation(body, branchId);
+
+      expect(observation.missingMetrics).toEqual([]);
+      expect(observation.pgbouncerCurrentConnectionSeries).toEqual({
+        branch: 5,
+        primary: 2,
+        replica: 1,
+        unrecognizedRole: 2,
+        primaryMissingPod: 0,
+      });
+      expect(JSON.stringify(observation.pgbouncerCurrentConnectionSeries))
+        .not.toContain("synthetic-private-");
+      expect(observation.postgresStateSeries).toEqual(complete.postgresStateSeries);
+      expect(observation.snapshot).toEqual(complete.snapshot);
+      expect(observation.snapshot).toMatchObject({
+        serverConnections,
+        serverPoolCapacity: 50,
+        serverPoolSaturationRatio: serverConnections / 50,
+      });
+      expect(parsePlanetScaleDatabaseMetrics(body, branchId)).toEqual(complete.snapshot);
+    },
+  );
+
   it("alerts on wait, local server saturation, Postgres state, and connection-error deltas", () => {
     const snapshot = parsePlanetScaleDatabaseMetrics(
       buildMetricsBody({

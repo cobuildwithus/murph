@@ -12,6 +12,9 @@ import {
   VAULT_QUERY_SOURCE,
 } from "@murphai/contracts";
 import {
+  isVaultError,
+  listAuditShardSources,
+  readAuditShardRows,
   listEventLedgerShardSources,
   readEventLedgerShardRows,
 } from "@murphai/core";
@@ -148,6 +151,17 @@ export async function readVaultSourceTolerant(
     metadata,
     entities: [...baseEntities, ...healthEntities.entities].sort(compareCanonicalEntities),
   };
+}
+
+/** Read only strict, default-visible experiments in canonical entity order. */
+export async function readBrowserVaultReplicaExperiments(
+  vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CanonicalEntity[]> {
+  options.signal?.throwIfAborted();
+  const experiments = await readExperimentEntities(vaultRoot, "strict", options.signal);
+  options.signal?.throwIfAborted();
+  return experiments.filter(isDefaultProjectedQueryEntity);
 }
 
 /**
@@ -1003,13 +1017,26 @@ async function forEachJsonlPayload(
   ) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (relativeDir === VAULT_LAYOUT.eventLedgerDirectory) {
-    for (const source of await listEventLedgerShardSources(vaultRoot)) {
+  if (relativeDir === VAULT_LAYOUT.eventLedgerDirectory || relativeDir === VAULT_LAYOUT.auditDirectory) {
+    const listSources = relativeDir === VAULT_LAYOUT.auditDirectory ? listAuditShardSources : listEventLedgerShardSources;
+    const readRows = relativeDir === VAULT_LAYOUT.auditDirectory ? readAuditShardRows : readEventLedgerShardRows;
+    for (const source of await listSources(vaultRoot)) {
       signal?.throwIfAborted();
-      for (const row of await readEventLedgerShardRows({
+      const rows = await readRows({
         vaultRoot,
         relativePath: source.logicalPath,
-      })) {
+      }).catch((error: unknown) => {
+        if (relativeDir !== VAULT_LAYOUT.auditDirectory
+          || !isVaultError(error) || error.code !== "VAULT_INVALID_JSONL") throw error;
+        // Keep storage parser causes (which may quote content) behind the
+        // existing safe, vault-relative query-source error boundary.
+        throw new QueryVaultSourceError({
+          issue: "malformed_json",
+          relativePath: source.logicalPath,
+          lineNumber: typeof error.details.lineNumber === "number" ? error.details.lineNumber : undefined,
+        });
+      });
+      for (const row of rows) {
         signal?.throwIfAborted();
         visit(source.logicalPath, row.lineNumber, row.value as QueryRecordData);
       }

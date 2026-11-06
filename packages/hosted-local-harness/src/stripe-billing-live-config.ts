@@ -9,8 +9,6 @@ export const HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV =
   "MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID";
 export const HOSTED_STRIPE_BILLING_RUN_ID_ENV =
   "MURPH_HOSTED_STRIPE_BILLING_RUN_ID";
-export const HOSTED_STRIPE_BILLING_PRIVY_APP_ID_ENV =
-  "NEXT_PUBLIC_PRIVY_APP_ID";
 
 export const HOSTED_STRIPE_BILLING_PRICE_ENV_KEYS = [
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
@@ -39,7 +37,6 @@ const HOSTED_STRIPE_BILLING_DEDICATED_ENV_KEYS = [
 
 export interface HostedStripeBillingLiveConfig {
   accountId: string;
-  privyAppId: string;
   priceIds: {
     edge: string;
     familyEdge: string;
@@ -112,7 +109,6 @@ export function resolveHostedStripeBillingLiveConfig(
     HOSTED_STRIPE_BILLING_SECRET_KEY_ENV,
     HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV,
     HOSTED_STRIPE_BILLING_RUN_ID_ENV,
-    HOSTED_STRIPE_BILLING_PRIVY_APP_ID_ENV,
     ...HOSTED_STRIPE_BILLING_PRICE_ENV_KEYS,
     HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_ENV_KEY,
   ] as const;
@@ -127,19 +123,12 @@ export function resolveHostedStripeBillingLiveConfig(
 
   const secretKey = requireNormalized(environment, HOSTED_STRIPE_BILLING_SECRET_KEY_ENV);
   const accountId = requireNormalized(environment, HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV);
-  const privyAppId = requireNormalized(
-    environment,
-    HOSTED_STRIPE_BILLING_PRIVY_APP_ID_ENV,
-  );
   const malformed: string[] = [];
   if (!/^(?:sk|rk)_test_[A-Za-z0-9_]+$/u.test(secretKey)) {
     malformed.push(HOSTED_STRIPE_BILLING_SECRET_KEY_ENV);
   }
   if (!/^acct_[A-Za-z0-9]+$/u.test(accountId)) {
     malformed.push(HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV);
-  }
-  if (!/^[A-Za-z0-9_-]{25}$/u.test(privyAppId)) {
-    malformed.push(HOSTED_STRIPE_BILLING_PRIVY_APP_ID_ENV);
   }
   for (const key of HOSTED_STRIPE_BILLING_PRICE_ENV_KEYS) {
     if (!/^price_[A-Za-z0-9]+$/u.test(requireNormalized(environment, key))) {
@@ -175,7 +164,6 @@ export function resolveHostedStripeBillingLiveConfig(
     configured: true,
     config: {
       accountId,
-      privyAppId,
       priceIds: {
         edge: requireNormalized(
           environment,

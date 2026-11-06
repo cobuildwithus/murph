@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
@@ -357,7 +358,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
         const otherHandles = chatId === "chat_second"
           ? ["+14155550101", "+14155550202"]
           : ["+14155550303"];
-        return {
+        return linqRoster({
           handleCount: otherHandles.length + 2,
           handles: [
             { handle: PROVIDER_PHONE, isMe: true, status: "active" },
@@ -370,7 +371,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
           ],
           handlesComplete: true,
           isGroup: true,
-        };
+        });
       },
     );
     dependencyMocks.lookupHostedGroupParticipantMemberIdsByHandles
@@ -494,7 +495,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
         const otherHandle = chatId === "chat_second"
           ? "+14155550606"
           : "+14155550707";
-        return {
+        return linqRoster({
           handleCount: 3,
           handles: [
             { handle: PROVIDER_PHONE, isMe: true, status: "active" },
@@ -503,7 +504,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
           ],
           handlesComplete: true,
           isGroup: true,
-        };
+        });
       },
     );
     dependencyMocks.lookupHostedGroupParticipantMemberIdsByHandles
@@ -585,7 +586,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
         nonLinqContainerMemberIds: new Set(),
         unavailableContainerMemberIds: new Set(),
       });
-    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue({
+    dependencyMocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handleCount: 3,
       handles: [
         { handle: PROVIDER_PHONE, isMe: true, status: "active" },
@@ -594,7 +595,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
       ],
       handlesComplete: true,
       isGroup: true,
-    });
+    }));
     dependencyMocks.lookupHostedGroupParticipantMemberIdsByHandles
       .mockResolvedValue(new Map([[REQUESTER_PHONE, ORIGIN_MEMBER_ID]]));
     dependencyMocks.readHostedMemberAddressBookAdvisoryNames.mockResolvedValue({
@@ -679,7 +680,7 @@ describe("membership ID selection composed with Assistant Ask admission", () => 
         unavailableContainerMemberIds: new Set(),
       });
     dependencyMocks.getHostedLinqChatSummary.mockImplementation(
-      async ({ chatId }: { chatId: string }) => ({
+      async ({ chatId }: { chatId: string }) => linqRoster({
         handleCount: 3,
         handles: [
           { handle: PROVIDER_PHONE, isMe: true, status: "active" },

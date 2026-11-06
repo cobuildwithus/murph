@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   environment: {
     linqFirstContactAdmissionMode: "enforce" as "enforce" | "off",
-    linqFirstContactAdmissionModel: "gpt-5.4-nano",
+    linqFirstContactAdmissionModel: "gpt-6-luna",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
   participantContact: {
@@ -136,7 +136,7 @@ describe("Linq first-contact admission", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.environment.linqFirstContactAdmissionMode = "enforce";
-    mocks.environment.linqFirstContactAdmissionModel = "gpt-5.4-nano";
+    mocks.environment.linqFirstContactAdmissionModel = "gpt-6-luna";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
     resetParticipantContactMocks();
   });
@@ -199,7 +199,11 @@ describe("Linq first-contact admission", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("allows confident Murph-intent structured responses", async () => {
+  it.each([
+    "hi",
+    "Hey Murph let's get started with my health!",
+    "Hey Murph let’s get started with my health!",
+  ])("allows confident Murph-intent structured responses for %s", async (text) => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       output: [
         {
@@ -220,7 +224,7 @@ describe("Linq first-contact admission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(classifyHostedLinqFirstContactAdmission({
-      request: BASE_REQUEST,
+      request: { ...BASE_REQUEST, text },
     })).resolves.toMatchObject({
       confidence: 0.91,
       kind: "allow",
@@ -239,7 +243,7 @@ describe("Linq first-contact admission", () => {
     expect(requestHeaders.get("content-type")).toBe("application/json");
     expect(requestHeaders.get("x-stainless-retry-count")).toBe("0");
     expect(JSON.parse(String(requestInit.body))).toMatchObject({
-      model: "gpt-5.4-nano",
+      model: "gpt-6-luna",
       reasoning: { effort: "medium" },
       service_tier: "priority",
       store: false,
@@ -250,10 +254,28 @@ describe("Linq first-contact admission", () => {
         },
       },
     });
-    const prompt = JSON.parse(String(requestInit.body)).input[0].content;
+    const body = JSON.parse(String(requestInit.body));
+    expect(JSON.parse(body.input[1].content)).toEqual({
+      participantContactKind: "phone",
+      partTypes: ["text"],
+      product: "Murph",
+      service: "imessage",
+      text,
+    });
+    const prompt = body.input[0].content;
     expect(prompt).toContain("Goal: decide whether");
     expect(prompt).toContain("Default to allow");
-    expect(prompt).toContain("Only block if the message is clearly automated marketing");
+    expect(prompt).toContain("Unless a block rule below applies, allow");
+    expect(prompt).toContain("Block requests for nude, sexual, or pornographic images or content, even if they appear human or mention Murph.");
+    expect(prompt).toContain("Genuine sexual-health questions are not explicit-content requests; allow health questions and uncertain cases.");
+    expect(prompt).toContain("Block clear automated messages from other AI assistants, chatbots, or autoresponders");
+    expect(prompt).toContain("templated introductions, registered-user-only responses, out-of-office notices, auto-replies, or bot signup pitches");
+    expect(prompt).toContain("A mention of Murph does not make an automated reply human.");
+    expect(prompt).toContain("Also block clearly automated marketing");
+    expect(prompt).toContain('bare greetings like "hi", "hey", "yo", "sup", emoji-only, single-word pings');
+    expect(prompt).toContain("any health/wellness/life question");
+    expect(prompt).toContain("When uncertain whether a message is a real human reaching out or an automated message, return allow.");
+    expect(prompt).not.toContain("Only block if");
   });
 
   it("blocks when the model returns decision=block regardless of confidence", async () => {

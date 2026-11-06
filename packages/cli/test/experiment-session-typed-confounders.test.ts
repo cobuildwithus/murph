@@ -2,11 +2,6 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
-import {
-  resolveExperimentSessionMetricSpec,
-  resolveExperimentSessionMetricSpecForBiomarker,
-} from '@murphai/health-metrics'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -75,32 +70,6 @@ async function runRawSliceCli(args: readonly string[]): Promise<string> {
   return output.join('').trim()
 }
 
-test('every generated protocol with a session-captured primary outcome declares exactly one matching field', () => {
-  const artifact = loadGeneratedHealthCommonsProtocolRunSpecs()
-
-  for (const protocol of artifact.protocols) {
-    const sessionFields = protocol.protocol?.sessionFieldIds ?? []
-    for (const plan of protocol.testPlans) {
-      const primarySpec = resolveExperimentSessionMetricSpecForBiomarker(
-        plan.primaryBiomarkerKey,
-      )
-      if (!primarySpec) {
-        continue
-      }
-
-      const matches = sessionFields.filter(
-        (fieldId) =>
-          resolveExperimentSessionMetricSpec(fieldId)?.key === primarySpec.key,
-      )
-      assert.equal(
-        matches.length,
-        1,
-        `${protocol.key} primary ${plan.primaryBiomarkerKey} must declare exactly one recognized ${primarySpec.key} session field; fields=${sessionFields.join(', ') || '(none)'}`,
-      )
-    }
-  }
-})
-
 test('experiment session log schema exposes typed confounder map entries', async () => {
   const schema = JSON.parse(
     await runRawSliceCli([
@@ -143,8 +112,6 @@ test.sequential(
         'experiment',
         'start',
         'typed-confounders',
-        '--custom',
-        '--no-public-protocol',
         '--title',
         'Typed Confounders',
         '--started-on',
@@ -267,8 +234,6 @@ test.sequential(
         'experiment',
         'start',
         'duplicate-sleep-diary-fields',
-        '--custom',
-        '--no-public-protocol',
         '--intervention-start',
         '2026-04-04',
         '--intervention-days',
@@ -294,8 +259,6 @@ test.sequential(
         'experiment',
         'start',
         'sleep-diary',
-        '--custom',
-        '--no-public-protocol',
         '--title',
         'Sleep Diary',
         '--baseline-start',
@@ -688,8 +651,6 @@ test.sequential(
         'experiment',
         'start',
         'paused-recovery-run',
-        '--custom',
-        '--no-public-protocol',
         '--status',
         'paused',
         '--baseline-start',
@@ -729,229 +690,6 @@ test.sequential(
       assert.equal(requireData(written).outcome.experiment.status, 'paused')
       assert.equal(requireData(shown).entity.data.status, 'paused')
       assert.equal(requireData(shown).entity.data.endedOn, undefined)
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'draft bedtime transition protocol cannot start through the CLI',
-  async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), 'murph-cli-bedtime-transition-start-'),
-    )
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-      const rejected = await runSliceCli([
-        'experiment',
-        'start',
-        'bedtime-transition-run',
-        '--from-protocol',
-        'protocol_variant:bedtime-transition/standard-tiny-fallback-transition',
-        '--intervention-start',
-        '2026-06-01',
-        '--onboarding-completed-at',
-        '2026-05-31T12:00:00.000Z',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(rejected.ok, false)
-      if (rejected.ok) {
-        throw new Error('Draft bedtime transition protocol must not start.')
-      }
-      assert.equal(rejected.error.code, 'not_found')
-      assert.match(
-        rejected.error.message ?? '',
-        /No Health Commons protocol variant matched/u,
-      )
-
-      const shown = await runSliceCli([
-        'experiment',
-        'show',
-        'bedtime-transition-run',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(shown.ok, false)
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'tomorrow-list protocol starts with only the compact default logging and analysis set',
-  async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), 'murph-cli-tomorrow-list-start-'),
-    )
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-      const created = await runSliceCli<{ experimentId: string; slug: string }>([
-        'experiment',
-        'start',
-        'tomorrow-list-run',
-        '--from-protocol',
-        'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list',
-        '--intervention-start',
-        '2026-06-01',
-        '--onboarding-completed-at',
-        '2026-05-31T12:00:00.000Z',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(created.ok, true, created.ok ? undefined : created.error.message)
-      const shown = await runSliceCli<{
-        entity: {
-          data: {
-            analysisPlan?: {
-              primaryBiomarkerKey?: string
-              secondaryBiomarkerKeys?: string[]
-            }
-            runPlan?: {
-              logging?: {
-                confounderFields?: string[]
-                sessionFields?: string[]
-              }
-            }
-          }
-        }
-      }>(['experiment', 'show', 'tomorrow-list-run', '--vault', vaultRoot])
-
-      assert.equal(
-        requireData(shown).entity.data.analysisPlan?.primaryBiomarkerKey,
-        'biomarker:pre-sleep-arousal',
-      )
-      assert.deepEqual(
-        requireData(shown).entity.data.analysisPlan?.secondaryBiomarkerKeys,
-        [
-          'biomarker:sleep-onset-latency',
-          'biomarker:daytime-sleepiness',
-        ],
-      )
-      assert.deepEqual(
-        requireData(shown).entity.data.runPlan?.logging?.sessionFields,
-        [
-          'pre_sleep_arousal',
-          'sleep_opportunity_minutes',
-          'estimated_sleep_onset_latency_minutes',
-          'daytime_sleepiness',
-          'writing_burden',
-        ],
-      )
-      assert.equal(
-        requireData(shown).entity.data.runPlan?.logging?.confounderFields,
-        undefined,
-      )
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'experiment start rejects either stale protocol revision and persists an exact compare-and-set pair',
-  async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), 'murph-cli-experiment-revision-cas-'),
-    )
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-      const protocolKey =
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
-      const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
-        (candidate) => candidate.key === protocolKey,
-      )
-      assert.ok(protocol)
-      const runSpecRevisionId = protocol.revision.runSpecRevisionId
-      assert.ok(runSpecRevisionId)
-
-      const stalePage = await runSliceCli<unknown>([
-        'experiment',
-        'start',
-        'stale-page-revision',
-        '--from-protocol',
-        protocolKey,
-        '--intervention-start',
-        '2026-05-01',
-        '--page-revision-id',
-        `sha256:${'0'.repeat(64)}`,
-        '--run-spec-revision-id',
-        runSpecRevisionId,
-        '--vault',
-        vaultRoot,
-      ])
-      const staleRunSpec = await runSliceCli<unknown>([
-        'experiment',
-        'start',
-        'stale-run-spec-revision',
-        '--from-protocol',
-        protocolKey,
-        '--intervention-start',
-        '2026-05-01',
-        '--page-revision-id',
-        protocol.revision.pageRevisionId,
-        '--run-spec-revision-id',
-        `sha256:${'1'.repeat(64)}`,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(stalePage.ok, false)
-      assert.match(stalePage.error.message ?? '', /page-revision-id revision expectation.*does not match/u)
-      assert.equal(staleRunSpec.ok, false)
-      assert.match(staleRunSpec.error.message ?? '', /run-spec-revision-id revision expectation.*does not match/u)
-      for (const slug of ['stale-page-revision', 'stale-run-spec-revision']) {
-        const missing = await runSliceCli<unknown>([
-          'experiment',
-          'show',
-          slug,
-          '--vault',
-          vaultRoot,
-        ])
-        assert.equal(missing.ok, false)
-      }
-
-      const exact = await runSliceCli<{ experimentId: string }>([
-        'experiment',
-        'start',
-        'exact-protocol-revision',
-        '--from-protocol',
-        protocolKey,
-        '--intervention-start',
-        '2026-05-01',
-        '--page-revision-id',
-        protocol.revision.pageRevisionId,
-        '--run-spec-revision-id',
-        runSpecRevisionId,
-        '--onboarding-completed-at',
-        '2026-04-30T12:00:00.000Z',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(exact.ok, true, exact.ok ? undefined : exact.error.message)
-      const shown = await runSliceCli<{
-        entity: { data: { commonsProtocolRef?: Record<string, unknown> } }
-      }>([
-        'experiment',
-        'show',
-        'exact-protocol-revision',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(shown.ok, true, shown.ok ? undefined : shown.error.message)
-      assert.deepEqual(requireData(shown).entity.data.commonsProtocolRef, {
-        key: protocolKey,
-        pageRevisionId: protocol.revision.pageRevisionId,
-        runSpecRevisionId,
-        testPlanId: protocol.testPlans[0]?.planId,
-      })
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

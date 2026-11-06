@@ -7,7 +7,7 @@ import {
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from '../src/linq-runtime.ts'
-import { createDeviceSyncClient, resolveDeviceSyncBaseUrl } from '../src/device-sync-client.ts'
+
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
@@ -103,37 +103,5 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       error.code === 'LINQ_INVALID_INPUT' &&
       error.message ===
         'Linq subscribed event list must contain at least one non-empty value.',
-  )
-})
-
-test('device sync client covers non-loopback passthrough paths', async () => {
-  assert.throws(
-    () =>
-      resolveDeviceSyncBaseUrl('http://[::1', {}, null),
-    (error) => error instanceof TypeError,
-  )
-
-  assert.equal(createDeviceSyncClient({ baseUrl: 'http://127.0.0.1:8788' }).baseUrl, 'http://127.0.0.1:8788')
-
-  let remoteBaseUrlError: unknown
-  try {
-    createDeviceSyncClient({
-      baseUrl: '   ',
-      controlToken: 'token-123',
-      env: {
-        DEVICE_SYNC_BASE_URL: 'https://device-sync.example.test',
-      },
-    })
-  } catch (error) {
-    remoteBaseUrlError = error
-  }
-  assert.ok(remoteBaseUrlError && typeof remoteBaseUrlError === 'object')
-  assert.equal(
-    (remoteBaseUrlError as { code?: string }).code,
-    'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
-  )
-  assert.equal(
-    (remoteBaseUrlError as { context?: { baseUrl?: string } }).context?.baseUrl,
-    'https://device-sync.example.test',
   )
 })

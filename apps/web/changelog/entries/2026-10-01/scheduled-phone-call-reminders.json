@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "scheduled-phone-call-reminders",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reminders by phone call",
+    "summary": "Ask Murph in a private iMessage or Telegram chat to call you with a reminder at a chosen time.",
+    "details": "Murph uses your incoming iMessage phone number when available and asks for a number when it is missing. Each scheduled reminder makes one call attempt; reaching you is not guaranteed.",
+    "relevanceTags": [
+      "reminders",
+      "phone-calls"
+    ],
+    "sourcePullRequests": [3970]
+  }
+}

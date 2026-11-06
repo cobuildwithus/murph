@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "qualified-sleep-reports",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer sleep reports",
+    "summary": "Sleep reports distinguish short sessions and preliminary estimates from a complete night.",
+    "details": "Available short sessions stay visible with their qualifications. They do not count as confirmed overnight sleep or close a missing-night reporting gap.",
+    "relevanceTags": [
+      "sleep",
+      "wearables",
+      "groups"
+    ],
+    "sourcePullRequests": []
+  }
+}

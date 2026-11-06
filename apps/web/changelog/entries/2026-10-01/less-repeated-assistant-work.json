@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "less-repeated-assistant-work",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less repeated work behind your replies",
+    "summary": "Murph can handle longer vault tasks with focused context and review morning reminders in batches.",
+    "details": "Simple iMessage acknowledgments can stay quiet after a lightweight check. Reactions that answer a question, express confusion, or need follow-through continue to the full assistant. Reminder changes still require a current record check.",
+    "relevanceTags": ["usage", "conversation", "reminders"],
+    "sourcePullRequests": []
+  }
+}

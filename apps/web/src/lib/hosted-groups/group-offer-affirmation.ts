@@ -27,6 +27,7 @@ export type HostedGroupOfferAffirmationSkipReason =
 
 export type HostedGroupOfferAffirmationResult =
   | { status: "accepted"; kind: "disclosure" | "join" }
+  | { status: "replayed" }
   | { status: "ignored"; reason: HostedGroupOfferAffirmationSkipReason };
 
 /**
@@ -43,7 +44,8 @@ export type HostedGroupOfferAffirmationKind = "disclosure" | "join";
  * The one place a chat affirmation becomes a durable group grant. Provider
  * adapters classify the gesture and resolve the actor; this owns matching the
  * offer, running the existing acceptance transactions, and the post-commit work
- * that must happen identically on every channel.
+ * that must happen identically on every channel. A redelivered gesture that was
+ * already accepted returns `replayed` and changes nothing.
  */
 export async function acceptHostedGroupOfferAffirmation(input: {
   affirmationEventId: string;
@@ -112,6 +114,9 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       }
       return { status: "ignored", reason };
     }
+    if (disclosureResult.kind === "replayed") {
+      return { status: "replayed" };
+    }
     if (disclosureResult.kind === "accepted") {
       return { status: "accepted", kind: "disclosure" };
     }
@@ -133,6 +138,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   try {
     result = await input.prisma.$transaction(async (tx) => {
       const accepted = await acceptHostedGroupJoinOfferTx({
+        affirmationEventId: input.affirmationEventId,
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
         memberId: input.memberId,
@@ -142,6 +148,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
           input.threadIdentityLookupKeyReadCandidates,
         tx,
       });
+      if (!accepted) return null;
       await input.assertActorStillBound?.(tx);
       await input.onAcceptedTx?.(tx, accepted);
       return accepted;
@@ -153,6 +160,8 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     }
     return { status: "ignored", reason };
   }
+
+  if (!result) return { status: "replayed" };
 
   const runPostCommitTail = async (): Promise<void> => {
     const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);

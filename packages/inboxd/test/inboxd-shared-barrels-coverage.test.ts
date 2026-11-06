@@ -26,7 +26,6 @@ vi.mock("@murphai/core", () => ({
 }));
 
 import * as sharedModule from "../src/shared.ts";
-import * as sharedRuntimeModule from "../src/shared-runtime.ts";
 import {
   assertVaultPathOnDisk,
   buildAttachmentId,
@@ -34,9 +33,7 @@ import {
   buildSnippet,
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
-  ensureParentDirectory,
   generatePrefixedId,
-  mapObjectEntries,
   normalizeRelativePath,
   normalizeStoredAttachments,
   sanitizeFileName,
@@ -51,7 +48,6 @@ import {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-  waitForAbortOrTimeout,
 } from "../src/shared-runtime.ts";
 
 afterEach(() => {
@@ -63,15 +59,7 @@ afterEach(() => {
   mocks.assertPathWithinVaultOnDiskMock.mockReset();
 });
 
-test("shared barrel re-exports the shared-runtime helpers and contract types without drift", () => {
-  assert.equal(sharedModule.createCaptureCheckpoint, sharedRuntimeModule.createCaptureCheckpoint);
-  assert.equal(sharedModule.normalizeTextValue, sharedRuntimeModule.normalizeTextValue);
-  assert.equal(sharedModule.redactSensitivePaths, sharedRuntimeModule.redactSensitivePaths);
-  assert.equal(sharedModule.relayAbort, sharedRuntimeModule.relayAbort);
-  assert.equal(sharedModule.sanitizeRawMetadata, sharedRuntimeModule.sanitizeRawMetadata);
-  assert.equal(sharedModule.toIsoTimestamp, sharedRuntimeModule.toIsoTimestamp);
-  assert.equal(sharedModule.waitForAbortOrTimeout, sharedRuntimeModule.waitForAbortOrTimeout);
-
+test("stored attachment types stay aligned across the public contract and normalization", () => {
   expectTypeOf<BarrelStoredAttachment>().toEqualTypeOf<ContractStoredAttachment>();
   expectTypeOf<Parameters<typeof normalizeStoredAttachments>[1]>().toEqualTypeOf<
     ReadonlyArray<ContractStoredAttachment>
@@ -146,7 +134,7 @@ test("shared-runtime helpers cover sensitive redaction and abort fast paths", as
   vi.useFakeTimers();
   const alreadyAborted = new AbortController();
   alreadyAborted.abort();
-  await waitForAbortOrTimeout(alreadyAborted.signal, 5_000);
+
   assert.equal(vi.getTimerCount(), 0);
 });
 
@@ -213,11 +201,6 @@ test("shared helpers normalize ids, snippets, search text, and attachment record
   );
   assert.equal(buildSnippet(undefined, " second "), "second");
 
-  assert.deepEqual(
-    mapObjectEntries({ alpha: 1, beta: 2 }, (key, entry) => [key.toUpperCase(), Number(entry) * 10]),
-    { ALPHA: 10, BETA: 20 },
-  );
-
   assert.equal(
     createInboxCaptureIdentityKey({
       source: "telegram",
@@ -268,7 +251,7 @@ test("shared helper wrappers translate cross-package path errors into TypeErrors
   );
 });
 
-test("filesystem helpers create parent directories, hash content, and walk named files with skips", async () => {
+test("filesystem helpers hash content and walk named files with skips", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "inboxd-shared-coverage-"));
 
   try {
@@ -279,7 +262,7 @@ test("filesystem helpers create parent directories, hash content, and walk named
     const hashedFile = path.join(tempRoot, "hash.txt");
 
     await mkdir(skippedDirectory, { recursive: true });
-    await ensureParentDirectory(targetFile);
+    await mkdir(nestedDirectory, { recursive: true });
     await writeFile(targetFile, "alpha");
     await writeFile(skippedFile, "hidden");
     await writeFile(hashedFile, "murph");

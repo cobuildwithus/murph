@@ -1,0 +1,664 @@
+/**
+ * The weekly game's wire contract: the request bodies of the /api/game/v1
+ * routes, the commands they become (the one internal write path, which Murph's
+ * tools will call too), and the views that come back. One file so the server,
+ * its tests and the iOS client agree on shapes. The /v1 path versions the API:
+ * change it additively, or add /v2.
+ */
+
+/** Monday = 0 … Sunday = 6, matching the app. */
+export const GAME_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+export type Weekday = (typeof GAME_WEEKDAYS)[number];
+
+/**
+ * Set weekdays, or a count: any N days across the whole game (not per week),
+ * so a 14-day game with `{ count: 10 }` needs 10 days in total.
+ */
+export type GameSchedule = { days: Weekday[] } | { count: number };
+
+export const GAME_STAKE_KINDS = ["winner_gets", "per_miss", "prize", "dare"] as const;
+export type GameStakeKind = (typeof GAME_STAKE_KINDS)[number];
+
+export interface GameStake {
+  kind: GameStakeKind;
+  /** In the player's own words: "Breakfast in bed". */
+  item: string;
+  /** Assigned by the server (ignored on create); a ticket names its stake by it. */
+  key?: string;
+}
+
+export interface GameTask {
+  /** 0 = the player who started the game, 1 = the invitee. */
+  seat: number;
+  /** In the player's own words: "100 pushups". */
+  text: string;
+}
+
+export const GAME_CHECK_IN_KINDS = ["photo", "heart_rate", "any"] as const;
+export type GameCheckInKind = (typeof GAME_CHECK_IN_KINDS)[number];
+
+/** One version of what everyone agreed to, applying from `fromDay`. */
+export interface GameTermsVersion {
+  defaultTask?: string;
+  checkInKind?: GameCheckInKind;
+  n: number;
+  fromDay: number;
+  tasks: GameTask[];
+  schedule: GameSchedule;
+  stakes: GameStake[];
+}
+
+/** What a new game starts with (version 1, from day 0). */
+export interface GameTermsInput {
+  defaultTask?: string;
+  /** New games use any; retained photo/heart_rate terms keep their requirement. */
+  checkInKind?: GameCheckInKind;
+  /** Pair tasks address seats 0 and 1; with defaultTask, tasks are sparse seat overrides. */
+  tasks: GameTask[];
+  schedule: GameSchedule;
+  stakes: GameStake[];
+  lengthDays?: number;
+  /**
+   * The challenger's picked Day 1 (YYYY-MM-DD, a calendar date): from tomorrow
+   * to 60 days out in their zone. Going live before 15:00 for every player
+   * can start today; this date wins when later.
+   */
+  startsOn?: string;
+}
+
+/**
+ * A daily artifact, or an excuse for a missed day (on-device transcript only).
+ * No audio, raw heart-rate samples, or route coordinates are stored.
+ */
+export const GAME_ENTRY_KINDS = ["photo", "heart_rate", "words", "route", "reps", "excuse"] as const;
+export type GameEntryKind = (typeof GAME_ENTRY_KINDS)[number];
+
+export interface GameHeartRateData {
+  durationSec: number;
+  avgBpm: number;
+  lowBpm: number;
+  peakBpm: number;
+}
+export interface GameRouteData {
+  activity: "walk" | "run";
+  distanceM: number;
+  durationSec: number;
+}
+export interface GameRepsData {
+  exercise: "pushups";
+  count: number;
+  countLow?: number;
+  countHigh?: number;
+  reps: { tMs: number; depth: number }[];
+  fastestMs?: number;
+  slowestMs?: number;
+  heartRate?: GameHeartRateData;
+}
+export type GameEntryData = GameHeartRateData | GameRouteData | GameRepsData;
+
+/** The words a challenger attaches to whoever they invite; only they ever see them. */
+export interface GameInviteeLabel {
+  /** An uploaded media key, e.g. their contact photo. */
+  photoKey?: string | null;
+  relationship?: string | null;
+}
+
+// Request bodies. Every write is idempotent through its own ids (gameId,
+// entryId) or state (accepting twice, redeeming twice), so retries are safe.
+//
+// POST /media takes a photo's raw bytes (Content-Type image/jpeg or
+// image/heic; 4 MiB max) and returns { mediaKey }. The key is derived from the
+// bytes, so uploading the same file again returns the same key.
+
+/** PUT /me/profile */
+export interface SetProfileBody {
+  firstName?: string;
+  timeZone?: string;
+  /** Omitted keeps the current photo; null removes it. Must be your own upload. */
+  photoKey?: string | null;
+}
+
+/** PUT /players/:memberId/photo. Private to you; their own profile photo wins. */
+export interface SetPlayerPhotoBody {
+  /** Your finished upload, only while they have no profile photo; null removes yours. */
+  photoKey: string | null;
+}
+
+export interface GameProfileView {
+  memberId: string;
+  firstName: string;
+  timeZone: string;
+  avatarUrl: string | null;
+}
+
+/** POST /games. Chat setup translates member-keyed tasks into this same command,
+ * seating both verified players in negotiating rather than an unclaimed invite. */
+export interface CreateGameBody {
+  maxPlayers?: 2 | 10;
+  groupWord?: string;
+  invitees?: GameInviteTargetInput[];
+  gameId: string;
+  terms: GameTermsInput;
+  /** The first name the challenger typed for the invitee. */
+  inviteeFirstName?: string;
+  inviteeLabel?: GameInviteeLabel;
+  previousGameId?: string;
+}
+
+export interface GameInviteTargetInput {
+  seat: number;
+  recipient: { kind: "phone" | "email"; value: string };
+  firstName: string;
+  label?: GameInviteeLabel;
+}
+
+export interface EditGameTermsBody {
+  expectedTermsVersion: number;
+  proposalId?: string;
+  terms: GameTermsInput;
+}
+
+/** POST /invites/:token/negotiate */
+export type NegotiateInviteBody = AcceptInviteBody & {
+  proposalId: string;
+} & ({ change: GameChange; note?: never } | { note: string; change?: never });
+
+export interface AcceptInviteBody {
+  /** The terms version the invitee saw (`terms.n`). */
+  termsVersion: number;
+  timeZone: string;
+}
+
+/**
+ * POST /games/:id/entries. A photo needs 1-4 `mediaKeys` (.jpg/.heic); a
+ * heart_rate, route and reps need exactly one rendered JPEG and summary data.
+ * Words need one trimmed line (1-140 characters), with no media or data. An
+ * excuse needs `text` (1-500 characters) and no media, and applies to your most
+ * recent missed scheduled day, never today.
+ */
+export interface PostEntryBody {
+  entryId: string;
+  kind: GameEntryKind;
+  mediaKeys?: string[];
+  text?: string;
+  data?: GameEntryData;
+  /** Optional device-rendered locked preview, at most 64 characters. */
+  blurHash?: string;
+  /** Milliseconds since capture, from a monotonic clock on the phone. */
+  captureAgeMs?: number;
+  /** Refuse to replace a live post on the day the server places this one. It names no day. */
+  expectEmptySlot?: true;
+}
+
+// DELETE /games/:id/entries/:entryId and POST /tickets/:id/redeem have no body.
+
+/** Why a player reports the other player's content. */
+export const GAME_REPORT_REASONS = ["sexual", "harassment", "hate", "violence", "self_harm", "money", "other"] as const;
+export type GameReportReason = (typeof GAME_REPORT_REASONS)[number];
+
+/** What a report is about: one post, their name and photo, or the task and stake they wrote. */
+export const GAME_REPORT_ABOUT = ["post", "player", "terms", "reply"] as const;
+export type GameReportAbout = (typeof GAME_REPORT_ABOUT)[number];
+
+/**
+ * POST /games/:id/reports, and POST /invites/:token/reports before accepting.
+ * `entryId` reports one of the other player's posts you can see (`about`
+ * defaults to "post"); without it, "player" (the default) or "terms". It works
+ * after a game ends. The reported member is never told who reported them.
+ * From then on a reported post is hidden from you (it still counts for
+ * them), and so is a reported player's photo. `block` blocks them in the same
+ * step. Retrying with the same `reportId` is safe.
+ */
+export interface ReportGameBody {
+  replyId?: string;
+  reportedMemberId?: string;
+  reportId: string;
+  reason: GameReportReason;
+  about?: GameReportAbout;
+  entryId?: string;
+  /** Optional, at most 500 characters; only the team reads it. */
+  note?: string;
+  block?: boolean;
+}
+
+// PUT /blocks/:memberId blocks someone you play or played with, and PUT
+// /invites/:token/block blocks whoever sent that invite. Every game the two
+// have open or going is called off (no winner, no tickets), Murph stops
+// texting their shared chat about it, and each sees the other as a player who
+// left, so the blocked player isn't told. Invites and rematches between them
+// fail with PLAYER_UNAVAILABLE. DELETE /blocks/:memberId unblocks; games that
+// ended stay ended. No bodies.
+
+/** Proposed in the app; the other player agrees in the game's shared chat. */
+export type GameChange =
+  | { kind: "start_now" }
+  | { kind: "edit"; schedule?: GameSchedule; lengthDays?: number; startsOn?: string | null;
+      tasks?: GameTask[]; defaultTask?: string; stakes?: GameStake[]; stakesApplyToWholeGame?: true };
+
+export interface ProposeGameChangeBody {
+  proposalId: string;
+  expectedTermsVersion: number;
+  change: GameChange;
+}
+
+export interface GamePendingChange {
+  id: string;
+  proposedByMemberId: string;
+  expectedTermsVersion: number;
+  change: GameChange;
+  /** Zero-based preview at read time; recomputed under the lock on acceptance. */
+  effectiveFromDay: number;
+  /** Conversational proposals use the ordinary assistant reply, not a second announcement. */
+  origin?: "app" | "chat";
+  deliveryStatus: "pending" | "queued" | "sent" | "failed" | "conversation";
+  /** False for a terminal receipt: cancel the proposal before proposing again. */
+  deliveryRetryable?: boolean;
+  /** Fixed start date agreed to, including a start-now proposal. */
+  startsOn: string | null;
+  votes?: { memberId: string; vote: "yes" | "no" }[];
+  yesNeeded?: number;
+}
+
+export interface GameChangeControls {
+  canStartNow: boolean;
+  canEdit: boolean;
+  canEditSchedule: boolean;
+  canEditStartDate: boolean;
+  canEditTasks?: boolean;
+  canEditStakes?: boolean;
+  editableFromDay: number | null;
+}
+
+/** Receipt for a speaker-owned day correction in the bound game chat. */
+export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" };
+
+export type ReplyToPostBody = { replyId: string } & (
+  | { kind: "text"; text: string }
+  | { kind: "voice"; audio: string; levels: number[] }
+);
+
+export type GameReplyView = { id: string; createdAt: string; mine: boolean } & (
+  | { kind: "text"; text: string }
+  | { kind: "voice"; durationMs: number; levels: number[] }
+);
+
+export type GameCommand =
+  | ({ type: "replyToPost"; gameId: string; entryId: string } & ReplyToPostBody)
+  | { type: "deleteReply"; gameId: string; replyId: string }
+  /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */
+  | { type: "challenge"; gameId: string; entryId: string }
+  | { type: "leave"; gameId: string }
+  /** POST /games/:id/recap-watched: you finished its recap. Settled games only; safe to repeat. */
+  | { type: "watchRecap"; gameId: string }
+  | ({ type: "editTerms"; gameId: string } & EditGameTermsBody)
+  | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean }
+  /** DELETE /games/:id cancels an unstarted invite. */
+  | { type: "cancelInvite"; gameId: string }
+  | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
+  | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
+  | ({ type: "setProfile" } & SetProfileBody)
+  /** Set or clear your private photo of someone you play with. */
+  | ({ type: "setPlayerPhoto"; memberId: string } & SetPlayerPhotoBody)
+  | ({ type: "createGame" } & CreateGameBody)
+  | ({ type: "join"; token: string } & AcceptInviteBody)
+  | ({ type: "negotiate"; token: string } & NegotiateInviteBody)
+  | ({ type: "post"; gameId: string; mediaKeys: string[] } & PostEntryBody)
+  /** Take back your own post for your current day (a retake follows, if one's left). */
+  | { type: "withdraw"; gameId: string; entryId: string }
+  | { type: "redeem"; ticketId: string }
+  /** By game (a player) or by invite token (before accepting). */
+  | ({ type: "report"; gameId?: string; token?: string } & ReportGameBody & { about: GameReportAbout })
+  | { type: "block"; memberId?: string; token?: string }
+  | { type: "unblock"; memberId: string };
+
+export type GameStatus = "invited" | "negotiating" | "live" | "settled" | "void";
+
+export interface GameGroupView { id: string; word: string }
+export interface GameParticipationView {
+  state: "joined" | "left" | "deleted";
+  joinedOn: string | null;
+  eligibleFromDay: number | null;
+  canWin: boolean;
+}
+export interface GameStandingView { seat: number; score: number; rank: number | null }
+export interface GamePermissions {
+  canJoin: boolean;
+  canLeave: boolean;
+  canCancel: boolean;
+  canEditTerms: boolean;
+}
+
+export interface GamePlayerView {
+  participation?: GameParticipationView;
+  memberId: string | null;
+  seat: number;
+  /** The viewer's private label name if set, else the player's own first name. */
+  firstName: string;
+  /** This person's chosen profile photo, else the viewer's private photo. */
+  avatarUrl: string | null;
+  /** Only the person's own chosen photo. Use this for explicitly shared exports. */
+  profileAvatarUrl: string | null;
+  /**
+   * The relationship the viewer typed when they invited this person ("my
+   * partner"); only they see it. Null for yourself and anyone you haven't
+   * labelled.
+   */
+  relationship: string | null;
+  isMe: boolean;
+  /** This player's current 0-based day, or null before Day 1 / after the end. */
+  dayIndex: number | null;
+  score: number;
+  /** Consecutive scheduled days posted; an unposted today does not break it. */
+  streak?: number;
+  /**
+   * This player deleted their account and left the game: `memberId` is null,
+   * `firstName` is the name the viewer knew them by, and they have no photo or
+   * days. A `void` game with a player who left was called off. A player
+   * blocked either way looks exactly the same.
+   */
+  left?: true;
+}
+
+export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off";
+
+export interface GameEntryView {
+  reply?: GameReplyView;
+  canReply?: boolean;
+  /** Self-reported incomplete day; omitted after restore. Does not hide the artifact. */
+  incomplete?: true;
+  entryId: string;
+  kind: GameEntryKind;
+  mediaUrls: string[];
+  text: string | null;
+  data?: GameEntryData | null;
+  /**
+   * The first media URL's five-minute signed delivery URL. A post's answer
+   * with `?delivery=signed` uses the photo rendition for unlocked pictures.
+   * History uses the avatar rendition for each person's latest game previews.
+   * Missing means request mediaUrls[0] as usual; mediaUrls remains cache identity.
+   */
+  delivery?: { url: string; expiresAt: string };
+}
+
+export interface GameDayView {
+  progress?: { latestPosterSeats: number[] };
+  index: number;
+  /** The viewer's local date for this day (YYYY-MM-DD). */
+  localDate: string;
+  /** True when the schedule doesn't count this day for the viewer. */
+  off: boolean;
+  /** Your post that day. `postedAt` is when the server took it in. */
+  mine: (GameEntryView & { postedAt?: string }) | null;
+  /** Per other player, in seat order. */
+  others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
+    /** Server receipt time for locked or visible posts; omitted for hidden/absent posts. */
+    postedAt?: string; blurHash?: string | null;
+    /**
+     * Locked, on the viewer's today, with a picture: what it will be once the
+     * viewer posts. `mediaUrl` stays locked (it answers MEDIA_MISSING until
+     * then); Home adds a short-lived signed `delivery` so the app can keep the
+     * picture ready, hidden, and develop it the moment the viewer's post is in.
+     */
+    preview?: { kind: GameEntryKind; mediaUrl: string; delivery?: { url: string; expiresAt: string } };
+    /** The viewer reported this post: it's posted and counts, but never shown to them. */
+    hidden?: true }[];
+}
+
+export interface GameTicketView {
+  parties?: { owedBy: GameTicketPartyView[]; owedTo: GameTicketPartyView[] };
+  canRedeem?: boolean;
+  group?: GameGroupView;
+  id: string;
+  kind?: GameStakeKind;
+  what: string;
+  /** "expired" once it's past `useBy` unredeemed; expired tickets stay in the wallet. */
+  status: "open" | "redeemed" | "expired";
+  /** Redeem by this time: 14 days after the ticket was issued. */
+  useBy: string;
+  owedByMemberId: string;
+  owedToMemberId: string;
+  /** True when the viewer holds it (is owed). */
+  youHold: boolean;
+  /**
+   * The other member deleted their account (or one of you blocked the other):
+   * their member id is "" and the ticket stays as history; it can't be marked done.
+   */
+  left?: true;
+  createdAt: string;
+  redeemedAt: string | null;
+}
+
+export interface GameTicketPartyView {
+  seat: number;
+  memberId: string | null;
+  firstName: string;
+  avatarUrl: string | null;
+}
+
+/** Addressed app rematches also use the existing join/negotiate commands from chat.
+ * Shared native shape for app and chat creation: negotiating + no pendingChange
+ * waits for seat 1 to Shake on it; seat 0 has already agreed. */
+export interface GameView {
+  /** Live bound pair and an unspent Prove it. Entry eligibility is checked separately. */
+  canChallenge?: boolean;
+  maxPlayers?: 2 | 10;
+  group?: GameGroupView;
+  invitedCount?: number;
+  permissions?: GamePermissions;
+  changeControls: GameChangeControls;
+  pendingChange: GamePendingChange | null;
+  talkDelivery?: "pending" | "sent" | "failed";
+  /**
+   * Only to the viewer: they finished this settled game's recap, on any phone.
+   * Absent otherwise. Clients that predate it ignore it.
+   */
+  recapWatched?: true;
+  id: string;
+  status: GameStatus;
+  /** 1 for a new game, then 2, 3… along its rematch chain. */
+  round: number;
+  /** The settled game this one rematches; null for a new game. */
+  previousGameId: string | null;
+  terms: GameTermsVersion;
+  /** The picked Day 1, if the challenger chose one. */
+  startsOn: string | null;
+  lengthDays: number;
+  startedAt: string | null;
+  players: GamePlayerView[];
+  days: GameDayView[];
+  retakeAvailable: boolean;
+  /**
+   * Results soon: set while the game is live but the viewer's own last day is
+   * over (their part is done; the other player may still be on theirs). The
+   * expected settle time, ISO 8601: when the last player's last day ends, plus
+   * an hour only while a late post can still count. Null otherwise. Clients
+   * that predate it ignore it.
+   */
+  settlesAt: string | null;
+  /**
+   * The game's own invite token, for the people it belongs to: while invited,
+   * the challenger (to build the link) and a rematch's addressed invitee (to
+   * accept with POST /invites/:token/accept); once it's live or over, both
+   * players, so the app can recognize its own link. A used token can't be
+   * accepted again. Everyone else gets null.
+   */
+  /**
+   * Also accepts current terms for the claimed seat-1 viewer when status is
+   * negotiating and pendingChange is null, within the original invite expiry.
+   */
+  inviteToken: string | null;
+  inviteExpiresAt: string | null;
+  result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect"; winnerSeats?: number[]; standings?: GameStandingView[] } | null;
+  recap: { superlatives?: Array<{ memberId: string; title: string; line: string }>; pages: Array<{ background: "night" | "paper" | "sage" | "sienna" | "slate"; blocks: Array<Record<string, unknown>> }>; scoreLine?: string; chatLine: string } | null;
+  tickets: GameTicketView[];
+}
+
+export interface GameHomeView {
+  canStartGroups?: boolean;
+  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
+  /** Invite-only: whether this member may start a fresh game. Anyone may rematch. Older apps ignore it. */
+  canStartGames: boolean;
+  /**
+   * Games and tickets with people you blocked are left out. Everyone you
+   * blocked, newest first, by your name for them, to unblock in Settings.
+   */
+  blocked?: GameBlockedPerson[];
+  games: GameView[];
+  wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
+}
+
+export interface GameHistoryView {
+  groups?: GameHistoryGroupView[];
+  people: GameHistoryPersonView[];
+}
+
+export interface GameHistoryGroupGameView {
+  id: string;
+  round: number;
+  startedOn: string;
+  endsOn: string;
+  lengthDays: number;
+  schedule: GameSchedule;
+  players: GamePlayerView[];
+  result: "won" | "lost" | "tied";
+  winnerSeats: number[];
+  standings: GameStandingView[];
+  previews: Array<GameEntryView & { seat: number }>;
+}
+
+export interface GameHistoryGroupView {
+  id: string;
+  word: string;
+  task: string;
+  prize: string | null;
+  record: { won: number; lost: number; tied: number };
+  games: GameHistoryGroupGameView[];
+}
+
+export interface GameHistoryPersonView {
+  memberId: string;
+  firstName: string;
+  avatarUrl?: string;
+  /** Only their own chosen photo, so the app knows a private one can't be set. */
+  profileAvatarUrl?: string;
+  record: { won: number; lost: number; tied: number };
+  games: GameHistoryGameView[];
+}
+
+export interface GameHistoryGameView {
+  id: string;
+  /** The viewer's local dates, matching the dates in `GameView.days`. */
+  startedOn: string;
+  endsOn: string;
+  lengthDays: number;
+  schedule: GameTermsVersion["schedule"];
+  /** Final agreed task wording, oriented by player seat. */
+  tasks: { mine: string; theirs: string };
+  stake: { kind: "prize" | "dare"; item: string } | null;
+  score: { mine: number; theirs: number };
+  result: "won" | "lost" | "tied";
+  perfect: boolean;
+  previews: GameHistoryPreviewView[];
+}
+
+/** One of up to six visible posts, preferring photos, then other kinds, returned in day and player-seat order. */
+export interface GameHistoryPreviewView extends GameEntryView {
+  mine: boolean;
+}
+
+export interface GameBlockedPerson {
+  memberId: string;
+  firstName: string;
+}
+
+/** What an invite link shows. Only an open invite carries terms; cancellation may name the inviter. */
+export type GameInvitePreview =
+  | {
+      status: "open";
+      maxPlayers?: 2 | 10;
+      group?: GameGroupView;
+      yourTask?: string;
+      alreadyIn?: { count: number; firstNames: string[]; avatarUrl: string | null };
+      dayOne?: string | null;
+      supportsNegotiation?: boolean;
+      supportsTalk?: boolean;
+      canTalk?: boolean;
+      talkDelivery?: "pending" | "sent" | "failed";
+      lengthDays?: number;
+      inviterFirstName: string;
+      /**
+       * Never sent. The name a challenger types for the invitee is their own
+       * private label, and this preview is served to anyone holding the link
+       * without sign-in. Kept optional so older clients that decode it still
+       * parse; they fall back to the member's own first name.
+       */
+      inviteeFirstName?: never;
+      terms: GameTermsVersion;
+      /** The picked Day 1, if the challenger chose one. */
+      startsOn: string | null;
+      expiresAt: string | null;
+    }
+  | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }
+  | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string; talkDelivery?: "pending" | "sent" | "failed" };
+
+export type GameErrorCode =
+  | "REPLY_USED"
+  | "UNAUTHENTICATED"
+  | "GAME_DISABLED"
+  | "INVALID_REQUEST"
+  | "GAME_NOT_FOUND"
+  | "INVITE_NOT_FOUND"
+  | "INVITE_USED"
+  | "INVITE_EXPIRED"
+  | "TERMS_CHANGED"
+  /** An open rematch of this same game already exists. */
+  | "ALREADY_IN_A_GAME"
+  /** These two players already have ten open games together. */
+  | "TOO_MANY_GAMES"
+  /** A later game in this rematch chain has already settled. */
+  | "REMATCH_OUTDATED"
+  | "NOT_A_PLAYER"
+  | "GAME_NOT_LIVE"
+  | "DAY_CLOSED"
+  | "RETAKE_USED"
+  /** An empty-slot post found an existing post on its posting day. */
+  | "SLOT_TAKEN"
+  | "CHALLENGE_USED"
+  | "MEDIA_MISSING"
+  | "TICKET_NOT_HELD"
+  | "TICKET_EXPIRED"
+  | "PROFILE_REQUIRED"
+  | "CHANGE_PENDING"
+  | "CHANGE_EXPIRED"
+  | "CHAT_UNAVAILABLE"
+  /** One of you blocked the other: no invite or rematch between you. */
+  | "PLAYER_UNAVAILABLE"
+  /** The write-time content check refused these words. */
+  | "CONTENT_NOT_ALLOWED"
+  /**
+   * Murph's own Terms (the `launch.legal` consent), not a game's: this write
+   * waits until the member agrees to their current versions. `details` names
+   * the scope and its documents with those versions.
+   */
+  | "TERMS_REQUIRED";
+
+export interface GameError {
+  code: GameErrorCode;
+  message: string;
+  retryable?: boolean;
+}
+
+/**
+ * GET /games/:id/message-recipient, asked only when a player taps Message on
+ * a live pair game: the other player's verified number, or null when there's
+ * no one to text.
+ */
+export interface GameMessageRecipientView {
+  ok: true;
+  phone: string | null;
+}
+
+/** Returned only when creation explicitly prepares a Messages handoff. */
+export interface CreateGameView extends GameView {
+  composer?: { murphPhoneNumber: string };
+}

@@ -95,4 +95,4 @@ Don't treat one food as poison; overall pattern and replacement matter. Very low
 
 ## Related goals
 
-[Lower My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Follow a Mediterranean Diet](/goals/follow-mediterranean-diet) · [Eat More Omega-3s](/goals/eat-more-omega-3s)
+[Understand My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Follow a Mediterranean Diet](/goals/follow-mediterranean-diet) · [Eat More Omega-3s](/goals/eat-more-omega-3s)

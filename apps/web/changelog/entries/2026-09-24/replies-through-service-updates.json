@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 200,
+  "item": {
+    "id": "replies-through-service-updates",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer interrupted replies during updates",
+    "summary": "Murph can finish an active reply while a service update is rolling out.",
+    "details": "Routine updates allow the conversation work to finish before the old runtime exits, reducing avoidable restarts and reply delays.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3690
+    ]
+  }
+}

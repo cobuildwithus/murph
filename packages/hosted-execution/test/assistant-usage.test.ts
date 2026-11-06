@@ -9,7 +9,6 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
-  buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedGeminiVideoAnalysisUsageRecord,
@@ -31,7 +30,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
     credentialSource: "platform",
     featureKey: "assistant_idle_compact",
     memberId: "member_123",
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerName: "hosted-openai",
     tokenPricingBasis: "openai-flex",
@@ -59,7 +58,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   // providerRequestId so the two identities can never be conflated.
   assert.equal(record.sessionId, "asst_123");
   assert.equal(record.providerRequestId, "thread_abc");
-  assert.equal(record.requestedModel, "gpt-5.6-terra");
+  assert.equal(record.requestedModel, "gpt-6.1-sol");
   assert.equal(record.triggerKind, "automation_idle_compact");
   assert.equal(record.inputTokens, 104_000);
   assert.equal(
@@ -79,7 +78,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       credentialSource: "member",
       featureKey: "assistant_idle_compact",
       memberId: "member_123",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       occurredAt: PROVIDER_REQUEST_STARTED_AT,
       triggerKind: "automation_idle_compact",
       usage: {
@@ -96,7 +95,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
 test("measured maintenance identities isolate members, providers, and response operations", () => {
   const input = {
     assistantSessionId: "asst_123", codexThreadId: "thread_abc", credentialSource: "platform" as const,
-    featureKey: "assistant_idle_compact", memberId: "member_123", model: "gpt-5.6-terra",
+    featureKey: "assistant_idle_compact", memberId: "member_123", model: "gpt-6.1-sol",
     occurredAt: PROVIDER_REQUEST_STARTED_AT, providerName: "hosted-openai",
     providerRequestId: "response_compact_fixture", triggerKind: "automation_idle_compact",
     usage: { inputTokens: 100, cachedInputTokens: 50, cacheWriteTokens: 10,
@@ -104,70 +103,12 @@ test("measured maintenance identities isolate members, providers, and response o
   };
   const record = buildAssistantMaintenanceUsageRecord(input);
   assert.deepEqual(buildAssistantMaintenanceUsageRecord(input), record);
-  for (const changed of [{ memberId: "member_other" }, { providerName: "venice" }, { providerRequestId: "response_retry_fixture" }]) {
+  for (const changed of [{ memberId: "member_other" }, { providerName: "other-provider" }, { providerRequestId: "response_retry_fixture" }]) {
     assert.notEqual(buildAssistantMaintenanceUsageRecord({ ...input, ...changed }).usageId, record.usageId);
   }
   assert.equal(record.cacheWriteTokens, 10);
   assert.equal(record.reasoningTokens, 5);
   assert.equal(record.providerRequestId, input.providerRequestId);
-});
-
-test("native Codex memory usage is exact and replay-idempotent", () => {
-  const input = {
-    apiKeyEnv: "OPENAI_API_KEY",
-    baseUrl: "https://api.openai.com/v1",
-    cacheWriteTokens: 50,
-    cachedInputTokens: 700,
-    inputTokens: 1_500,
-    memberId: "member_123",
-    occurredAt: "2026-04-01T12:00:00.000Z",
-    outputTokens: 180,
-    providerName: "hosted-openai",
-    providerRequestId: "resp_memory_123",
-    providerRequestOutcome: "succeeded" as const,
-    rawUsageJson: {
-      cacheWriteInputTokens: 50,
-      input_tokens: 1_500,
-      input_tokens_details: {
-        cache_write_tokens: 50,
-        cached_tokens: 700,
-      },
-      output_tokens: 180,
-      output_tokens_details: { reasoning_tokens: 40 },
-      total_tokens: 1_680,
-    },
-    reasoningTokens: 40,
-    requestedModel: "gpt-5.6-terra",
-    servedModel: "gpt-5.6-terra-2026-07-30",
-    tokenPricingBasis: "openai-flex" as const,
-    totalTokens: 1_680,
-  };
-
-  const record = buildHostedCodexMemoryUsageRecord(input);
-  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
-  assert.match(record.turnId, /^turn_codex_memory_[0-9a-f]{32}$/u);
-  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
-  assert.equal(record.occurredAt, input.occurredAt);
-  assert.equal(record.credentialSource, "platform");
-  assert.equal(record.provider, "codex-cli");
-  assert.equal(record.providerName, "hosted-openai");
-  assert.equal(record.providerRequestId, "resp_memory_123");
-  assert.equal(record.providerRequestOutcome, "succeeded");
-  assert.equal(record.requestedModel, "gpt-5.6-terra");
-  assert.equal(record.servedModel, "gpt-5.6-terra-2026-07-30");
-  assert.equal(record.tokenPricingBasis, "openai-flex");
-  assert.equal(record.cacheWriteTokens, 50);
-  assert.deepEqual(record.rawUsageJson, input.rawUsageJson);
-
-  const duplicate = buildHostedCodexMemoryUsageRecord(input);
-  assert.deepEqual(duplicate, record);
-  assert.notEqual(
-    buildHostedCodexMemoryUsageRecord({
-      ...input,
-      providerRequestId: "resp_memory_456",
-    }).usageId,
-    record.usageId,
-  );
 });
 
 test("usage records default and validate token pricing basis", () => {
@@ -177,7 +118,7 @@ test("usage records default and validate token pricing basis", () => {
     credentialSource: "platform",
     featureKey: "assistant_turn",
     memberId: "member_123",
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     triggerKind: "automation_cron",
     usage: {
@@ -417,7 +358,6 @@ test("assistant usage records accept TTS character cost basis", () => {
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: null,
     sessionId: "asst_123",
-    stripeMeterSource: "murph",
     surface: "hosted-runtime",
     tokenPricingBasis: "standard",
     totalTokens: null,
@@ -739,7 +679,6 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       schema: ASSISTANT_USAGE_SCHEMA,
       servedModel: null,
       sessionId: "asst_123",
-      stripeMeterSource: "murph",
       surface: null,
       tokenPricingBasis: "standard",
       totalTokens: null,
@@ -1159,23 +1098,6 @@ test("assistant usage parsing allows only token-count raw usage metadata", () =>
   );
 });
 
-test("assistant usage parsing rejects Vercel meter source payloads", () => {
-  assert.throws(
-    () => parseAssistantUsageRecord({
-      attemptCount: 1,
-      credentialSource: "platform",
-      occurredAt: "2026-03-29T12:00:00.000Z",
-      provider: "codex-cli",
-      schema: ASSISTANT_USAGE_SCHEMA,
-      sessionId: "asst_123",
-      stripeMeterSource: "external-meter",
-      turnId: "turn_123",
-      usageId: "turn_123.attempt-1",
-    }),
-    /stripeMeterSource must be 'murph' when provided/u,
-  );
-});
-
 test("assistant usage parsing rejects non-canonical usage ids", () => {
   assert.throws(
     () =>
@@ -1232,7 +1154,6 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
       parseAssistantUsageRecord({
         attemptCount: 1,
         credentialSource: "invalid",
-        stripeMeterSource: "invalid",
         occurredAt: "2026-03-29T12:00:00.000Z",
         provider: "codex-cli",
         schema: "murph.assistant-usage.v0",
@@ -1241,22 +1162,6 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
         usageId: "turn_123.attempt-1",
       }),
     /credentialSource must be 'member', 'platform', or 'unknown'/u,
-  );
-
-  assert.throws(
-    () =>
-      parseAssistantUsageRecord({
-        attemptCount: 1,
-        credentialSource: "platform",
-        stripeMeterSource: "invalid",
-        occurredAt: "2026-03-29T12:00:00.000Z",
-        provider: "codex-cli",
-        schema: ASSISTANT_USAGE_SCHEMA,
-        sessionId: "asst_123",
-        turnId: "turn_123",
-        usageId: "turn_123.attempt-1",
-      }),
-    /stripeMeterSource must be 'murph' when provided/u,
   );
 
   assert.throws(

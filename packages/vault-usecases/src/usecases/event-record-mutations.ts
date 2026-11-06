@@ -1,5 +1,7 @@
 import {
   type EventRecord,
+  mealNameViolation,
+  MEAL_NAME_GUIDANCE,
   normalizeIanaTimeZone,
   normalizeStrictIsoTimestamp,
 } from '@murphai/contracts'
@@ -490,6 +492,10 @@ export async function editEventRecord(input: EditEventRecordInput) {
       dayKeyPolicy: input.dayKeyPolicy,
     }),
   )
+  if (record.kind === 'meal' && nextPayload.touchedTopLevelFields.has('title')
+    && (typeof patchedPayload.title !== 'string' || mealNameViolation(patchedPayload.title) !== null)) {
+    throw new VaultCliError('invalid_option', MEAL_NAME_GUIDANCE, { stage: 'validation', retryable: false })
+  }
   // The public edit action is member-authored. Preserve provider attribution,
   // but never let an inherited or caller-supplied device source reclaim the
   // provider-owned reconciliation lane.

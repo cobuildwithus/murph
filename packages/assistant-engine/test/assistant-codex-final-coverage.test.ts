@@ -13,7 +13,6 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -78,6 +77,9 @@ const providerTurnRunnerMocks = vi.hoisted(() => ({
   recordCodexAttemptFailed: vi.fn(),
 }))
 
+const reactionRoutingMocks = vi.hoisted(() => ({ classify: vi.fn() }))
+vi.mock('../src/assistant/reaction-routing.js', () => ({ classifyAssistantReaction: reactionRoutingMocks.classify }))
+
 const storeMocks = vi.hoisted(() => ({
   appendAssistantTranscriptEntries: vi.fn(() => Promise.resolve([])),
 }))
@@ -133,17 +135,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import type { AssistantCodexContinuation } from '../src/assistant/active-turn-input-journal.ts'
-import {
-  DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
-  DEFAULT_CODEX_REASONING_OPTIONS,
-  findCodexCatalogModelOptionIndex,
-  findCodexCatalogReasoningOptionIndex,
-  resolveCodexAssistantProfile,
-  resolveCodexCatalogReasoningOptions,
-  resolveCodexModelCapabilities,
-  resolveCodexModelCatalog,
-  resolveCodexTargetCapabilities,
-} from '../src/assistant/provider-catalog.ts'
 import { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
 import type {
   AssistantCodexAttemptPlan,
@@ -229,7 +220,10 @@ function createRoute(input?: {
 
 function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagnostics'] {
   return {
+    threadRotationReason: 'binding_absent',
     assistantContextSnapshotElapsedMs: null,
+    assistantContextSnapshotRefreshElapsedMs: null,
+    followUpContextElapsedMs: null,
     cliBootstrapElapsedMs: null,
     dynamicToolCount: 0,
     messageTargetingAvailable: false,
@@ -248,6 +242,7 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
 
 async function createHostedCodexFlexCatalog(input: {
   model: string
+  priority?: boolean
 }): Promise<{
   cleanup(): Promise<void>
   env: NodeJS.ProcessEnv
@@ -261,6 +256,7 @@ async function createHostedCodexFlexCatalog(input: {
         {
           slug: input.model,
           service_tiers: [
+            ...(input.priority ? [{ id: 'priority', name: 'Priority' }] : []),
             {
               id: 'flex',
               name: 'Flex',
@@ -336,7 +332,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {
@@ -402,150 +397,11 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
   }
 }
 
-describe('Codex model catalog', () => {
-  it('uses Codex default as the first chat-model option', () => {
-    expect(DEFAULT_CODEX_CHAT_MODEL_OPTIONS).toEqual([
-      {
-        value: '',
-        description: 'Use the model configured by Codex.',
-      },
-    ])
-  })
-
-  it('forwards provider capability resolution through the registry helpers', () => {
-    providerMocks.resolveCodexAssistantCapabilities.mockReturnValueOnce({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValueOnce({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: false,
-    })
-
-    expect(resolveCodexModelCapabilities()).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-    expect(
-      resolveCodexTargetCapabilities({
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: false,
-    })
-  })
-
-  it('normalizes provider profiles and displays only the explicit current model', () => {
-    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-
-    const profile = resolveCodexAssistantProfile({
-      provider: 'codex-cli',
-    })
-    expect(profile).toMatchObject({
-      target: {
-        model: null,
-        modelProvider: null,
-      },
-      providerLabel: 'Codex CLI',
-    })
-
-    const catalog = resolveCodexModelCatalog({
-      currentModel: ' custom-current ',
-      currentReasoningEffort: 'high',
-      provider: 'codex-cli',
-    })
-
-    expect(catalog.providerLabel).toBe('Codex CLI')
-    expect(catalog.models.map((model) => model.id)).toEqual([
-      'custom-current',
-    ])
-    expect(catalog.selectedModel?.id).toBe('custom-current')
-    expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
-    expect(catalog.modelOptions).toEqual([
-      {
-        value: '',
-        description: 'Use the model configured by Codex.',
-      },
-      {
-        value: 'custom-current',
-        description: 'Current Codex model.',
-      },
-    ])
-  })
-
-  it('keeps Codex default selected when no model is explicitly configured', () => {
-    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-
-    const catalog = resolveCodexModelCatalog({
-      currentModel: null,
-      provider: 'codex-cli',
-    })
-
-    expect(catalog.selectedModel).toBeNull()
-    expect(catalog.modelOptions[0]).toEqual({
-      value: '',
-      description: 'Use the model configured by Codex.',
-    })
-    expect(catalog.models).toEqual([])
-    expect(catalog.modelOptions).toHaveLength(1)
-    expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
-  })
-
-  it('finds stable fallback indexes for model and reasoning selections', () => {
-    expect(
-      findCodexCatalogModelOptionIndex('missing', [
-        { value: 'gpt-5.4', description: 'Frontier' },
-        { value: 'gpt-5.4-mini', description: 'Mini' },
-      ]),
-    ).toBe(0)
-    expect(
-      findCodexCatalogModelOptionIndex(' gpt-5.4-mini ', [
-        { value: 'gpt-5.4', description: 'Frontier' },
-        { value: 'gpt-5.4-mini', description: 'Mini' },
-      ]),
-    ).toBe(1)
-
-    expect(findCodexCatalogReasoningOptionIndex(null, [])).toBe(0)
-    expect(
-      findCodexCatalogReasoningOptionIndex('missing', DEFAULT_CODEX_REASONING_OPTIONS),
-    ).toBe(1)
-    expect(
-      findCodexCatalogReasoningOptionIndex('high', DEFAULT_CODEX_REASONING_OPTIONS),
-    ).toBe(2)
-  })
-
-  it('handles empty Codex catalogs and uses the Codex current-model description branch', () => {
-    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-    const catalog = resolveCodexModelCatalog({
-      currentModel: 'custom-codex',
-      provider: 'codex-cli',
-    })
-    expect(catalog.models).toEqual([expect.objectContaining({
-      id: 'custom-codex',
-      description: 'Current Codex model.',
-    })])
-    expect(catalog.selectedModel?.id).toBe('custom-codex')
-    expect(resolveCodexCatalogReasoningOptions(null)).toEqual([])
-    expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
-  })
-
+describe('Codex provider routing', () => {
   it('emits only the final provider reasoning effort after routing overrides resolve', async () => {
     const baseAutomationTarget = createAssistantModelTarget({
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'low',
     })
@@ -642,7 +498,11 @@ describe('Codex model catalog', () => {
           },
           dynamicTools: [],
           onboardingGuidanceInjected: false,
-          planningDiagnostics: createRoutePlanningDiagnostics(),
+          planningDiagnostics: {
+            ...createRoutePlanningDiagnostics(),
+            assistantContextSnapshotRefreshElapsedMs: 73,
+            followUpContextElapsedMs: 41,
+          },
           promptCacheMetadata: null,
           resume: null,
           sessionContext: undefined,
@@ -674,6 +534,9 @@ describe('Codex model catalog', () => {
       expect(planTrace).toMatchObject({
         schema: 'murph.assistant-provider-plan-diagnostics.v1',
         type: 'assistant.provider.plan',
+        routePlanningAssistantContextSnapshotRefreshElapsedMs: 73,
+        routePlanningFollowUpContextElapsedMs: 41,
+        threadRotationReason: 'binding_absent',
         reasoningEffort: expectedReasoningEffort,
       })
       expect(planTrace).not.toHaveProperty('providerConfig')
@@ -801,7 +664,7 @@ describe('Codex model catalog', () => {
     })
   })
 
-  it('enforces the output-only boundary at provider execution', async () => {
+  it.each([false, true])('enforces output-only restrictions before follow-up configuration (follow-up=%s)', async (followUpInvocation) => {
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -881,6 +744,7 @@ describe('Codex model catalog', () => {
           surface: null,
         },
         dynamicTools: unsafeDynamicTools,
+        followUpInvocation,
         environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
         onboardingGuidanceInjected: false,
         planningDiagnostics: createRoutePlanningDiagnostics(),
@@ -926,7 +790,11 @@ describe('Codex model catalog', () => {
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
     })
-    expect(providerInput).not.toHaveProperty('processLifetime')
+    if (followUpInvocation) {
+      expect(providerInput).toHaveProperty('processLifetime', 'one-shot')
+    } else {
+      expect(providerInput).not.toHaveProperty('processLifetime')
+    }
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
@@ -1141,7 +1009,6 @@ describe('Codex model catalog', () => {
 
     for (const modelProvider of [
       HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
     ]) {
       route.providerOptions.modelProvider = modelProvider
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
@@ -1167,138 +1034,15 @@ describe('Codex model catalog', () => {
     }
   })
 
-  it('keeps only song generation while denying native creative-notification capabilities', async () => {
-    const route = createRoute()
-    const session = createAssistantSession({
-      providerOptions: route.providerOptions,
-    })
-    const input = {
-      prompt: 'Generate one sponsor song from untrusted creative material.',
-      vault: '/vaults/test',
-    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
-    const unsafeProgressDelivery = {
-      send: vi.fn(async () => ({
-        kind: 'sent' as const,
-        source: 'system' as const,
-      })),
-    }
-    const hostedProviderFetch = vi.fn<typeof fetch>(async () =>
-      new Response(null, { status: 204 })
-    )
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
-    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
-      createProviderAttemptResult(),
-    )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
-      executionContext: {
-        hosted: {
-          materializeWorkspaceArtifacts: vi.fn(),
-          memberId: 'member-creative-notification',
-          providerFetch: hostedProviderFetch,
-          publicInternetFetch: fetch,
-          userEnvKeys: [],
-        },
-      },
-      hostedToolContext: {
-        automationTool: { request: vi.fn() },
-        computerToolsAvailable: true,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        sendVaultFile: vi.fn(),
-        vaultFileSendAvailable: true,
-      },
-      input,
-      profile: {
-        promptProfile: 'creative-notification',
-        toolProfile: 'provider-turn',
-        threadScope: 'isolated-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-07-20',
-        currentTimeZone: 'UTC',
-      },
-      route,
-      sharedPlan: createSharedPlan(),
-      progressDelivery: unsafeProgressDelivery,
-      turnId: 'turn-creative-notification',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
-      route,
-      routePlan: {
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
-        diagnosticsPolicy: {
-          environment: 'hosted',
-          privateIssueCaptureEnabled: false,
-          surface: 'linq',
-        },
-        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
-        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        promptCacheMetadata: null,
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: 'Creative notification system prompt.',
-        turnContextPrompt: null,
-        voiceMemoDeliveryChannel: 'linq',
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
-      session,
-    } satisfies AssistantCodexAttemptPlan)
-
-    const outcome = await executeCodexTurnWithRecovery({
-      input,
-      plan: createSharedPlan(),
-      resolvedSession: session,
-      route,
-      turnCreatedAt: '2026-07-20T00:00:00.000Z',
-      turnId: 'turn-creative-notification',
-    })
-
-    expect(outcome.kind).toBe('succeeded')
-    const providerInput =
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(providerInput?.providerConfig).toMatchObject({
-      approvalPolicy: 'never',
-      sandbox: 'read-only',
-    })
-    expect(providerInput).not.toHaveProperty('codexConfigOverrides')
-    expect(providerInput?.codexThreadConfig).toEqual(
-      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
-    )
-    expect(providerInput).toMatchObject({
-      dynamicTools: [MURPH_GENERATE_SONG_TOOL],
-      environments: [],
-      generateSongPolicy: {
-        maxAttempts: 1,
-        requiredDurationSeconds: 15,
-      },
-      hostedToolContext: null,
-      materializeWorkspaceArtifacts: null,
-      progressDelivery: null,
-      providerFetch: hostedProviderFetch,
-      providerThreadEphemeral: true,
-      publicInternetFetch: fetch,
-      requireHostedPrivateImageDelivery: false,
-    })
-    expect(providerInput).not.toHaveProperty('processLifetime')
-    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
-  })
-
-  it('runs immutable room-model maintenance as a one-shot tool-only permission turn', async () => {
+  it.each([
+    { managedAuthority: true, followUpInvocation: false },
+    { managedAuthority: true, followUpInvocation: true },
+    { managedAuthority: false, followUpInvocation: false },
+    { managedAuthority: false, followUpInvocation: true },
+  ])('preserves room-model authority and follow-up precedence: %j', async ({
+    managedAuthority,
+    followUpInvocation,
+  }) => {
     const route = createRoute({
       providerOptions: {
         modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
@@ -1311,7 +1055,9 @@ describe('Codex model catalog', () => {
       maintenanceProfile: 'group-room-model' as const,
       prompt: 'Refresh the group room model.',
       scheduledInvocationAuthority: {
-        automationId: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+        automationId: managedAuthority
+          ? MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+          : 'unrelated-automation',
         occurrenceAt: '2026-07-25T08:00:00.000Z',
       },
       vault: '/vaults/group',
@@ -1366,6 +1112,7 @@ describe('Codex model catalog', () => {
           surface: 'linq',
         },
         dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
+        followUpInvocation,
         onboardingGuidanceInjected: false,
         planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
@@ -1394,27 +1141,45 @@ describe('Codex model catalog', () => {
     })
 
     expect(outcome.kind).toBe('succeeded')
-    expect(
+    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledOnce()
+    const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-        ?.codexThreadConfig,
-    ).toEqual(EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG)
-    expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
-      groupRoomModelMaintenanceAuthorized: true,
-      permissions:
-        MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-      processLifetime: 'one-shot',
-      providerThreadEphemeral: true,
+    expect(providerInput.codexThreadConfig).toEqual(
+      managedAuthority
+        ? EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
+        : followUpInvocation
+          ? EXPECTED_READ_ONLY_AUTOMATION_THREAD_CONFIG
+          : null,
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: followUpInvocation ? [] : [MURPH_GROUP_ROOM_MODEL_TOOL],
+      groupRoomModelMaintenanceAuthorized: managedAuthority,
+      memberMemoryMaintenanceAuthorized: false,
+      permissions: managedAuthority
+        ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
+        : followUpInvocation ? MURPH_MEMBER_READ_PERMISSION_PROFILE : null,
+      providerThreadEphemeral: managedAuthority || followUpInvocation ? true : null,
       runtimeWorkspaceRoots: ['/vaults/group'],
-    }))
+    })
+    if (managedAuthority || followUpInvocation) {
+      expect(providerInput).toHaveProperty('processLifetime', 'one-shot')
+      expect(providerInput).toMatchObject({
+        environments: [],
+        hostedToolContext: null,
+        materializeWorkspaceArtifacts: null,
+        progressDelivery: null,
+        publicInternetFetch: null,
+        requireHostedPrivateImageDelivery: false,
+      })
+    } else {
+      expect(providerInput).not.toHaveProperty('processLifetime')
+    }
   })
 
   it('keeps memory maintenance one-shot and isolated from reminder tools', async () => {
     const route = createRoute({
       providerOptions: {
-        modelProvider: HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
     const session = createAssistantSession({
@@ -1543,118 +1308,7 @@ describe('Codex model catalog', () => {
     }))
   })
 
-  it('keeps Habitat memory isolation on the thread without changing process lifetime', async () => {
-    const route = createRoute()
-    const session = createAssistantSession({
-      providerOptions: route.providerOptions,
-    })
-    const executionContext = {
-      hosted: {
-        memberId: 'member-habitat-maintenance',
-        userEnvKeys: [],
-      },
-    }
-    const hostedToolContext: AssistantHostedToolContext = {
-      computerToolsAvailable: false,
-      currentHostedDeliveryContext: () => null,
-      currentHostedMailboxItemIds: () => [],
-      sendVaultFile: vi.fn(),
-      vaultFileSendAvailable: false,
-    }
-    const input = {
-      executionContext,
-      maintenanceProfile: 'habitat-voice' as const,
-      prompt: 'Maintain Habitat state.',
-      vault: '/vaults/member',
-    }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
-    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
-      createProviderAttemptResult(),
-    )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
-      executionContext,
-      hostedToolContext,
-      input,
-      profile: {
-        promptProfile: 'maintenance',
-        threadScope: 'isolated-thread',
-        toolProfile: 'maintenance-turn',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-07-25',
-        currentTimeZone: 'America/New_York',
-      },
-      route,
-      sharedPlan: createSharedPlan(),
-      progressDelivery: null,
-      turnId: 'turn-habitat-maintenance',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
-      route,
-      routePlan: {
-        assistantContractFingerprint: 'a'.repeat(64),
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
-        diagnosticsPolicy: {
-          environment: 'hosted',
-          privateIssueCaptureEnabled: false,
-          surface: 'linq',
-        },
-        dynamicTools: [],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        promptCacheMetadata: null,
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: 'Habitat maintenance prompt.',
-        turnContextPrompt: null,
-        workingDirectory: '/vaults/member',
-      } satisfies AssistantRouteTurnPlan,
-      session,
-    } satisfies AssistantCodexAttemptPlan)
-
-    const outcome = await executeCodexTurnWithRecovery({
-      input,
-      plan: createSharedPlan(),
-      profile: {
-        nativeResumePolicy: 'disabled',
-        promptProfile: 'maintenance',
-        threadScope: 'isolated-thread',
-        toolProfile: 'maintenance-turn',
-      },
-      resolvedSession: session,
-      route,
-      turnCreatedAt: '2026-07-25T08:00:00.000Z',
-      turnId: 'turn-habitat-maintenance',
-    })
-
-    expect(outcome.kind).toBe('succeeded')
-    const providerInput =
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(providerInput?.codexThreadConfig).toEqual({
-      'memories.generate_memories': false,
-      'memories.use_memories': false,
-    })
-    expect(providerInput).not.toHaveProperty('codexConfigOverrides')
-    expect(providerInput).not.toHaveProperty('processLifetime')
-    expect(providerInput).toMatchObject({
-      hostedToolContext,
-      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
-      runtimeWorkspaceRoots: ['/vaults/member'],
-    })
-  })
-
-  it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
+  it('gives onboarding goal check-ins their planned tools inside the vault-readable one-shot process', async () => {
     const route = createRoute({
       providerOptions: {
         modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
@@ -1777,15 +1431,20 @@ describe('Codex model catalog', () => {
     expect(providerInput?.codexThreadConfig).not.toHaveProperty(
       'features.shell_tool',
     )
+    // The planned tools and their host-side context reach the provider; the
+    // process stays a one-shot, read-only, member-read, unresumed thread.
+    expect(providerInput?.dynamicTools).toEqual([MURPH_GENERATE_SONG_TOOL])
+    expect(providerInput?.hostedToolContext).toBe(
+      (await providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mock.results[0]?.value)
+        ?.hostedToolContext,
+    )
+    expect(providerInput?.providerFetch).toBe(hostedProviderFetch)
     expect(providerInput).toMatchObject({
-      dynamicTools: [],
       environments: [],
-      hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
       permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
       progressDelivery: null,
-      providerFetch: null,
       providerThreadEphemeral: true,
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
@@ -1887,12 +1546,26 @@ describe('Codex model catalog', () => {
     expect(providerInput?.groupConversation).toBe(true)
   })
 
-  it('drops unsupported rich user parts and keeps flex for the hosted-local OpenAI route', async () => {
+  it.each([
+    { name: 'Flex stays Flex during onboarding', ageMs: 1, requested: 'flex', expected: 'flex' },
+    { name: 'signup instant', ageMs: 0, expected: 'priority' },
+    { name: 'just before 24 hours', ageMs: 86_399_999, expected: 'priority' },
+    { name: 'exactly 24 hours', ageMs: 86_400_000, expected: null },
+    { name: 'established account', ageMs: 172_800_000, expected: null },
+    { name: 'future signup', ageMs: -1, expected: null },
+    { name: 'old Web without expiry', ageMs: null, expected: null },
+    { name: 'malformed expiry', ageMs: NaN, expected: null },
+    { name: 'unsupported catalog', ageMs: 1, catalogPriority: false, expected: null },
+    { name: 'local subscription', ageMs: 1, hosted: false, expected: null },
+    { name: 'scheduled standard retry', ageMs: 1, scheduled: true, expected: null },
+  ] as const)('selects the tier for $name and preserves rich input filtering', async (scenario) => {
     const providerScopeEvents: string[] = []
-    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
+    const now = Date.parse('2026-09-23T12:00:00Z')
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-6.1-sol', priority: !('catalogPriority' in scenario) || scenario.catalogPriority })
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
@@ -1918,7 +1591,8 @@ describe('Codex model catalog', () => {
         },
       ],
       vault: '/vaults/test',
-      serviceTier: 'flex',
+      serviceTier: 'requested' in scenario ? scenario.requested : null,
+      ...('scheduled' in scenario ? { turnTrigger: 'automation-cron' as const } : {}),
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1933,11 +1607,8 @@ describe('Codex model catalog', () => {
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
-      executionContext: {
-        hosted: {
-          memberId: 'member-flex-openai',
-          userEnvKeys: [],
-        },
+      executionContext: 'hosted' in scenario ? { hosted: null } : {
+        hosted: { memberId: 'member-onboarding', userEnvKeys: [] },
       },
       input,
       profile: {
@@ -1960,7 +1631,13 @@ describe('Codex model catalog', () => {
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
-        cliEnv: flexCatalog.env,
+        cliEnv: {
+          ...flexCatalog.env,
+          ...(scenario.ageMs === null ? {} : {
+            HOSTED_ASSISTANT_PRIORITY_UNTIL: Number.isNaN(scenario.ageMs)
+              ? 'invalid' : new Date(now + 86_400_000 - scenario.ageMs).toISOString(),
+          }),
+        },
         developerInstructions: null,
         dynamicTools: [],
         diagnosticsPolicy: {
@@ -1984,7 +1661,7 @@ describe('Codex model catalog', () => {
     } satisfies AssistantCodexAttemptPlan)
 
     try {
-      await executeCodexTurnWithRecovery({
+      const outcome = await executeCodexTurnWithRecovery({
         input,
         onProviderRequestPlanned: async () => {
           providerScopeEvents.push('bound')
@@ -1999,6 +1676,8 @@ describe('Codex model catalog', () => {
         turnCreatedAt: '2026-04-29T00:00:00.000Z',
         turnId: 'turn-1',
       })
+      if (outcome.kind === 'failed_terminal') throw outcome.error
+      expect(outcome.kind).toBe('succeeded')
     } finally {
       await flexCatalog.cleanup()
     }
@@ -2009,9 +1688,14 @@ describe('Codex model catalog', () => {
     expect(providerScopeEvents).toEqual(['bound', 'provider', 'released'])
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(providerInput?.serviceTier).toBe('flex')
-    expect(timeoutSpy).toHaveBeenCalledWith(600_000)
-    expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    expect(providerInput?.serviceTier).toBe(scenario.expected)
+    if (scenario.expected === 'flex') {
+      expect(timeoutSpy).toHaveBeenCalledWith(600_000)
+      expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    } else {
+      expect(timeoutSpy).not.toHaveBeenCalled()
+      expect(providerInput?.abortSignal).toBe(upstreamAbort.signal)
+    }
     expect(providerInput?.abortSignal?.aborted).toBe(false)
     upstreamAbort.abort()
     expect(providerInput?.abortSignal?.aborted).toBe(true)
@@ -2693,7 +2377,7 @@ describe('Codex model catalog', () => {
   it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
       },
     })
@@ -2786,8 +2470,8 @@ describe('Codex model catalog', () => {
   it('drops flex service tier for hosted routes on unsupported model providers', async () => {
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-5.6-terra',
-        modelProvider: 'vercel-ai-gateway',
+        model: 'gpt-6.1-sol',
+        modelProvider: 'hosted-openai',
       },
     })
     const session = createAssistantSession({
@@ -2982,5 +2666,63 @@ describe('Codex model catalog', () => {
     // records failures exclusively: a successful attempt must make no receipt
     // timeline write between provider success and the reply return.
     expect(providerTurnRunnerMocks.recordCodexAttemptFailed).not.toHaveBeenCalled()
+  })
+})
+
+describe('attested reaction routing through the admitted provider turn', () => {
+  it.each(['quiet', 'quiet-cold', 'escalate', 'failed-leaf', 'aborted-leaf', 'mixed'] as const)('preserves billing, admission, and terminal ownership for %s', async (decision) => {
+    const route = createRoute()
+    const session = createAssistantSession({ providerOptions: route.providerOptions })
+    const input = { prompt: 'Reacted with a heart reaction.', vault: '/vaults/test', reactionRouting: { reaction: 'Reacted with a heart reaction.', targetMessage: 'The entry is saved.' } }
+    const recordUsage = vi.fn(async () => {})
+    const accepted = vi.fn(async () => {})
+    const recorded = vi.fn(async () => {})
+    const order: string[] = []
+    const released = vi.fn(async () => { order.push('released') })
+    reactionRoutingMocks.classify.mockImplementation(async (leaf: Parameters<typeof import('../src/assistant/reaction-routing.js').classifyAssistantReaction>[0]) => {
+      order.push('classifier')
+      await leaf.beforeProviderEntry?.()
+      leaf.onProviderUsage?.({ stage: 'answer', usage: { occurredAt: '2026-09-30T12:00:00Z', provider: 'codex-cli', providerRequestOrdinal: 0, providerRequestOutcome: decision === 'failed-leaf' ? 'failed' : decision === 'aborted-leaf' ? 'aborted' : 'succeeded', usage: {
+        apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: 0, inputTokens: 180,
+        outputTokens: 8, providerMetadataJson: null, providerName: null, providerRequestId: 'synthetic-classifier-request', rawUsageJson: null,
+        reasoningTokens: 0, requestedModel: 'gpt-6-luna', servedModel: 'gpt-6-luna', totalTokens: 188,
+      } } })
+      if (decision === 'aborted-leaf') throw new Error('Synthetic outer cancellation')
+      return decision.startsWith('quiet') ? 'quiet' : 'escalate'
+    })
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportedUserMessageContentTypes: ['text'], supportsReasoningEffort: true })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      acceptedInputItems: [{ id: 'synthetic-reaction-input', source: 'manual' }, ...(decision === 'mixed' ? [{ id: 'synthetic-other-input', source: 'manual' as const }] : [])],
+      activeTurnSteering: null, allowFinishWithoutReply: true,
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], usageRecorder: { recordUsage } } },
+      input, onFinishWithoutReplyAccepted: accepted, onFinishWithoutReplyRecorded: recorded,
+      profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'session-thread' },
+      promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' }, route, sharedPlan: createSharedPlan(), turnId: 'synthetic-parent-turn',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ attemptCount: 1, route, session, routePlan: {
+      assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
+      codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
+      diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },
+      dynamicTools: [], onboardingGuidanceInjected: false, planningDiagnostics: createRoutePlanningDiagnostics(),
+      promptCacheMetadata: null, resume: decision === 'quiet-cold' ? null : { codexThreadId: 'unchanged-root-thread' }, sessionContext: undefined,
+      systemPrompt: null, turnContextPrompt: null, workingDirectory: '/work',
+    } } satisfies AssistantCodexAttemptPlan)
+    const outcome = await executeCodexTurnWithRecovery({ input, plan: createSharedPlan(), resolvedSession: session, route,
+      turnCreatedAt: '2026-09-30T12:00:00Z', turnId: 'synthetic-parent-turn',
+      onProviderRequestPlanned: async () => { order.push('admitted'); return released },
+    })
+    expect(outcome.kind).toBe(decision === 'aborted-leaf' ? 'failed_terminal' : 'succeeded')
+    expect(order).toEqual(decision === 'mixed' ? ['admitted', 'released'] : ['admitted', 'classifier', 'released'])
+    expect(recordUsage).toHaveBeenCalledTimes(decision === 'mixed' ? 0 : 1)
+    if (decision !== 'mixed') expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({ turnId: 'synthetic-parent-turn:reaction-routing', requestedModel: 'gpt-6-luna', inputTokens: 180, outputTokens: 8, featureKey: 'reaction-routing', providerRequestOutcome: decision === 'failed-leaf' ? 'failed' : decision === 'aborted-leaf' ? 'aborted' : 'succeeded' }), ['synthetic-reaction-input'])
+    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledTimes(decision.startsWith('quiet') || decision === 'aborted-leaf' ? 0 : 1)
+    expect(accepted).toHaveBeenCalledTimes(decision.startsWith('quiet') ? 1 : 0)
+    expect(recorded).toHaveBeenCalledTimes(decision.startsWith('quiet') ? 1 : 0)
+    if (decision.startsWith('quiet') && outcome.kind === 'succeeded') {
+      expect(outcome.providerTurn).toMatchObject({ providerThreadUnchanged: true, response: '', finalAction: { kind: 'none' }, codexThreadId: decision === 'quiet-cold' ? null : 'unchanged-root-thread', usage: null, acceptedNoReplyDeliveryContextOrdinals: [0] })
+      const { resolveAssistantProviderResumeStateAction } = await import('../src/assistant/turn-finalizer.js')
+      expect(resolveAssistantProviderResumeStateAction({ ...outcome.providerTurn, threadScope: 'session-thread' })).toBe('preserve-existing')
+    }
   })
 })

@@ -17,22 +17,15 @@ categories:
   - "measurement-method"
   - "clinic"
 relations:
+  - type: measures
+    target: biomarker:standardized-skin-photo-score
+  - type: measures
+    target: biomarker:periocular-wrinkle-score
+  - type: measures
+    target: biomarker:skin-texture-roughness-score
+  - type: safety_outcome
+    target: biomarker:skin-tolerability-symptoms
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
-  -
-    type: "measures"
-    target: "biomarker:standardized-skin-photo-score"
-  -
-    type: "measures"
-    target: "biomarker:periocular-wrinkle-score"
-  -
-    type: "measures"
-    target: "biomarker:skin-texture-roughness-score"
-  -
-    type: "safety_outcome"
-    target: "biomarker:skin-tolerability-symptoms"
 measurementMethod:
   shortName: "Clinic Imaging Upgrade"
   displayName: "Clinic Imaging Upgrade"

@@ -4,10 +4,13 @@ import {
   readHostedOnboardingJsonObject,
 } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { reconcileHostedHealthDataRuntimeConsent } from "@/src/lib/hosted-privacy/health-data-consent-withdrawal";
 import {
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
   type HostedConsentLaunchScope,
   parseHostedConsentAcceptRequest,
   readHostedConsentStatus,
+  readHostedHealthDataConsentState,
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
@@ -19,7 +22,7 @@ function isLaunchScope(scope: string): scope is HostedConsentLaunchScope {
 }
 
 // Native consent recovery uses the same persisted grants and current document
-// registry as the hosted Web surface. Privy bearer auth deliberately has no
+// registry as the hosted Web surface. First-party bearer auth deliberately has no
 // cookie fallback and no active-subscription gate: a signed-in member must be
 // able to review and accept legal terms before protected product access resumes.
 export const GET = withJsonError(async (request: Request) => {
@@ -49,6 +52,11 @@ export const POST = withJsonError(async (request: Request) => {
       httpStatus: 400,
       message: "The companion app can accept launch consent only.",
     });
+  }
+
+  if (consent.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE
+    && await readHostedHealthDataConsentState({ memberId: auth.member.id, prisma }) === "revoked") {
+    await reconcileHostedHealthDataRuntimeConsent({ memberId: auth.member.id });
   }
 
   return jsonOk(await recordHostedLaunchRequiredConsent({

@@ -2,7 +2,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createServer as createNetServer } from "node:net";
 import { expect } from "vitest";
 import {
-  listMurphDynamicToolNames,
   resolveMurphDynamicTools,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
@@ -21,11 +20,6 @@ const temporalDevUiPortOffset = 1_000;
 const minTemporalDevFrontendPort = 10_000;
 const maxTemporalDevFrontendPort = 65_535 - temporalDevUiPortOffset;
 const maxTemporalDevPortReservationAttempts = 1_000;
-const hostedGroupFamilyToolNames = new Set(
-  resolveMurphDynamicTools({ groupAvailable: true })
-    .filter((tool) => tool.name.startsWith("group_"))
-    .map((tool) => `${tool.namespace}.${tool.name}`),
-);
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;
@@ -48,15 +42,9 @@ export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
-  "VENICE_API_KEY",
   "XAI_API_KEY",
-  "HOSTED_ASSISTANT_API_KEY_ENV",
-  "HOSTED_ASSISTANT_BASE_URL",
   "HOSTED_ASSISTANT_CODEX_COMMAND",
-  "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
-  "HOSTED_ASSISTANT_OSS",
   "HOSTED_ASSISTANT_PROFILE",
-  "HOSTED_ASSISTANT_PROVIDER_NAME",
 ] as const;
 export const HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS = [
   ...deviceSyncProviderRuntimeSecretEnvKeys,
@@ -74,6 +62,9 @@ export type HostedLocalAssistantProviderMode = "stub" | "live";
  * first, then the follow-up text.
  */
 type HostedLocalAssistantProviderFunctionCallResponse = {
+    beforeResponse?: () => Promise<void> | void;
+    // Hold streamed tool content after response.created, leaving the HTTP stream open.
+    beforeStreamContent?: () => Promise<void> | void;
     functionCall: {
       arguments: Record<string, unknown>;
       name: string;
@@ -82,6 +73,7 @@ type HostedLocalAssistantProviderFunctionCallResponse = {
   };
 
 type HostedLocalAssistantProviderCustomToolCallResponse = {
+  beforeResponse?: () => Promise<void> | void;
   customToolCall: {
     input: string;
     name: string;
@@ -147,13 +139,13 @@ export function scopeHostedLocalAssistantProviderResponse(
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
- * Codex 0.153.4 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * Codex 0.158.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
  * advertises the unified `exec_command` tool on Linux; bump the tool name here
  * if a Codex upgrade changes the advertised exec tool.
  */
 export function buildAssistantProviderShellCommandCall(
   command: string,
-): HostedLocalAssistantProviderScriptedResponse {
+): HostedLocalAssistantProviderFunctionCallResponse {
   return {
     functionCall: {
       arguments: { cmd: command },
@@ -170,8 +162,10 @@ export function buildAssistantProviderShellCommandCall(
 export function buildAssistantProviderMurphToolCall(
   tool: string,
   toolArguments: Record<string, unknown>,
+  beforeResponse?: () => Promise<void> | void,
 ): HostedLocalAssistantProviderScriptedResponse {
   return {
+    ...(beforeResponse ? { beforeResponse } : {}),
     customToolCall: {
       input: buildAssistantProviderMurphCodeModeInput(tool, toolArguments),
       name: "exec",
@@ -245,6 +239,9 @@ export function expectAdvertisedMurphDynamicTools(
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
     groupAvailable?: boolean;
+    gameReadAvailable?: boolean;
+    gamesAvailable?: boolean;
+    gamePhotosAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
@@ -252,6 +249,7 @@ export function expectAdvertisedMurphDynamicTools(
     physicalNoteRecoveryAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
+    senderContactAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     responseCardAvailable?: boolean;
     telegramRichContentResponseCardAvailable?: boolean;
@@ -262,154 +260,36 @@ export function expectAdvertisedMurphDynamicTools(
   const lastResponsesRequest = [...requests]
     .reverse()
     .find((request) => request.url === "/v1/responses");
-  const expectedToolNames = listMurphDynamicToolNames()
-    .filter((name) => {
-      if (
-        options.analyzeVideoAvailable !== true
-        && name === "murph.analyze_video"
-      ) {
-        return false;
-      }
-
-      if (
-        options.calendarLinkAvailable !== true
-        && name === "murph.create_calendar_link"
-      ) {
-        return false;
-      }
-
-      if (
-        options.computerToolsAvailable !== true
-        && name.startsWith("murph.computer_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.connectedAppsAvailable !== true
-        && name.startsWith("murph.connected_apps_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.messageTargetingAvailable !== true
-        && (
-          name === "murph.react_to_message"
-          || name === "murph.select_reply_target"
-        )
-      ) {
-        return false;
-      }
-
-      if (
-        options.groupAvailable !== true
-        && hostedGroupFamilyToolNames.has(name)
-      ) {
-        return false;
-      }
-
-      if (
-        options.groupRoomModelAvailable !== true
-        && name === "murph.group_room_model"
-      ) {
-        return false;
-      }
-
-      if (
-        options.imessageContactAvailable !== true
-        && name === "murph.imessage_contact"
-      ) {
-        return false;
-      }
-
-      if (
-        options.physicalNoteRecoveryAvailable !== true
-        && name === "murph.resolve_physical_note"
-      ) {
-        return false;
-      }
-
-      if (
-        options.physicalNotesAvailable !== true
-        && name === "murph.send_physical_note"
-      ) {
-        return false;
-      }
-
-      if (
-        options.progressUpdatesAvailable === false
-        && name === "murph.send_progress_update"
-      ) {
-        return false;
-      }
-
-      if (
-        options.responseCardAvailable !== true
-        && name === "murph.attach_response_card"
-      ) {
-        return false;
-      }
-
-      if (
-        options.exerciseRoutineResponseCardAvailable !== true
-        && name === "murph.attach_exercise_routine_card"
-      ) {
-        return false;
-      }
-
-      if (
-        options.telegramRichContentResponseCardAvailable !== true
-        && name === "murph.attach_telegram_rich_content"
-      ) {
-        return false;
-      }
-
-      if (
-        options.pendingVaultFilesAvailable !== true
-        && name === "murph.pending_vault_files"
-      ) {
-        return false;
-      }
-
-      if (
-        options.vaultFileSendAvailable !== true
-        && name === "murph.send_vault_file"
-      ) {
-        return false;
-      }
-
-      if (
-        options.phoneCallsAvailable !== true
-        && name === "murph.create_phone_call"
-      ) {
-        return false;
-      }
-
-      if (
-        options.askGrokAvailable !== true
-        && name === "murph.ask_grok"
-      ) {
-        return false;
-      }
-
-      return true;
-    })
-    .map((name) => name.replace(/^murph\./u, ""))
-    .sort();
+  const expectedTools = resolveMurphDynamicTools({
+    ...options,
+    assistantStyleSettingsAvailable: true,
+    assistantConfigurationAvailable: true,
+    automationAvailable: true,
+    deviceAvailable: true,
+    clinicalRecordsConnectLinkAvailable: true,
+    familyPlanAvailable: true,
+    labsAvailable: true,
+    planUsageAvailable: true,
+    pollsAvailable: true,
+    subscriptionAvailable: true,
+    personalizationAvailable: true,
+    productFeedbackAvailable: true,
+    voiceMemoGenerationAvailable: true,
+    phoneCallStatusAvailable: true,
+    phoneCallStopAvailable: true,
+    conversationAttachmentsAvailable: true,
+    responseCardsAvailable: options.responseCardAvailable,
+    exerciseRoutineResponseCardsAvailable: options.exerciseRoutineResponseCardAvailable,
+    telegramRichContentResponseCardsAvailable: options.telegramRichContentResponseCardAvailable,
+  });
   expect(lastResponsesRequest).toBeDefined();
   const advertisement = readMurphDynamicToolAdvertisement(
     lastResponsesRequest!.body,
   );
-  const expectedAdvertisedToolNames = advertisement.codeMode
-    ? expectedToolNames.filter((name) =>
-        name !== "automation"
-        && name !== "attach_response_card"
-        && name !== "attach_exercise_routine_card"
-        && name !== "attach_telegram_rich_content"
-        && !hostedGroupFamilyToolNames.has(`murph.${name}`)
-      )
-    : expectedToolNames;
+  const expectedAdvertisedToolNames = expectedTools
+    .filter((tool) => !advertisement.codeMode || !("deferLoading" in tool && tool.deferLoading))
+    .map((tool) => tool.name)
+    .sort();
   expect(advertisement.toolNames.sort()).toEqual(expectedAdvertisedToolNames);
   if (advertisement.codeMode) {
     expect(advertisement.deferredDiscoveryAvailable).toBe(true);
@@ -425,7 +305,7 @@ function readMurphDynamicToolAdvertisement(body: string): {
   const candidateToolLists: unknown[][] = [];
 
   // The murph namespace appears in the top-level `tools` array on the full
-  // Responses API. Responses Lite models (e.g. gpt-5.6-terra in Codex >= 0.144)
+  // Responses API. Responses Lite models (e.g. gpt-6.1-sol in Codex >= 0.144)
   // relocate the structured tool specs into an `additional_tools` input item
   // and null the top-level `tools`, so look in both places.
   const topLevelTools = request?.tools;
@@ -525,8 +405,13 @@ export interface HostedLocalAssistantProviderStubState {
 
 export interface HostedLocalAssistantProviderStubRequest {
   body: string;
+  fixtureMatch?: "scoped" | "unscoped" | "none" | "compaction" | "not_applicable";
   method: string;
   observedAtEpochMs?: number;
+  queuedResponseCount?: number;
+  requestKind?: "turn" | "prewarm" | "compaction" | "memory" | "unknown";
+  responseStatus?: number | null;
+  responseToolCallId?: string;
   url: string;
 }
 
@@ -551,6 +436,23 @@ export function readHostedLocalAssistantProviderToolOutputs(
     )
     .map((item) => readAssistantProviderToolOutputText(item?.output))
     .filter((output): output is string => output !== null);
+}
+
+export function hostedLocalAssistantProviderLatestUserInputContains(
+  request: HostedLocalAssistantProviderStubRequest,
+  text: string,
+): boolean {
+  const input = parseJsonObject(request.body)?.input;
+  if (!Array.isArray(input)) {
+    return false;
+  }
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (isRecord(item) && item.role === "user") {
+      return readAssistantProviderToolOutputText(item.content)?.includes(text) ?? false;
+    }
+  }
+  return false;
 }
 
 export type HostedLocalAssistantProviderStubUsageMode =
@@ -593,9 +495,11 @@ export function buildHostedAssistantNotificationDecisionResponse(input: {
 function dequeueAssistantProviderResponse(input: {
   requestBody?: string;
   requestBodyJson?: unknown;
+  requestRecord: HostedLocalAssistantProviderStubRequest;
   fallbackResponseText?: string | null;
   responseState?: HostedLocalAssistantProviderStubState;
 }): HostedLocalAssistantProviderScriptedResponsePayload | null {
+  input.requestRecord.fixtureMatch = "none";
   const queuedResponses = input.responseState?.queuedResponses;
   if (!queuedResponses || queuedResponses.length === 0) {
     return input.fallbackResponseText ?? null;
@@ -623,6 +527,9 @@ function dequeueAssistantProviderResponse(input: {
     return input.fallbackResponseText ?? null;
   }
 
+  input.requestRecord.fixtureMatch = isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    ? "scoped"
+    : "unscoped";
   return readHostedLocalAssistantProviderResponsePayload(scriptedResponse);
 }
 
@@ -804,11 +711,12 @@ async function prepareAssistantProviderScriptedResponse(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
   requestContext: HostedLocalAssistantProviderRequestContext,
 ): Promise<string | HostedLocalAssistantProviderToolCallResponse> {
-  if (
-    typeof scriptedResponse === "string"
-    || "customToolCall" in scriptedResponse
-    || "functionCall" in scriptedResponse
-  ) {
+  if (typeof scriptedResponse === "object"
+    && ("functionCall" in scriptedResponse || "customToolCall" in scriptedResponse)) {
+    await scriptedResponse.beforeResponse?.();
+    return scriptedResponse;
+  }
+  if (typeof scriptedResponse === "string") {
     return scriptedResponse;
   }
   if ("deriveResponse" in scriptedResponse) {
@@ -948,13 +856,14 @@ function buildAssistantProviderToolCallItem(input: {
   };
 }
 
-function writeAssistantProviderToolCallStubStream(input: {
+async function writeAssistantProviderToolCallStubStream(input: {
+  beforeContent?: () => Promise<void> | void;
   modelId: string;
   response: ServerResponse;
   responseId: string;
   toolCallItem: Record<string, unknown>;
   usage: HostedLocalAssistantProviderUsage;
-}): void {
+}): Promise<void> {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
@@ -975,6 +884,7 @@ function writeAssistantProviderToolCallStubStream(input: {
     },
     type: "response.created",
   });
+  await input.beforeContent?.();
   writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
     item: {
       ...input.toolCallItem,
@@ -1056,7 +966,7 @@ export async function startAssistantProviderStubServer(input: {
   responseState?: HostedLocalAssistantProviderStubState;
   usageMode?: HostedLocalAssistantProviderStubUsageMode;
 } = {}): Promise<ReturnType<typeof createServer>> {
-  const modelId = input.modelId ?? "gpt-5.6-terra";
+  const modelId = input.modelId ?? "gpt-6.1-sol";
   let responseSequence = 0;
   let responsesApiRequestBodyCount = 0;
 
@@ -1079,12 +989,19 @@ export async function startAssistantProviderStubServer(input: {
     }
 
     const body = await readRequestBody(request);
-    const requestRecord = {
+    const requestRecord: HostedLocalAssistantProviderStubRequest = {
       body,
+      fixtureMatch: "not_applicable",
       method: requestMethod,
       observedAtEpochMs,
+      queuedResponseCount: input.responseState?.queuedResponses.length ?? 0,
+      requestKind: readAssistantProviderRequestKind(body, request.headers["x-codex-turn-metadata"]),
+      responseStatus: null,
       url: requestUrl,
-    } satisfies HostedLocalAssistantProviderStubRequest;
+    };
+    response.once("finish", () => {
+      requestRecord.responseStatus = response.statusCode;
+    });
     input.onRequest?.(requestRecord);
     if (process.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB === "1") {
       console.log(
@@ -1112,6 +1029,7 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
+      requestRecord.fixtureMatch = "compaction";
       writeJsonResponse(response, 200, {
         output: [
           {
@@ -1136,6 +1054,7 @@ export async function startAssistantProviderStubServer(input: {
       responseSequence += 1;
       const responseId = `resp_stub_hosted_local_e2e_${responseSequence}`;
       if (isContextCompactionResponsesRequest(bodyJson)) {
+        requestRecord.fixtureMatch = "compaction";
         const usage = buildAssistantProviderStubUsage({
           body,
           responseText: hostedLocalContextCompactionSummary,
@@ -1172,6 +1091,7 @@ export async function startAssistantProviderStubServer(input: {
         fallbackResponseText: input.fallbackResponseText,
         requestBody: body,
         requestBodyJson: bodyJson,
+        requestRecord,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -1218,13 +1138,17 @@ export async function startAssistantProviderStubServer(input: {
           responseId,
           toolCall: preparedScriptedResponse,
         });
+        requestRecord.responseToolCallId = String(toolCallItem.call_id);
         const usage = buildAssistantProviderStubUsage({
           body,
           responseText: JSON.stringify(toolCallItem),
           usageMode: input.usageMode ?? "fixed",
         });
         if (bodyJson.stream === true) {
-          writeAssistantProviderToolCallStubStream({
+          await writeAssistantProviderToolCallStubStream({
+            beforeContent: "functionCall" in preparedScriptedResponse
+              ? preparedScriptedResponse.beforeStreamContent
+              : undefined,
             modelId,
             response,
             responseId,
@@ -1285,6 +1209,7 @@ export async function startAssistantProviderStubServer(input: {
         fallbackResponseText: input.fallbackResponseText,
         requestBody: body,
         requestBodyJson: bodyJson,
+        requestRecord,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -1419,7 +1344,7 @@ export function resolveHostedAssistantLocalDevEnv(
 
     return {
       ...buildHostedAssistantStubEnvClearances(),
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
@@ -1657,6 +1582,21 @@ function readAssistantProviderToolOutputText(value: unknown): string | null {
     .map((item) => isRecord(item) ? item.text : null)
     .filter((text): text is string => typeof text === "string");
   return textItems.length > 0 ? textItems.join("\n") : null;
+}
+
+function readAssistantProviderRequestKind(
+  body: string,
+  header: string | string[] | undefined,
+): NonNullable<HostedLocalAssistantProviderStubRequest["requestKind"]> {
+  const metadata = parseJsonObject(body)?.client_metadata;
+  const turnMetadata = isRecord(metadata) ? metadata["x-codex-turn-metadata"] : null;
+  for (const value of [turnMetadata, header]) {
+    const kind = typeof value === "string" ? parseJsonObject(value)?.request_kind : null;
+    if (kind === "turn" || kind === "prewarm" || kind === "compaction" || kind === "memory") {
+      return kind;
+    }
+  }
+  return "unknown";
 }
 
 function isContextCompactionResponsesRequest(value: Record<string, unknown>): boolean {

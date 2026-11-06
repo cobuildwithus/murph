@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from './execution-context.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -187,7 +188,8 @@ export async function buildAssistantInputAttachmentPromptBundles(input: {
         onEvidenceReadFailure: input.onEvidenceReadFailure,
         vaultRoot: input.vaultRoot,
       }))
-    } catch {
+    } catch (error) {
+      if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
       // Attachment evidence is best effort. Preserve successful bundles and
       // let the caller continue the accepted turn with available context.
     }
@@ -393,7 +395,8 @@ async function buildDerivedTextSourcesBestEffort(input: {
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot,
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
     input.onEvidenceReadFailure?.({
       attachmentOrdinal: input.attachment.ordinal,
       details: `attachment ${input.attachment.ordinal} derived evidence unavailable`,
@@ -598,9 +601,10 @@ async function readBoundedParserResult(input: {
   if (maxBytes === 0) {
     return null
   }
-  await input.materializeWorkspaceArtifacts?.([input.resultPath], {
+  const materialized = await input.materializeWorkspaceArtifacts?.([input.resultPath], {
     maxFileBytes: maxBytes,
   })
+  if (materialized && !materialized.materializedArtifactPaths.has(`vault:${input.resultPath}`)) return null
   try {
     const absolutePath = await resolveAssistantVaultPath(input.vaultRoot, input.resultPath)
     const fileStats = await stat(absolutePath)
@@ -642,7 +646,8 @@ async function readPreparedRoutingEvidence(input: {
     }
 
     try {
-      await input.materializeWorkspaceArtifacts?.([rawPath])
+      const materialized = await input.materializeWorkspaceArtifacts?.([rawPath], { maxFileBytes: MAX_ROUTING_IMAGE_BYTES })
+      if (materialized && !materialized.materializedArtifactPaths.has(`vault:${rawPath}`)) throw new Error("Attachment image unavailable.")
       const absolutePath = await resolveAssistantVaultPath(
         input.vaultRoot,
         rawPath,
@@ -670,7 +675,8 @@ async function readPreparedRoutingEvidence(input: {
         mediaType: attachment.routingImage.mediaType ?? null,
         bytes,
       })
-    } catch {
+    } catch (error) {
+      if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
       const details = `attachment ${attachment.ordinal} image evidence unavailable`
       errors.push(details)
       input.onEvidenceReadFailure?.({
@@ -730,7 +736,8 @@ async function resolveAvailableAssistantInputRawArtifactPath(input: {
   }
 
   try {
-    await input.materializeWorkspaceArtifacts?.([rawPath])
+    const materialized = await input.materializeWorkspaceArtifacts?.([rawPath])
+    if (materialized && !materialized.materializedArtifactPaths.has(`vault:${rawPath}`)) return null
     const absolutePath = await resolveAssistantVaultPath(
       input.vaultRoot,
       rawPath,
@@ -738,7 +745,8 @@ async function resolveAvailableAssistantInputRawArtifactPath(input: {
     )
     const fileStats = await stat(absolutePath)
     return fileStats.isFile() ? rawPath : null
-  } catch {
+  } catch (error) {
+    if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
     return null
   }
 }
@@ -786,9 +794,10 @@ async function readMaterializedRelativeTextFile(input: {
   if (maxBytes === 0) {
     return null
   }
-  await input.materializeWorkspaceArtifacts?.([input.relativePath], {
+  const materialized = await input.materializeWorkspaceArtifacts?.([input.relativePath], {
     maxFileBytes: maxBytes,
   })
+  if (materialized && !materialized.materializedArtifactPaths.has(`vault:${input.relativePath}`)) return null
   try {
     const absolutePath = await resolveAssistantVaultPath(input.vaultRoot, input.relativePath)
     const fileStats = await stat(absolutePath)

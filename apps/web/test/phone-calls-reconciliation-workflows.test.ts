@@ -226,6 +226,21 @@ describe("hosted phone-call reconciliation Workflow", () => {
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
   });
 
+  it("does not acknowledge the call while its registration signal is unsettled", async () => {
+    const registration = createDeferred();
+    mocks.resumeHook.mockReturnValue(registration.promise);
+    const acknowledged = vi.fn();
+    const pending = startHostedPhoneCallReconciliationWorkflow({
+      phoneCallId: "hpc_123",
+    }, { signal: new AbortController().signal }).then(acknowledged);
+
+    await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
+    expect(acknowledged).not.toHaveBeenCalled();
+    registration.resolve();
+    await pending;
+    expect(acknowledged).toHaveBeenCalledWith({ runId: "run_123" });
+  });
+
   it("bounds a stalled Workflow start and observes late settlement", async () => {
     let resolveStart: ((value: { runId: string }) => void) | undefined;
     mocks.start.mockReturnValue(new Promise((resolve) => {

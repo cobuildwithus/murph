@@ -102,10 +102,6 @@
   ],
   "goldenOutputs": [
     {
-      "id": "assistant",
-      "path": "fixtures/golden-outputs/assistant"
-    },
-    {
       "id": "knowledge",
       "path": "fixtures/golden-outputs/knowledge"
     },

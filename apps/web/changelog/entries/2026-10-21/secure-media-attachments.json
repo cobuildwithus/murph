@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-21",
+  "order": 100,
+  "item": {
+    "id": "secure-media-attachments",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Receive more kinds of files in chat",
+    "summary": "Murph can send common image, audio, and video files alongside documents and ZIPs through secure file approval.",
+    "details": "Approve the exact file and conversation before delivery. This works for saved files and newly created attachments in iMessage and private Telegram chats. Telegram delivers them as file attachments. If a public image preview fails, Murph gets guidance to retry the original image or prepare a file for approval. Existing size limits still apply.",
+    "relevanceTags": ["attachments", "imessage", "telegram"],
+    "sourcePullRequests": [4287]
+  }
+}

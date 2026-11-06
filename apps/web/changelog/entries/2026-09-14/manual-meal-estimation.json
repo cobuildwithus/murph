@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "manual-meal-estimation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Meal photos get an estimate or a useful question",
+    "summary": "Send a meal photo from the app and Murph will estimate it in your private conversation, or ask for an essential missing detail.",
+    "details": "Murph updates the saved meal and checks incomplete meals for that day when you log more food. Your preferences for tracking food without numbers still apply.",
+    "relevanceTags": [
+      "food",
+      "nutrition",
+      "ios"
+    ],
+    "sourcePullRequests": [
+      3454
+    ]
+  }
+}

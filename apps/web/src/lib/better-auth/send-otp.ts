@@ -6,6 +6,7 @@ import type { HostedLinqParticipantContact } from "../hosted-onboarding/linq-par
 import { createHostedBetterAuth, type HostedAuthDelivery } from "./auth";
 import { hostedAuthAdapter, hostedAuthTransactionAdapter } from "./adapter";
 import { hostedAuthOtpIdentifier, lockHostedAuthOtpTx } from "./otp-store";
+import { hostedAuthReviewSignInCode } from "./review-account";
 import { sendHostedAuthSmsOtp } from "./sms-otp";
 import { hostedAuthSmsVerification, type HostedAuthSmsVerification } from "./twilio-verify";
 
@@ -50,5 +51,7 @@ export async function sendHostedAuthOtp(input: {
       return captured;
     }), { maxWait: 5_000, timeout: 10_000 });
   });
+  // The review account's code is fixed in configuration and has no inbox.
+  if (hostedAuthReviewSignInCode(input.contact.value) !== undefined) return;
   await input.delivery.email({ address: input.contact.value, code });
 }

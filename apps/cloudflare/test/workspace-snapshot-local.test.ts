@@ -1,3 +1,4 @@
+import { brotliCompressSync } from "node:zlib";
 import { execFile } from "node:child_process";
 import { createCipheriv, createHash } from "node:crypto";
 import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
@@ -9,6 +10,10 @@ import { describe, expect, it, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   archiveClosedEventLedgerShards,
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestRecord,
+  readIntegrationIngestEntries,
+  withIntegrationIngestMaterializer,
   initializeVault,
   readEvent,
   upsertEvent,
@@ -35,6 +40,8 @@ import {
 } from "@murphai/query";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
+  resolveHostedMediaReferenceCataloguePath,
+  HOSTED_MEDIA_REFS_SCHEMA,
 } from "@murphai/runtime-state/node";
 import {
   createEncryptedWorkspaceSnapshotFile,
@@ -149,7 +156,7 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
-  it("measures closed event archiving at the encrypted snapshot boundary", async () => {
+  it("restores archived closed events with reduced uncompressed snapshot size", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-event-archive-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -229,7 +236,8 @@ describe("workspace snapshot local restore", () => {
       });
 
       expect(archived.totalPlainBytes).toBeLessThan(baseline.totalPlainBytes);
-      expect(archived.encryptedByteSize).toBeLessThan(baseline.encryptedByteSize);
+      // Per-shard compression reduces extraction bytes, but can prevent zstd
+      // from sharing matches across shards. Encrypted size is not monotonic.
 
       await restoreEncryptedWorkspaceSnapshot({
         dataKey: encodedDataKey,
@@ -243,12 +251,17 @@ describe("workspace snapshot local restore", () => {
           userId: "member_test",
         }),
       });
-      await expect(readEvent({
-        eventId: historicalEvents[0]!.eventId,
-        vaultRoot: path.join(restoredDurableRoot, "vault"),
-      })).resolves.toMatchObject({
-        event: { title: "Historical event 0" },
-      });
+      for (const [index, historicalEvent] of historicalEvents.entries()) {
+        await expect(readEvent({
+          eventId: historicalEvent.eventId,
+          vaultRoot: path.join(restoredDurableRoot, "vault"),
+        })).resolves.toMatchObject({
+          event: {
+            title: `Historical event ${index}`,
+            note: `closed event history ${index} `.repeat(100).trim(),
+          },
+        });
+      }
     } finally {
       dataKey.fill(0);
       await rm(tempRoot, { force: true, recursive: true });
@@ -1479,6 +1492,53 @@ while :; do sleep 0.01; done
     }
   });
 
+  it("compresses distant duplicate payloads and restores every file with the existing decoder", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-distance-test-"));
+    const durableRoot = path.join(tempRoot, "source");
+    const restoredRoot = path.join(tempRoot, "restored");
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(new Uint8Array(32).fill(7));
+    const objectKey = "users/synthetic/workspace-snapshots/distant.snapshot.enc";
+    const snapshotId = "distant";
+    const userId = "synthetic";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+    const entropy = createCipheriv("aes-256-ctr", Buffer.alloc(32, 3), Buffer.alloc(16, 5));
+    // Each copy is larger than level 9's default history. Only distant matching
+    // can share these bytes; local repetition alone cannot satisfy the bound.
+    const payload = entropy.update(Buffer.alloc(8 * 1024 * 1024));
+    entropy.final();
+    const archivePaths = ["canonical.bin", "query-cache.bin", "search-cache.bin"];
+    try {
+      await mkdir(durableRoot);
+      for (const archivePath of archivePaths) {
+        await writeFile(path.join(durableRoot, archivePath), payload);
+      }
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: archivePaths.map((archivePath) => ({
+          absolutePath: path.join(durableRoot, archivePath), archivePath, kind: "file" as const,
+        })),
+        dataKey, durableRoot,
+        ivBase64: Buffer.alloc(12, 9).toString("base64url"),
+        maxEncryptedBytes: 32 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      expect(encrypted.fileCount).toBe(3);
+      expect(encrypted.totalPlainBytes).toBe(3 * payload.length);
+      expect(encrypted.encryptedByteSize).toBeLessThan(1.5 * payload.length);
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey, durableRoot: restoredRoot, encryptedFilePath: encrypted.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }),
+      });
+      const digest = createHash("sha256").update(payload).digest("hex");
+      for (const archivePath of archivePaths) {
+        expect(createHash("sha256").update(await readFile(path.join(restoredRoot, archivePath))).digest("hex"))
+          .toBe(digest);
+      }
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("creates and restores with only the archive and compression processes", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const durableRoot = path.join(tempRoot, "durable");
@@ -1580,7 +1640,7 @@ exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
         zstdArgumentsMarkerPath,
         "utf8",
       )).trim().split("\n");
-      expect(compressArguments?.split(" ")).toContain("-3");
+      expect(compressArguments?.split(" ")).toContain("-9");
       expect(compressArguments?.split(" ")).not.toContain("-1");
       expect(decompressArguments?.split(" ")).toContain("-d");
     } finally {
@@ -1880,3 +1940,51 @@ function splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes: Buffer): Ui
     encryptedBytes.subarray(ciphertextEnd + 8),
   ].filter((chunk) => chunk.byteLength > 0);
 }
+
+
+it("restores a sparse encrypted checkpoint without cold bytes, then verifies a lazy history read", async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "cold-snapshot-roundtrip-"));
+  const source = path.join(tempRoot, "source");
+  const vaultRoot = path.join(source, "vault");
+  const restored = path.join(tempRoot, "restored");
+  const relativePath = "ledger/integration-ingests/2020/2020-01.jsonl.br";
+  try {
+    await initializeVault({ vaultRoot });
+    const record = buildIntegrationIngestRecord({ id: "xfm_cold", provider: "synthetic", source: "device",
+      importedAt: "2020-01-01T00:00:00.000Z",
+      parts: [buildIntegrationEvidencePart({ role: "payload", fileName: "payload.json", mediaType: "application/json", content: '{"synthetic":true}' })],
+      eventOutputs: [], eventIdsComplete: true, sampleIds: [], sampleIdsComplete: true, eventCount: 0, sampleCount: 0 });
+    const coldBytes = brotliCompressSync(Buffer.from(`${JSON.stringify(record)}\n`));
+    await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
+    await writeFile(path.join(vaultRoot, relativePath), coldBytes);
+    const catalogue = resolveHostedMediaReferenceCataloguePath(vaultRoot);
+    await mkdir(path.dirname(catalogue), { recursive: true });
+    await writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{
+      relativePath, byteSize: coldBytes.length, sha256: createHash("sha256").update(coldBytes).digest("hex"),
+      mediaId: "a".repeat(64), mediaKind: "integration-ingest", expiresAt: null,
+    }] }));
+    const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: source, vaultRoot, excludedVaultPaths: [relativePath] });
+    const userId = "synthetic_cold_member";
+    const snapshotId = "synthetic_cold_snapshot";
+    const objectKey = "synthetic/cold-snapshot.enc";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ userId, snapshotId, objectKey });
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(new Uint8Array(32).fill(9));
+    const encrypted = await createEncryptedWorkspaceSnapshotFile({ aad, archiveEntries: plan.entries,
+      dataKey, durableRoot: source, ivBase64: Buffer.alloc(12, 3).toString("base64url"),
+      maxEncryptedBytes: 16 * 1024 * 1024, outputDir: path.join(tempRoot, "scratch") });
+    await restoreEncryptedWorkspaceSnapshot({ dataKey, durableRoot: restored,
+      encryptedFilePath: encrypted.encryptedFilePath,
+      ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }) });
+    const restoredVault = path.join(restored, "vault");
+    await expect(readFile(path.join(restoredVault, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+    const materialize = vi.fn(async (paths: readonly string[]) => {
+      expect(paths).toEqual([relativePath]);
+      await mkdir(path.dirname(path.join(restoredVault, relativePath)), { recursive: true });
+      await writeFile(path.join(restoredVault, relativePath), coldBytes);
+    });
+    expect(materialize).not.toHaveBeenCalled();
+    const entries = await withIntegrationIngestMaterializer(restoredVault, materialize, () => readIntegrationIngestEntries(restoredVault));
+    expect(entries[0]?.record).toEqual(record);
+    expect(materialize).toHaveBeenCalledOnce();
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
+});

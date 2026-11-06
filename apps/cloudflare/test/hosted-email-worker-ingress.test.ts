@@ -792,7 +792,7 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("keeps signed member email body addresses unredacted while classifying extra recipients as non-direct", async () => {
+  it.each(["To", "Cc", "Bcc"])("keeps personal alias email private with an extra %s recipient", async (header) => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
@@ -819,10 +819,10 @@ describe("hosted email worker ingress", () => {
       from: "owner@example.com",
       raw: buildRawEmail({
         body: "Please compare this note from teammate@example.test and keep From: Owner <owner@example.com> intact.",
-        extraHeaders: ["Cc: Teammate <teammate@example.test>"],
+        extraHeaders: header === "To" ? [] : [`${header}: Teammate <teammate@example.test>`],
         from: "Owner <owner@example.com>",
         subject: "Question from owner@example.com",
-        to: replyAliasAddress,
+        to: header === "To" ? `${replyAliasAddress}, teammate@example.test` : replyAliasAddress,
       }),
       to: replyAliasAddress,
     }, createWorkerEnv(bucket));
@@ -832,7 +832,8 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body?.subject).toBe("Question from owner@example.com");
     expect(appendInput?.body?.textPreview).toContain("teammate@example.test");
     expect(appendInput?.body?.textPreview).toContain("owner@example.com");
-    expect(appendInput?.body?.threadIsDirect).toBe(false);
+    expect(appendInput?.body?.threadIsDirect).toBe(true);
+    expect(appendInput?.body?.assistantStyleSettingsAuthorized).toBe(false);
   });
 
   it("preserves long hosted email thread targets without truncation", async () => {
@@ -1090,95 +1091,6 @@ describe("hosted email worker ingress", () => {
     }));
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
-  });
-
-  it("relies on the web append route to signal Temporal after appending the mailbox item", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        userId: "user_456",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-    const env = createWorkerEnv(bucket);
-
-    await handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
-      from: "owner@example.com",
-      raw: buildRawEmail({
-        from: "Owner <owner@example.com>",
-        to: "assistant@mail.example.test",
-      }),
-      to: "assistant@mail.example.test",
-    }, env);
-
-    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not use a direct Durable Object nudge on the email handoff path", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        userId: "user_456",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-    const env = createWorkerEnv(bucket);
-
-    await handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
-      from: "owner@example.com",
-      raw: buildRawEmail({
-        from: "Owner <owner@example.com>",
-        to: "assistant@mail.example.test",
-      }),
-      to: "assistant@mail.example.test",
-    }, env);
-
-    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not branch on direct nudge acceptance before completing email ingress", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        userId: "user_456",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-    const env = createWorkerEnv(bucket);
-
-    await handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
-      from: "owner@example.com",
-      raw: buildRawEmail({
-        from: "Owner <owner@example.com>",
-        to: "assistant@mail.example.test",
-      }),
-      to: "assistant@mail.example.test",
-    }, env);
-
-    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
   it("does not create a post-append Worker waitUntil nudge handoff", async () => {

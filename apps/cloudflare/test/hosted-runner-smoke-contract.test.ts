@@ -44,21 +44,17 @@ const validHostedRunnerSmokeResult = {
   codexHostedCliSchemaVaultOptionHidden: true,
   codexHostedCliVaultCommandProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   codexHostedCliVaultWriteProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-  codexHostedShellMurphPathBytes: 1536,
+  codexHostedShellVaultCliPathBytes: 1536,
   codexHostedShellPythonVersion: "Python 3.11.2",
   codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
   healthCommonsCliGoalProofCount: HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
-  healthCommonsCliProtocolListBytes: 768,
-  healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
-  healthCommonsRuntimeProtocolHitKeys: [
-    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  healthCommonsCliKnowledgeSearchBytes: 768,
+  healthCommonsRuntimeBiomarkerDesiredDirection: "lower_or_stable",
+  healthCommonsRuntimeKnowledgeEntityKeys: [
+    "biomarker:deep-sleep-minutes",
   ],
-  healthCommonsRuntimeSearchHitKeys: [
-    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-  ],
-  murphCommandDiscovered: true,
   operatorHomeRebound: true,
   pdfParserProviderId: "poppler.pdf",
   pdfTextSha256: "b".repeat(64),
@@ -126,11 +122,10 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexHostedCliSchemaVaultOptionHidden: true,
       codexHostedCliVaultCommandProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
       codexHostedCliVaultWriteProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-      codexHostedShellMurphPathBytes: 1536,
+      codexHostedShellVaultCliPathBytes: 1536,
       codexHostedShellPythonVersion: "Python 3.11.2",
       codexHostedShellVaultCliLlmsBytes: 4096,
       codexVersion: "codex-cli 0.125.0",
-      murphCommandDiscovered: true,
       operatorHomeRebound: true,
       pdfParserProviderId: "poppler.pdf",
       pdfTextSha256: "b".repeat(64),
@@ -141,11 +136,11 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsCatalogHash: "sha256:catalog",
       healthCommonsCliGoalProofCount:
         HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
-      healthCommonsCliProtocolListBytes: 768,
-      healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
+      healthCommonsCliKnowledgeSearchBytes: 768,
+      healthCommonsRuntimeBiomarkerDesiredDirection: "lower_or_stable",
       reportedVaultIdMatchesExpected: true,
-      healthCommonsRuntimeSearchHitKeys: [
-        "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      healthCommonsRuntimeKnowledgeEntityKeys: [
+        "biomarker:deep-sleep-minutes",
       ],
       vaultCliCommandDiscovered: true,
       vaultRootRebound: true,
@@ -163,9 +158,9 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
-      healthCommonsRuntimeSearchHitKeys: [],
+      healthCommonsRuntimeKnowledgeEntityKeys: [],
     })).toThrow(
-      "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys must be a non-empty array.",
+      "Hosted runner smoke result.healthCommonsRuntimeKnowledgeEntityKeys must be a non-empty array.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({
@@ -294,9 +289,9 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
-      codexHostedShellMurphPathBytes: 0,
+      codexHostedShellVaultCliPathBytes: 0,
     })).toThrow(
-      "Hosted runner smoke result.codexHostedShellMurphPathBytes must be a positive finite number.",
+      "Hosted runner smoke result.codexHostedShellVaultCliPathBytes must be a positive finite number.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({
@@ -374,7 +369,6 @@ describe("parseHostedRunnerSmokeResult", () => {
       "codexMemberWorkspaceVaultWriteAllowed",
       "codexHostedConfigShellEnvironmentPolicyAllowlisted",
       "codexHostedCliSchemaVaultOptionHidden",
-      "murphCommandDiscovered",
       "operatorHomeRebound",
       "reportedVaultIdMatchesExpected",
       "ripgrepCommandDiscovered",

@@ -16,14 +16,13 @@ categories:
 - walking
 - wearable-metric
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:pmid-18029834
-- type: cites
-  target: source_artifact:pmid-19791652
-- type: cites
-  target: source_artifact:pmid-33036635
+  - type: cites
+    target: source_artifact:pmid-18029834
+  - type: cites
+    target: source_artifact:pmid-19791652
+  - type: cites
+    target: source_artifact:pmid-33036635
+
 measurementContexts:
 - phone_step_counter
 - wearable_step_counter

@@ -86,14 +86,12 @@ export function getChallengeStandingsCardImageSize(
 
 /**
  * Static counterpart to the shipping SwiftUI challenge standings balloon.
- * Messages owns the outer corner mask; the bitmap owns Murph's canonical mark.
+ * Messages owns the outer corner mask and draws Murph's app badge beside the title.
  */
 export function ChallengeStandingsCardImage({
   card,
-  logoSrc = "/icons/murph-mark.svg",
 }: {
   card: ChallengeStandingsResponseCardV1;
-  logoSrc?: string;
 }) {
   const layout = getChallengeStandingsLayout(card);
   return (
@@ -113,7 +111,6 @@ export function ChallengeStandingsCardImage({
     >
       <IMessageCardHeader
         height={layout.headerHeight}
-        logoSrc={logoSrc}
         subtitle={layout.subtitle}
         title={layout.title}
       />

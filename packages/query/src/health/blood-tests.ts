@@ -3,7 +3,7 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
 } from "@murphai/contracts";
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { listCanonicalEntitiesRuntime } from "../query-projection.ts";
+import { listCanonicalEventEntitiesRuntime } from "../query-projection.ts";
 import { readCanonicalEntityFamilySource } from "../vault-source.ts";
 import {
   applyLimit,
@@ -186,13 +186,11 @@ export async function listBloodTests(
   vaultRoot: string,
   options: BloodTestListOptions = {},
 ): Promise<BloodTestQueryRecord[]> {
-  const entities = await listCanonicalEntitiesRuntime(vaultRoot, {
-    family: "event",
+  const entities = await listCanonicalEventEntitiesRuntime(vaultRoot, {
     from: options.from,
     kinds: ["test"],
-    // Blood-test classification and text matching live above the canonical
-    // entity projection, so SQL must not truncate generic test events first.
-    limit: null,
+    // The event reader is unlimited: classification and text matching must
+    // still precede the blood-test selector's final limit.
     to: options.to,
   });
   return selectProjectedBloodTests(entities, options);

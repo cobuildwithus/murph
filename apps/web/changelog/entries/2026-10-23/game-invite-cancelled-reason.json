@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-23",
+  "order": 100,
+  "item": {
+    "id": "game-invite-cancelled-reason",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Know when a challenge was called off",
+    "summary": "Cancelled challenge links now explain that the invite was called off.",
+    "details": "An invite that reaches its deadline still shows the expiry message.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4343
+    ]
+  }
+}

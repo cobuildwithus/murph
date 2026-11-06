@@ -71,6 +71,7 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_CODES,
@@ -194,7 +195,7 @@ export { HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE } from "./app-routes";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
-export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
+export { HOSTED_FAMILY_BILLING_PLAN_CODE } from "./billing-plans";
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
@@ -488,6 +489,7 @@ export type HostedFamilyStripeSubscriptionResult = {
   accessRestoredMemberIds?: string[];
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
+  terminalOwnerMemberId?: string;
   groupId: string | null;
   runtimeRecheckMemberIds?: string[];
 };
@@ -2329,6 +2331,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     });
     return {
       activations: [],
+      terminalOwnerMemberId: group.ownerMemberId,
       billingModeChangedMemberIds: billingModeChanged
         ? [group.ownerMemberId]
         : [],
@@ -5324,12 +5327,6 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         memberId: generateHostedMemberId(),
         prisma: input.tx,
       });
-  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-    domain: "control",
-    prisma: input.tx,
-    reason: "hosted-family.telegram-routing",
-    userId: member.id,
-  });
   let telegramBindingAttempted = false;
   let telegramBindingWritten = false;
   const writeTelegramBinding = async (): Promise<void> => {
@@ -5357,6 +5354,13 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
         });
       }
     }
+    // Every caller holds the member row by now: member before root.
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: input.tx,
+      reason: "hosted-family.telegram-routing",
+      userId: member.id,
+    });
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: member.id,
       prisma: input.tx,

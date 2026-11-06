@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-urine-albumin
 slug: reduce-urine-albumin
-title: Reduce Albumin in My Urine
-summary: Lower persistently high urine albumin by treating blood pressure, diabetes, and kidney risk while confirming the trend correctly.
+title: Understand My Urine Albumin
+summary: Understand urine albumin results, repeat testing, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:protect-kidney-function
   outcomeKind: biomarker
-  goalPhrase: reduce albumin in my urine
+  goalPhrase: understand my urine albumin
   successSignals:
     - id: urine_albumin_trend
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me reduce albumin in my urine.
+  startPrompt: Hey Murph, help me understand my urine albumin.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -91,4 +91,4 @@ ACE inhibitors, ARBs, and related kidney medicines can affect potassium and crea
 
 ## Related goals
 
-[Protect My Kidney Function](/goals/protect-kidney-function) · [Lower My Blood Pressure](/goals/lower-blood-pressure) · [Lower My A1C](/goals/lower-a1c)
+[Understand My Kidney Health](/goals/protect-kidney-function) · [Track My Blood Pressure](/goals/lower-blood-pressure) · [Understand My A1C](/goals/lower-a1c)

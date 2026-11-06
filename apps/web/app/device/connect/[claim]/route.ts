@@ -1,7 +1,7 @@
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceConnectSourceAvailableForConnection,
-  listConfiguredDeviceSyncReconnectTargets,
+  listConfiguredDeviceSyncConnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
 } from "@murphai/device-syncd/connect-config";
 
@@ -24,6 +24,9 @@ import {
   resolveDecodedRouteParam,
 } from "@/src/lib/http";
 
+const DEAD_LINK_TITLE = "This link isn’t working.";
+const FAILED_LINK_TITLE = "Something went wrong.";
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ claim: string }> },
@@ -37,7 +40,7 @@ export async function GET(
         code: `HOSTED_DEVICE_CONNECT_INTENT_${result.status.toUpperCase()}`,
         message: describeUnavailableIntentStatus(result.status),
         status: 410,
-        title: "Connection link unavailable",
+        ...describeDeadLink(result.status),
       });
     }
 
@@ -45,9 +48,10 @@ export async function GET(
     if (!target) {
       return deviceConnectIntentMessageResponse(request, {
         code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+        detail: "This device connection is not available right now.",
         message: "This device connection is not available right now.",
         status: 404,
-        title: "Connection unavailable",
+        title: DEAD_LINK_TITLE,
       });
     }
 
@@ -79,7 +83,7 @@ export async function POST(
         code: `HOSTED_DEVICE_CONNECT_INTENT_${claimed.status.toUpperCase()}`,
         message: describeUnavailableIntentStatus(claimed.status),
         status: claimed.status === "owner_mismatch" ? 403 : 410,
-        title: "Connection link unavailable",
+        ...describeDeadLink(claimed.status),
       });
     }
 
@@ -91,9 +95,10 @@ export async function POST(
       });
       return deviceConnectIntentMessageResponse(request, {
         code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+        detail: "This device connection is not available right now.",
         message: "This device connection is not available right now.",
         status: 404,
-        title: "Connection unavailable",
+        title: DEAD_LINK_TITLE,
       });
     }
 
@@ -127,7 +132,7 @@ export async function POST(
 }
 
 function resolveHostedDeviceConnectIntentTarget(intent: HostedDeviceConnectIntentRecord) {
-  return listConfiguredDeviceSyncReconnectTargets(
+  return listConfiguredDeviceSyncConnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(process.env),
   ).find((target) =>
     isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
@@ -154,6 +159,30 @@ function describeUnavailableIntentStatus(status: string): string {
   return "This connection link could not be found. Ask Murph for a new one.";
 }
 
+// The page a person sees; the JSON above keeps its own sentences for the app.
+function describeDeadLink(status: string): { detail: string; title: string } {
+  if (status === "expired") {
+    return {
+      detail: "Nothing changed. Ask Murph for a new one.",
+      title: "This link expired.",
+    };
+  }
+
+  if (status === "owner_mismatch") {
+    return {
+      detail: "It belongs to a different Murph account.",
+      title: DEAD_LINK_TITLE,
+    };
+  }
+
+  return {
+    detail: status === "used"
+      ? "It was already used. Ask Murph for a new one."
+      : "Ask Murph for a new one.",
+    title: DEAD_LINK_TITLE,
+  };
+}
+
 function buildHostedDeviceConnectPageUrl(input: {
   claim: string;
   connectSourceId: string;
@@ -173,19 +202,15 @@ function handleHostedDeviceConnectIntentError(error: unknown, request?: Request)
   }
 
   if (error instanceof InvalidRouteParamEncodingError) {
-    return deviceConnectIntentHtml(
-      "Connection link unavailable",
-      "This connection link is invalid. Ask Murph for a new one.",
-      400,
-    );
+    return deviceConnectIntentHtml(DEAD_LINK_TITLE, "Ask Murph for a new one.", 400);
   }
 
   if (isDeviceSyncError(error)) {
-    return deviceConnectIntentHtml("Connection failed", error.message, error.httpStatus);
+    return deviceConnectIntentHtml(FAILED_LINK_TITLE, error.message, error.httpStatus);
   }
 
   if (isHostedOnboardingError(error)) {
-    return deviceConnectIntentHtml("Connection failed", error.message, error.httpStatus);
+    return deviceConnectIntentHtml(FAILED_LINK_TITLE, error.message, error.httpStatus);
   }
 
   console.error("Hosted device connect intent failed unexpectedly.", {
@@ -193,8 +218,8 @@ function handleHostedDeviceConnectIntentError(error: unknown, request?: Request)
   });
 
   return deviceConnectIntentHtml(
-    "Connection failed",
-    "Something went wrong while starting the device connection. Please retry from Murph.",
+    FAILED_LINK_TITLE,
+    "Nothing changed. Try again in a moment.",
     500,
   );
 }
@@ -221,6 +246,7 @@ function deviceConnectIntentMessageResponse(
   request: Request,
   input: {
     code: string;
+    detail: string;
     message: string;
     status: number;
     title: string;
@@ -241,7 +267,7 @@ function deviceConnectIntentMessageResponse(
     });
   }
 
-  return deviceConnectIntentHtml(input.title, input.message, input.status);
+  return deviceConnectIntentHtml(input.title, input.detail, input.status);
 }
 
 function deviceConnectIntentHtml(title: string, message: string, status = 200): Response {
@@ -252,25 +278,28 @@ function deviceConnectIntentHtml(title: string, message: string, status = 200): 
   );
 }
 
+// This route answers before any page exists, so it draws the shared dead link
+// (`LinkPageScreen`) itself. Next's fonts have no stable URL, hence the fallbacks.
 function htmlResponse(title: string, body: string, status = 200): Response {
   return new Response(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1C1915">
   <title>${escapeHtml(title)}</title>
   <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: Canvas; color: CanvasText; }
-    main { width: min(100%, 420px); }
-    h1 { margin: 0 0 12px; font-size: 24px; line-height: 1.15; }
-    p { margin: 0 0 20px; color: color-mix(in srgb, CanvasText 76%, transparent); line-height: 1.5; }
-    button { width: 100%; border: 0; border-radius: 8px; padding: 13px 16px; font: inherit; font-weight: 650; color: white; background: #0f766e; cursor: pointer; }
-    button:focus-visible { outline: 3px solid color-mix(in srgb, #0f766e 45%, transparent); outline-offset: 3px; }
+    :root { color-scheme: dark; font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    html, body { background: #1C1915; }
+    body { margin: 0; min-height: 100dvh; color: #FFFCF6; }
+    main { box-sizing: border-box; width: min(100%, 26rem); margin: 0 auto; padding: 12px 24px 24px; }
+    img { display: block; height: 25px; width: auto; margin: 9.5px 0; }
+    h1 { margin: 0; padding-top: 20px; font-family: Fraunces, Georgia, "Times New Roman", serif; font-size: 40px; font-weight: 600; line-height: 44px; letter-spacing: -0.02em; overflow-wrap: anywhere; text-wrap: balance; }
+    p { margin: 10px 0 0; font-size: 16px; font-weight: 500; line-height: 22px; color: rgb(255 252 246 / 0.6); }
   </style>
 </head>
 <body>
-  <main>${body}</main>
+  <main><img alt="Murph" src="/logo-dark.svg">${body}</main>
 </body>
 </html>`, {
     status,
