@@ -26,7 +26,7 @@ import {
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   createHostedAssistantInputSource,
-  resolveHostedCurrentInputIdForAcceptedInputs,
+  readHostedAcceptedInputContext,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 
@@ -1219,7 +1219,7 @@ describe("selectHostedAssistantInputIds", () => {
       limit: 10,
       sourceId: "linq",
     });
-    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+    const acceptedContext = await readHostedAcceptedInputContext({
       assistantInputIds: selection.inputIds,
       vaultRoot,
     });
@@ -1236,7 +1236,6 @@ describe("selectHostedAssistantInputIds", () => {
     )).toEqual(["asst_image_completion_group", null]);
     expect(acceptedContext).toEqual({
       conversationActivityReceivedAtEpochMs: Date.parse(fresh.receivedAt!),
-      currentInputId: fresh.inputId,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
         assistantInputIds: [completion.inputId, fresh.inputId],
@@ -1400,7 +1399,7 @@ describe("selectHostedAssistantInputIds", () => {
       mode: "foreground",
       vaultRoot,
     });
-    const foregroundContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+    const foregroundContext = await readHostedAcceptedInputContext({
       assistantInputIds: foregroundSelection.inputIds,
       vaultRoot,
     });
@@ -1413,7 +1412,6 @@ describe("selectHostedAssistantInputIds", () => {
     expect(foregroundSelection.preserveInputOrder).toBe(true);
     expect(foregroundContext).toEqual({
       conversationActivityReceivedAtEpochMs: Date.parse(newestFresh.receivedAt!),
-      currentInputId: newestFresh.inputId,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
         assistantInputIds: [
@@ -1880,10 +1878,6 @@ describe("selectHostedAssistantInputIds", () => {
       freshAssistantInputIds: assistantInputIds, mode: "foreground", vaultRoot,
     });
     expect(selection.inputIds).toEqual([first.inputId]);
-    const accepted = await resolveHostedCurrentInputIdForAcceptedInputs({
-      assistantInputIds, vaultRoot,
-    });
-    expect(accepted.currentInputId).toBeNull();
   });
 
   it("ends a causal batch before a legacy unsequenced input", async () => {
@@ -1950,13 +1944,12 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual(inputIds.slice(0, 50));
     expect(selection.inputIds).not.toContain(inputIds[50]);
-    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+    const acceptedContext = await readHostedAcceptedInputContext({
       assistantInputIds: inputIds,
       vaultRoot,
     });
     expect(acceptedContext).toMatchObject({
       conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:02.000Z"),
-      currentInputId: null,
       foregroundPriorityInputAccepted: true,
     });
     expect(acceptedContext.latencyTraceInputGroups).toEqual([{
@@ -2400,22 +2393,21 @@ describe("selectHostedAssistantInputIds", () => {
 
 });
 
-describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
+describe("readHostedAcceptedInputContext", () => {
   it("does not treat a generic provider input as conversation activity", async () => {
     const vaultRoot = await createTempVault();
 
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    await expect(readHostedAcceptedInputContext({
       assistantInputIds: [],
       vaultRoot,
     })).resolves.toEqual({
       conversationActivityReceivedAtEpochMs: null,
-      currentInputId: null,
       foregroundPriorityInputAccepted: false,
       latencyTraceInputGroups: [],
     });
   });
 
-  it("uses the terminal input id across intervening system events", async () => {
+  it("reports activity and trace groups across intervening system events", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -2438,12 +2430,11 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       }),
     });
 
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    await expect(readHostedAcceptedInputContext({
       assistantInputIds: [second.inputId, first.inputId],
       vaultRoot,
     })).resolves.toEqual({
       conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:03.000Z"),
-      currentInputId: second.inputId,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
         assistantInputIds: [second.inputId, first.inputId],
@@ -2452,52 +2443,14 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     });
   });
 
-  it("fails closed instead of skipping a conversation message", async () => {
-    const vaultRoot = await createTempVault();
-    const first = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        causalSeq: "7",
-        dedupeKey: "dedupe_causal_batch_gap_first",
-        eventId: "evt_causal_batch_gap_first",
-        itemId: "item_causal_batch_gap_first",
-        laneSeq: "41",
-      }),
-    });
-    const afterGap = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        causalSeq: "9",
-        dedupeKey: "dedupe_causal_batch_gap_second",
-        eventId: "evt_causal_batch_gap_second",
-        itemId: "item_causal_batch_gap_second",
-        laneSeq: "43",
-      }),
-    });
-
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
-      assistantInputIds: [first.inputId, afterGap.inputId],
-      vaultRoot,
-    })).resolves.toEqual({
-      conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:03.000Z"),
-      currentInputId: null,
-      foregroundPriorityInputAccepted: true,
-      latencyTraceInputGroups: [{
-        assistantInputIds: [first.inputId, afterGap.inputId],
-        source: "linq",
-      }],
-    });
-  });
-
-  it("fails closed when an accepted input event is missing", async () => {
+  it("keeps foreground priority when an accepted input event is missing", async () => {
     const vaultRoot = await createTempVault();
 
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    await expect(readHostedAcceptedInputContext({
       assistantInputIds: ["ain_00000000000000000000000000000000"],
       vaultRoot,
     })).resolves.toEqual({
       conversationActivityReceivedAtEpochMs: null,
-      currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
     });
@@ -2520,7 +2473,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       ),
     );
 
-    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+    const acceptedContext = await readHostedAcceptedInputContext({
       assistantInputIds: [unsupported.inputId, email.inputId, telegram.inputId, linq.inputId],
       vaultRoot,
     });
@@ -2542,7 +2495,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       event: createAssistantInputEvent({ lane: "system" }),
     });
 
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    await expect(readHostedAcceptedInputContext({
       assistantInputIds: [staged.inputId],
       vaultRoot,
     })).resolves.toMatchObject({
@@ -2582,7 +2535,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       }),
     });
 
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    await expect(readHostedAcceptedInputContext({
       assistantInputIds: [completion.inputId],
       vaultRoot,
     })).resolves.toMatchObject({
@@ -2611,15 +2564,15 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       });
       expect(replay.inputId).toBe(original.inputId);
       expect(replay.receivedAt).toBe(receivedAt);
-      const accepted = await resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [replay.inputId], vaultRoot });
+      const accepted = await readHostedAcceptedInputContext({ assistantInputIds: [replay.inputId], vaultRoot });
       expect(accepted.conversationActivityReceivedAtEpochMs).toBe(Date.parse(receivedAt));
       const newer = await upsertAssistantInputEvent({
         vault: vaultRoot,
         event: createAssistantInputEvent({ source, threadIsDirect, receivedAt: "2026-08-01T12:59:59.000Z", dedupeKey: "dedupe_newer", eventId: "evt_newer", itemId: "item_newer", laneSeq: "43" }),
       });
-      const extended = await resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [original.inputId, newer.inputId], vaultRoot });
+      const extended = await readHostedAcceptedInputContext({ assistantInputIds: [original.inputId, newer.inputId], vaultRoot });
       expect(extended.conversationActivityReceivedAtEpochMs).toBe(Date.parse(newer.receivedAt!));
-      const duplicate = await resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [original.inputId, original.inputId], vaultRoot });
+      const duplicate = await readHostedAcceptedInputContext({ assistantInputIds: [original.inputId, original.inputId], vaultRoot });
       expect(duplicate.conversationActivityReceivedAtEpochMs).toBeNull();
       expect(duplicate.foregroundPriorityInputAccepted).toBe(true);
     } finally { vi.useRealTimers(); }
@@ -2628,7 +2581,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
   it("does not award warmth to a self-authored response", async () => {
     const vaultRoot = await createTempVault();
     const event = await upsertAssistantInputEvent({ vault: vaultRoot, event: createAssistantInputEvent({ actorIsSelf: true }) });
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [event.inputId], vaultRoot })).resolves.toMatchObject({
+    await expect(readHostedAcceptedInputContext({ assistantInputIds: [event.inputId], vaultRoot })).resolves.toMatchObject({
       conversationActivityReceivedAtEpochMs: null,
       foregroundPriorityInputAccepted: false,
     });
@@ -2641,7 +2594,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       event: createAssistantInputEvent({ sourceKind: "inbox-capture" }),
     });
 
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    await expect(readHostedAcceptedInputContext({
       assistantInputIds: [staged.inputId],
       vaultRoot,
     })).resolves.toMatchObject({

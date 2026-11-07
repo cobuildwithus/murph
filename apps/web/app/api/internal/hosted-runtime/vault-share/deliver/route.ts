@@ -8,6 +8,7 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
+  hostedVaultShareRetainedHistoryDays,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
   type HostedVaultShareDeliverResponse,
@@ -277,7 +278,8 @@ function filterDeliverableRecords(
   memberTimeZone?: string,
 ): HostedVaultShareDeliveryRecord[] {
   if (memberTimeZone) {
-    return filterHostedVaultShareHistoryRecords({ records, scope: projectionScope, timeZone: memberTimeZone });
+    return filterHostedVaultShareHistoryRecords({ records, scope: projectionScope, timeZone: memberTimeZone,
+      requestedHistoryDays: hostedVaultShareRetainedHistoryDays(projectionScope.projectionKind) });
   }
   // Preserve the deployed legacy guard during consumer-first rollout.
   const nowMs = Date.now();

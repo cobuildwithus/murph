@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, gameZoneSpreadHours, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
   it("relays the note as user data without inventing terms or acceptance", () => {
@@ -212,6 +212,49 @@ it("composes shared-evidence superlatives guidance without requiring legacy writ
   for (const phrase of ["tool supports superlatives", "both memberIds", "exactly one {memberId, title, line} per player", "2–6 words", "no trailing period", "differs from the other title", "text both players can see", "bodies or weight"]) expect(instructions).toContain(phrase);
 });
 
+
+describe("players far apart", () => {
+  const at = new Date("2026-11-06T15:00:00.000Z");
+  const kickoffFor = (timeZones: string[], room?: { tasks: string[]; otherGames: { status: "live"; tasks: string[] }[]; startedAfterAnother: boolean }) => {
+    const game = hostedGameChatStateSchema.parse({ games: [{ id: "game_zones", maxPlayers: 10, status: "live", lengthDays: 7, startsOn: null,
+      players: timeZones.map((timeZone, seat) => ({ memberId: `player_${seat}`, seat, firstName: `Alex (${seat + 1})`, timeZone, dayOne: "2026-11-06" })),
+      terms: { n: 1, fromDay: 0, tasks: timeZones.map((_, seat) => ({ seat, text: "Walk" })), schedule: { count: 5 }, stakes: [] },
+      pendingChange: null, changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+    }] }).games[0]!;
+    return buildGameKickoffInstructions({ kind: "started", game, at, ...(room ? { room } : {}) });
+  };
+
+  it("measures the widest gap at that instant, across daylight saving", () => {
+    expect(gameZoneSpreadHours(["America/New_York", "Europe/Warsaw"], at)).toBe(6);
+    // In the weeks when the US has changed its clocks and Europe hasn't.
+    expect(gameZoneSpreadHours(["America/New_York", "Europe/Warsaw"], new Date("2026-03-20T15:00:00.000Z"))).toBe(5);
+    expect(gameZoneSpreadHours(["America/New_York", "America/Chicago", "Australia/Sydney"], at)).toBe(17);
+    expect(gameZoneSpreadHours(["Asia/Kolkata", "Asia/Tokyo"], at)).toBe(3.5);
+    expect(gameZoneSpreadHours(["UTC"], at)).toBe(0);
+  });
+
+  it("ignores a zone it can't read rather than failing the kickoff", () => {
+    expect(gameZoneSpreadHours([null, undefined, "Not/AZone", "UTC"], at)).toBe(0);
+    expect(gameZoneSpreadHours([], at)).toBe(0);
+  });
+
+  it("offers chat reminders only to players under three hours apart", () => {
+    const close = kickoffFor(["America/New_York", "America/Chicago"]);
+    expect(close).toContain("Briefly offer reminders");
+    for (const timeZones of [["America/New_York", "America/Los_Angeles"], ["America/New_York", "Europe/Warsaw"], ["America/New_York", "Australia/Sydney"]]) {
+      const far = kickoffFor(timeZones);
+      expect(far).toContain("Say nothing about reminders or time zones");
+      expect(far).not.toContain("Briefly offer reminders");
+      expect(far).toContain("do not create, schedule or claim any reminders");
+    }
+  });
+
+  it("keeps the shared room wording when another game already runs there", () => {
+    const shared = kickoffFor(["America/New_York", "Europe/Warsaw"], { tasks: ["Walk"], otherGames: [{ status: "live", tasks: ["Read"] }], startedAfterAnother: true });
+    expect(shared).toContain("Skip the reminder offer");
+    expect(shared).not.toContain("Say nothing about reminders or time zones");
+  });
+});
 
 it("shares the kickoff reminder offer while preserving group consent", () => {
   const game = hostedGameChatStateSchema.parse({ games: [{ id: "game_group", maxPlayers: 10, status: "live", lengthDays: 7, startsOn: null,

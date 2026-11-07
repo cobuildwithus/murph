@@ -31,6 +31,7 @@ import {
   getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
+  hostedVaultShareRetainedHistoryDays,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
@@ -104,7 +105,8 @@ const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   (_, zone) => `heart-rate-zone-${zone}-minutes`,
 );
 
-// All dated metric grants publish the same member-local retention window.
+// Dated metric grants publish this member-local retention window; the pair
+// board's four metrics retain longer (hostedVaultShareRetainedHistoryDays).
 // Short reporting windows are selected by the shared-read owner, not here.
 export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
 
@@ -853,17 +855,31 @@ export async function readProjectableDailyMetricDays(
   vaultRoot: string,
   spec: HostedVaultShareDailyMetricProjectionSpec,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
+  // A longer window never costs a member the default one. Older dates can bring
+  // an unresolvable source, or more source/dates than the unchanged record
+  // ceiling holds; both publish the complete default window instead.
+  const retainedDays = hostedVaultShareRetainedHistoryDays(spec.projectionKind);
+  const retained = retainedDays > HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS
+    ? await readProjectableDailyMetricWindow(vaultRoot, spec, retainedDays).catch(() => null)
+    : null;
+  return retained
+    ?? await readProjectableDailyMetricWindow(vaultRoot, spec, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS)
+    ?? [];
+}
+
+async function readProjectableDailyMetricWindow(
+  vaultRoot: string,
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+  historyDays: number,
+): Promise<HostedVaultShareDeliveryRecord[] | null> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
   if (!dateContext) {
-    return [];
+    return null;
   }
-  const cutoffDate = projectionCutoffDate(
-    dateContext.currentDate,
-    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
-  );
+  const cutoffDate = projectionCutoffDate(dateContext.currentDate, historyDays - 1);
   if (!cutoffDate) {
-    return [];
+    return null;
   }
   const sourcePoints = await readMetricPointsByPublicSource({
     cutoffDate,
@@ -894,7 +910,7 @@ export async function readProjectableDailyMetricDays(
     points: projectionPoints,
   });
   if (!rows) {
-    return [];
+    return null;
   }
 
   const completedDateScope = [
@@ -904,7 +920,7 @@ export async function readProjectableDailyMetricDays(
     "rem-sleep-sources-days.v1",
   ].includes(spec.projectionKind);
   if (!completedDateScope) {
-    return selectProjectableDailyMetricDays(rows, spec, nowMs, dateContext.currentDate);
+    return selectProjectableDailyMetricDays(rows, spec, nowMs, dateContext.currentDate, historyDays);
   }
 
   return selectProjectableDailyMetricDays(rows.flatMap((row) => {
@@ -913,7 +929,7 @@ export async function readProjectableDailyMetricDays(
     if (!timeZone) return [];
     const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
     return row.date > currentDate ? [] : [row];
-  }), spec, nowMs, dateContext.currentDate);
+  }), spec, nowMs, dateContext.currentDate, historyDays);
 }
 
 function selectPublicSourceMetricSeries(input: {
@@ -1386,11 +1402,22 @@ export function selectProjectableSleepNights(
   return records;
 }
 
+function isProjectableDailyMetricValue(
+  value: unknown,
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+): value is number {
+  return typeof value === "number"
+    && Number.isFinite(value)
+    && value >= spec.minValue
+    && value <= spec.maxValue;
+}
+
 export function selectProjectableDailyMetricDays(
   points: readonly DailyMetricProjectionPoint[],
   spec: HostedVaultShareDailyMetricProjectionSpec,
   nowMs: number,
   currentDate: string,
+  historyDays: number = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
 ): HostedVaultShareDeliveryRecord[] {
   const records: HostedVaultShareDeliveryRecord[] = [];
 
@@ -1398,11 +1425,7 @@ export function selectProjectableDailyMetricDays(
     right.date.localeCompare(left.date)
     || (left.source?.source ?? "").localeCompare(right.source?.source ?? "")
   )) {
-    if (!isDateInProjectionWindow(
-      point.date,
-      currentDate,
-      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
-    )) {
+    if (!isDateInProjectionWindow(point.date, currentDate, historyDays - 1)) {
       continue;
     }
     if (
@@ -1414,12 +1437,7 @@ export function selectProjectableDailyMetricDays(
     }
 
     const value = point.value;
-    if (
-      typeof value !== "number"
-      || !Number.isFinite(value)
-      || value < spec.minValue
-      || value > spec.maxValue
-    ) {
+    if (!isProjectableDailyMetricValue(value, spec)) {
       continue;
     }
 

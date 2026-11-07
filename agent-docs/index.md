@@ -1,4 +1,6 @@
 ReviewGPT runs for risky behavior and core architecture, not for size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
+Checkpoint step timings, the archive plan/build split, and unconditional residue
+pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
 
 Runtime logs are diagnostic only: an accepted-attempt failure log no longer triggers a recheck, and its historical rows stay parseable; [the hosted runtime protocol](references/hosted-runtime-protocol.md) owns that contract, and [the removal plan](exec-plans/completed/2026-11-06-sm-f11b-log-triggered-wake.md) records the drain evidence.
 
@@ -1157,7 +1159,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Group newsletter behavior. | Group newsletter behavior | Medium | 2026-08-22 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group diagnostics, plain metric permissions with 90-date retention, source coverage, and consumer-first rollout limits. | Group challenge diagnostics | High | 2026-09-18 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group diagnostics, plain metric permissions with 90-date retention (180 for the four pair-board metrics), source coverage, and consumer-first rollout limits. | Group challenge diagnostics | High | 2026-09-18 |
 | `agent-docs/exec-plans/completed/2026-09-17-group-three-month-history.md` | Completed 90-day group-sharing implementation, consent proof, review and rollout constraints. | Historical implementation evidence | Low | 2026-09-18 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Group challenge standings response card. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships. | Hosted group self-awareness | High | 2026-08-29 |
@@ -1965,3 +1967,7 @@ Ordinary reminder input replay is recorded in the [execution plan](exec-plans/co
 Typed companion VO2 input, its consumer-first release and backend proof are
 recorded in the [execution plan](exec-plans/completed/2026-11-06-companion-vo2-reading-input.md).
 The measurement action and rollback floor are owned by `../ARCHITECTURE.md`.
+
+Deferred device cron history deletion and the thin-session safety check
+are recorded in [the retention assessment](exec-plans/completed/2026-11-06-retire-settled-device-cron.md).
+The current family policies remain in `docs/contracts/06-hosted-workspace-file-count.md`.

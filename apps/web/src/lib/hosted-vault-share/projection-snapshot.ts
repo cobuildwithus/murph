@@ -10,6 +10,7 @@ import {
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareHistoryDays,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -126,7 +127,7 @@ export async function encryptHostedVaultShareProjectionSnapshot(input: {
 
 export async function decryptHostedVaultShareProjectionSnapshots(input: {
   nowMs?: number;
-  requestedHistoryDays?: 7 | 90;
+  requestedHistoryDays?: HostedVaultShareHistoryDays;
   entries: readonly HostedVaultShareProjectionSnapshotEntry[];
   prisma?: HostedSecureBoxPrismaClient;
 }): Promise<Array<HostedVaultShareDeliveryRecord[] | null>> {
@@ -165,7 +166,7 @@ export async function decryptHostedVaultShareProjectionSnapshots(input: {
     // Old snapshots remain usable for ordinary reads. Never infer a timezone
     // or promise longer history until a compatible publisher replaces them.
     if (!snapshot.memberTimeZone) {
-      return input.requestedHistoryDays === 90 ? null : snapshot.records;
+      return (input.requestedHistoryDays ?? 7) > 7 ? null : snapshot.records;
     }
     return filterHostedVaultShareHistoryRecords({
       nowMs: input.nowMs,

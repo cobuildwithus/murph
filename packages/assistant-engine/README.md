@@ -693,6 +693,7 @@ Cancellation leaves its one announcement to the lifecycle owner, even when live.
 
 Kickoff offers share the pair wording: a strictly earlier live game suppresses
 the offer, simultaneous starts each offer, and settled games do not suppress.
+Players 3 or more hours apart get no offer and no mention of reminders.
 Offers never schedule. On explicit individual consent, existing automations save
 the exact game and requester IDs, local time, timezone and bounded duration.
 Each occurrence calls scheduled `read_game`, requires an OK result, the exact

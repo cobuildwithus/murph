@@ -178,7 +178,6 @@ export interface AssistantHostedToolContext {
     sha256: string
     sizeBytes: number
   }): Promise<boolean>
-  currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
@@ -308,22 +307,19 @@ export function createAssistantHostedToolContext(input: {
       })
     : null
   const groupEmailEffect = groupEmailOutboxTool
-  const readRawCurrentAssistantInputId = () =>
-    executionContext?.currentAssistantInputId?.() ?? null
   const readCurrentHostedImageCompletionEffectScope = ():
     AssistantHostedImageCompletionEffectScope | null => {
     const deliveryContext = readDeliveryContext()
     const restriction =
       deliveryContext.messageInput.hostedImageCompletionEffectRestriction ?? null
-    const currentAssistantInputId = readRawCurrentAssistantInputId()
-    const acceptedUserActionInputIds =
-      input.getUserActionAcceptedInputIds?.() ?? []
+    // A newer accepted input lifts the restriction. This reads the list itself
+    // because readCurrentUserActionScope depends on this reader.
+    const latestAcceptedInputId = input.getUserActionAcceptedInputIds?.().at(-1)
     if (
       restriction === null ||
       (
-        currentAssistantInputId !== null &&
-        currentAssistantInputId !== restriction.completionAssistantInputId &&
-        acceptedUserActionInputIds.includes(currentAssistantInputId)
+        latestAcceptedInputId !== undefined &&
+        latestAcceptedInputId !== restriction.completionAssistantInputId
       )
     ) {
       return null
@@ -334,18 +330,6 @@ export function createAssistantHostedToolContext(input: {
       completionAssistantInputId: restriction.completionAssistantInputId,
       exactMedia: restriction.exactMedia,
     }
-  }
-  const readCurrentUserActionAssistantInputId = () => {
-    if (readCurrentHostedImageCompletionEffectScope() !== null) {
-      return null
-    }
-    const currentAssistantInputId = readRawCurrentAssistantInputId()
-    const userActionAcceptedInputIds =
-      input.getUserActionAcceptedInputIds?.() ?? []
-    return currentAssistantInputId !== null &&
-      userActionAcceptedInputIds.at(-1) === currentAssistantInputId
-      ? currentAssistantInputId
-      : null
   }
   const readCurrentUserActionScope = (): AssistantHostedUserActionScope | null => {
     if (readCurrentHostedImageCompletionEffectScope() !== null) {
@@ -369,6 +353,8 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     }
   }
+  const readCurrentUserActionAssistantInputId = () =>
+    readCurrentUserActionScope()?.acceptedInputIds.at(-1) ?? null
   const prepareGameLore = async (): Promise<{ fingerprint: string; guidance: string } | null> => {
     const explicit = executionContext?.gameRecapScope ?? executionContext?.gameMissedCheckInScope ?? null
     if (explicit) return { fingerprint: explicit.pairFingerprint, guidance: '' }
@@ -549,10 +535,6 @@ export function createAssistantHostedToolContext(input: {
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
-    currentAssistantInputId: () =>
-      readCurrentHostedImageCompletionEffectScope() === null
-        ? readRawCurrentAssistantInputId()
-        : null,
     claimSubscriptionAssistantInputId: () => {
       if (subscriptionActionClaimed) {
         return null

@@ -8192,7 +8192,7 @@ describe('scheduled poll advertisement', () => {
       bindingDeliveryTarget: 'authorized-binding', deliveryTarget: 'authorized-fallback', threadId: 'saved-old-thread',
     }
     const context = createAssistantHostedToolContext({
-      executionContext: { memberId: 'member_synthetic', userEnvKeys: [], pollTool: { request }, currentAssistantInputId: () => inputId },
+      executionContext: { memberId: 'member_synthetic', userEnvKeys: [], pollTool: { request } },
       getUserActionAcceptedInputIds: () => acceptedInputIds, getConversationScope: () => 'direct',
       messageInput, session: createSession(),
     })

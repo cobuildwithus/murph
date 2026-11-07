@@ -42,6 +42,7 @@ import type {
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareDailyMetricProjectionSpec,
+  hostedVaultShareRetainedHistoryDays,
   isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -2043,8 +2044,10 @@ function renderHostedGroupJoinOfferScopeSentence(
     );
   }
 
-  if (projectionScopes.some((scope) => isHostedVaultShareRecentDateProjectionKind(scope.projectionKind))) {
-    disclosures.push("health sharing covers 90 days, including today and the previous 89 days");
+  const recentDateKinds = projectionScopes.map((scope) => scope.projectionKind).filter(isHostedVaultShareRecentDateProjectionKind);
+  if (recentDateKinds.length > 0) {
+    const days = Math.max(...recentDateKinds.map(hostedVaultShareRetainedHistoryDays));
+    disclosures.push(`health sharing covers up to ${days} days, including today and the previous ${days - 1} days`);
     disclosures.push("only available data is shared; older provider history is not fetched");
   }
   return disclosures.length > 0

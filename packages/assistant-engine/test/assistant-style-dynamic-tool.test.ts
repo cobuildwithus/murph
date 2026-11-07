@@ -85,7 +85,7 @@ describe('assistant style dynamic tool', () => {
   it.each(['direct', 'group'] as const)('keeps style intent bound to its source in a %s batch', async (conversationScope) => {
     const first = `ain_${'1'.repeat(32)}`
     const later = `ain_${'2'.repeat(32)}`
-    const options = { hosted: true, assistantInputId: later, conversationScope, acceptedInputIds: () => [first, later] }
+    const options = { hosted: true, conversationScope, acceptedInputIds: () => [first, later] }
     // The instruction retains its identity for Web's stale-write comparison.
     hostedMocks.requestPersonalization.mockResolvedValue({
       action: 'update_personality',
@@ -346,7 +346,7 @@ describe('assistant style dynamic tool', () => {
   })
 
   it('fails hosted mutations closed without provider-accepted input authority', async () => {
-    const hostedWithoutInput = { assistantInputId: null, hosted: true }
+    const hostedWithoutInput = { acceptedInputIds: () => [], hosted: true }
     const show = await executeStyleRequest({ action: 'show' }, hostedWithoutInput)
     const set = await executeStyleRequest(
       { action: 'set', setting: 'humor', value: 8 },
@@ -603,7 +603,6 @@ function readStyleRequest(argumentsValue: unknown, toolCallId?: string) {
 async function executeStyleRequest(
   argumentsValue: unknown,
   options: {
-    assistantInputId?: string | null
     acceptedInputIds?: () => readonly string[]
     conversationScope?: 'direct' | 'group'
     hosted?: boolean
@@ -628,20 +627,15 @@ async function executeStyleRequest(
       ? null
       : {
           computerToolsAvailable: false,
-          ...(options.acceptedInputIds ? {
-            currentUserActionScope: () => ({
-              acceptedInputIds: options.acceptedInputIds!(),
-              conversationId: 'conversation_style',
-              conversationScope: options.conversationScope ?? 'direct',
-              inboundMailboxItemIds: [],
-              originSessionId: 'session_style',
-              recipientKey: 'recipient_style',
-            }),
-          } : {}),
-          currentAssistantInputId: () =>
-            options.assistantInputId === undefined
-              ? 'ain_0123456789abcdef0123456789abcdef'
-              : options.assistantInputId,
+          currentUserActionScope: () => ({
+            acceptedInputIds: options.acceptedInputIds?.()
+              ?? ['ain_0123456789abcdef0123456789abcdef'],
+            conversationId: 'conversation_style',
+            conversationScope: options.conversationScope ?? 'direct',
+            inboundMailboxItemIds: [],
+            originSessionId: 'session_style',
+            recipientKey: 'recipient_style',
+          }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           ...(options.personalizationAvailable === false

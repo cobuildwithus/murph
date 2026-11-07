@@ -3298,6 +3298,9 @@ async function runCodexAppServerTurnOnProcess(
   let firstAssistantResponseCompleted = false
   let trailingSteerCandidate: CodexAppServerTrailingResponseCandidate | null = null
   let completedUserMessageOrdinal = -1
+  // Set before any await and never cleared. A plan change must not run once a
+  // follow-up has tried to join the turn, even if that steer fails or is unconsumed.
+  let steerAttempted = false
   const workoutDeliveryContext = createCodexWorkoutDeliveryContextTracker({
     contextReferences: input.trustedContextReferences,
   })
@@ -4863,6 +4866,7 @@ async function runCodexAppServerTurnOnProcess(
               )
             ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
+          providerTurnSteered: steerAttempted,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:
             input.onboardingFirstReadCompletionTransitionAvailable ?? false,
@@ -5741,6 +5745,7 @@ async function runCodexAppServerTurnOnProcess(
   const steerLiveTurn = async (
     steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
   ): Promise<void> => {
+    steerAttempted = true
     const liveTurn = requireLiveTurnIds()
     const preparedSteerImages = await materializeCodexImages({
       images: normalizeCodexAppServerImageDetails({

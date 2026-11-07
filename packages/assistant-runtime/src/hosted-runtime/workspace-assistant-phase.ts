@@ -390,7 +390,6 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
-  currentAssistantInputId?: () => string | null;
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null;
   signal?: AbortSignal | null;
 }
@@ -1795,11 +1794,6 @@ export async function runHostedWorkspaceAssistantPhase(
             signal: channelAbortController.signal,
           });
         },
-        ...(input.currentAssistantInputId
-          ? {
-              currentAssistantInputId: input.currentAssistantInputId,
-            }
-          : {}),
         assistantConfigurationTool:
           input.runtime.platform.assistantConfigurationToolPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,

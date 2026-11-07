@@ -1,5 +1,5 @@
 import "server-only";
-import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
+import { hostedVaultShareRetainedHistoryDays, sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -125,7 +125,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   },
   "resting-heart-rate-days.v0": {
     label: "Resting heart rate",
-    description: "Shares 90 days of resting heart rate by source.",
+    description: "Shares 180 days of resting heart rate by source.",
   },
   "sleep-times.v0": {
     label: "Sleep timing",
@@ -133,7 +133,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   },
   "sleep-duration-days.v0": {
     label: "Sleep duration",
-    description: "Shares 90 days of total sleep duration by source.",
+    description: "Shares 180 days of total sleep duration by source.",
   },
   "deep-sleep-days.v0": {
     label: "Deep sleep",
@@ -153,11 +153,11 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   },
   "steps-days.v0": {
     label: "Steps",
-    description: "Shares 90 days of step counts by source.",
+    description: "Shares 180 days of step counts by source.",
   },
   "vo2-max-days.v0": {
     label: "VO2 max",
-    description: "Shares 90 days of VO2 max by source.",
+    description: "Shares 180 days of VO2 max by source.",
   },
   "workout-days.v0": {
     label: "Workout summaries",
@@ -454,7 +454,8 @@ function hostedVaultShareProjectionScopeDisplay(
   const display = baseHostedVaultShareProjectionScopeDisplay(scope);
   const descriptions = [display.description];
   if (isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)) {
-    descriptions.push("Includes today and the previous 89 days. Only available data is shared.");
+    const days = hostedVaultShareRetainedHistoryDays(scope.projectionKind);
+    descriptions.push(`Includes today and the previous ${days - 1} days. Only available data is shared.`);
   }
   if (sharesCompanionContact(scope.projectionKind)) {
     descriptions.push("Apple Health sharing includes when the Murph app last checked in.");

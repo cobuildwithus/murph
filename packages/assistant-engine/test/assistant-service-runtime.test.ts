@@ -3685,7 +3685,6 @@ describe("assistant execution context normalization", () => {
     const assertTurnCommitAuthority = async function (this: unknown) {
       receivers.push(this);
     };
-    const currentAssistantInputId = () => "input-synthetic";
     const recordUsage = async () => {};
     const launcher = { launch: () => "started" as const };
     const hosted: AssistantHostedExecutionContext = {
@@ -3709,10 +3708,6 @@ describe("assistant execution context normalization", () => {
         reads.push("assertTurnCommitAuthority");
         return assertTurnCommitAuthority;
       },
-      get currentAssistantInputId() {
-        reads.push("currentAssistantInputId");
-        return currentAssistantInputId;
-      },
       get imageGenerationLauncher() {
         reads.push("imageGenerationLauncher");
         return launcher;
@@ -3727,14 +3722,12 @@ describe("assistant execution context normalization", () => {
       "memberId", "deviceTool", "device.request", "device.request",
       "releaseSha", "usageRecorder",
       "assertTurnCommitAuthority", "assertTurnCommitAuthority",
-      "currentAssistantInputId", "currentAssistantInputId",
       "imageGenerationLauncher", "imageGenerationLauncher", "userEnvKeys",
     ]);
     expect(Object.keys(normalized!)).toEqual([
-      "assertTurnCommitAuthority", "currentAssistantInputId", "imageGenerationLauncher",
+      "assertTurnCommitAuthority", "imageGenerationLauncher",
       "deviceTool", "releaseSha", "usageRecorder", "memberId", "userEnvKeys",
     ]);
-    expect(normalized?.currentAssistantInputId).toBe(currentAssistantInputId);
     expect(normalized?.usageRecorder?.recordUsage).toBe(recordUsage);
     expect(normalized?.imageGenerationLauncher).toBe(launcher);
     const boundAuthority = normalized?.assertTurnCommitAuthority;

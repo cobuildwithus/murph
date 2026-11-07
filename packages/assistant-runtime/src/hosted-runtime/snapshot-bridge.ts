@@ -313,6 +313,17 @@ const HOSTED_WORKSPACE_V2_SNAPSHOT_MODE = "workspace_snapshot_v2";
 
 interface HostedWorkspaceSnapshotTimingDetails
   extends HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
+  snapshotLeaseReadBeforeSnapshotElapsedMs?: number;
+  snapshotRuntimeSymlinkPruneElapsedMs?: number;
+  snapshotTerminalWriteOperationPruneElapsedMs?: number;
+  snapshotGeneratedDeliveryPruneElapsedMs?: number;
+  snapshotPendingInputCompactionElapsedMs?: number;
+  snapshotAssistantRuntimeResiduePruneElapsedMs?: number;
+  snapshotMediaReferencesPublishElapsedMs?: number;
+  snapshotArchivePlanElapsedMs?: number;
+  snapshotLeaseReadBeforeUploadElapsedMs?: number;
+  snapshotLeaseReadBeforeCheckpointElapsedMs?: number;
+  snapshotTemporaryCleanupElapsedMs?: number;
   snapshotArchiveBuildElapsedMs?: number;
   snapshotDirectR2UploadElapsedMs?: number;
   snapshotSessionCompleteElapsedMs?: number;
@@ -380,7 +391,11 @@ async function createHostedWorkspaceV2Snapshot(
 
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
-      lease: await input.readCurrentLease(),
+      lease: await runHostedWorkspaceSnapshotMeasuredStep({
+        key: "snapshotLeaseReadBeforeSnapshotElapsedMs",
+        run: async () => await input.readCurrentLease(),
+        timings: snapshotTimings,
+      }),
       request: input.request,
       stage: "before_snapshot",
       userId: input.userId,
@@ -406,10 +421,14 @@ async function createHostedWorkspaceV2Snapshot(
     const activeSnapshotSession = snapshotSession;
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     snapshotStage = "archive";
-    ({ prunedRuntimeSymlinkCount } = await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
-      durableRoot,
-      operatorHomeRoot,
-      signal: input.signal,
+    ({ prunedRuntimeSymlinkCount } = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotRuntimeSymlinkPruneElapsedMs",
+      run: async () => await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
+        durableRoot,
+        operatorHomeRoot,
+        signal: input.signal,
+      }),
+      timings: snapshotTimings,
     }));
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (prunedRuntimeSymlinkCount > 0) {
@@ -427,10 +446,14 @@ async function createHostedWorkspaceV2Snapshot(
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
-      terminalWriteOperationPruneResult = await pruneTerminalWriteOperationRecords({
-        checkpointedAfter: input.previousWorkspaceCheckpointedAt,
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
+      terminalWriteOperationPruneResult = await runHostedWorkspaceSnapshotMeasuredStep({
+        key: "snapshotTerminalWriteOperationPruneElapsedMs",
+        run: async () => await pruneTerminalWriteOperationRecords({
+          checkpointedAfter: input.previousWorkspaceCheckpointedAt,
+          signal: input.signal,
+          vaultRoot: input.vaultRoot,
+        }),
+        timings: snapshotTimings,
       });
       if (hasTerminalWriteOperationPrunedFiles(terminalWriteOperationPruneResult)) {
         emitHostedExecutionStructuredLog({
@@ -465,9 +488,13 @@ async function createHostedWorkspaceV2Snapshot(
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
       assistantGeneratedDeliveryPruneResult =
-        await pruneAssistantGeneratedDeliveryResidue({
-          signal: input.signal,
-          vault: input.vaultRoot,
+        await runHostedWorkspaceSnapshotMeasuredStep({
+          key: "snapshotGeneratedDeliveryPruneElapsedMs",
+          run: async () => await pruneAssistantGeneratedDeliveryResidue({
+            signal: input.signal,
+            vault: input.vaultRoot,
+          }),
+          timings: snapshotTimings,
         });
       if (
         assistantGeneratedDeliveryPruneResult.generatedDeliveryFilesPruned >
@@ -536,18 +563,26 @@ async function createHostedWorkspaceV2Snapshot(
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
-      const pendingInputIds = await compactHostedUnresolvedAssistantInputIds({
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
+      const pendingInputIds = await runHostedWorkspaceSnapshotMeasuredStep({
+        key: "snapshotPendingInputCompactionElapsedMs",
+        run: async () => await compactHostedUnresolvedAssistantInputIds({
+          signal: input.signal,
+          vaultRoot: input.vaultRoot,
+        }),
+        timings: snapshotTimings,
       });
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-      assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
-        now: new Date(),
-        pendingInputIds,
-        protectPendingProviderCleanupEvidence:
-          !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
-        signal: input.signal,
-        vault: input.vaultRoot,
+      assistantRuntimeResiduePruneResult = await runHostedWorkspaceSnapshotMeasuredStep({
+        key: "snapshotAssistantRuntimeResiduePruneElapsedMs",
+        run: async () => await pruneAssistantRuntimeResidue({
+          now: new Date(),
+          pendingInputIds,
+          protectPendingProviderCleanupEvidence:
+            !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
+          signal: input.signal,
+          vault: input.vaultRoot,
+        }),
+        timings: snapshotTimings,
       });
       if (
         hasAssistantRuntimeResiduePrunedFiles(
@@ -584,15 +619,18 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    const mediaReferences =
-      await publishHostedWorkspaceMediaReferencesForLoggedSnapshot({
+    const mediaReferences = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotMediaReferencesPublishElapsedMs",
+      run: async () => await publishHostedWorkspaceMediaReferencesForLoggedSnapshot({
         platform: input.platform,
         signal: input.signal,
         userId: input.userId,
         vaultRoot: input.vaultRoot,
-      });
-    const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
-      key: "snapshotArchiveBuildElapsedMs",
+      }),
+      timings: snapshotTimings,
+    });
+    const archivePlan = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotArchivePlanElapsedMs",
       run: async () => {
         assertHostedWorkspaceSnapshotConstructionLive(input.signal);
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
@@ -623,20 +661,25 @@ async function createHostedWorkspaceV2Snapshot(
         if (archivePlan.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
           throw new RangeError("Hosted workspace snapshot exceeds the total plain size limit.");
         }
-        return await input.snapshotArchiveBuilder.buildEncryptedSnapshot({
-          aad: activeSnapshotSession.encryption.aad,
-          archiveEntries: archivePlan.entries,
-          dataKey: activeSnapshotSession.encryption.dataKeyBase64,
-          durableRoot,
-          ivBase64: activeSnapshotSession.encryption.ivBase64,
-          maxEncryptedBytes: Math.min(
-            activeSnapshotSession.limits.maxSinglePartEncryptedBytes,
-            HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-          ),
-          outputDir: resolveWorkspaceScratchRoot(input.vaultRoot),
-          signal: input.signal,
-        });
+        return archivePlan;
       },
+      timings: snapshotTimings,
+    });
+    const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotArchiveBuildElapsedMs",
+      run: async () => await input.snapshotArchiveBuilder.buildEncryptedSnapshot({
+        aad: activeSnapshotSession.encryption.aad,
+        archiveEntries: archivePlan.entries,
+        dataKey: activeSnapshotSession.encryption.dataKeyBase64,
+        durableRoot,
+        ivBase64: activeSnapshotSession.encryption.ivBase64,
+        maxEncryptedBytes: Math.min(
+          activeSnapshotSession.limits.maxSinglePartEncryptedBytes,
+          HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        ),
+        outputDir: resolveWorkspaceScratchRoot(input.vaultRoot),
+        signal: input.signal,
+      }),
       timings: snapshotTimings,
     });
     encryptedTemporaryDirectoryPath = encrypted.temporaryDirectoryPath;
@@ -672,7 +715,11 @@ async function createHostedWorkspaceV2Snapshot(
     snapshotStage = "upload";
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
-      lease: await input.readCurrentLease(),
+      lease: await runHostedWorkspaceSnapshotMeasuredStep({
+        key: "snapshotLeaseReadBeforeUploadElapsedMs",
+        run: async () => await input.readCurrentLease(),
+        timings: snapshotTimings,
+      }),
       request: input.request,
       stage: "before_direct_r2_put",
       userId: input.userId,
@@ -700,7 +747,11 @@ async function createHostedWorkspaceV2Snapshot(
     snapshotStage = "checkpoint";
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
-      lease: await input.readCurrentLease(),
+      lease: await runHostedWorkspaceSnapshotMeasuredStep({
+        key: "snapshotLeaseReadBeforeCheckpointElapsedMs",
+        run: async () => await input.readCurrentLease(),
+        timings: snapshotTimings,
+      }),
       request: input.request,
       stage: "before_web_checkpoint",
       userId: input.userId,
@@ -877,10 +928,15 @@ async function createHostedWorkspaceV2Snapshot(
     throw controlInterruptionError ?? propagatedError;
   } finally {
     if (encryptedTemporaryDirectoryPath) {
+      const temporaryDirectoryPath = encryptedTemporaryDirectoryPath;
       try {
-        await rm(encryptedTemporaryDirectoryPath, {
-          force: true,
-          recursive: true,
+        await runHostedWorkspaceSnapshotMeasuredStep({
+          key: "snapshotTemporaryCleanupElapsedMs",
+          run: async () => await rm(temporaryDirectoryPath, {
+            force: true,
+            recursive: true,
+          }),
+          timings: snapshotTimings,
         });
       } catch (cleanupError) {
         emitHostedExecutionStructuredLog({
@@ -1351,22 +1407,19 @@ function countAssistantRuntimeResiduePrunedFiles(
 function createAssistantRuntimeResiduePruneLogDetails(
   result: AssistantRuntimeResiduePruneResult | null,
 ): HostedRuntimeRedactedJson {
-  if (!result || !hasAssistantRuntimeResiduePrunedFiles(result)) {
-    return {};
-  }
   return {
     prunedAssistantRuntimeAcceptedTurnInputJournalCount:
-      result.acceptedTurnInputJournalsPruned,
+      result?.acceptedTurnInputJournalsPruned ?? 0,
     prunedAssistantRuntimeAutoReplyEvidenceFileCount:
-      result.autoReplyEvidenceFilesPruned,
+      result?.autoReplyEvidenceFilesPruned ?? 0,
     prunedAssistantRuntimeAutoReplyEvidenceGroupCount:
-      result.autoReplyEvidenceGroupsPruned,
+      result?.autoReplyEvidenceGroupsPruned ?? 0,
     prunedAssistantRuntimeAutoReplyIntentProvenanceCount:
-      result.autoReplyIntentProvenancePruned,
+      result?.autoReplyIntentProvenancePruned ?? 0,
     prunedAssistantRuntimeHostedMailboxInputItemMappingCount:
-      result.hostedMailboxInputItemMappingsPruned,
-    prunedAssistantRuntimeInputEventCount: result.inputEventsPruned,
-    prunedAssistantRuntimeReceiptCount: result.receiptsPruned,
+      result?.hostedMailboxInputItemMappingsPruned ?? 0,
+    prunedAssistantRuntimeInputEventCount: result?.inputEventsPruned ?? 0,
+    prunedAssistantRuntimeReceiptCount: result?.receiptsPruned ?? 0,
     prunedAssistantRuntimeResidueFileCount:
       countAssistantRuntimeResiduePrunedFiles(result),
   };
@@ -1510,22 +1563,14 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
     ...createAssistantGeneratedDeliveryResiduePruneLogDetails(
       input.assistantGeneratedDeliveryPruneResult,
     ),
-    ...(
-      hasAssistantRuntimeResiduePrunedFiles(
-        input.assistantRuntimeResiduePruneResult,
-      ) ||
-      (input.assistantGeneratedDeliveryPruneResult
-        ?.generatedDeliveryFilesPruned ?? 0) > 0
-        ? {
-            prunedAssistantRuntimeResidueFileCount:
-              countAssistantRuntimeResiduePrunedFiles(
-                input.assistantRuntimeResiduePruneResult,
-              ) +
-              (input.assistantGeneratedDeliveryPruneResult
-                ?.generatedDeliveryFilesPruned ?? 0),
-          }
-        : {}
-    ),
+    assistantRuntimeResiduePruneAttemptedCount:
+      input.timingDetails.snapshotAssistantRuntimeResiduePruneElapsedMs === undefined ? 0 : 1,
+    assistantRuntimeResiduePruneCompletedCount:
+      input.assistantRuntimeResiduePruneResult === null ? 0 : 1,
+    prunedAssistantRuntimeResidueFileCount:
+      countAssistantRuntimeResiduePrunedFiles(input.assistantRuntimeResiduePruneResult) +
+      (input.assistantGeneratedDeliveryPruneResult?.generatedDeliveryFilesPruned ?? 0),
+    snapshotAssistantRuntimeResiduePruneElapsedMs: 0,
     ...input.timingDetails,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,

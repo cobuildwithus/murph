@@ -2405,7 +2405,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     let activeInvocation = 1;
     let combinedPhaseInputIds: readonly string[] = [];
     let combinedPhaseSessionIds: readonly (string | null)[] = [];
-    let currentInputAtProviderAcceptance: string | null = null;
     let freshInputId: string | null = null;
     let imageProviderInvocationCount = 0;
     let interruptedPhaseInputIds: readonly string[] = [];
@@ -2740,8 +2739,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                               }))?.conversation?.sessionId ?? null
                             ),
                           );
-                          currentInputAtProviderAcceptance =
-                            phaseInput.currentAssistantInputId?.() ?? null;
                         }
                         return release;
                       },
@@ -2850,7 +2847,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         null,
       ]);
       assert.ok(combinedPhaseSessionIds[0]);
-      assert.equal(currentInputAtProviderAcceptance, newestFreshInputId);
       assert.equal(linqRequests.length, 2, events.join(","));
       assert.equal(linqRequestPaths.length, 2);
       for (const requestPath of linqRequestPaths) {
