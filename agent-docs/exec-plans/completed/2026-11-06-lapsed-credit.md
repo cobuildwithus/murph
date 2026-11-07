@@ -152,3 +152,11 @@ was not established as safe for overlapping independent calls; concurrency proof
 covers the actual managed callback protocol and locked gate/settlement path.
 The local test database and generated .swc cache are removed at handoff.
 Completed: 2026-11-06
+
+## Parent review and deep review outcomes
+
+- Mutation checks on real PostgreSQL: a stale plan allowance fails 10 tests, credit funding rooms fails 6, AI access at zero balance fails 13, and the usage gate at zero fails 7.
+- Accepted limit: settlement uses current funding, so a turn in flight when a plan ends is charged to credit, and credit-only spend settling after resubscribing lands on the plan. Comparing the spend time to the billing period would be worse: an immediate cancel keeps a future period end, so credit spend would charge the dead plan and credit would never drain. A correct fix needs funding persisted at admission. The exposure is one in-flight turn, charged once.
+- Fixed: running out of credit while a message was queued left it with no notice. Settlement now sends the usual out-of-usage notice once; later messages get the billing notice.
+- Rejected: Settings shows Starter for a lapsed member with credit. They resolve as a free member with a balance, so the label matches the rule, and Settings still offers a way to restart a plan.
+- `group-membership-participants.ts` also passes `sponsorshipOnly`, so no room path relies on inference.

@@ -125,7 +125,8 @@ describe.skipIf(!enabled)("lapsed personal credit on PostgreSQL", () => {
       if (!decision.allowed) return false;
       const record = usage(memberId);
       await recordHostedAiUsageRecords({ prisma: tx, trustedUserId: memberId, usage: [record] });
-      expect(await settleHostedAiUsageForAllowanceTx({ memberId, now, record, tx })).toMatchObject({ platformAiUsageAllowedAfter: false, limitNoticeCandidate: null });
+      // A queued message gets no reply here, so the settlement itself must tell the member.
+      expect(await settleHostedAiUsageForAllowanceTx({ memberId, now, record, tx })).toMatchObject({ platformAiUsageAllowedAfter: false, limitNoticeCandidate: { memberId, userNotice: { code: "starter_usage_limit_reached" } } });
       return true;
     }, { timeout: 15_000 });
     expect((await Promise.all([attempt(), attempt()])).sort()).toEqual([false, true]);

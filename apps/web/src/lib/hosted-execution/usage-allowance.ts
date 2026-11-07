@@ -1158,8 +1158,6 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     usageCreditBalanceUsdMicros: usageCreditProjection.usageCreditBalanceUsdMicros,
     tx: input.tx,
   });
-  const lapsedPersonalCredit = !memberState.threadContainer
-    && allowanceAccess.creditOnly;
   const threadContainerAccessActive = input.allowanceBeneficiaryMemberId && memberState.threadContainer
     ? true // Charge already-admitted work even if its game or room changed.
     : await hasHostedAiUsageThreadContainerAccess({
@@ -1216,7 +1214,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return { ...settlement, limitNoticeCandidate: !lapsedPersonalCredit && settlement.limitNoticeCandidate
+    return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
       ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
   }
   const priced = operatorFunded
@@ -1261,7 +1259,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     sourceUsageId: input.record.usageId,
     tx: input.tx,
   });
-  return { ...settlement, limitNoticeCandidate: !lapsedPersonalCredit && settlement.limitNoticeCandidate
+  return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
     ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
 }
 
