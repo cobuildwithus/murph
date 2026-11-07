@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "games-end-at-the-last-post",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Games end when the last photo is in",
+    "summary": "Once you've both posted on the last day, the game ends right away and Murph starts your recap, instead of waiting until 3am.",
+    "details": "If someone misses the last day, the game ends overnight and Murph's recap arrives in the morning.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4720]
+  }
+}
