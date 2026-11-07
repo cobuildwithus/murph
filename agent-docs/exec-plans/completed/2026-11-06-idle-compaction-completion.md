@@ -1,6 +1,6 @@
 # Restore idle compaction independently of scheduled wakes
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -23,7 +23,7 @@ The old shared pending-work predicate incorrectly made all near scheduled wakes 
 - Focused tests passed before integration: 95 tests across four changed boundary suites.
 - Current-base proof: 300 runtime tests passed (6 opt-in skips), 2 engine compaction tests passed, 4 changelog rendering tests passed; workspace typecheck and complexity passed (all exit 0).
 - Native Codex app-server proof passed using a synthetic local provider: compaction, continuation, and no repeated idle compaction (exit 0). Exact-head CI and external review remain pending.
-- The implementation lane independently runs the full runtime suite. Its first run had a corrected test-hook failure; do not count it as green.
+- The implementation lane finished with 4,402 runtime tests and 4,741 Cloudflare tests passing (exit 0). Its initial test-hook failure was corrected and the complete rerun passed. These runs precede current-main integration and supplement the integrated focused proof.
 
 ## Product UX and durability
 
@@ -39,4 +39,5 @@ Public release note: `quieter-long-conversations`. Final ReviewGPT is required f
 
 ## Publication handoff
 
-PR: https://github.com/cobuildwithus/murph/pull/4721. Local implementation and parent review are complete. The completion checkout owns this PR; the original implementation branch is retained unchanged. External review and CI remain completion gates.
+PR: https://github.com/cobuildwithus/murph/pull/4721. This record closes verified local implementation and parent candidate review. The completion checkout owns this PR; the original implementation branch is retained unchanged. At local closeout, exact-head CI and the Mountain-lane ReviewGPT waiter were active. External review, CI, merge, deployment, and live verification remain separate gates; this record does not claim they passed. The reviewed code candidate is `d30762a27ad466a2fc9760c27d61a544b9d659b5`; this closeout changes documentation only.
+Completed: 2026-11-06
