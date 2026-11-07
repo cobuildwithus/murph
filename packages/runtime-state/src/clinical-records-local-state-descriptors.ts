@@ -7,7 +7,7 @@ export const clinicalRecordsLocalStateDescriptors: readonly VaultLocalStatePathD
   defineLocalStateSubtreeDescriptor({
     classification: "operational",
     description:
-      "Bounded in-progress Clinical Records retrieval evidence must travel with hosted checkpoint recovery until canonical import terminalizes.",
+      "Bounded in-progress Clinical Records retrieval evidence must travel with hosted checkpoint recovery until canonical import terminalizes. Superseded extraction caches are disposable; idle maintenance preserves the current cache, pending index and job records.",
     owner: "vault-usecases-clinical-records",
     portability: "portable",
     rebuildable: false,

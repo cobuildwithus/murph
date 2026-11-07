@@ -1968,6 +1968,10 @@ Typed companion VO2 input, its consumer-first release and backend proof are
 recorded in the [execution plan](exec-plans/completed/2026-11-06-companion-vo2-reading-input.md).
 The measurement action and rollback floor are owned by `../ARCHITECTURE.md`.
 
+Obsolete clinical extraction cache cleanup and unused hot snapshot producer removal
+are recorded in [dead runtime weight](exec-plans/completed/2026-11-06-dead-runtime-weight.md).
+`../ARCHITECTURE.md` owns cache retention; staged-operation expiry remains excluded
+because age and canonical lock ownership do not prove abandonment.
 Deferred device cron history deletion and the thin-session safety check
 are recorded in [the retention assessment](exec-plans/completed/2026-11-06-retire-settled-device-cron.md).
 The current family policies remain in `docs/contracts/06-hosted-workspace-file-count.md`.

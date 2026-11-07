@@ -187,6 +187,37 @@ beforeEach(() => {
 });
 
 describe("runHostedIdleCheckpointMaintenance", () => {
+  it("removes only superseded clinical extraction caches during ordinary idle maintenance", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-obsolete-clinical-cache-"));
+    const enrichmentRoot = path.join(vaultRoot, ".runtime/operations/clinical-records/enrichment");
+    const obsolete = ["extraction-v1", "extraction-v2", "extraction-v3", "extraction-v9"];
+    const retained = ["extraction-v4/hash/1.json", "pending.json", "synthetic-job.json", "other/payload.json"];
+    try {
+      for (const relativePath of [...obsolete.map((version) => `${version}/hash/1.json`), ...retained]) {
+        await fs.mkdir(path.dirname(path.join(enrichmentRoot, relativePath)), { recursive: true });
+        await fs.writeFile(path.join(enrichmentRoot, relativePath), "synthetic evidence\n");
+      }
+      const input = {
+        credentialSource: "platform" as const,
+        memberId: "synthetic-member", model: null, pendingWork: false,
+        providerName: null, recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot, wakeSignal: null,
+      };
+      await runHostedIdleCheckpointMaintenance({ ...input, pendingWork: true });
+      for (const version of obsolete) await fs.access(path.join(enrichmentRoot, version));
+      await runHostedIdleCheckpointMaintenance(input);
+      await runHostedIdleCheckpointMaintenance(input);
+      for (const version of obsolete) {
+        await expect(fs.access(path.join(enrichmentRoot, version))).rejects.toMatchObject({ code: "ENOENT" });
+      }
+      for (const relativePath of retained) {
+        expect(await fs.readFile(path.join(enrichmentRoot, relativePath), "utf8")).toBe("synthetic evidence\n");
+      }
+    } finally {
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps idle-shutdown compaction below the hosted Codex auto-compact ceiling", () => {
     expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(50_000);
     expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(90_000);
@@ -372,6 +403,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   });
 
   it("does not retry unchanged cleanup failures inside the container idle window", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-idle-cleanup-retry-"));
     vi.useFakeTimers();
     const start = Date.parse("2026-07-05T00:00:00.000Z");
     runInboxMediaRetention.mockRejectedValue(new Error("synthetic unavailable cleanup"));
@@ -386,7 +418,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
           credentialSource: "platform", memberId: "member_synthetic_retention",
           model: null, providerName: null, pendingWork: false,
           recordUsage: null, resolveAssistantSessionId: null,
-          shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+          shutdownSignal: null, vaultRoot, wakeSignal: null,
         });
         expect(outcome.nextWakeAt).toBeDefined();
         now = Date.parse(outcome.nextWakeAt!);
@@ -397,6 +429,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     } finally {
       warn.mockRestore();
       vi.useRealTimers();
+      await fs.rm(vaultRoot, { recursive: true, force: true });
     }
   });
 

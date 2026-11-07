@@ -112,7 +112,6 @@ import {
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
-  snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
   writePendingAssistantRuntimeIssueRecord,
   writeHostedBundleTextFile,
