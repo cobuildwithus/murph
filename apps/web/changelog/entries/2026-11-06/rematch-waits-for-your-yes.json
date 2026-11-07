@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "rematch-waits-for-your-yes",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A rematch waits for your yes",
+    "summary": "If you and a friend ask for a rematch at the same moment, the second ask no longer starts a game on rules you haven't read.",
+    "details": "The first ask stays on Home, ready for you to Shake on it or suggest changes.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4699]
+  }
+}

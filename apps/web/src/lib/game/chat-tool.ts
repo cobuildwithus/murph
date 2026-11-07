@@ -200,13 +200,13 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   if (parseGameRecapEventId(eventId)?.gameId !== gameId) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const prisma = getPrisma();
   const unavailable = async (): Promise<HostedGameToolResponse> => ({ action: input.request.action, result: {
-    status: "unavailable", error: await isGameRecapGenerationRetired(prisma, gameId, eventId, input.memberId) ? GAME_RECAP_GENERATION_RETIRED : "recap_authority_unavailable",
+    status: "unavailable", error: await isGameRecapGenerationRetired(prisma, eventId, input.memberId) ? GAME_RECAP_GENERATION_RETIRED : "recap_authority_unavailable",
   } });
   await prisma.$transaction(async (tx) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
-  if (await isGameRecapGenerationRetired(prisma, gameId, eventId, input.memberId)) return { action: input.request.action, result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
+  if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: input.request.action, result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   const players = await requireExactGameChat(input.memberId, input.multiplayer);
   if (!supportsGameChatRoster(input, players)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const audience = input.multiplayer ? await readGameChatAudience(input.memberId) : undefined;
@@ -221,7 +221,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
   if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: gameRecapMessage(gameId, replay.chatLine) } };
-  if (await isGameRecapGenerationRetired(prisma, gameId, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
+  if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material });
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result, group: material.validation.group });

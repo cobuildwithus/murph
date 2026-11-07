@@ -91,7 +91,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     await Promise.all([first?.$disconnect(), second?.$disconnect(), observer?.$disconnect(), blockerClient?.$disconnect()]);
   });
 
-  async function member(billingStatus: "active" | "paused" = "active") {
+  async function member(billingStatus: "active" | "paused" | "not_started" = "active") {
     const id = `runtime_proof_${randomUUID()}`;
     members.push(id);
     await observer.hostedMember.create({ data: { id, billingStatus } });
@@ -202,7 +202,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } })).toEqual(expected);
   });
 
-  it.each(["paused", "suspended", "consent_revoked"] as const)("does not supply live admission for a %s member", async restriction => {
+  it.each(["not_started", "suspended", "consent_revoked"] as const)("does not supply live admission for a %s member", async restriction => {
     const userId = await member();
     const claimed = (await claim(userId)).owner;
     await prepareHostedRuntimeLaunch({ prisma: first, identity: identity(claimed),
@@ -216,8 +216,8 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       } });
       await revokeHostedConsentScope({ prisma: observer, memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE });
     } else {
-      await observer.hostedMember.update({ where: { id: userId }, data: restriction === "paused"
-        ? { billingStatus: "paused" } : { suspendedAt: new Date() } });
+      await observer.hostedMember.update({ where: { id: userId }, data: restriction === "not_started"
+        ? { billingStatus: "not_started" } : { suspendedAt: new Date() } });
     }
     expect(await readHostedRuntimeDirectWakeOwner({ prisma: first, userId })).toBeNull();
     expect(await claimHostedRuntime({ prisma: second, userId, processingMode: "default" }))
@@ -1299,15 +1299,15 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
   });
 
   it.each(["default", "system_mailbox", "inbox_media_retention"] as const)("preserves %s admission policy with a bounded game fallback", async processingMode => {
-    for (const policy of ["missing", "active", "paused", "suspended", "granted", "revoked"] as const) {
-      const userId = await member(policy === "paused" ? "paused" : "active");
+    for (const policy of ["missing", "active", "paused", "not_started", "suspended", "granted", "revoked"] as const) {
+      const userId = await member(policy === "paused" || policy === "not_started" ? policy : "active");
       if (policy === "missing") await observer.hostedMember.delete({ where: { id: userId } });
       if (policy === "suspended") await observer.hostedMember.update({ where: { id: userId }, data: { suspendedAt: new Date() } });
       if (policy === "granted" || policy === "revoked") await observer.hostedConsentGrant.create({ data: {
         memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: policy,
         documentVersionsJson: {}, source: "runtime_owner_proof", grantedAt: new Date(),
       } });
-      const allowed = policy === "active" || policy === "granted" || (policy === "paused" && processingMode === "inbox_media_retention");
+      const allowed = policy === "active" || policy === "granted" || policy === "paused" || (policy === "not_started" && processingMode === "inbox_media_retention");
       const operations: PrismaOperationTiming[] = [];
       const result = await runWithPrismaOperationTimings(operations, () => executeHostedRuntimeOwnerCommand({
         prisma: first, userId, command: { operation: "claim", processingMode },
@@ -1373,7 +1373,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       .toEqual({ cutover: "postgres", status: "blocked", reason: "admission" });
   });
 
-  it.each(["consent", "suspension", "billing"] as const)("keeps admitted provider work usable after %s changes and blocks the next run", async policy => {
+  it.each(["consent", "suspension", "billing"] as const)("keeps admitted provider work usable after %s changes and rechecks product policy for the next run", async policy => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);
     const tokenHash = "c".repeat(64);
@@ -1403,8 +1403,13 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     await expect(first.$transaction(tx => requireHostedRuntimeOwnerTx(tx, runtime)))
       .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
     await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime, runnerContainerName });
-    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default" }))
-      .toEqual({ cutover: "postgres", status: "blocked", reason: "admission" });
+    const next = await claimHostedRuntime({ prisma: first, userId, processingMode: "default" });
+    if (policy === "billing") {
+      expect(next).toMatchObject({ cutover: "postgres", status: "claimed" });
+      expect(await readHostedAiUsageGate({ memberId: userId, prisma: observer })).toMatchObject({ allowed: false });
+    } else {
+      expect(next).toEqual({ cutover: "postgres", status: "blocked", reason: "admission" });
+    }
   });
 
   it.each(["default", "inbox_media_retention"] as const)("serializes consent withdrawal with a waiting %s claim", async processingMode => {

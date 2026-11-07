@@ -4,6 +4,7 @@ import {
   classifyHostedLinqAckReaction,
   HOSTED_LINQ_ACK_REACTION_CLASSIFY_TIMEOUT_MS,
   HOSTED_LINQ_ACK_REACTION_HEAVY_THRESHOLD,
+  HOSTED_LINQ_ACK_REACTION_QUICK_KINDS,
   type HostedLinqAckReactionDecision,
   type HostedLinqAckReactionMessage,
 } from "./linq-ack-reaction-classifier";
@@ -33,6 +34,7 @@ type HostedLinqAckReactionOutcome =
   | "classifier_error"
   | "expired"
   | "heavy"
+  | "live_conversation"
   | "provider_ambiguous"
   | "provider_refused"
   | "quiet"
@@ -206,7 +208,7 @@ export async function runHostedLinqAckReactionBestEffort(input: {
   }
   classifierMs = Math.round(performance.now() - startedAt);
 
-  let claimedAt: Date | null;
+  let claimedAt: Date | "live_conversation" | null;
   try {
     if (decision && decision.heavy >= HOSTED_LINQ_ACK_REACTION_HEAVY_THRESHOLD) {
       await markHostedLinqAckReactionHeavy({
@@ -231,6 +233,7 @@ export async function runHostedLinqAckReactionBestEffort(input: {
       messageReceivedAt: input.messageReceivedAt,
       prisma: input.prisma,
       reaction: decision.emoji,
+      skipLiveConversation: HOSTED_LINQ_ACK_REACTION_QUICK_KINDS.includes(decision.kind),
     });
   } catch (error) {
     finish("store_error", { error });
@@ -238,6 +241,10 @@ export async function runHostedLinqAckReactionBestEffort(input: {
   }
   if (!claimedAt) {
     finish("answered_or_burst_taken");
+    return;
+  }
+  if (claimedAt === "live_conversation") {
+    finish("live_conversation");
     return;
   }
 

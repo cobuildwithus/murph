@@ -259,8 +259,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   advances the existing checkpoint deadline after foreground work, so waiting
   does not consume the request's ten-minute validity. An exact foreground reply
   prerequisite may also advance it; no later pass may rearm the deadline while
-  that reply waits. Internal assistant, maintenance, retention, cleanup,
-  projection, and scheduled wakes must not shorten it. A background delivery
+  that reply waits. Dispatching a transport-idempotent Linq reply boundary with a
+  follow-up or direct nutrition invitation also advances publication to now to
+  preserve its settlement state, even if delivery fails; runner loss
+  before publication finishes can still lose that obligation. Internal assistant,
+  maintenance, retention, cleanup, projection, and scheduled wakes must not shorten
+  it. A background delivery
   claim waiting for publication keeps that window within eight minutes of the
   claim, so stale-send recovery cannot judge a live, unsent claim. Only the exact
   assistant retry or follow-up wake projected directly by the current foreground

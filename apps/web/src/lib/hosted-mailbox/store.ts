@@ -21,7 +21,7 @@ import {
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
-  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+  getHostedSystemMailboxModelFreeKinds,
   HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES,
 } from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
@@ -1499,6 +1499,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
 }
 
 export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
+  assistantExecutionBlocked?: boolean;
   afterSeq: bigint | number | string;
   at: Date;
   modelFreeOnly?: true;
@@ -1530,7 +1531,7 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
         ? {
             AND: [{
               OR: [
-                { kind: { in: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.filter(
+                { kind: { in: getHostedSystemMailboxModelFreeKinds(input.assistantExecutionBlocked).filter(
                   (kind) => kind !== "assistant.notification.requested",
                 ) } },
                 ...HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.map(

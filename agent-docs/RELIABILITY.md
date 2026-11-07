@@ -3336,9 +3336,26 @@ Current product admission, delivery and native runtime safety rules remain.
   barrier. Generic non-idempotent transport work remains excluded from the hot
   pass, and generic notifications or unrelated pending outbox work cannot
   hitchhike. Fresh conversation input retains priority.
-  A Linq reply boundary carrying a parked file-approval cycle or post-acceptance
-  settlement obligation publishes its prepared claims and obligations before
-  any reply bubble can consume the input. A crash after publication but before
+  A finished reply has one route: its effects drain inline before the phase
+  returns, and only `publishBeforeDispatch` effects wait for publication. Once a
+  provider has accepted a send, one boundary keeps the accepted outcome: a later
+  cleanup, staging or wake-projection failure logs
+  `assistant_after_checkpoint_failed` and leaves a prompt recovery wake.
+  A Linq reply boundary carrying a parked file-approval cycle publishes its
+  prepared claims and obligations before any reply bubble can consume the input.
+  Follow-up requests and direct nutrition invitations send first only when every
+  send in their reply boundary is transport-idempotent. Otherwise, the whole
+  obligation boundary publishes first, including earlier reply bubbles. Before
+  a send-first drain, the existing durable-effect deadline requests immediate
+  workspace publication; rejection or later drain failure preserves the request.
+  Accepted risk: a runner that dies after Linq acceptance and before publication
+  finishes can lose the follow-up or the nutrition invitation memory. Immediate
+  publication reduces the normal exposure from the idle window of up to ten
+  minutes to publication time, roughly seven to twelve seconds; it does not
+  guarantee completion within that time. Non-idempotent retries, durable-pending
+  claims and Telegram vault files keep publish-first. Already-published sending
+  and confirmation-pending records recover under their original identities.
+  A crash after publication but before
   non-idempotent provider entry can still leave an ambiguous unsent effect.
   Fresh Telegram and email first sends stay outside this fence by owner
   decision and can still repeat through input replay.

@@ -65,6 +65,7 @@ import {
 import {
   type ProjectedWearableSleepSummary,
   listCanonicalEntities,
+  isManualMetricSource,
   listMetricPointsBatch,
   listMetricPointsByPublicSource,
   readMealNutritionTotals,
@@ -1038,7 +1039,7 @@ function isManualSleepStageCorrection(point: MetricPoint): boolean {
   return point.source.family === "event"
     && point.source.kind === "observation"
     && point.provenance.provider === null
-    && point.provenance.sourceLabel === "Manual";
+    && isManualMetricSource(point.provenance.sourceLabel);
 }
 
 function resolveMetricPointPublicSource(
@@ -1046,7 +1047,7 @@ function resolveMetricPointPublicSource(
 ): HostedVaultShareDataSource | null {
   if (
     point.provenance.provider === null
-    && point.provenance.sourceLabel === "Manual"
+    && isManualMetricSource(point.provenance.sourceLabel)
   ) {
     return resolveHostedVaultShareDataSource("manual");
   }

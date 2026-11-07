@@ -12,7 +12,7 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
-import { readGroupGameChatAuthority, sameGamePlayers } from "./chat-membership";
+import { readGroupGameNoticeAuthority, sameGamePlayers } from "./chat-membership";
 import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
 import { isMissedCheckInExpired } from "./missed-check-in";
@@ -201,7 +201,7 @@ function stale(): never {
   throw hostedOnboardingError({ code: "GAME_CHANGE_SUPERSEDED", httpStatus: 409, message: "This proposed game change is no longer current.", retryable: false });
 }
 
-async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameChatAuthority>[0], players: readonly string[]): Promise<boolean> {
+async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameNoticeAuthority>[0], players: readonly string[]): Promise<boolean> {
   if (game.maxPlayers !== 10) return sameGamePlayers(game.players.map(player => player.memberId), players);
-  return Boolean(input.audience && await readGroupGameChatAuthority(game, input.containerMemberId, input.audience, input.tx));
+  return Boolean(input.audience && await readGroupGameNoticeAuthority(game, input.containerMemberId, input.audience, input.tx));
 }

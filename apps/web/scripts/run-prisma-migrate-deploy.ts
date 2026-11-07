@@ -251,6 +251,13 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
   [
+    "20260910210000_require_hosted_phone_call_encrypted_private_content",
+    // Every supported phone writer already supplies a nonempty encrypted brief
+    // and never writes plaintext. Validate the completed hosted deletion before
+    // removing readers; retain legacy columns through the old reader drain.
+    new Set(["ADD CONSTRAINT CHECK", "ALTER COLUMN SET NOT NULL"]),
+  ],
+  [
     "20260922170000_hosted_sponsorship_topup_margin",
     // A strict expansion from the historical $5 grant to $4 or $5 grants.
     // Preserve old writers and frozen purchases before deploying the new catalog.

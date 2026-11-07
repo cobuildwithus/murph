@@ -16,9 +16,9 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
   return {
     ...actual,
-    readActiveHostedMemberAccess: async (
-      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
-    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+    readStrictHostedPersonAccess: async (
+      input: Parameters<typeof actual.readStrictHostedPersonAccess>[0],
+    ) => actual.hasStrictHostedPersonAccess(await input.prisma!.hostedMember.findUnique({ where: { id: input.memberId } }) as never),
   };
 });
 

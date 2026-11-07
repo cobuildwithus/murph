@@ -64,6 +64,31 @@ describe.skipIf(!enabled)("committed producer handoff PostgreSQL", () => {
     return { room, id, membershipId, chatId };
   }
 
+  it.each(["canceled", "paused", "unpaid", "past_due", "active", "sponsored"] as const)("checks strict Telegram welcome eligibility for %s before delivery", async state => {
+    const memberId = await member();
+    const familyId = randomUUID();
+    mocks.signal.mockResolvedValue({ signalAccepted: true, workflowId: "synthetic" });
+    try {
+      await db.hostedMember.update({ where: { id: memberId }, data: { billingStatus: state === "sponsored" ? "canceled" : state } });
+      if (state === "sponsored") {
+        await db.hostedAccountGroup.create({ data: { id: familyId, ownerMemberId: await member(), billingStatus: "active" } });
+        await db.hostedAccountGroupMembership.create({ data: { id: randomUUID(), groupId: familyId, memberId, role: "member" } });
+      }
+      await db.$transaction(tx => upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId: "1234567", prisma: tx }));
+      vi.stubEnv("TELEGRAM_BOT_TOKEN", "synthetic-token");
+      const send = vi.fn(async () => Response.json({ ok: true, result: { message_id: 1, chat: { id: 1234567, type: "private" } } }));
+      vi.stubGlobal("fetch", send);
+      const allowed = state === "active" || state === "sponsored";
+      expect(await welcomeNativeMessagingTelegram({ memberId, telegramUserId: "1234567", prisma: db }))
+        .toMatchObject({ telegramAwaitingInbound: !allowed });
+      expect(send).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(await db.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(allowed ? 1 : 0);
+    } finally {
+      await db.hostedAccountGroup.deleteMany({ where: { id: familyId } });
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(["journal", "channels", "welcome", "join", "sharing"] as const)("recovers the real %s producer's committed row after signal rejection", async producer => {
     const memberId = await member();
     mocks.signal.mockReset().mockRejectedValue(new Error("synthetic signal rejection after commit"));

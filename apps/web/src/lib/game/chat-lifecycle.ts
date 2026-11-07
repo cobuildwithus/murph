@@ -16,7 +16,7 @@ import { isHostedMailboxItemConsumed, appendPreparedHostedMailboxEnvelopeTx, pre
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { GameChatAudienceError, readGroupGameChatAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
+import { GameChatAudienceError, readGroupGameChatAuthority, readGroupGameNoticeAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -533,7 +533,7 @@ async function deliverCurrentGameChatLifecycle(input: {
   const { boundOnly, eventId, game, gameId, instructions, kind, players, prisma } = input;
   if (game.maxPlayers === 10) {
     if (!game.chatContainerMemberId || !game.audienceKey) return false;
-    const roomAudience = await readGroupGameChatAuthority(game, game.chatContainerMemberId);
+    const roomAudience = await readGroupGameNoticeAuthority(game, game.chatContainerMemberId);
     if (!roomAudience) return kind === "talk" || kind === "challenge"
       ? skipGameNotice(createHostedLinqDeliveryIdempotencyLookupKey(eventId), prisma, new Date()) : false;
     const talk = /^game-talk:([^:]+):([^:]+)$/u.exec(eventId);

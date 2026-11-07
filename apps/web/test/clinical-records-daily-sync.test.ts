@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   append: vi.fn(), signal: vi.fn(), open: vi.fn(), seal: vi.fn(),
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAccessDecision: mocks.access }));
+vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.access }));
 vi.mock("@/src/lib/legal/consent", () => ({ readHostedConsentStatus: mocks.consent, assertHostedLaunchRequiredConsentGranted: vi.fn() }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: vi.fn(), readHostedMemberSuspensionAfterLockTx: mocks.suspension }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => Promise<unknown>) => fn() }));
@@ -47,7 +47,7 @@ function fixture() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.access.mockResolvedValue({ allowed: true });
+  mocks.access.mockResolvedValue(true);
   mocks.consent.mockResolvedValue({ launchGranted: true });
   mocks.suspension.mockResolvedValue("active");
   mocks.append.mockResolvedValue({ wake: "synthetic" });
@@ -83,7 +83,7 @@ describe("daily clinical admission", () => {
   });
 
   it("backs off an ineligible row so it cannot starve the bounded sweep", async () => {
-    const f = fixture(); mocks.access.mockResolvedValue({ allowed: false });
+    const f = fixture(); mocks.access.mockResolvedValue(false);
     expect(await runClinicalDailySyncSweep({ now })).toEqual({ checked: 1, queued: 0, failed: 0 });
     expect(f.connection.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
     expect(f.row.nextSyncAt.getTime()).toBe(now.getTime() + 86_400_000);

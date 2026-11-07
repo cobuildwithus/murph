@@ -13886,11 +13886,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  // Every lapsed-after-activation billing state must answer on the member's own
-  // bound home chat. Reaching the first-contact tail here raises a retryable
-  // HOSTED_LINQ_HOME_ROUTE_CHANGED that can never succeed, which silently drops
-  // the message on every provider retry.
-  it.each([
+  // Inactive conversations must be answered now, never held for future funding.
+  it.each(([
     [HostedBillingStatus.paused, "sent-billing-inactive-notice"],
     [HostedBillingStatus.past_due, "sent-billing-inactive-notice"],
     [HostedBillingStatus.canceled, "sent-billing-inactive-notice"],
@@ -13898,10 +13895,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     // `incomplete` reaches here only because the fixture owns a subscription;
     // a first-time `incomplete` member has none and stays on the signup path.
     [HostedBillingStatus.incomplete, "sent-billing-inactive-notice"],
-  ] as const)(
-    "answers a %s member on their bound home chat instead of dropping the text",
-    async (billingStatus, expectedReason) => {
+  ] as const).flatMap(([billingStatus, expectedReason]) =>
+    ["home", "new"].map(chat => ({ billingStatus, expectedReason, chat }))))(
+    "answers a $billingStatus member on a $chat direct chat without holding the text",
+    async ({ billingStatus, expectedReason, chat }) => {
       const fixture = await buildPausedHostedMemberHomeRouteFixture({ billingStatus });
+      const chatId = chat === "home" ? fixture.homeChatId : "synthetic-new-direct-chat";
       const scheduledTasks: Array<() => Promise<void>> = [];
       const prisma = asPrismaTransactionClient({
         hostedLinqProviderEvent: {
@@ -13919,7 +13918,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           createdAt: "2026-07-23T12:00:00.000Z",
           data: {
             chat: {
-              id: fixture.homeChatId,
+              id: chatId,
+              is_group: false,
               owner_handle: {
                 handle: fixture.homeLinePhone,
                 id: "handle_owner_home",
@@ -13946,17 +13946,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(response).toMatchObject({ ok: true, reason: expectedReason });
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          chatId: fixture.homeChatId,
+          chatId,
           message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
         }),
       );
       expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
       expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment).not.toHaveBeenCalled();
     },
   );
 
-  it("keeps the home-line redirect when a paused member texts another hosted line", async () => {
+  it("answers a paused member with the billing notice on another direct hosted line", async () => {
     const fixture = await buildPausedHostedMemberHomeRouteFixture();
     const scheduledTasks: Array<() => Promise<void>> = [];
     const prisma = asPrismaTransactionClient({
@@ -14003,12 +14004,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "redirected-to-home-line",
+      reason: "sent-billing-inactive-notice",
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_other_paused",
-        message: expect.stringContaining(fixture.homeLinePhone),
+        message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -14017,13 +14018,88 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("answers a bound-home member with no billing to recover instead of retrying forever", async () => {
-    const fixture = await buildPausedHostedMemberHomeRouteFixture();
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      retryAfter: new Date("2026-07-23T12:15:00.000Z"),
-      userNotice: null,
+  it("keeps a never-activated incomplete member with a subscription out of the billing notice", async () => {
+    const fixture = await buildPausedHostedMemberHomeRouteFixture({
+      billingStatus: HostedBillingStatus.incomplete,
+    });
+    const prisma = asPrismaTransactionClient({
+      $transaction: vi.fn(
+        async (run: (tx: unknown) => unknown) => run(prisma),
+      ) as never,
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue({
+          expiresAt: new Date("2026-07-24T12:00:00.000Z"),
+          id: "hin_first_contact",
+          inviteCode: "first_contact_invite_code",
+        }),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({ inviteCode: "first_contact_invite_code" }),
+      },
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: {
+        // The activation evidence query carries an OR; this member has none.
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : fixture.member),
+      },
+      hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+    });
+
+    const scheduledTasks: Array<() => Promise<void> | void> = [];
+    const outcome = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-07-23T12:00:00.000Z",
+        data: {
+          chat: {
+            id: "chat_other_first_contact",
+            owner_handle: {
+              handle: "+15550100002",
+              id: "handle_owner_other_first_contact",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sent_at: "2026-07-23T12:00:00.000Z",
+        },
+        eventId: "evt_incomplete_new_chat",
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    }).catch((error: unknown) => ({ ok: false, reason: String(error) }));
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    expect(outcome).not.toMatchObject({ reason: "sent-billing-inactive-notice" });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("settings#subscription"),
+      }),
+    );
+  });
+
+  it("does not hold product-member conversation input when the AI denial has no notice", async () => {
+    // Returning incomplete with activation evidence but no provider subscription:
+    // the real product predicate admits it and the real strict decision has no notice.
+    const fixture = await buildPausedHostedMemberHomeRouteFixture({
+      billingStatus: HostedBillingStatus.incomplete,
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+      },
     });
     const prisma = asPrismaTransactionClient({
       // Recovery runs after the planner transaction rolled back, so it opens
@@ -14051,10 +14127,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
     });
 
-    // No notice means there is no billing to recover, so this member belongs on
-    // the signup journey rather than being answered as a lapsed member. The
-    // permanent-route guard still owns the storage layer: it aborts the
-    // transaction, and recovery then answers on the chat the member used.
+    // AI denial cannot reclassify an established product member as first contact.
     const scheduledTasks: Array<() => Promise<void> | void> = [];
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
@@ -14088,12 +14161,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "sent-signup-link",
+      ignored: true,
+      reason: "hosted_access_inactive",
     });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: fixture.homeChatId }),
-    );
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 
   it("appends active-member Linq input even when the usage gate would deny", async () => {

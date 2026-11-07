@@ -308,7 +308,8 @@ describe("hosted preference handoff sweeper", () => {
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).toContain('"active_person_members"');
-    expect(sql).toContain('"active_member"."id" IS NOT NULL');
+    expect(sql).toContain(`"member"."billing_status" IN ('canceled', 'paused', 'unpaid', 'past_due')`);
+    expect(sql.indexOf('"member"."billing_status" IN')).toBeLessThan(sql.lastIndexOf("LIMIT"));
     expect(sql).toContain('"active_owner"."id" IS NOT NULL');
     expect(sql).toContain('"hosted_thread_container_participant"');
     expect(sql).toContain('JOIN "active_person_members" AS "active_participant"');
