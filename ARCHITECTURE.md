@@ -6706,6 +6706,44 @@ receipt is skipped unless its mailbox item already exists, and a published one
 leaves the sweep without being skipped. Final egress refuses either past the same
 deadline, which also bounds outbox retries.
 
+`evening-check-in.ts` reuses the room collector, rule state and lifecycle
+publication path for pair, group and mixed rooms. The five-minute room sweep
+stays inside the minute drain's budget. Real audience membership and current
+profile zones gate the room before the latest scheduled 8pm horizon; posting and
+per-game opt-outs affect the addressed set only. One `game_evening` receipt per
+room/date owns the claim, with the room as payload owner. Its immutable event
+key survives delivery metadata rewrites and identifies each of the previous
+three accepted evenings for the unanswered-send pause. The encrypted
+`game_evening_check_in` policy freezes addressed game/day/member sets, terms
+versions, expiry and conversation watermark. The bounded same-day transcript
+stops at that watermark. Publication and dispatch recheck the frozen witness
+under game and mailbox locks; an expired or changed witness is stale. Recovery
+signals an existing mailbox item without replacing it. The runner parses this
+policy and allows a skip, with no game host tools or lore. Egress checks the
+28-day inactivity pause separately after validating evening currentness.
+
+Private game reminders reuse the signed group-tool transport for a direct-only
+`my_game_reminders` request. The runtime member and accepted direct input own
+authority; Web returns only that member's live tasks, schedule, status, peer
+first names and reminder settings. Settings and both chat tools write through
+`setReminders`. `canText` additionally requires the private-reminders flag,
+remaining AI access and usage, and an already deliverable direct thread; the
+game never grants a private conversation. A per-seat `reminder_every_day` option
+changes count-game reminder urgency without changing posting eligibility.
+
+The minute drain reserves one `game_private_evening` receipt per member and
+local date, one hour after their saved reminder time, for open games no room
+check-in covers. Its typed policy freezes game/day/terms and conversation
+watermark; publication and egress recheck text consent, access, the witness,
+expiry and unanswered-evening pause. Each player's live-game activation copies
+opt-out and cadence from validated lineage or the latest exact cohort, then
+records an idempotent activation event. A new-person or changed-rhythm offer
+gets one `game_private_kickoff` receipt per game and member. It waits overnight
+until 09:00 local, expires 24 hours after start, and rechecks live seating and
+private text eligibility at publication and dispatch. Both notifications are
+output-only, allow a skip, and remain subject to the 28-day pause; ordinary
+direct replies use behavior-followthrough and the direct tool.
+
 The minute drain handles up to ten lifecycle receipts a pass, four at a time. It
 takes the oldest due receipt of each chat before applying that limit, so a chat
 with a long backlog takes one slot and hides no other chat. That query reads

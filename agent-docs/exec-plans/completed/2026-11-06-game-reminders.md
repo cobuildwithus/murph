@@ -1,6 +1,6 @@
 # Private game reminders
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -138,6 +138,9 @@ sending. APNs expiry matches the window. The payload gains a sound.
   following the missed-day pattern, and independent of who has posted. The
   addressed players are filtered afterwards. The window is 30 minutes from that
   horizon, ending any retry.
+- Room timing uses the frozen game zones, so the horizon stays stable. If everyone
+  in a room travels together it's off by that offset, and their profile zones still
+  decide whether the room is close enough.
 - Receipt: template `game_evening`, event `game-evening:<roomId>:<date>`,
   `payloadOwnerMemberId` the room. `readOldestReceiptPerChat` uses that owner for
   the new families so rooms don't share one queue slot.
@@ -164,6 +167,8 @@ Order: additive Web support with producers off, then the runner, then enable.
   tied to the room. Results say whether the saved reminder will reach the player.
 - New game reminder requests go to `setReminders`, not ordinary room automations,
   once that path is live. Bounded legacy automations expire on their own.
+- Private messages are Linq only. Telegram has no final game or pause check at
+  egress, so `canText` is false there and the push still goes.
 - Private check-in: `game_private_evening`, event per member and date, for open
   games no room check-in covers, when `reminder_text` and `canText` hold, on an
   existing thread (`requireThreadDelivery: true`). Same witness and pause rules.
@@ -224,8 +229,15 @@ ReviewGPT architecture round (Mountain lane), findings and outcomes:
 Answers: minute sweep, `GameEvent` for push, `hostedLinqDelivery` for text,
 separate private adapter, copy at activation.
 
+Outcome: shipped through #4714, #4717, #4724, #4728 and murph-ios #470. ReviewGPT
+passed every PR. A Codex deep review on each backend PR found what ReviewGPT did not:
+the route recheck order, the evening pause lapsing, a later room horizon failing the
+recheck, private texts on Telegram skipping final checks, an overnight send after
+queueing, and a missing game-on check. All are fixed with regression tests.
+
 ## Verification
 
 - Deterministic tests for `openGameDay`, spread, sweep claims, egress recheck.
 - Real-Codex journeys for far-apart kickoff, evening check-in and the DM.
 - iOS build, UI tests and visual proof for the Notifications page.
+Completed: 2026-11-06

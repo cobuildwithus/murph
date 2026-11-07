@@ -551,6 +551,19 @@ resulting avatar. No private photo is shared with the subject or other players.
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
+- **Evening room check-ins.** At the latest local 8pm among the room's eligible
+  scheduled game/player slots, Murph may ask one short question in the existing
+  room naming each still-open player's own task. The half-hour window and one
+  room/date claim never move earlier when someone posts; a late item is dropped.
+  Pair, group and mixed rooms share this path. Every actual recipient must be a
+  joined member with a known current game-profile time zone, and the widest
+  clock gap must be strictly under three hours. Unjoined or unresolved recipients
+  stop the room check-in. A player switched off for a game is not addressed.
+  Murph stays quiet about someone who already said they will or will not do it.
+  Three consecutive accepted scheduled evening sends without a player message
+  pause future evenings until someone writes. Skips and failures do not count.
+  The 28-day iMessage inactivity pause still applies. The feature is off unless
+  `MURPH_GAME_EVENING_CHECK_IN_ENABLED` is exactly `true`.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with
@@ -761,9 +774,13 @@ resulting avatar. No private photo is shared with the subject or other players.
 ## Daily reminders
 
 The profile owns one local reminder time (default 19:00), push on, text off;
-each live seat can opt out. `setReminders` is the single write owner. Text is
-unavailable (`canText: false`). Reading settings never creates a profile or
-changes Home. Only a current game push registration with `gameReminders: true`
+each live seat can opt out. `setReminders` is the single write owner for Settings,
+game-chat `set_reminder`, and direct `my_game_reminders`. Text can be enabled only
+with the private-reminders flag, remaining AI access and usage, and an existing
+deliverable direct thread. Reading settings never creates a profile or changes
+Home. Tool results distinguish a saved setting from one that can reach the member
+by push or text; when neither can, Murph asks them to enable notifications in the
+app. Only a current game push registration with `gameReminders: true`
 can receive reminders; older game registrations clear that capability, while
 same-address wearable refreshes preserve it.
 
@@ -771,7 +788,8 @@ The minute sweep makes at most one best-effort attempt per member and local
 calendar date, within 30 minutes of the profile's reminder time. Game eligibility
 uses each seat's frozen zone: live, remaining, scheduled, admitted, no post or
 excuse, with an attempt left. Count games remind only when outstanding credit
-is positive and remaining opportunities are no greater than that shortfall.
+is positive and remaining opportunities are no greater than that shortfall,
+unless that player's `reminder_every_day` choice asks for every open evening.
 An earlier miss does not stop reminders; an incomplete artifact earns no credit
 but still suppresses a reminder for its own day.
 
@@ -782,7 +800,19 @@ The body is "They posted. Share yours to see it." only for one open game with
 a visible peer post today; otherwise "Still time today." Symmetric blocks and
 reported posts cannot supply that peer signal. The push opens the first open
 game, uses default sound and expires at the window's end. Claims never retry,
-even after failure or a newly closed day. No new chat or private texts ship here.
+even after failure or a newly closed day.
+
+One private evening check-in may follow an hour after the member's reminder time
+on an open day, within a 30-minute window, when text is on and no room check-in
+covers that game. It uses only the member's own unfinished tasks, a frozen batch
+and direct-conversation watermark, and the room check-in's unanswered-evening
+pause. It remains subject to the 28-day engagement pause. On activation, the
+member's reminder opt-out and count-game cadence carry from a validated previous
+game, then the latest same-people game if there is no lineage. A new person gets
+one private help offer; familiar people with a changed schedule or length get
+one check-in preference question; an unchanged rhythm stays quiet. The offer
+waits until 09:00 local if activation is between 21:00 and 09:00 and expires
+24 hours after game start. Replies use normal direct behavior-followthrough.
 
 ## Replies
 
@@ -1017,10 +1047,11 @@ people may still join. A strictly earlier live game suppresses a later kickoff's
 offer. Players 3 or more hours apart at kickoff get no offer and no mention of
 reminders, because one message in their chat can't suit them all; the gap is the
 widest between any two seated players' clocks at that instant. Simultaneous starts each offer, and settled games do not suppress it.
-There is no room reminder claim. A bare yes needs a time and number of days;
-one person or a majority cannot consent for another. Existing automations save
-only the requesting member's exact game/member IDs, time, timezone and bounded
-duration. Each occurrence requires an OK scheduled read, that exact game's live
+New reminder requests use the member's saved Settings through `set_reminder`;
+a bare yes without a time needs that detail. One person or a majority cannot
+consent for another. Earlier bounded room automations remain in force until
+they expire; they save only the requesting member's exact game/member IDs, time,
+timezone and bounded duration. Each occurrence requires an OK scheduled read, that exact game's live
 status and the requester in its current players, then derives their name and task.
 It stays quiet for ended, departed, unavailable or missing targets and never
 substitutes another game. Rematch invitations do not

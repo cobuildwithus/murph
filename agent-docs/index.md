@@ -1,4 +1,4 @@
-ReviewGPT runs only for risky changes, at any size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
+ReviewGPT runs for risky behavior and core architecture, not for size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
 Checkpoint step timings, the archive plan/build split, and unconditional residue
 pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
 
@@ -1975,3 +1975,18 @@ because age and canonical lock ownership do not prove abandonment.
 Deferred device cron history deletion and the thin-session safety check
 are recorded in [the retention assessment](exec-plans/completed/2026-11-06-retire-settled-device-cron.md).
 The current family policies remain in `docs/contracts/06-hosted-workspace-file-count.md`.
+
+Pending-reply preservation, selected-retry deadline ownership and deferred delivery
+cancellation are documented in [the runtime owner](../packages/assistant-runtime/README.md); implementation
+and proof are tracked in [the reply ownership plan](exec-plans/completed/2026-11-06-deferred-delivery-cancellation.md).
+
+Reply-email sender authentication and public invite-status privacy are owned by
+[Security](SECURITY.md). Local remediation and rollout proof are tracked in
+[the execution plan](exec-plans/completed/2026-11-06-reply-invite-auth.md).
+
+The reply-email parser correction and production rollout are tracked in
+[the shipping plan](exec-plans/completed/2026-11-06-reply-invite-shipping.md).
+
+Named group iMessage acknowledgment eligibility and background usage checks are
+tracked in [group acknowledgments](exec-plans/active/2026-11-06-group-name-tapback.md).
+The egress boundary remains owned by `SECURITY.md`.

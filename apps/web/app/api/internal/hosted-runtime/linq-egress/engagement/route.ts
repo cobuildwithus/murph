@@ -1,5 +1,7 @@
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
+import { readPrivateEveningDeliveryAuthority } from "@/src/lib/game/private-notification";
+import { readPrivateKickoffDeliveryAuthority } from "@/src/lib/game/private-kickoff";
 import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
@@ -57,6 +59,18 @@ async function isRequestedAskReply(
   ) || await isHostedGroupCurrentSenderPrivateLinqCompletionTx(input);
 }
 
+async function lockGameEgressRouteTx(input: { tx: Prisma.TransactionClient; targetKind: string | null;
+  expectedResolvedRoute: HostedExecutionResolvedLinqDeliveryRoute | null; target: string | null; userId: string }): Promise<void> {
+  const chatLockTarget = input.targetKind === "participant" ? null
+    : input.expectedResolvedRoute?.targetKind === "thread" ? input.expectedResolvedRoute.target : input.target;
+  if (chatLockTarget) await acquireHostedLinqChatOwnershipLockTx({ chatId: chatLockTarget, tx: input.tx });
+  if (input.targetKind !== "participant") await acquireHostedMemberHomeLinqRouteLockTx({ memberId: input.userId, prisma: input.tx });
+}
+
+function gameProposalBypassesPause(requested: boolean, key: string | null): boolean {
+  return requested && !key?.startsWith("game-evening:") && !key?.startsWith("game-evening-private:") && !key?.startsWith("game-dm:");
+}
+
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
@@ -103,30 +117,20 @@ export const POST = withJsonError(async (request: Request) => {
 
   const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
+  const privateEveningPolicy = idempotencyKey?.startsWith("game-evening-private:")
+    ? await readPrivateEveningDeliveryAuthority(idempotencyKey, userId) : null;
+  const privateKickoffPolicy = idempotencyKey?.startsWith("game-dm:")
+    ? await readPrivateKickoffDeliveryAuthority(idempotencyKey, userId) : null;
 
   const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
-    ? { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
+    ? "memberIds" in gameChatPlayers
+      ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers.audience, eveningPolicy: gameChatPlayers.policy }
+      : { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
     : gameChatPlayers && "memberIds" in gameChatPlayers
     ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
 
   const assertion = await prisma.$transaction(async (tx) => {
-    const chatLockTarget = targetKind === "participant"
-      ? null
-      : expectedResolvedRoute?.targetKind === "thread"
-        ? expectedResolvedRoute.target
-        : target;
-    if (chatLockTarget) {
-      await acquireHostedLinqChatOwnershipLockTx({
-        chatId: chatLockTarget,
-        tx,
-      });
-    }
-    if (targetKind !== "participant") {
-      await acquireHostedMemberHomeLinqRouteLockTx({
-        memberId: userId,
-        prisma: tx,
-      });
-    }
+    await lockGameEgressRouteTx({ tx, targetKind, expectedResolvedRoute, target, userId });
 
     const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
       answeredMailboxItemIds,
@@ -151,6 +155,8 @@ export const POST = withJsonError(async (request: Request) => {
     const requestedGameProposal = await assertGameProposalDeliveryCurrentTx({
       deliveryIdempotencyKey: idempotencyKey,
       containerMemberId: userId,
+      privateEveningPolicy: privateEveningPolicy ?? undefined,
+      privateKickoffPolicy: privateKickoffPolicy ?? undefined,
       ...gameAuthority,
       rematchTermsVersion,
       tx,
@@ -241,7 +247,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
     // App-requested proposals may start a new room with no inbound history.
     // Only the current proposal and freshly proven exact audience qualify.
-    if (!requestedGameProposal && !requestedAskReply && await isHostedLinqProactivityPaused({
+    if (!gameProposalBypassesPause(requestedGameProposal, idempotencyKey) && !requestedAskReply && await isHostedLinqProactivityPaused({
       answeredMailboxItemIds,
       replyToMessageId,
       service: health.service,

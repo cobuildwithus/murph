@@ -62,6 +62,13 @@ describe("game chat tool authority", () => {
       expect(JSON.stringify(result)).not.toContain('"reply":');
     }
   });
+  it("routes set_reminder as the current sender and returns delivery reach without a shared state", async () => {
+    m.run.mockResolvedValueOnce({ ok: true, reaches: "none", reminders: { minutes: 1080 } });
+    const request = { action: "update_game" as const, origin, update: { operation: "set_reminder" as const, gameId: "game_synthetic", minutes: 1080 } };
+    expect(await handleGameChatTool({ ...read, request })).toEqual({ action: "update_game", result: { status: "ok", reaches: "none" } });
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, update: request.update }));
+    expect(m.read).not.toHaveBeenCalled();
+  });
   it("disables paid-group reads and mutations when the game flag is off", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "false");
     expect((await handleGameChatTool(read)).result.status).toBe("unavailable");

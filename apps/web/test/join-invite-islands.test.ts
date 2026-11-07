@@ -664,6 +664,18 @@ test("messaging setup holds the phone step until it ends", async () => {
   await cleanup();
 });
 
+test("email invites allow manual email entry without disclosing a saved target", async () => {
+  const { cleanup } = await renderClientComponent(createElement(JoinInvitePhoneVerificationIsland, {
+    detail: "Use the iMessage email address that received this join link.",
+    inviteCode: "invite-code", title: "Verify your email.", verificationMode: "invite_email",
+  }), { requireButton: false });
+  expect(mocks.hostedAuthProps).toMatchObject({
+    initialEmailAddress: undefined, methods: ["email"], inviteCode: "invite-code",
+    requireLaunchConsentOnCompletion: true, onCompleted: expect.any(Function),
+  });
+  await cleanup();
+});
+
 test("email invites use first-party verification with their saved target and invite binding", async () => {
   const { cleanup } = await renderClientComponent(createElement(JoinInvitePhoneVerificationIsland, {
     detail: "Use the iMessage email address that received this join link.",

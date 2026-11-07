@@ -16,6 +16,7 @@ import {
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplySuppressionEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 
 import {
@@ -2221,7 +2222,7 @@ describe("selectHostedAssistantInputIds", () => {
       .resolves.toEqual([overdue.inputId]);
   });
 
-  it("drops a background retry of a message older than the stale window without replying", async () => {
+  it("keeps retrying an unanswered message beyond fifteen minutes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-04-23T01:00:00.000Z"));
     const vaultRoot = await createTempVault();
@@ -2234,22 +2235,14 @@ describe("selectHostedAssistantInputIds", () => {
 
     const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
 
-    expect(selection.inputIds).toEqual([]);
-    expect(selection).toMatchObject({ staleRetryDropped: [{ inputId: failed.inputId, reason: "too_old" }] });
-    expect((await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, failed.inputId))?.terminal)
-      .toMatchObject({ kind: "suppressed" });
-    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([]);
+    expect(selection.inputIds).toEqual([failed.inputId]);
+    expect(await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, failed.inputId)).toBeNull();
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds)
+      .toEqual([failed.inputId]);
 
-    // A system input (for example a delivery failure) keeps its own recovery even when its timestamp is old.
-    const systemNote = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({ dedupeKey: "dedupe_system_old", eventId: "evt_system_old", itemId: "item_system_old", lane: "system", laneSeq: "11", causalSeq: "11", messageId: "msg_system_old" }),
-    });
-    await enqueueHostedPendingAssistantInputId({ inputId: systemNote.inputId, vaultRoot });
-    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([systemNote.inputId]);
   });
 
-  it("drops a background retry once a newer message in the same chat was answered", async () => {
+  it("keeps an unanswered input eligible after a newer message in the same chat was answered", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-04-23T00:05:00.000Z"));
     const vaultRoot = await createTempVault();
@@ -2259,23 +2252,7 @@ describe("selectHostedAssistantInputIds", () => {
       event: createAssistantInputEvent({ dedupeKey: "dedupe_failed", eventId: "evt_failed", itemId: "item_failed", laneSeq: "10", causalSeq: "10", messageId: "msg_failed",
         occurredAt: "2026-04-23T00:00:01.000Z", receivedAt: "2026-04-23T00:00:02.000Z" }),
     });
-    const otherChat = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({ dedupeKey: "dedupe_other_chat", eventId: "evt_other_chat", itemId: "item_other_chat", laneSeq: "11", causalSeq: "11", messageId: "msg_other_chat",
-        occurredAt: "2026-04-23T00:00:03.000Z", receivedAt: "2026-04-23T00:00:04.000Z", threadId: "thread_other" }),
-    });
-    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [otherChat.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:00:05.000Z", sessionId: "session_other", vault: vaultRoot });
     await enqueueHostedPendingAssistantInputId({ inputId: failed.inputId, vaultRoot });
-
-    const answeredSystemNote = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({ dedupeKey: "dedupe_system_note", eventId: "evt_system_note", itemId: "item_system_note", lane: "system", laneSeq: "11b", causalSeq: "11", messageId: "msg_system_note",
-        occurredAt: "2026-04-23T00:00:30.000Z", receivedAt: "2026-04-23T00:00:31.000Z" }),
-    });
-    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [answeredSystemNote.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:00:40.000Z", sessionId: "session_system", vault: vaultRoot });
-
-    // An answer in another chat, or to a system input in this chat, does not make this one stale.
-    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([failed.inputId]);
 
     const newer = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -2293,9 +2270,16 @@ describe("selectHostedAssistantInputIds", () => {
     await enqueueHostedPendingAssistantInputId({ inputId: unanswered.inputId, vaultRoot });
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
-    expect(selection.inputIds).toEqual([unanswered.inputId]);
-    expect(selection).toMatchObject({ staleRetryDropped: [{ inputId: failed.inputId, reason: "newer_message_answered" }] });
+    expect(selection.inputIds).toEqual([failed.inputId]);
+    expect(selection.pendingInputIds).toEqual([failed.inputId, unanswered.inputId]);
+    expect(await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, failed.inputId)).toBeNull();
     expect(listSpy).toHaveBeenCalledTimes(1); // Reuse the required retention read.
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: [], inputIds: [failed.inputId], vault: vaultRoot,
+      reason: "stale retry dropped before a late reply",
+    });
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds)
+      .toEqual([unanswered.inputId]); // Historical terminal evidence is not resurrected.
   });
 
   it("cancels background selection before history I/O", async () => {

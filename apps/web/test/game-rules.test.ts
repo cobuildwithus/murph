@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gameReminderWindow, reminderOpenDay } from "@/src/lib/game/reminders";
+import { gameReminderReach, gameReminderWindow, reminderOpenDay } from "@/src/lib/game/reminders";
 import { gameChatProgress } from "@/src/lib/game/chat-progress";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
 import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
@@ -1075,6 +1075,13 @@ describe("decided pair endings", () => {
 });
 
 describe("game reminder eligibility", () => {
+  it("reports whether a selected saved reminder can actually reach its member", () => {
+    const settings = { push: true, text: true, canText: true };
+    expect(gameReminderReach(settings, true, true)).toBe("text");
+    expect(gameReminderReach({ ...settings, canText: false }, true, true)).toBe("push");
+    expect(gameReminderReach({ ...settings, canText: false }, true, false)).toBe("none");
+    expect(gameReminderReach(settings, false, true)).toBe("none");
+  });
   it("uses the frozen game day, schedule and remaining seat", () => {
     const state = live();
     const player = state.players[0]!;

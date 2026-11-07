@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 120,
+  "item": {
+    "id": "game-reminders-fit-your-day",
+    "kind": "feature",
+    "priority": 2,
+    "title": "Game reminders that fit your day",
+    "summary": "If you haven't posted by 8pm, Murph checks in. It won't send reminders to a chat that spans time zones, so nobody gets woken up.",
+    "details": "A daily 7pm push is coming with the next app update, with a Notifications page in Settings for your time and your games. If you have a plan or AI usage left, Murph can text you privately too, and it will offer help when you start a game with someone new.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4714, 4717, 4724, 4728]
+  }
+}

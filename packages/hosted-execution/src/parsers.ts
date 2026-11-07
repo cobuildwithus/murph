@@ -1,4 +1,4 @@
-import { gameGroupMissedCheckInPolicySchema } from "./game-group-missed.ts";
+import { gameEveningCheckInPolicySchema, gameGroupMissedCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, gamePrivateKickoffPolicySchema } from "./game-group-missed.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
   parseHostedVaultShareRevokePayload,
@@ -1783,6 +1783,12 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
       };
     case "game_group_missed_check_in":
       return gameGroupMissedCheckInPolicySchema.parse(record);
+    case "game_evening_check_in":
+      return gameEveningCheckInPolicySchema.parse(record);
+    case "game_private_evening_check_in":
+      return gamePrivateEveningCheckInPolicySchema.parse(record);
+    case "game_private_kickoff":
+      return gamePrivateKickoffPolicySchema.parse(record);
     case "game_missed_check_in":
       assertExactHostedExecutionKeys(
         record,

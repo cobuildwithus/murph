@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedAssistantAskCompletionDeliveryAuthorityTx: vi.fn(),
   getPrisma: vi.fn(),
   readGameProposalDeliveryPlayers: vi.fn(),
+  gameCurrentOverride: null as null | (() => Promise<boolean>),
   decodeHostedMailboxStoredPayload: vi.fn(),
   decryptHostedLinqLinePhoneNumber: vi.fn(),
   encryptHostedLinqLinePhoneNumber: vi.fn(),
@@ -26,6 +27,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/game/chat-delivery", () => ({
   readGameProposalDeliveryPlayers: mocks.readGameProposalDeliveryPlayers,
 }));
+vi.mock("@/src/lib/game/chat-delivery-authority", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/src/lib/game/chat-delivery-authority")>();
+  return { ...actual, assertGameProposalDeliveryCurrentTx: async (input: Parameters<typeof actual.assertGameProposalDeliveryCurrentTx>[0]) =>
+    mocks.gameCurrentOverride ? mocks.gameCurrentOverride() : actual.assertGameProposalDeliveryCurrentTx(input) };
+});
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   assertHostedAssistantAskCompletionDeliveryAuthorityTx:
@@ -108,6 +114,7 @@ import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/host
 describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.gameCurrentOverride = null;
     mocks.readGameProposalDeliveryPlayers.mockReset().mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
     mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx.mockResolvedValue(
@@ -2446,6 +2453,27 @@ describe("hosted Linq egress authority", () => {
     }));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ deliveryBlockCode: "automation_engagement_paused" });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps a current evening game notice subject to the dormant-room pause", async () => {
+    const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1" });
+    prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
+    prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.gameCurrentOverride = async () => true;
+    const eventId = "game-evening:member-1:2030-03-04";
+    mocks.readGameProposalDeliveryPlayers.mockResolvedValue({ memberIds: ["person-a", "person-b"], audience: undefined,
+      policy: { kind: "game_evening_check_in", eventId, roomId: "member-1", date: "2030-03-04",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), conversationLaneSeq: "0",
+        batch: [{ gameId: "game", termsVersion: 1, memberIds: ["person-a"], dayIndex: 0 }] } });
+    const response = await postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorityCheckOnly: false, idempotencyKey: eventId, target: "chat-authorized-group", targetKind: "thread" }),
+    }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ deliveryBlockCode: "automation_engagement_paused" });
+    expect(mocks.gameCurrentOverride).not.toBeNull();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 

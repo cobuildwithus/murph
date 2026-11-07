@@ -286,8 +286,9 @@ export interface GameReminders {
   minutes: number;
   push: boolean;
   text: boolean;
-  canText: false;
+  canText: boolean;
   offGameIds: string[];
+  everyDayGameIds?: string[];
 }
 
 export type GameCommand =

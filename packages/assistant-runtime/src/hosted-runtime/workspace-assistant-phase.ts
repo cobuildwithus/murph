@@ -1629,6 +1629,9 @@ function buildHostedPhaseOptionalTools(
             input.runtime.platform.assistantPersonalizationToolPort,
         }
       : {}),
+    ...(input.runtime.platform.groupToolPort
+      ? { myGameRemindersTool: input.runtime.platform.groupToolPort }
+      : {}),
     ...(input.runtime.platform.usageDiagnosticsPort
       ? { usageDiagnostics: input.runtime.platform.usageDiagnosticsPort }
       : {}),
@@ -2438,6 +2441,9 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
       initialLinqDeliveryContexts,
     );
+    // Maintenance validates this selected-input deadline; aggregate wakes never
+    // acquire retry authority merely by sharing the assistant wake reason.
+    const invocationLocalAssistantWakeAt = assistantMetrics.assistantAutomationSelectedInputWakeAt;
     if (foregroundAssistantPass) {
       const foregroundCronReconciliationWake =
         input.assistantAutomationScheduleChanged?.() === true
@@ -2489,7 +2495,7 @@ export async function runHostedWorkspaceAssistantPhase(
       }
       const foregroundResult = withFreshHostedManagedAutomationsAfterCheckpoint({
         input,
-        result: mergeContinuingSystemMailboxResult(foregroundAssistantResult),
+        result: mergeContinuingSystemMailboxResult({ ...foregroundAssistantResult, invocationLocalAssistantWakeAt }),
       });
       const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
         executionContext,
@@ -2655,6 +2661,7 @@ export async function runHostedWorkspaceAssistantPhase(
       return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
         input,
         result: mergeContinuingSystemMailboxResult({
+          invocationLocalAssistantWakeAt,
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
             ? { nextWakeReason: nextWake.reason }
@@ -2666,6 +2673,7 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const result = mergeContinuingSystemMailboxResult({
+      invocationLocalAssistantWakeAt,
       // Inline delivery retains the same selected-input continuation as the
       // former post-phase delivery work, without keeping a callback alive.
       ...(postDelivery ? { afterCheckpointKeepsForegroundImportLoop: true as const } : {}),
@@ -6143,8 +6151,30 @@ async function runSystemMailboxPostCheckpointPhase(input: {
 function deferHostedDeliveryUntilDurableCheckpoint(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
 ): HostedWorkspaceDurableCheckpointEffect {
-  const effect: HostedWorkspaceDurableCheckpointEffect = async () => {
-    const postDelivery = await drainHostedPostCheckpointDelivery(input);
+  const effect: HostedWorkspaceDurableCheckpointEffect = async (context) => {
+    // A current-turn batch keeps its existing delivery priority. Scheduler
+    // notifications preempt background batches; phase cancellation applies to both.
+    const interruption = input.assistantDeliveryEffects.some((effect) =>
+      effect.deliveryPhase === "foreground_current_turn") ? null : context?.signal;
+    const signal = interruption
+      ? input.input.signal
+        ? AbortSignal.any([input.input.signal, interruption])
+        : interruption
+      : input.input.signal;
+    const postDelivery = await drainHostedPostCheckpointDelivery({
+      ...input,
+      input: {
+        ...input.input,
+        signal,
+        backgroundMaintenanceSignal: signal
+          ? input.input.backgroundMaintenanceSignal
+            ? AbortSignal.any([input.input.backgroundMaintenanceSignal, signal])
+            : signal
+          : input.input.backgroundMaintenanceSignal,
+      },
+      shouldYieldBackgroundDrain: () =>
+        signal?.aborted === true || input.shouldYieldBackgroundDrain?.() === true,
+    });
     return {
       nextWakeAt: postDelivery.nextWakeAt ?? null,
       nextWakeReason: postDelivery.nextWakeReason ?? null,
@@ -6279,13 +6309,6 @@ async function runForegroundAssistantReplyPhase(input: {
     assistantOutboxOnlyNextWakeAt:
       input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
-  const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-    input: input.input,
-    nextWakeAt: input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
-  });
-  const invocationLocalAssistantWake = selectedInputWakeAt
-    ? { invocationLocalAssistantWakeAt: selectedInputWakeAt }
-    : {};
 
   let nextWake: HostedRuntimeWakeCandidate;
   let postDelivery: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
@@ -6374,7 +6397,6 @@ async function runForegroundAssistantReplyPhase(input: {
   if (!progressed) {
     return {
       foregroundReplyFailed,
-      ...invocationLocalAssistantWake,
       ...(nextWakeAt ? { nextWakeAt } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -6398,7 +6420,6 @@ async function runForegroundAssistantReplyPhase(input: {
           wakeStateProgressed,
         }),
     foregroundReplyFailed,
-    ...invocationLocalAssistantWake,
     nextWakeAt,
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }

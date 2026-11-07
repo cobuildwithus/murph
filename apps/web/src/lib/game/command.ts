@@ -90,9 +90,11 @@ export function parseGameCommand(value: unknown): GameCommand {
 }
 
 function reminders(input: Record<string, unknown>): Extract<GameCommand, { type: "setReminders" }> {
-  if (typeof input.push !== "boolean" || input.text !== false) reject("INVALID_REQUEST", "Choose push reminders. Text reminders aren't available yet.");
-  return { type: "setReminders", minutes: integer(input.minutes, "minutes", 0, 1439), push: input.push, text: false,
-    offGameIds: [...new Set(list(input.offGameIds, "offGameIds", 1000).map(id => clientId(id, "gameId")))] };
+  if (typeof input.push !== "boolean" || typeof input.text !== "boolean") reject("INVALID_REQUEST", "Choose push and text reminders.");
+  return { type: "setReminders", minutes: integer(input.minutes, "minutes", 0, 1439), push: input.push, text: input.text,
+    offGameIds: [...new Set(list(input.offGameIds, "offGameIds", 1000).map(id => clientId(id, "gameId")))],
+    ...(input.everyDayGameIds === undefined ? {} : { everyDayGameIds: [...new Set(list(input.everyDayGameIds, "everyDayGameIds", 1000).map(id => clientId(id, "gameId")))] }),
+  };
 }
 
 /** Shared acceptance body for public token joins and addressed chat acceptance. */

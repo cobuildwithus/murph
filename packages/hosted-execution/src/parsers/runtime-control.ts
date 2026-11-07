@@ -941,7 +941,7 @@ export function parseHostedRuntimeGroupToolRequest(
     "Hosted runtime group tool request action",
   );
   if (action === "game_chat_bootstrap") return hostedGameChatBootstrapRequestSchema.parse(record);
-  if (["read_game", "update_game", "game_photo", "write_recap"].includes(action)) return hostedGameToolRequestSchema.parse(record);
+  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolRequestSchema.parse(record);
   const parsed =
     parseHostedRuntimeGroupConsultationRequest(record, action) ??
     parseHostedRuntimeGroupJournalRequest(record, action) ??
@@ -2866,7 +2866,7 @@ export function parseHostedRuntimeGroupToolResponse(
   );
 
   if (action === "game_chat_bootstrap") return hostedGameChatBootstrapResponseSchema.parse(record);
-  if (["read_game", "update_game", "game_photo", "write_recap"].includes(action)) return hostedGameToolResponseSchema.parse(record);
+  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {
     const label = "Hosted runtime group tool ask_current_sender response";
     assertAllowedObjectKeys(record, new Set(["action", "result"]), label);

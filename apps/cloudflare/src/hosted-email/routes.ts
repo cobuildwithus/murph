@@ -274,9 +274,7 @@ async function resolveHostedEmailRouteUserId(input: {
   groupId: string | null;
 }): Promise<string | null> {
   if (
-    input.aliasKey === null
-    && input.groupId === null
-    && !isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)
+    !isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)
   ) {
     return null;
   }
@@ -294,21 +292,14 @@ async function resolveHostedEmailRouteUserId(input: {
         ? { allowHttpHosts: input.context.webControlAllowHttpHosts }
         : {}),
       baseUrl: input.context.webControlBaseUrl,
-      body: JSON.stringify(input.aliasKey
-        ? { aliasKey: input.aliasKey }
-        : input.groupId
-          ? {
-            envelopeFrom: input.context.envelopeFrom ?? null,
-            groupId: input.groupId,
-            hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
-            headerFrom: input.context.headerFrom ?? null,
-          }
-          : {
-            authenticatedSender: input.context.authenticatedSender ?? null,
-            envelopeFrom: input.context.envelopeFrom ?? null,
-            hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
-            headerFrom: input.context.headerFrom ?? null,
-          }),
+      body: JSON.stringify({
+        ...(input.aliasKey ? { aliasKey: input.aliasKey } : {}),
+        ...(input.groupId ? { groupId: input.groupId } : {}),
+        authenticatedSender: input.context.authenticatedSender,
+        envelopeFrom: input.context.envelopeFrom ?? null,
+        hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
+        headerFrom: input.context.headerFrom ?? null,
+      }),
       boundUserId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
       callbackSigning: input.context.webCallbackSigning,
       fetchImpl: input.context.fetchImpl,

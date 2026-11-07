@@ -90,11 +90,12 @@ screenshots to material claims; there is no screenshot quota.
 
 Run final ReviewGPT when the implementation changes:
 
-- runtime protocols between apps or services;
+- core architecture: who owns state, how apps, services and packages connect,
+  runtime protocols, or shared contracts;
 - state ownership, schemas, migrations, ordering, concurrency, retries, or idempotency;
 - auth, privacy, secrets, billing, health safety, public APIs, external effects,
   hosted execution, deploy boundaries, or another trust boundary;
-- a high-risk refactor of any of those; or
+- a refactor that moves any of those; or
 - the user explicitly requests final ReviewGPT or a final cross-cutting bug hunt.
 
 Otherwise skip it for docs/process text, low-risk tooling or tests, static

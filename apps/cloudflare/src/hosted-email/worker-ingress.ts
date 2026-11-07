@@ -13,6 +13,7 @@ import {
   createHostedEmailThreadTarget,
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
   redactHostedGroupEmailPromptText,
+  resolveHostedEmailDirectSenderLookupAddress,
   serializeHostedEmailThreadTarget,
   type HostedEmailAuthenticatedSenderVerdict,
 } from "@murphai/runtime-state";
@@ -67,9 +68,66 @@ export interface HostedEmailIngressOptions {
 }
 
 export function verifyHostedEmailTrustedSender(
-  _input: HostedEmailTrustedSenderVerificationInput,
+  input: HostedEmailTrustedSenderVerificationInput,
 ): HostedEmailAuthenticatedSenderVerdict | null {
-  return null;
+  // Only the platform event header is authoritative, never raw MIME or ARC.
+  // Cloudflare prepends its result; Headers may combine later sender results.
+  // https://developers.cloudflare.com/email-service/api/route-emails/email-handler/#authentication-results
+  const fields = readFirstAuthenticationResultFields(
+    input.message.headers?.get("authentication-results") ?? null,
+  );
+  if (fields?.[0]?.trim().toLowerCase() !== "mx.cloudflare.net") {
+    return null;
+  }
+  const dmarcResults = fields.slice(1)
+    .map((field) => /^\s*dmarc\s*=\s*([a-z]+)(?:\s|$)/iu.exec(field)?.[1]?.toLowerCase())
+    .filter((result) => result !== undefined);
+  if (dmarcResults.length !== 1 || dmarcResults[0] !== "pass") return null;
+  const verdict = { dkimAligned: false, dmarcPass: true, spfAligned: false };
+  return resolveHostedEmailDirectSenderLookupAddress({
+    authenticatedSender: verdict,
+    envelopeFrom: input.envelopeFrom,
+    headerFrom: input.headerFrom,
+  }) ? verdict : null;
+}
+
+function readFirstAuthenticationResultFields(value: string | null): string[] | null {
+  if (!value || value.length > 16_384) return null;
+  const fields: string[] = [];
+  let field = "";
+  let commentDepth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && (commentDepth > 0 || quoted)) {
+      escaped = true;
+    } else if (commentDepth > 0) {
+      if (character === "(") commentDepth += 1;
+      if (character === ")") commentDepth -= 1;
+    } else if (character === '"') {
+      quoted = !quoted;
+      field += " ";
+    } else if (quoted) {
+      continue;
+    } else if (character === "(") {
+      commentDepth = 1;
+      field += " ";
+    } else if (character === ")") {
+      return null;
+    } else if (character === ",") {
+      break;
+    } else if (character === ";") {
+      fields.push(field);
+      field = "";
+    } else {
+      field += character;
+    }
+  }
+  return commentDepth || quoted || escaped ? null : [...fields, field];
 }
 
 export async function handleHostedEmailIngress(

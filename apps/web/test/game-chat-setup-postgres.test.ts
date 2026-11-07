@@ -15,7 +15,7 @@ async function setup() {
   members.push(a, b, room);
   await getPrisma().hostedMember.createMany({ data: [a, b, room].map(id => ({ id, billingStatus: "not_started" })) });
   for (const [id, firstName] of [[a, "Ava"], [b, "Sam"]]) expect(await runGameCommand({ actorMemberId: id, command: { type: "setProfile", firstName, timeZone: "UTC" } })).toMatchObject({ ok: true });
-  const create = (gameId = randomUUID(), previousGameId?: string): HostedGameUpdate => ({ operation: "create", gameId, ...(previousGameId ? { previousGameId } : {}), terms: {
+  const create = (gameId = randomUUID(), previousGameId?: string): Extract<HostedGameUpdate, { operation: "create" }> => ({ operation: "create", gameId, ...(previousGameId ? { previousGameId } : {}), terms: {
     // Deliberately reverse input order: references, never ordering, own the tasks.
     tasks: [{ memberId: b, text: "Read a chapter" }, { memberId: a, text: "Walk twenty minutes" }],
     schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item: "Choose the film" }],

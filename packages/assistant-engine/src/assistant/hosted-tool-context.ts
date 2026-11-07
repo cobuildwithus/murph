@@ -148,6 +148,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly myGameRemindersTool?: AssistantHostedGroupTool | null
   readonly pollTool?: ConversationPollTool | null
   readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
@@ -481,6 +482,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    myGameRemindersTool: readMyGameRemindersTool(executionContext),
     pollTool: readPollTool(executionContext),
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
@@ -851,4 +853,8 @@ function readUsageTools(context: AssistantHostedExecutionContext | null) {
 
 function readPollTool(context: AssistantHostedExecutionContext | null): ConversationPollTool | null {
   return context?.pollTool ?? null
+}
+
+function readMyGameRemindersTool(context: AssistantHostedExecutionContext | null): AssistantHostedGroupTool | null {
+  return context?.myGameRemindersTool ?? null
 }

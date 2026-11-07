@@ -477,7 +477,6 @@ export async function runHostedAssistantAutomation(
       requestId,
       selectedAssistantInputCount: selectedInputIds.inputIds.length,
       selectedAssistantInputMode: selectedInputIds.mode,
-      ...readHostedStaleRetryDropLogDetails(selectedInputIds),
     },
     wake,
     message: "Hosted assistant automation pass starting.",
@@ -662,9 +661,7 @@ export async function runHostedAssistantAutomation(
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
     const wakeNowMs = resolveHostedMaintenanceWakeNowMs(wake);
-    const selectedInputWakeAt = selectedInputIds.mode === "foreground"
-      ? normalizeHostedFutureWakeAt(replies.nextWakeAt ?? null, wakeNowMs)
-      : null;
+    const selectedInputWakeAt = normalizeHostedFutureWakeAt(replies.nextWakeAt ?? null, wakeNowMs);
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       inferBacklogFromSaturation: selectedInputIds.mode === "background",
       nowMs: wakeNowMs,
@@ -751,7 +748,7 @@ export async function runHostedAssistantAutomation(
         redactedLogEntries,
         replyFailed: 0,
         selectedInputIds: baseInputSource.readSelectedInputIds(),
-        selectedInputWakeAt: selectedInputIds.mode === "foreground" ? nextWakeAt : null,
+        selectedInputWakeAt: baseInputSource.readSelectedInputIds().length > 0 ? nextWakeAt : null,
         terminalLinqCleanup: null,
       };
     }
@@ -1190,20 +1187,6 @@ function normalizeHostedRuntimeLogSourceId(value: string | null | undefined): st
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
-}
-
-/** Reason codes and counts only: the dropped retries were never answered. */
-function readHostedStaleRetryDropLogDetails(
-  selection: Awaited<ReturnType<typeof selectHostedAssistantInputIds>>,
-): Record<string, number> {
-  const dropped = selection.mode === "background" ? selection.staleRetryDropped ?? [] : [];
-  if (dropped.length === 0) {
-    return {};
-  }
-  return {
-    staleRetryDroppedNewerAnsweredCount: dropped.filter((entry) => entry.reason === "newer_message_answered").length,
-    staleRetryDroppedTooOldCount: dropped.filter((entry) => entry.reason === "too_old").length,
-  };
 }
 
 function emitHostedRuntimeRedactedLog(

@@ -12,6 +12,7 @@ import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, reserveGameMissed
 import { drainGameChatLifecycle, readOldestReceiptPerChat } from "@/src/lib/game/chat-lifecycle";
 import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
+import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn } from "@/src/lib/game/evening-check-in";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { advanceHostedMailboxConsumedSeqByLane, acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
@@ -270,6 +271,173 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(prepared?.policy.batch.map(game => game.gameId)).toEqual([group]);
   });
 
+  const eveningAt = new Date("2030-03-04T20:05:00Z");
+  it("reserves one evening per room and date, and freezes the addressed batch and watermark", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), id = await f.addGame();
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
+    const row = await receipt(eventId);
+    expect(row).toMatchObject({ template: "game_evening", sourceRef: `${f.roomId}:${date}`, payloadOwnerMemberId: f.roomId });
+    const prepared = await prepareGameEveningCheckIn(f.roomId, date, eveningAt);
+    expect(prepared?.policy.batch).toEqual([{ gameId: id, termsVersion: 1, memberIds: f.people.map(person => person.id).sort(), dayIndex: 0 }]);
+    expect(prepared?.policy.expiresAt).toBe("2030-03-04T20:30:00.000Z");
+  });
+
+  it("still asks when a fully posted game in the room sets a later horizon", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), open = await f.addGame(), posted = await f.addGame(10, f.people.map(() => "Atlantic/Azores"));
+    for (const person of f.people) await db.gameEntry.create({ data: { id: randomUUID(), gameId: posted, memberId: person.id, dayIndex: 0, attempt: 1, kind: "words", receivedAt: eveningAt } });
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    const at = new Date("2030-03-04T21:05:00Z");
+    expect(await reserveGameEveningCheckIn(f.roomId, [open, posted], at)).toBe(1);
+    expect((await prepareGameEveningCheckIn(f.roomId, date, at))?.policy.batch.map(game => game.gameId)).toEqual([open]);
+  });
+
+  it("suppresses unjoined and far-apart audiences, and excludes a switched-off player", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);
+    expect(await reserveGameEveningCheckIn(unjoined.roomId, [unjoinedId], eveningAt)).toBe(0);
+    const far = await fixture(3), farId = await far.addGame();
+    await db.gameProfile.update({ where: { memberId: far.people[2]!.id }, data: { timeZone: "America/Los_Angeles" } });
+    expect(await reserveGameEveningCheckIn(far.roomId, [farId], eveningAt)).toBe(0);
+    const close = await fixture(3), closeId = await close.addGame();
+    await db.gamePlayer.update({ where: { gameId_seat: { gameId: closeId, seat: 2 } }, data: { reminderOff: true } });
+    const eventId = gameEveningEventId(close.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(close.roomId, [closeId], eveningAt)).toBe(1);
+    expect((await prepareGameEveningCheckIn(close.roomId, date, eveningAt))?.policy.batch[0]?.memberIds).toEqual(close.people.slice(0, 2).map(person => person.id).sort());
+  });
+
+  it("reserves the same evening family for an exact two-player pair room", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(2), id = await f.addGame(2);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
+    const phones = ["+12025550181", "+12025550182"];
+    for (const [index, person] of f.people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({
+      ...buildHostedMemberPhoneIdentityFields(phones[index]!), memberId: person.id, prisma: tx,
+      phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+    proof.rooms.set(f.roomId, phones);
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    expect((await prepareGameEveningCheckIn(f.roomId, date, eveningAt))?.policy.batch[0]?.memberIds).toEqual(f.people.map(person => person.id).sort());
+  });
+
+  it("does not reserve when an authorized room recipient has unresolved identity", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), id = await f.addGame();
+    const unknown = `${randomUUID()}@example.test`;
+    await db.gameInvitee.create({ data: { gameId: id, seat: 3, memberId: null, recipientLookupKey: createHostedEmailLookupKey(unknown) } });
+    proof.rooms.set(f.roomId, [...f.people.map(person => person.email), unknown]);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
+  });
+
+  it("combines pair and group games in one mixed-room evening witness", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(2), pair = await f.addGame(2), group = await f.addGame(10);
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [pair, group], eveningAt)).toBe(1);
+    expect((await prepareGameEveningCheckIn(f.roomId, date, eveningAt))?.policy.batch.map(game => game.gameId).sort()).toEqual([pair, group].sort());
+  });
+
+  it("keeps the flag off and rejects expiry", async () => {
+    const f = await fixture(2), id = await f.addGame();
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "false");
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], new Date("2030-03-04T20:30:00Z"))).toBe(0);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    const prepared = await prepareGameEveningCheckIn(f.roomId, date, eveningAt);
+    expect(prepared).not.toBeNull();
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, new Date("2030-03-04T20:30:00Z")))).toBe(false);
+    expect(await drainGameChatLifecycle({ now: new Date("2030-03-04T20:31:00Z") })).toMatchObject({ queued: 0 });
+    expect(await receipt(eventId)).toMatchObject({ status: "skipped", skipReason: "game_evening_expired" });
+  });
+
+  it.each(["post", "leave", "opt-out", "terms", "message"] as const)("makes a frozen evening stale after %s", async mutation => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), id = await f.addGame();
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    const prepared = await prepareGameEveningCheckIn(f.roomId, date, eveningAt);
+    expect(prepared).not.toBeNull();
+    if (mutation === "post") await db.gameEntry.create({ data: { id: randomUUID(), gameId: id, memberId: f.people[0]!.id, dayIndex: 0,
+      attempt: 1, kind: "words", receivedAt: eveningAt } });
+    if (mutation === "leave") await db.gamePlayer.update({ where: { gameId_seat: { gameId: id, seat: 2 } }, data: { leftAt: eveningAt } });
+    if (mutation === "opt-out") await db.gamePlayer.update({ where: { gameId_seat: { gameId: id, seat: 1 } }, data: { reminderOff: true } });
+    if (mutation === "terms") await db.game.update({ where: { id }, data: { terms: { v: 1, versions: [{ n: 2, fromDay: 0,
+      schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] } } });
+    if (mutation === "message") await conversation(f, "I'm doing my task today.");
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(false);
+  });
+
+  it("publishes an evening witness and reads it from the mailbox for final authority", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), id = await f.addGame();
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    expect(await drainGameChatLifecycle({ now: eveningAt })).toMatchObject({ queued: 1 });
+    const authority = await readGameEveningDeliveryAuthority(eventId, f.roomId);
+    expect(authority?.policy.batch[0]?.gameId).toBe(id);
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(authority!.policy, authority!.memberIds, authority!.audience, tx, eveningAt))).toBe(true);
+    await conversation(f, "I'll do it today.");
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
+      containerMemberId: f.roomId, playerMemberIds: authority!.memberIds, audience: authority!.audience,
+      eveningPolicy: authority!.policy, now: eveningAt }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it("pauses after three accepted scheduled evenings even when delivery metadata was rewritten", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), id = await f.addGame();
+    const fourth = "2030-03-07", at = new Date("2030-03-07T20:05:00Z");
+    for (const day of ["2030-03-04", "2030-03-05", "2030-03-06"]) {
+      const eventId = gameEveningEventId(f.roomId, day); events.push(eventId);
+      await db.hostedLinqDelivery.create({ data: { id: randomUUID(), idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId),
+        source: "hosted_runtime_linq_delivery", sourceRef: "rewritten", template: "other", status: "accepted",
+        targetKind: "thread", attemptedAt: new Date(`${day}T20:00:00Z`), acceptedAt: new Date(`${day}T20:01:00Z`) } });
+    }
+    const fourthEvent = gameEveningEventId(f.roomId, fourth); events.push(fourthEvent);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], at)).toBe(0);
+    // A paused evening sends nothing, and that must not end the pause.
+    const fifthEvent = gameEveningEventId(f.roomId, "2030-03-08"); events.push(fifthEvent);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], new Date("2030-03-08T20:05:00Z"))).toBe(0);
+    await conversation(f, "I'm here.");
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], at)).toBe(1);
+  });
+
+  it.each(["skipped", "failed"] as const)("does not count a %s evening toward the three-send pause", async status => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), id = await f.addGame();
+    for (const day of ["2030-03-04", "2030-03-05", "2030-03-06"]) {
+      const eventId = gameEveningEventId(f.roomId, day); events.push(eventId);
+      await db.hostedLinqDelivery.create({ data: { id: randomUUID(), idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId),
+        source: "hosted_runtime_linq_delivery", sourceRef: "rewritten", template: "other", status: day === "2030-03-05" ? status : "accepted",
+        targetKind: "thread", attemptedAt: new Date(`${day}T20:00:00Z`),
+        acceptedAt: day === "2030-03-05" ? null : new Date(`${day}T20:01:00Z`) } });
+    }
+    const fourth = gameEveningEventId(f.roomId, "2030-03-07"); events.push(fourth);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], new Date("2030-03-07T20:05:00Z"))).toBe(1);
+  });
+
+  it("gives ten evening rooms ten drain slots while keeping one room ordered", async () => {
+    const roomIds = Array.from({ length: 10 }, () => `evening_room_${randomUUID()}`);
+    for (const roomId of roomIds) {
+      members.push(roomId);
+      await db.hostedMember.create({ data: { id: roomId } });
+      for (const [index, day] of ["2030-03-04", ...(roomId === roomIds[0] ? ["2030-03-05"] : [])].entries()) {
+        const eventId = gameEveningEventId(roomId, day); events.push(eventId);
+        await db.hostedLinqDelivery.create({ data: { id: randomUUID(), idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId),
+          source: "game_lifecycle", sourceRef: `${roomId}:${day}`, template: "game_evening", status: "awaiting_generation",
+          targetKind: "thread", payloadOwnerMemberId: roomId, attemptedAt: new Date(index * 1_000), retryAfterAt: new Date(0) } });
+      }
+    }
+    const selected = await readOldestReceiptPerChat(db, new Date("2030-03-06T20:00:00Z"));
+    expect(selected).toHaveLength(10);
+    expect(new Set(selected.map(row => row.payloadOwnerMemberId)).size).toBe(10);
+    expect(selected.find(row => row.payloadOwnerMemberId === roomIds[0])?.sourceRef).toBe(`${roomIds[0]}:2030-03-04`);
+  });
   it("concurrent sweeps publish one encrypted room/date envelope and recover only its pointer", async () => {
     const f = await fixture(4), id = await f.addGame(10, [], 3);
     const claims = await Promise.all([1, 2, 3].map(() => reserveGroupGameMissedDay(f.roomId, [id], now)));

@@ -415,13 +415,21 @@ Device import yield reasons and receipt-capacity slicing are specified in
 [`agent-docs/RELIABILITY.md`](../../agent-docs/RELIABILITY.md).
 
 
-### Background stale retry discovery
+### Pending reply ownership
 
-Background input selection reuses its content-retention event snapshot for stale
-retry discovery. Retention still owns the full-store scan; retry discovery does
-not perform a second scan. It groups recent pending member messages by exact
-source/account/thread, considers only later member inputs in those chats, and
-stops at the newest replied or committed-reply evidence per chat. System inputs
-and image completions cannot supersede member messages. The caller's abort
-signal reaches history listing, retention, compaction and retry evidence checks.
-No prompt, reply policy, persisted index, or foreground provider input changes.
+An answered newer message does not settle an earlier unanswered input. Background
+selection retains that input until its own terminal evidence or the separate
+privacy content-retention limit applies. A fifteen-minute delay never settles it. Historical suppression evidence stays terminal.
+Retention owns the full-store scan; selection no longer scans later chat messages
+or reads their terminal evidence to infer supersession.
+
+A selected reply's dated retry belongs to the current invocation regardless of
+foreground or background selection. Both phase result paths carry that deadline
+to the existing hot-wake timer. Aggregate cron, cleanup and outbox wake times do
+not confer this authority; publication gates and no-progress wake keys remain.
+
+Deferred background delivery uses the current durable-effect cancellation scope
+alongside the original phase signal, including provider cleanup. A batch carrying
+a current-turn reply preserves its delivery priority across scheduling wakes.
+Cancellation before provider entry releases only exact prepared claims; provider
+entry uncertainty and accepted receipts continue to prevent blind resend.

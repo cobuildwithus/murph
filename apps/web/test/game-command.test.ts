@@ -294,7 +294,7 @@ describe("game reminder command", () => {
     expect(parseGameCommand({ ...command, offGameIds: ["game_one", "game_one"], actor: "foreign" })).toEqual(command);
   });
   it.each([{ minutes: -1 }, { minutes: 1440 }, { minutes: 1.5 }, { minutes: "1140" }, { push: undefined },
-    { push: "true" }, { text: true }, { text: undefined }, { offGameIds: undefined }, { offGameIds: [null] }])("refuses invalid preferences %o", invalid => {
+    { push: "true" }, { text: "true" }, { text: undefined }, { offGameIds: undefined }, { offGameIds: [null] }])("refuses invalid preferences %o", invalid => {
     expect(codeOf(() => parseGameCommand({ ...command, ...invalid }))).toBe("INVALID_REQUEST");
   });
 });
