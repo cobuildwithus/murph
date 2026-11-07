@@ -496,6 +496,34 @@ test("hosted email sender helpers authorize only the verified email", () => {
     resolveHostedEmailInboundSenderAddress({
       headerFrom: "Owner <owner@example.test> Team <owner@example.test>",
     }),
-    "owner@example.test",
+    null,
   );
+});
+
+
+test("sender admission never extracts authority from comments or display names", () => {
+  const authenticatedSender = { dkimAligned: false, dmarcPass: true, spfAligned: false };
+  for (const headerFrom of [
+    "attacker@evil.test (reply <owner@example.test>)",
+    '"<owner@example.test>" <attacker@evil.test>',
+    "attacker@evil.test (owner@example.test)",
+    "Owner <owner@example.test>, Owner <owner@example.test>",
+    "Owner <owner@example.test> Team <owner@example.test>",
+    "<owner@example.test> trailing text",
+    "Owner (work) <owner@example.test>",
+    "Group: owner@example.test;",
+  ]) {
+    assert.equal(resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender, envelopeFrom: "owner@example.test", headerFrom,
+    }), null, headerFrom);
+  }
+  for (const headerFrom of [
+    "owner@example.test", "Owner <owner@example.test>",
+    '"Owner, Example" <owner@example.test>', '<owner@example.test>',
+    '"<someone@else.test>" <owner@example.test>',
+  ]) {
+    assert.equal(resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender, envelopeFrom: "owner@example.test", headerFrom,
+    }), "owner@example.test", headerFrom);
+  }
 });

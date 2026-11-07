@@ -409,6 +409,14 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Provenance-bearing raw evidence and append-only records are immutable by
   default. Repair is an explicit owner primitive with precondition proof and a
   metadata-only audit trail.
+- Reply email aliases select a destination only. Before raw storage or assistant
+  admission, require trusted platform sender authentication and bind the sender
+  to the alias owner's current verified email; group aliases retain their
+  membership/share checks after sender authentication. Model approval flags
+  cannot grant authority to an unauthenticated email sender.
+- Public invite status must not disclose pending email addresses or member setup
+  state without the matching session. Expired invitations expose no contact
+  hints or private setup projection.
 - A guard or authority change is complete only when every path to the protected
   effect routes through it durably or is proved unreachable.
 - For any storage owner placed under a private-content classification guard,

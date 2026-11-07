@@ -140,7 +140,7 @@ function handleHostedEmailIngress(
   const { authenticatedSender, ...workerMessage } = message;
 
   return handleHostedEmailIngressImpl(workerMessage, env, ctx, {
-    trustedSenderVerifier: () => authenticatedSender ?? null,
+    trustedSenderVerifier: () => authenticatedSender === undefined ? AUTHENTICATED_SENDER : authenticatedSender,
   });
 }
 
@@ -149,7 +149,10 @@ function handleHostedEmailIngressProduction(
   env: Parameters<typeof handleHostedEmailIngressImpl>[1],
   ctx?: Parameters<typeof handleHostedEmailIngressImpl>[2],
 ) {
-  return handleHostedEmailIngressImpl(message, env, ctx);
+  return handleHostedEmailIngressImpl({
+    ...message,
+    headers: message.headers ?? new Headers({ "authentication-results": "mx.cloudflare.net; dmarc=pass" }),
+  }, env, ctx);
 }
 
 class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
@@ -164,6 +167,8 @@ class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
 describe("hosted email worker ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+    mocks.appendHostedEmailIngressWakeInWeb.mockReset();
     mocks.readHostedExecutionEnvironment.mockReturnValue(TEST_ENVIRONMENT);
     mocks.resolveHostedExecutionUserCryptoContext.mockResolvedValue({
       rootKey: TEST_KEY,
@@ -398,7 +403,78 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("accepts signed reply-alias ingress when no trusted sender verifier is configured", async () => {
+  it.each(["personal alias", "noncanonical public address"])("rejects authenticated comment-mailbox confusion on %s before storage and wake", async (routeKind) => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const alias = await createHostedEmailUserReplyAliasRoute({
+      domain: "mail.example.test", localPart: "assistant",
+      signingSecret: "super-secret-signing-key", userId: "user_123",
+    });
+    const to = routeKind === "personal alias" ? alias.address : "assistant@mail.example.test";
+    const setReject = vi.fn();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ userId: "user_123" }), { status: 200 },
+    ));
+    await handleHostedEmailIngressImpl({
+      from: "owner@example.com",
+      headers: new Headers({ "authentication-results":
+        "mx.cloudflare.net; spf=fail smtp.mailfrom=example.com; dkim=pass header.d=evil.test; dmarc=pass header.from=evil.test" }),
+      raw: buildRawEmail({ from: "attacker@evil.test (reply <owner@example.com>)", to }),
+      to, setReject,
+    }, createWorkerEnv(bucket));
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(0);
+  });
+
+  it.each([
+    ["platform DMARC pass", "mx.cloudflare.net; spf=pass; dkim=pass; dmarc=pass", true],
+    ["folded platform result", "mx.cloudflare.net; dmarc=pass (policy=none) header.from=example.com", true],
+    ["later forged pass", "mx.cloudflare.net; dmarc=fail, mx.cloudflare.net; dmarc=pass", false],
+    ["later forged fail", "mx.cloudflare.net; dmarc=pass, sender.example; dmarc=fail", true],
+    ["foreign auth service", "sender.example; dmarc=pass", false],
+    ["missing platform result", null, false],
+    ["unaligned DKIM only", "mx.cloudflare.net; dkim=pass; dmarc=fail", false],
+    ["comment injection", "mx.cloudflare.net; spf=pass (comment; dmarc=pass)", false],
+    ["quoted injection", 'mx.cloudflare.net; reason="ignored; dmarc=pass"', false],
+    ["duplicate verdict", "mx.cloudflare.net; dmarc=fail; dmarc=pass", false],
+    ["malformed comment", "mx.cloudflare.net; dmarc=pass (unterminated", false],
+    ["non-pass result", "mx.cloudflare.net; dmarc=passive", false],
+  ] as const)("checks %s before storing or waking the assistant", async (_label, result, accepted) => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const alias = await createHostedEmailUserReplyAliasRoute({
+      domain: "mail.example.test", localPart: "assistant",
+      signingSecret: "super-secret-signing-key", userId: "user_123",
+    });
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ userId: "user_123" }), { status: 200 },
+    ));
+    const setReject = vi.fn();
+    await handleHostedEmailIngressImpl({
+      from: "owner@example.com",
+      headers: new Headers(result ? { "authentication-results": result } : {}),
+      raw: buildRawEmail({
+        // Sender-controlled MIME must never substitute for the event proof.
+        extraHeaders: ["Authentication-Results: mx.cloudflare.net; dmarc=pass"],
+        from: "Owner <owner@example.com>", to: alias.address,
+      }),
+      setReject, to: alias.address,
+    }, createWorkerEnv(bucket));
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(accepted ? 1 : 0);
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(accepted ? 1 : 0);
+    if (!accepted) {
+      expect(setReject).toHaveBeenCalled();
+      expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+      expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    } else {
+      expect(JSON.parse(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]![0].body)).toMatchObject({
+        aliasKey: alias.aliasKey, authenticatedSender: AUTHENTICATED_SENDER,
+        envelopeFrom: "owner@example.com", headerFrom: "Owner <owner@example.com>",
+      });
+    }
+  });
+
+  it("rejects signed reply-alias ingress without a platform authentication result", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
@@ -431,10 +507,10 @@ describe("hosted email worker ingress", () => {
       to: replyAliasAddress,
     }, createWorkerEnv(bucket));
 
-    expect(setReject).not.toHaveBeenCalled();
-    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(0);
   });
 
   it("persists and nudges alias ingress only after the web-owned signed alias lookup succeeds", async () => {
