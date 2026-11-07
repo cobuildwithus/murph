@@ -1,6 +1,6 @@
 # Simplify and ship the state-machine fixes
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-07
 
@@ -8,8 +8,9 @@ Updated: 2026-11-07
 
 Ship the confirmed Murph and iOS state-machine corrections with one maintained
 inventory, regression proof and the smallest correct ownership boundaries.
-Backend production delivery is complete. Native source and the test-only follow-up are on main; full native CI and
-final documentation delivery remain below.
+Backend production delivery is complete. Native source and the test-only
+follow-up are on main. Implementation, focused verification and documentation
+are complete; linked PRs and runs own final hosted verification and merge status.
 
 On 2026-11-07 the user explicitly limited native delivery to main and excluded a
 new TestFlight upload. Signing setup, archive, upload and App Review submission
@@ -52,16 +53,18 @@ local patch; its parser/inbox suites passed 54 and 25 tests. The shared
 [state-machine inventory](../../references/app-state-machines.md) owns the
 failure schedules, transition tables and detailed evidence.
 
-## Remaining completion receipts
+## Final delivery evidence
 
-- **Native test-only follow-up:** [iOS PR #480](https://github.com/cobuildwithus/murph-ios/pull/480)
-  merged as `132a2279d2709e137290b6850fd580c7e4efe867` after both exact-head
-  checks passed. The 79 affected tests and latest-main test build passed locally.
-  [Main CI #42342494525](https://github.com/cobuildwithus/murph-ios/actions/runs/42342494525)
-  is queued; record its result before closing the plan.
-- **Final documentation:** parent owns the evidence PR from this branch, final
-  documentation checks, exact-head hosted checks and merge receipt. Record that
-  PR and archive this plan through the supported task-finishing helper.
+- [iOS PR #480](https://github.com/cobuildwithus/murph-ios/pull/480) merged as
+  `132a2279d2709e137290b6850fd580c7e4efe867` after both exact-head checks passed.
+  The 79 affected tests and the latest-main test build passed locally. Its
+  [full main CI run](https://github.com/cobuildwithus/murph-ios/actions/runs/42342494525)
+  owns post-merge product verification; local proof does not imply that result.
+- [Murph documentation PR #4734](https://github.com/cobuildwithus/murph/pull/4734)
+  owns the final inventory/index update and this archived plan. Diff, drift and
+  gardening checks pass. Its hosted checks and guarded merge remain PR-owned
+  completion gates, separate from the already verified production delivery.
 
 Physical-device and live native-backend behavior are not represented by simulator
 proof. No TestFlight upload is planned or required for the user-approved outcome.
+Completed: 2026-11-07

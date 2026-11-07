@@ -1547,8 +1547,8 @@ Merged source and release evidence are tracked separately:
   save admission and retry, without reminder-specific global revision checks.
 - [iOS PR #480](https://github.com/cobuildwithus/murph-ios/pull/480) merged as
   `132a2279d2709e137290b6850fd580c7e4efe867` after both exact-head checks passed.
-  Its 79 affected tests and the latest-main test build pass; full
-  [main CI](https://github.com/cobuildwithus/murph-ios/actions/runs/42342494525) is pending.
+  Its 79 affected tests and the latest-main test build pass. Full post-merge
+  verification is tracked by [main CI #42342494525](https://github.com/cobuildwithus/murph-ios/actions/runs/42342494525).
 - Native delivery is main-only at the user’s request; no TestFlight upload or
   App Review submission is included. The test-only follow-up preserves the
   latest main’s build `1.1.24 (88)`.
