@@ -297,6 +297,12 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       response: { action: input.request.action, status: "already_completed" },
     };
   }
+  if (task.status === "failed") {
+    return {
+      mailboxWake: null,
+      response: { action: input.request.action, status: "terminal", terminalReason: "unavailable" },
+    };
+  }
   if (input.request.action === "prepare") {
     const wake = await readHostedMailboxWakeByItemId({
       mailboxItemId: task.requestMailboxItemId,
@@ -312,10 +318,13 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
         response: { action: "prepare", status: "terminal", terminalReason: "unavailable" },
       };
     }
-    await prisma.hostedOperatorTask.updateMany({
+    const prepared = await prisma.hostedOperatorTask.updateMany({
       data: { status: "running" },
-      where: { id: task.id, status: "queued" },
+      where: { id: task.id, status: { in: ["queued", "running"] } },
     });
+    if (prepared.count !== 1) {
+      return readOperatorDiagnosticTerminalResponse(prisma, task.id, "prepare");
+    }
     return {
       mailboxWake: null,
       response: {
@@ -337,13 +346,33 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       ? { ...input.request.result, answer: sanitizeHostedProductFeedbackSummary(input.request.result.answer) }
       : input.request.result,
   });
-  await prisma.hostedOperatorTask.updateMany({
+  const completed = await prisma.hostedOperatorTask.updateMany({
     data: { completedAt: now, resultEncrypted, status: "completed" },
     where: { id: task.id, status: { in: ["queued", "running"] } },
   });
+  if (completed.count !== 1) {
+    return readOperatorDiagnosticTerminalResponse(prisma, task.id, "complete");
+  }
   return {
     mailboxWake: null,
     response: { action: "complete", status: "completed" },
+  };
+}
+
+async function readOperatorDiagnosticTerminalResponse(
+  prisma: PrismaClient,
+  taskId: string,
+  action: "complete" | "prepare",
+) {
+  const current = await prisma.hostedOperatorTask.findUnique({
+    select: { status: true },
+    where: { id: taskId },
+  });
+  return {
+    mailboxWake: null,
+    response: current?.status === "completed"
+      ? { action, status: "already_completed" }
+      : { action, status: "terminal", terminalReason: "unavailable" },
   };
 }
 

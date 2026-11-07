@@ -24,6 +24,7 @@ import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-a
 import { resolveHostedRuntimeAiUsageGate } from "../hosted-orchestration/runtime-usage-decision";
 import { readGamePushRoutes } from "./push-delivery";
 import { gameReminderReach } from "./reminders";
+import { GAME_REMINDER_OFF_CHOICE_EVENT, recordGameReminderPreferencesTx } from "./reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
@@ -261,7 +262,9 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
       reminderMinutes: command.minutes, reminderPush: command.push, reminderText: command.text,
     } });
     if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
-    const where = { memberId: actor, game: { status: "live" } };
+    await recordGameReminderPreferencesTx(tx, actor, command.everyDayGameIds !== undefined);
+    // A seat admitted after the recorded choice keeps its own activation defaults.
+    const where = { memberId: actor, game: { status: "live", events: { some: { actor, type: GAME_REMINDER_OFF_CHOICE_EVENT } } } };
     await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.offGameIds } }, data: { reminderOff: true } });
     await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.offGameIds } }, data: { reminderOff: false } });
     if (command.everyDayGameIds) {

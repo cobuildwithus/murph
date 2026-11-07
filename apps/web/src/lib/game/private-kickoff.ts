@@ -13,6 +13,7 @@ import { getPrisma } from "../prisma";
 import { isGameOn } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
 import { currentTerms, parseStoredTerms } from "./rules";
+import { carryOverGameReminderPreferencesTx } from "./reminder-preferences";
 import { canTextGameReminders } from "./service";
 
 const enabled = () => process.env.MURPH_GAME_PRIVATE_REMINDERS_ENABLED === "true";
@@ -58,8 +59,7 @@ async function activateOne(gameId: string, memberId: string, now: Date): Promise
     const people = game.players.flatMap(seat => seat.memberId && !seat.leftAt ? [seat.memberId] : []).sort();
     const previous = await findPreviousGameTx(tx, gameId, game.previousGameId, memberId, people, game.startedAt);
     const oldSeat = previous?.players.find(seat => seat.memberId === memberId);
-    if (oldSeat) await tx.gamePlayer.updateMany({ where: { gameId, memberId },
-      data: { reminderOff: oldSeat.reminderOff, reminderEveryDay: oldSeat.reminderEveryDay } });
+    if (oldSeat) await carryOverGameReminderPreferencesTx(tx, gameId, memberId, oldSeat);
     const newPerson = await hasNewPeerTx(tx, gameId, memberId, people, game.startedAt);
     const messageKind = newPerson ? "new_person" : previous && rhythm(game) !== rhythm(previous) ? "new_rhythm" : null;
     await tx.gameEvent.create({ data: { gameId, actor: "system", type: "reminder_activation", commandKey: activationKey(gameId, memberId),

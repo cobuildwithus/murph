@@ -3982,7 +3982,11 @@ mailbox item. Stable caller idempotency maps to one task and mailbox identity;
 the persisted request-shape digest makes replay with different authority or
 content fail closed. Runtime wake is only a post-commit hint. Diagnostics use
 the existing retrying detached Assistant Ask controller and idempotent
-completion callback. A diagnostic at the durable system-mailbox head receives
+completion callback. A diagnostic receives ready or completed acknowledgement
+only after its current queued/running transition succeeds. A failed task is
+terminal; a lost conditional write reads
+the winner and preserves already-completed replay without claiming an unsaved
+result. A diagnostic at the durable system-mailbox head receives
 one exact attempt before later device maintenance. Current member conversation
 work retains foreground priority: it leaves an unstarted diagnostic pending or
 aborts and durably requeues an active diagnostic without duplicating it. The

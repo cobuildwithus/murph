@@ -45,6 +45,26 @@ async function receipt(gameId: string, memberId: string) {
   return db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(privateKickoffEventId(gameId, memberId))! } });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(accept => { resolve = accept; });
+  return { promise, resolve };
+}
+
+async function waitForBlocked(holderPid: number, count: number) {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const [row] = await db.$queryRaw<Array<{ count: number }>>`WITH RECURSIVE blocked AS (
+      SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND ${holderPid} = ANY(pg_blocking_pids(pid))
+      UNION SELECT activity.pid FROM pg_stat_activity activity JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+      WHERE activity.datname = current_database()
+    ) SELECT count(*)::int AS count FROM blocked`;
+    if (row!.count >= count) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error("Expected reminder contention was not observed.");
+}
+
 describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
   beforeEach(() => {
     m.eligible = true;
@@ -76,6 +96,123 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     await activatePrivateGamePlayers(fallback, new Date("2026-11-06T19:00:00Z"));
     expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: fallback, memberId: a } } })).toMatchObject({ reminderOff: true });
     expect(await kind(fallback, a)).toEqual({ messageKind: "none" });
+  });
+
+  it.each([false, true])("preserves an explicit reminder choice after failed activation (previous off=%s)", async previousOff => {
+    const a = await member("Alex"), b = await member("Sam");
+    const previous = await game([a, b], { startedAt: new Date("2026-11-05T18:00:00Z") });
+    await db.game.update({ where: { id: previous }, data: { status: "settled" } });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: previous, memberId: a } },
+      data: { reminderOff: previousOff, reminderEveryDay: previousOff } });
+    const current = await game([a, b], { previousGameId: previous, schedule: { count: 3 } });
+    const failure = vi.spyOn(db, "$transaction").mockRejectedValueOnce(new Error("synthetic activation failure"));
+    try {
+      await expect(activatePrivateGamePlayers(current, now)).rejects.toThrow("synthetic activation failure");
+    } finally { failure.mockRestore(); }
+    expect(await kind(current, a)).toBeUndefined();
+
+    const choice = !previousOff;
+    expect(await runGameCommand({ actorMemberId: a, command: {
+      type: "setReminders", minutes: 1140, push: true, text: false,
+      offGameIds: choice ? [current] : [], everyDayGameIds: choice ? [current] : [],
+    } })).toMatchObject({ ok: true });
+    const seat = () => db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: current, memberId: a } } });
+    expect(await seat()).toMatchObject({ reminderOff: choice, reminderEveryDay: choice });
+    await reconcilePrivateGameActivations(now);
+    expect(await seat()).toMatchObject({ reminderOff: choice, reminderEveryDay: choice });
+    expect(await kind(current, a)).toEqual({ messageKind: "new_rhythm" });
+    expect(await receipt(current, a)).toMatchObject({ template: "game_private_kickoff" });
+  });
+
+  it("preserves feature-off choices while inheriting the omitted every-day field", async () => {
+    const a = await member("Alex"), b = await member("Sam");
+    const previous = await game([a, b], { startedAt: new Date("2026-11-05T18:00:00Z") });
+    await db.game.update({ where: { id: previous }, data: { status: "settled" } });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: previous, memberId: a } }, data: { reminderEveryDay: true } });
+    const current = await game([a, b], { previousGameId: previous, schedule: { count: 3 } });
+    vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "false");
+    expect(await runGameCommand({ actorMemberId: a, command: { type: "setReminders", minutes: 1140,
+      push: true, text: false, offGameIds: [current] } })).toMatchObject({ ok: true });
+    vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "true");
+    await reconcilePrivateGameActivations(now);
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: current, memberId: a } } }))
+      .toMatchObject({ reminderOff: true, reminderEveryDay: true });
+    expect(await receipt(current, a)).toMatchObject({ template: "game_private_kickoff" });
+  });
+
+  it.each([["activation", false], ["save", false], ["activation", true], ["save", true]] as const)(
+    "preserves the explicit choice when %s obtains the game lock first (existing off choice=%s)", async (first, existingOff) => {
+    const a = await member("Alex"), b = await member("Sam");
+    const previous = await game([a, b], { startedAt: new Date("2026-11-05T18:00:00Z") });
+    await db.game.update({ where: { id: previous }, data: { status: "settled" } });
+    const current = await game([a, b], { previousGameId: previous, schedule: { count: 3 } });
+    if (existingOff) expect(await runGameCommand({ actorMemberId: a, command: { type: "setReminders", minutes: 1140,
+      push: true, text: false, offGameIds: [current] } })).toMatchObject({ ok: true });
+    const acquired = deferred<number>(), release = deferred<void>();
+    const holding = db.$transaction(async tx => {
+      const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      if (first === "activation") await tx.$queryRaw`SELECT id FROM game WHERE id = ${current} FOR UPDATE`;
+      else {
+        await tx.$queryRaw`SELECT id FROM game WHERE id = ${current} FOR KEY SHARE`;
+        await tx.$queryRaw`SELECT game_id FROM game_player WHERE game_id = ${current} AND member_id = ${a} FOR UPDATE`;
+      }
+      acquired.resolve(connection!.pid);
+      await release.promise;
+    }, { timeout: 10_000 });
+    const activate = () => activatePrivateGamePlayers(current, now);
+    const save = () => runGameCommand({ actorMemberId: a, command: { type: "setReminders", minutes: 1140,
+      push: true, text: false, offGameIds: existingOff ? [] : [current], everyDayGameIds: [current] } });
+    let activation: Promise<void> | undefined, saved: ReturnType<typeof save> | undefined;
+    try {
+      const pid = await acquired.promise;
+      if (first === "activation") activation = activate();
+      else saved = save();
+      await waitForBlocked(pid, 1);
+      if (first === "activation") saved = save();
+      else activation = activate();
+      await waitForBlocked(pid, 2);
+      release.resolve();
+      expect(await saved).toMatchObject({ ok: true });
+      await activation;
+    } finally {
+      release.resolve();
+      await Promise.allSettled([holding, activation, saved]);
+    }
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: current, memberId: a } } }))
+      .toMatchObject({ reminderOff: !existingOff, reminderEveryDay: true });
+    expect(await receipt(current, a)).toMatchObject({ template: "game_private_kickoff" });
+  });
+
+  it("records at most two facts per seat with constant queries for 1,000 live games", async () => {
+    const a = await member("Alex"), b = await member("Sam");
+    const first = await game([a, b]);
+    vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "false");
+    const { runWithPrismaOperationTimings } = await import("@/src/lib/prisma-operation-timing");
+    const measure = async (ids: string[]) => {
+      const operations: import("@/src/lib/prisma-operation-timing").PrismaOperationTiming[] = [];
+      const queries: import("@/src/lib/prisma-operation-timing").PrismaQueryTiming[] = [];
+      const acquisitions: import("@/src/lib/prisma-operation-timing").PrismaPoolAcquisitionTiming[] = [];
+      const saved = await runWithPrismaOperationTimings(operations, () => runGameCommand({ actorMemberId: a,
+        command: { type: "setReminders", minutes: 1140, push: true, text: false, offGameIds: ids, everyDayGameIds: ids },
+      }), acquisitions, queries);
+      expect(saved).toMatchObject({ ok: true });
+      expect(queries.every(query => !query.failed)).toBe(true);
+      expect(queries.length).toBeLessThanOrEqual(12);
+      expect(acquisitions).toHaveLength(1);
+      return { queries: queries.length, operations: operations.length };
+    };
+    const single = await measure([first]);
+    const additional = Array.from({ length: 999 }, () => `game_${randomUUID().replaceAll("-", "")}`);
+    await db.game.createMany({ data: additional.map(id => ({ id, createdBy: a, wordsOwnerMemberId: a, status: "live",
+      terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 3 }, stakes: [] }] }, termsWordsEncrypted: "unused", startedAt: now })) });
+    await db.gamePlayer.createMany({ data: additional.flatMap(gameId => [a, b].map((memberId, seat) => ({
+      gameId, memberId, seat, timeZone: "UTC", joinedAt: now,
+    }))) });
+    const ids = [first, ...additional];
+    expect(await measure(ids)).toEqual(single);
+    expect(await measure(ids)).toEqual(single);
+    expect(await db.gameEvent.count({ where: { actor: a, type: { in: ["reminder_off_chosen", "reminder_every_day_chosen"] } } })).toBe(2_000);
+    expect(await db.gamePlayer.count({ where: { memberId: a, reminderOff: true, reminderEveryDay: true } })).toBe(1_000);
   });
 
   it("offers a new person once and a familiar person a new rhythm, then recovers a late join", async () => {
