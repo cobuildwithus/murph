@@ -129,6 +129,7 @@ export type CodexEventState = 'completed' | 'running'
 export type CodexAssistantMessagePhase = 'commentary' | 'final_answer'
 
 export type CodexNormalizedEvent =
+  | { kind: 'final_answer_started'; itemId: string | null; rawEvent: unknown }
   | {
       kind: 'assistant_delta'
       deltaText: string
@@ -313,21 +314,7 @@ export function normalizeCodexEvent(event: unknown): CodexNormalizedEvent {
   }
 
   if (itemType === 'agentMessage') {
-    const text = extractAssistantTextFromItem(item)
-    return text
-      ? {
-          kind: 'assistant_message',
-          itemId,
-          itemState,
-          messagePhase: extractAssistantMessagePhase(item),
-          rawEvent: event,
-          text,
-        }
-      : {
-          kind: 'unknown',
-          eventType,
-          rawEvent: event,
-        }
+    return normalizeCodexAgentMessageEvent({ event, eventType, item, itemId, itemState })
   }
 
   if (itemType === 'webSearch') {
@@ -367,6 +354,23 @@ export function normalizeCodexEvent(event: unknown): CodexNormalizedEvent {
     reasoningText: extractReasoningTextFromItem(item),
     rawEvent: event,
   }
+}
+
+function normalizeCodexAgentMessageEvent(input: {
+  event: unknown
+  eventType: string
+  item: Record<string, unknown>
+  itemId: string | null
+  itemState: CodexEventState
+}): CodexNormalizedEvent {
+  if (input.itemState === 'running' && input.item.phase === 'final_answer') {
+    return { kind: 'final_answer_started', itemId: input.itemId, rawEvent: input.event }
+  }
+  const text = extractAssistantTextFromItem(input.item)
+  return text ? {
+    kind: 'assistant_message', itemId: input.itemId, itemState: input.itemState,
+    messagePhase: extractAssistantMessagePhase(input.item), rawEvent: input.event, text,
+  } : { kind: 'unknown', eventType: input.eventType, rawEvent: input.event }
 }
 
 function normalizeCodexTextDeltaEvent(input: {

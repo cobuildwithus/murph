@@ -282,7 +282,8 @@ function buildHostedFinalReplyDeliveryAlertEmailText(
 
 function buildHostedTypingAlertEmailText(alertId: string, details: Record<string, unknown>): string {
   return [
-    "Murph message typing latency alert.",
+    details.measurementKind === "provider_start"
+      ? "Murph runtime start latency alert." : "Murph message typing latency alert.",
     "",
     `Alert ID: ${alertId}`,
     `Channel: ${details.source}`,
@@ -290,13 +291,17 @@ function buildHostedTypingAlertEmailText(alertId: string, details: Record<string
     ...(typeof details.providerEventCreatedAt === "string"
       ? [`Provider event created: ${details.providerEventCreatedAt}`] : []),
     `Webhook received: ${details.webhookReceivedAt}`,
+    ...(details.measurementKind === "provider_start"
+      ? [`Measured endpoint: provider start at ${details.measurementAt}`] : []),
     details.typingAcceptedAt === null
       ? "Typing acceptance: not observed when checked"
       : `First typing accepted: ${details.typingAcceptedAt}`,
     ...(typeof details.silenceStartedAt === "string"
       ? [
         `Silence measured from: ${details.silenceStartedAt}`,
-        `Wait without typing or a reply: ${details.elapsedMs} ms`,
+        details.measurementKind === "provider_start"
+          ? `Wait until provider start: ${details.elapsedMs} ms`
+          : `Wait without typing or a reply: ${details.elapsedMs} ms`,
       ]
       : [details.typingAcceptedAt === null
         ? `Time since webhook without recorded typing acceptance: ${details.elapsedMs} ms`

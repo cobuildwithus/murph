@@ -371,6 +371,69 @@ describe("hosted Linq egress authority", () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
+  it("keeps a stalled typing read outside both delivery locks and first-turn repair", async () => {
+    stubTypingCoverageEnv("on");
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    mockPersistedLinqInbound({ prisma, chatId: "chat-home", dedupeKey: "event-later",
+      mailboxItemId: "mailbox-later", messageId: "message-later",
+      occurredAt: new Date().toISOString(), threadIsDirect: true });
+    const stale = { id: "stale-first-turn", status: "pending", attemptedAt: new Date(0),
+      nextAttemptAt: new Date(0), attemptCount: 0 };
+    prisma.hostedLinqDelivery.findFirst.mockImplementation(async () => stale);
+    let finish!: () => void;
+    const wait = new Promise<void>(resolve => { finish = resolve; });
+    let reading = false;
+    prisma.$queryRaw.mockImplementation(async (strings: TemplateStringsArray | string) => {
+      const sql = typeof strings === "string" ? strings : strings.join("?");
+      if (sql.includes("hosted_linq_ack_reaction")) {
+        reading = true;
+        await wait;
+        return [{ covered: true }];
+      }
+      return [];
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    const coverage = postHostedLinqEgressEngagement(routeAuthorityRequest({ target: "chat-home",
+      authorityCheckOnly: true, deliveryPurpose: "typing", replyToMessageId: "message-later" }));
+    await vi.waitFor(() => expect(reading).toBe(true));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    // Ordinary final dispatch can complete while the advisory query is stalled.
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
+    prisma.hostedLinqDelivery.findFirst.mockResolvedValue(null);
+    const sent = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target: "chat-home" }));
+    expect(sent.status).toBe(200);
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+    finish();
+    const response = await coverage;
+    expect(await response.json()).toEqual({ ok: true, ackCovered: true });
+    expect(stale).toEqual({ id: "stale-first-turn", status: "pending", attemptedAt: new Date(0),
+      nextAttemptAt: new Date(0), attemptCount: 0 });
+  });
+
+  it.each([
+    ["disabled", "chat-home", "thread", false, false, "off"],
+    ["foreign", "chat-foreign", "thread", false, false, "on"],
+    ["group", "chat-group", "thread", true, false, "on"],
+    ["participant", "chat-home", "participant", false, false, "on"],
+    ["inactive", "chat-home", "thread", false, true, "on"],
+  ] as const)("returns no typing coverage for %s", async (_label, target, targetKind, group, inactive, flag) => {
+    stubTypingCoverageEnv(flag);
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const prisma = createPrismaStub({ homeChatId: "chat-home", activeMemberAccess: !inactive,
+      ...(group ? { threadRouteContainerMemberId: "member-1" } : {}) });
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target, targetKind,
+      authorityCheckOnly: true, deliveryPurpose: "typing" }));
+    expect((await response.json()).ackCovered).not.toBe(true);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["Murph's reaction check on a tapped message", { authorityCheckOnly: true, deliveryPurpose: "reaction", replyToMessageId: "msg-1" }, "chat-home", {}, "⏰"],
     ["reaction check on an untapped message", { authorityCheckOnly: true, deliveryPurpose: "reaction", replyToMessageId: "msg-2" }, "chat-home", {}, null],
@@ -2973,6 +3036,12 @@ async function expectRouteAuthorityMismatchResponse(
   expect(prisma.$executeRaw).not.toHaveBeenCalled();
 }
 
+function stubTypingCoverageEnv(flag: "on" | "off"): void {
+  vi.stubEnv("HOSTED_LINQ_ACK_REACTIONS", flag);
+  vi.stubEnv("HOSTED_LINQ_ACK_REACTION_OPENAI_API_KEY", "test-key");
+  delete (globalThis as { __murphHostedOnboardingEnv?: unknown }).__murphHostedOnboardingEnv;
+}
+
 function captureRouteAuthorityLogs(): void {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -3107,6 +3176,7 @@ function createPrismaStub(input: {
         linqChatLookupKey: "chat-default",
         phoneNumberLookupKey: defaultLineLookupKey,
         providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+        service: null as string | null,
         providerStatus: "HEALTHY",
         providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
       }),

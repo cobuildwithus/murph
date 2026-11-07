@@ -182,6 +182,19 @@ describe.skipIf(!runPostgresProof)("hosted Linq ack-reaction burst state (Postgr
     })).toEqual(before);
   });
 
+  it("uses a 30-second note window and a 120-second typing window without changing dedupe", async () => {
+    const chat = `ack-proof-${randomUUID()}`;
+    const claimedAt = await claimHostedLinqAckReaction({ ...ack("message-earlier"), linqChatId: chat,
+      messageReceivedAt: at(1), now: clock(2), prisma });
+    await confirmHostedLinqAckReaction({ claimedAt: claimedAt!, linqChatId: chat, now: clock(3), prisma });
+    for (const [seconds, note, typing] of [[31.999, true, true], [32, false, true], [121.999, false, true], [122, false, false]] as const) {
+      expect(await isHostedLinqAckReactionCoveringCurrentBurst({ linqChatId: chat, now: clock(seconds), maxAgeMs: 30_000, prisma })).toBe(note);
+      expect(await isHostedLinqAckReactionCoveringCurrentBurst({ linqChatId: chat, now: clock(seconds), prisma })).toBe(typing);
+    }
+    expect(await claimHostedLinqAckReaction({ ...ack("message-later"), linqChatId: chat,
+      messageReceivedAt: at(40), now: clock(41), prisma })).toBeNull();
+  });
+
   it("reserves one tapback per burst, suppresses progress only once confirmed, and reopens after Murph sends", async () => {
     const chat = `ack-proof-${randomUUID()}`;
     await recordOutbound(chat, at(0));

@@ -2493,14 +2493,21 @@ Current product admission, delivery and native runtime safety rules remain.
   notifications and scheduled turns stay silent. Only direct Linq
   media requiring attachment evidence may start during import; its preparation
   handle passes to the turn without another start. Text, reactions, and edits
-  wait for the model request. Per-chat claims, refresh, cooldown, and cleanup are unchanged.
+  wait for the model request. Direct iMessage adds one bounded burst-coverage
+  read after a 500 ms grace, measured from the first typing request. A
+  confirmed tapback holds typing until final-answer start or the same request's
+  30-second deadline. Preparation hands off this same gate. Other results fail
+  open within a one-second lookup budget. Terminal delivery closes the gate
+  before finalization; direct iMessage turns send a provider stop after the reply, because a deferred start can overlap it, guarded by the existing per-chat claim. Provider execution and delivery never await
+  this gate or late cleanup.
 - Web records `orchestration.ingressConversationIsGroup` on the existing ingress
   trace with the deferred webhook receipt, using the wake's resolved directness.
   The typing monitor excludes boolean `true`, including queued groups and
   no-reply outcomes. Missing or malformed facts retain existing alert behavior;
   reply-latency and progress monitors are unchanged.
 - Per-message typing alerts independently measure the direct member's wait through the
-  earliest accepted typing indicator: strictly over 3 seconds for a warm
+  earlier of accepted typing and provider start for direct Linq; Telegram uses
+  accepted typing only. The threshold is strictly over 3 seconds for a warm
   workspace and over 8 seconds for a cold workspace. Linq waits start at the
   exact provider event bound by the member's mailbox dedupe identity, never
   after the Web route's receipt instant, so
@@ -2509,22 +2516,27 @@ Current product admission, delivery and native runtime safety rules remain.
   Mailbox acceptance remains its existing timestamp; it never substitutes for
   either start.
   For unanswered Linq inputs, the latest accepted message in the same chat
-  resets the silence start between that start and the first typing acceptance
+  resets the silence start between that start and the selected observation
   (or the missing-observation check). A reply does not exempt subsequent silence.
-  An accepted reply linked to this exact input ends its wait; no later typing
-  is required for an already-answered input. Existing hashed provider-event and
+  An accepted reply linked to this exact input suppresses an alert only when it
+  precedes the selected endpoint. A slow provider start still alerts if a reply
+  follows it without typing. Existing hashed provider-event and
   blinded chat keys establish the exact conversation, including reactions whose
   synthetic message identity differs from the reacted-to message. Later edits
   or receipts cannot change an older input's origin. Another chat cannot reset the clock,
   and another member cannot supply prior-typing evidence.
   An earlier accepted typing session covers arrival until its linked reply or
   five-minute expiry, then silence resumes from that endpoint. Missing correlation,
-  failed sends, and sends after the measured typing endpoint cannot reset the clock.
-  Missing typing retains a 30-second telemetry grace from the silence start;
-  observed typing uses the strict warm/cold threshold. Frozen emails retain the
+  failed sends, and sends after the selected endpoint cannot reset the clock.
+  Provider start is never evidence of active typing for another input.
+  Missing observations retain a 30-second telemetry grace from the silence start;
+  observed endpoints use the strict warm/cold threshold. Frozen emails retain the
   receipt and silence-start timestamps, plus the provider event's creation when
   it preceded receipt; older records retain their original text.
-  Telegram retains exact-input typing observations and the existing thresholds.
+  Frozen details retain actual typing separately from the measurement kind and
+  timestamp. Direct Linq typing-provider failures no longer alert when runtime
+  start was fast; reply monitors remain unchanged. Telegram retains its
+  exact-input typing observations and existing thresholds.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.
   Transport exceptions use the existing two retries (250 ms and 1 second), and

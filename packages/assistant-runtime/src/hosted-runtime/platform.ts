@@ -405,7 +405,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
    * `progress_update`: skip a progress note the burst tapback already covers.
    * `reaction`: report Web's tapback on `replyToMessageId` as `ackReaction`.
    */
-  deliveryPurpose?: "progress_update" | "reaction" | null;
+  deliveryPurpose?: "progress_update" | "reaction" | "typing" | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -426,6 +426,8 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   progressUpdateSuppressed?: boolean | null;
   /** The emoji Linq accepted as Web's tapback on `replyToMessageId`. */
   ackReaction?: string | null;
+  /** Advisory confirmed coverage; never delivery authority. */
+  ackCovered?: boolean;
   providerDispatchClaimed?: boolean | null;
   resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }

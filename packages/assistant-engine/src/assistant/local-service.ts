@@ -1730,6 +1730,7 @@ export async function sendAssistantMessageLocal(
             }
           }
           const activeTurnSteering = {
+            onFinalAnswerStarted: () => typingIndicator?.release?.(),
             onFirstAssistantResponseCompleted,
             registerLiveProviderTurn: (
               liveTurn: Parameters<
@@ -2013,6 +2014,7 @@ export async function sendAssistantMessageLocal(
                 usageAttribution: providerOutcome.usageAttribution,
                 workingDirectory: sharedPlan.requestedWorkingDirectory,
               }
+              void stopAssistantChannelTypingIndicator(typingIndicator)
               const turnArtifactsStartedAt = Date.now()
               const session = await finalizeAssistantTurnArtifacts({
                 assistantTranscriptText: null,
@@ -2221,6 +2223,7 @@ export async function sendAssistantMessageLocal(
           providerResult = await finishHeldGroupReplyDraft(providerResult)
         }
 
+        closeQuietTypingIndicator(typingIndicator, providerResult)
         responseText = resolveAssistantPersistedReplyText({
           messageInput: currentInput,
           rawResponse: providerResult.response,
@@ -2452,6 +2455,7 @@ export async function sendAssistantMessageLocal(
               kind: precedingOutcome.kind,
               typingIndicatorDeliveryFields,
             })
+          closeDeliveredTypingIndicator(typingIndicator, deliverySupersededTypingIndicator)
           if (precedingOutcome.kind !== 'failed') {
             continue
           }
@@ -2551,6 +2555,9 @@ export async function sendAssistantMessageLocal(
             kind: finalResponseText !== null ? deliveryOutcome.kind : null,
             typingIndicatorDeliveryFields,
           })
+        void stopAssistantChannelTypingIndicator(typingIndicator, {
+          providerStop: !deliverySupersededTypingIndicator,
+        })
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
           acceptedInputIdsByDeliveryContextOrdinal,
           currentInput,
@@ -2671,6 +2678,7 @@ export async function sendAssistantMessageLocal(
         return result
       } catch (error) {
         activeTurnInputController?.fail(error)
+        void stopAssistantChannelTypingIndicator(typingIndicator)
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
         const failedSession = applyAssistantProgressDeliveredSession({
@@ -2755,6 +2763,22 @@ export async function sendAssistantMessageLocal(
       )
     }
   }
+}
+
+function closeQuietTypingIndicator(
+  indicator: Parameters<typeof stopAssistantChannelTypingIndicator>[0],
+  result: Pick<ExecutedAssistantProviderTurnResult, 'finalAction' | 'precedingResponseSegments'>,
+): void {
+  if (result.finalAction?.kind === 'none' && !result.precedingResponseSegments?.length) {
+    void stopAssistantChannelTypingIndicator(indicator)
+  }
+}
+
+function closeDeliveredTypingIndicator(
+  indicator: Parameters<typeof stopAssistantChannelTypingIndicator>[0],
+  delivered: boolean,
+): void {
+  if (delivered) void stopAssistantChannelTypingIndicator(indicator, { providerStop: false })
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {

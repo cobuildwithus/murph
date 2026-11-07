@@ -19,3 +19,5 @@ export {
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "./assistant/channel-adapters.ts";
+
+export { createAssistantChannelTypingHandle } from "./assistant/channels/typing-handle.ts";

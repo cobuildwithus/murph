@@ -1020,6 +1020,7 @@ function resolveActionKind(
 
 function readNormalizedItemId(normalized: CodexNormalizedEvent): string | null {
   switch (normalized.kind) {
+    case 'final_answer_started':
     case 'assistant_delta':
     case 'assistant_message':
     case 'plan_update':
