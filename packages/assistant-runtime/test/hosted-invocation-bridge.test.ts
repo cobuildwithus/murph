@@ -49,6 +49,12 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as core from "@murphai/core";
+import * as runtimeResidue from "@murphai/assistant-engine/assistant-runtime-residue";
+import * as runtimeState from "@murphai/runtime-state/node";
+import * as snapshotCleanup from "../src/hosted-runtime/snapshot-cleanup.ts";
+import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts";
+import * as mediaReferences from "../src/hosted-runtime/media-references.ts";
+import { parseHostedRuntimeLogEntry } from "@murphai/hosted-execution/parsers";
 import { deleteMealRecord, importEventRecordsFromJsonl } from "@murphai/vault-usecases/records";
 
 import {
@@ -2347,6 +2353,169 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
   });
 
+  it("accounts for each checkpoint step with controlled durations and no extra lifecycle event", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const builder = createSnapshotArchiveBuilder();
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const steps: string[] = [];
+    function timed<A extends unknown[], T>(name: string, ms: number, run: (...args: A) => Promise<T>) {
+      return async (...args: A): Promise<T> => {
+        steps.push(name);
+        try { return await run(...args); }
+        finally { now += ms; }
+      };
+    }
+    const symlinks = snapshotCleanup.pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks;
+    vi.spyOn(snapshotCleanup, "pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks")
+      .mockImplementation(timed("symlinks", 11, symlinks));
+    const terminal = core.pruneTerminalWriteOperationRecords;
+    vi.spyOn(core, "pruneTerminalWriteOperationRecords")
+      .mockImplementation(timed("terminal", 13, terminal));
+    const generated = runtimeResidue.pruneAssistantGeneratedDeliveryResidue;
+    vi.spyOn(runtimeResidue, "pruneAssistantGeneratedDeliveryResidue")
+      .mockImplementation(timed("generated", 17, generated));
+    const pending = pendingInputIndex.compactHostedUnresolvedAssistantInputIds;
+    vi.spyOn(pendingInputIndex, "compactHostedUnresolvedAssistantInputIds")
+      .mockImplementation(timed("pending", 19, pending));
+    const residue = runtimeResidue.pruneAssistantRuntimeResidue;
+    vi.spyOn(runtimeResidue, "pruneAssistantRuntimeResidue")
+      .mockImplementation(timed("residue", 23, residue));
+    const media = mediaReferences.publishHostedWorkspaceMediaReferencesForSnapshot;
+    vi.spyOn(mediaReferences, "publishHostedWorkspaceMediaReferencesForSnapshot")
+      .mockImplementation(timed("media", 29, media));
+    const plan = runtimeState.collectHostedWorkspaceSnapshotArchivePlan;
+    vi.spyOn(runtimeState, "collectHostedWorkspaceSnapshotArchivePlan")
+      .mockImplementation(timed("plan", 31, plan));
+    const build = vi.mocked(builder.buildEncryptedSnapshot);
+    vi.mocked(build).mockImplementation(timed("build", 37, build.getMockImplementation()!));
+    calls.startSnapshotSession.mockImplementation(timed("session", 7, calls.startSnapshotSession.getMockImplementation()!));
+    calls.putSnapshotObjectDirect.mockImplementation(timed("upload", 41, calls.putSnapshotObjectDirect.getMockImplementation()!));
+    calls.completeSnapshotSession.mockImplementation(timed("complete", 43, calls.completeSnapshotSession.getMockImplementation()!));
+    const options = createBridgeOptions({
+      platform,
+      readCurrentLease: timed("lease", 5, async () => createLease(TEST_REQUEST)),
+      snapshotArchiveBuilder: builder,
+      vaultRoot,
+    });
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(steps).toEqual([
+      "lease", "session", "symlinks", "terminal", "generated", "pending", "residue",
+      "media", "plan", "build", "lease", "upload", "lease", "complete",
+    ]);
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    const lifecycle = entries.filter(entry => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycle).toHaveLength(1);
+    const finished = lifecycle[0]!;
+    expect(finished.eventCode).toBe("checkpoint.snapshot_finished");
+    const timings = {
+      snapshotLeaseReadBeforeSnapshotElapsedMs: 5,
+      snapshotSessionStartElapsedMs: 7,
+      snapshotRuntimeSymlinkPruneElapsedMs: 11,
+      snapshotTerminalWriteOperationPruneElapsedMs: 13,
+      snapshotGeneratedDeliveryPruneElapsedMs: 17,
+      snapshotPendingInputCompactionElapsedMs: 19,
+      snapshotAssistantRuntimeResiduePruneElapsedMs: 23,
+      snapshotMediaReferencesPublishElapsedMs: 29,
+      snapshotArchivePlanElapsedMs: 31,
+      snapshotArchiveBuildElapsedMs: 37,
+      snapshotLeaseReadBeforeUploadElapsedMs: 5,
+      snapshotDirectR2UploadElapsedMs: 41,
+      snapshotLeaseReadBeforeCheckpointElapsedMs: 5,
+      snapshotSessionCompleteElapsedMs: 43,
+      snapshotTemporaryCleanupElapsedMs: 0,
+    };
+    expect(finished.redactedJson).toMatchObject({
+      ...timings,
+      assistantRuntimeResiduePruneAttemptedCount: 1,
+      assistantRuntimeResiduePruneCompletedCount: 1,
+      prunedAssistantRuntimeAcceptedTurnInputJournalCount: 0,
+      prunedAssistantRuntimeAutoReplyEvidenceFileCount: 0,
+      prunedAssistantRuntimeAutoReplyEvidenceGroupCount: 0,
+      prunedAssistantRuntimeAutoReplyIntentProvenanceCount: 0,
+      prunedAssistantRuntimeHostedMailboxInputItemMappingCount: 0,
+      prunedAssistantRuntimeInputEventCount: 0,
+      prunedAssistantRuntimeReceiptCount: 0,
+      prunedAssistantRuntimeResidueFileCount: 0,
+    });
+    const sum = Object.values(timings).reduce((total, ms) => total + ms, 0);
+    expect(finished.redactedJson?.snapshotElapsedMs).toBe(sum);
+    expect(parseHostedRuntimeLogEntry(finished)).toEqual(finished);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...finished, redactedJson: { ...finished.redactedJson, snapshotPath: "/private/synthetic" },
+    })).toThrow();
+    expect(JSON.stringify(finished.redactedJson)).not.toContain(vaultRoot);
+  });
+
+  it("records a throwing newly measured step and preserves snapshot failure and abort", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const builder = createSnapshotArchiveBuilder();
+    const failure = new Error("Synthetic symlink pruning failure.");
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.spyOn(snapshotCleanup, "pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks")
+      .mockImplementation(async () => { now += 47; throw failure; });
+    const options = createBridgeOptions({ platform, snapshotArchiveBuilder: builder, vaultRoot });
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toBe(failure);
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(builder.buildEncryptedSnapshot).not.toHaveBeenCalled();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const lifecycle = calls.logWrite.mock.calls.flatMap(([request]) => request.entries)
+      .filter(entry => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycle).toEqual([expect.objectContaining({
+      eventCode: "checkpoint.snapshot_failed",
+      redactedJson: expect.objectContaining({
+        snapshotStage: "archive",
+        snapshotRuntimeSymlinkPruneElapsedMs: 47,
+        snapshotElapsedMs: 47,
+      }),
+    })]);
+    expect(parseHostedRuntimeLogEntry(lifecycle[0])).toEqual(lifecycle[0]);
+  });
+
+  it.each(["compaction", "pruning"] as const)(
+    "finishes with an incomplete residue outcome after caught %s failure",
+    async stage => {
+      const vaultRoot = await createVaultRoot();
+      const { calls, platform } = createRuntimePlatform();
+      let now = Date.now();
+      vi.spyOn(Date, "now").mockImplementation(() => now);
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const fail = async () => { now += 53; throw new Error("Synthetic cleanup failure."); };
+      if (stage === "compaction") {
+        vi.spyOn(pendingInputIndex, "compactHostedUnresolvedAssistantInputIds").mockImplementation(fail);
+      } else {
+        vi.spyOn(runtimeResidue, "pruneAssistantRuntimeResidue").mockImplementation(fail);
+      }
+      const options = createBridgeOptions({ platform, vaultRoot });
+      await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+        .resolves.toMatchObject({ localWorkspaceCleanForWarmReuse: true });
+      expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+      expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+      await drainHostedRuntimeLogWritesBestEffort();
+      const lifecycle = calls.logWrite.mock.calls.flatMap(([request]) => request.entries)
+        .filter(entry => entry.eventCode.startsWith("checkpoint.snapshot_"));
+      expect(lifecycle).toHaveLength(1);
+      expect(lifecycle[0]).toMatchObject({
+        eventCode: "checkpoint.snapshot_finished",
+        redactedJson: {
+          assistantRuntimeResiduePruneAttemptedCount: stage === "pruning" ? 1 : 0,
+          assistantRuntimeResiduePruneCompletedCount: 0,
+          snapshotPendingInputCompactionElapsedMs: stage === "compaction" ? 53 : 0,
+          snapshotAssistantRuntimeResiduePruneElapsedMs: stage === "pruning" ? 53 : 0,
+          prunedAssistantRuntimeResidueFileCount: 0,
+        },
+      });
+      expect(parseHostedRuntimeLogEntry(lifecycle[0])).toEqual(lifecycle[0]);
+    },
+  );
+
   it("retains one finished lifecycle record with checkpoint metadata", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -2572,7 +2741,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {
     const vaultRoot = await createVaultRoot();
-    const { platform } = createRuntimePlatform();
+    const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
     const residuePaths = await writeSettledAssistantInputResidue(vaultRoot);
     const options = createBridgeOptions({
@@ -2591,6 +2760,17 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.evidence)).toBe(false);
     await expectMissing(path.join(vaultRoot, residuePaths.inputEvent));
     await expectMissing(path.join(vaultRoot, residuePaths.evidence));
+    await drainHostedRuntimeLogWritesBestEffort();
+    const finished = calls.logWrite.mock.calls.flatMap(([request]) => request.entries)
+      .find(entry => entry.eventCode === "checkpoint.snapshot_finished")!;
+    expect(finished.redactedJson).toMatchObject({
+      assistantRuntimeResiduePruneAttemptedCount: 1,
+      assistantRuntimeResiduePruneCompletedCount: 1,
+      prunedAssistantRuntimeInputEventCount: 1,
+      prunedAssistantRuntimeAutoReplyEvidenceFileCount: 1,
+      prunedAssistantRuntimeResidueFileCount: 2,
+    });
+    expect(parseHostedRuntimeLogEntry(finished)).toEqual(finished);
   });
 
   it("keeps disabled-channel nonterminal input residue in an idle snapshot", async () => {

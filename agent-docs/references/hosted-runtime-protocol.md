@@ -4802,6 +4802,35 @@ selection, mapping, or batch rotation. The fields never imply that exact-row
 stamping or the contiguous floor advanced; durable consumption remains that
 proof.
 
+Finished snapshot timing is sequential: `snapshotLeaseReadBeforeSnapshotElapsedMs`,
+`snapshotSessionStartElapsedMs`, `snapshotRuntimeSymlinkPruneElapsedMs`,
+`snapshotTerminalWriteOperationPruneElapsedMs`, `snapshotGeneratedDeliveryPruneElapsedMs`,
+`snapshotPendingInputCompactionElapsedMs`, `snapshotAssistantRuntimeResiduePruneElapsedMs`,
+`snapshotMediaReferencesPublishElapsedMs`, `snapshotArchivePlanElapsedMs`,
+`snapshotArchiveBuildElapsedMs`, `snapshotLeaseReadBeforeUploadElapsedMs`,
+`snapshotDirectR2UploadElapsedMs`, `snapshotLeaseReadBeforeCheckpointElapsedMs`,
+`snapshotSessionCompleteElapsedMs`, and `snapshotTemporaryCleanupElapsedMs` account
+for the checkpoint window. Residue timing includes its provider-cleanup recovery
+read. Archive-plan timing includes tree walking, validation and size diagnostics;
+archive-build timing now covers only tar, compression and encryption. Historical
+archive-build timings included planning. Sum these sequential fields against
+`snapshotElapsedMs`, allowing a small remainder for synchronous bookkeeping and
+existing diagnostic calls. Presign and PUT timings are nested within direct-upload
+timing and must not be added again. A throwing step records elapsed time before
+the existing failure or best-effort cleanup handler runs; no new event is emitted.
+
+Every finished event reports `assistantRuntimeResiduePruneAttemptedCount` and
+`assistantRuntimeResiduePruneCompletedCount` as zero or one, plus the existing
+per-category residue removal counts even when zero. A skipped prune has zero
+elapsed time; attempted but incomplete pruning means removal counts are unknown,
+and the zero defaults must not be interpreted as proof that nothing was removed.
+`prunedAssistantRuntimeResidueFileCount` sums known returned runtime-residue and
+generated-delivery removals. These diagnostics remain numeric and carry no paths
+or identifiers. Existing readers accept the additive fields; old producers omit
+them. No coordinated rollout or state migration is needed, and reverting the
+producer only removes the added measurements. Compare archive-build timings
+across versions only after accounting for the new archive-plan split.
+
 The retained fleet path selects no `checkpoint.snapshot_plan` or
 `checkpoint.snapshot_started` event. After v2 snapshot construction acquires
 its canonical lock, each attempt selects at most one best-effort terminal
