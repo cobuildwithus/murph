@@ -1,6 +1,6 @@
 # Pair board 180-day history and pre-game baseline
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -55,6 +55,9 @@ Updated: 2026-11-06
 - Commands to run: `game-board-numbers`, `game-board-postgres` on an isolated `murph_test_*` database, `hosted-group-store`, `hosted-group-shared-read`, `vault-share-deliver-route`, `projection-store`, the runner vault-share suites, the `hosted-execution` suite, three typechecks, oxlint on changed files, `pnpm complexity:diff`, `pnpm docs:drift`.
 - Expected outcomes: all exit 0.
 
+- Result: focused checks passed on the merged candidate. Final ReviewGPT round 1 passed at `d5d6a16a30` on GPT-6 Pro with no findings.
+
 ## Rollout
 
 - Web first (auto-deploys on merge), then the runner, deployed manually from main after the disclosure copy decision. Either order is safe, because old Web clips to 90 and old runners publish 90. A Web rollback stays safe, because no ceiling moved.
+Completed: 2026-11-06
