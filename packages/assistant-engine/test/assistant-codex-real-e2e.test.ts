@@ -609,6 +609,100 @@ describeRealCodex('assistant token efficiency sleep routing', () => {
   }, 240_000)
 })
 
+describeRealCodex('assistant bounded record recall', () => {
+  it.each(['weight', 'supplements', 'reminders'] as const)('bounded record recall preserves %s evidence with no writes', async scenario => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    const actions: ReturnType<typeof readCapabilityRoutingActions> = []
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async input => {
+      const result = await nativeExecute(input)
+      actions.push(...readCapabilityRoutingActions(result.jsonEvents))
+      return result
+    })
+    try {
+      fixture.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand: process.env.MURPH_REAL_CODEX_COMMAND!, directory: fixture.root })
+      if (scenario === 'weight') {
+        for (const [date, value] of [['2026-01-01', '70'], ['2026-01-30', '69'], ['2026-01-30', '73']]) {
+          await fixture.cli(['measurement', 'add', '--metric', 'weight', '--value', value!, '--unit', 'kg', '--occurred-at', `${date}T12:00:00Z`])
+        }
+        await fixture.cli(['measurement', 'add', '--metric', 'heart-rate', '--value', '80', '--unit', 'bpm', '--occurred-at', '2026-01-31T12:00:00Z'])
+      } else if (scenario === 'supplements') {
+        await upsertRegimen({ vaultRoot: fixture.vault, kind: 'supplement', status: 'active', title: 'Test capsules',
+          startedOn: '2026-01-01', dose: 2, unit: 'capsules', servingSize: '3 capsules', schedule: 'every other evening',
+          note: `${'Synthetic historical context. '.repeat(15)}Finish remaining supply; do not reorder.` })
+        await upsertRegimen({ vaultRoot: fixture.vault, kind: 'supplement', status: 'active', title: 'Test powder',
+          startedOn: '2026-01-01', servingSize: '1 scoop', note: 'Personal dose and frequency have not been saved.' })
+        await upsertRegimen({ vaultRoot: fixture.vault, kind: 'supplement', status: 'stopped', title: 'Old capsules',
+          startedOn: '2025-12-01', stoppedOn: '2026-01-01', dose: 1, unit: 'capsules' })
+      }
+      if (scenario === 'reminders') {
+        for (const [title, status, automationId] of [
+          ['Desk break', 'active', undefined], ['Paused walk', 'paused', undefined],
+          ['Internal upkeep', 'active', MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId],
+        ] as const) {
+          await upsertAutomation({ vaultRoot: fixture.vault, automationId, title, status,
+            instructions: 'Synthetic reminder.', continuityPolicy: 'fresh',
+            schedule: { kind: 'dailyLocal', localTime: '15:00', timeZone: 'UTC' },
+            route: { channel: 'linq', deliveryTarget: 'synthetic-record-recall', threadId: 'synthetic-record-recall', threadIsDirect: true, identityId: null, participantId: null },
+          })
+        }
+      }
+      const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
+      const result = await fixture.message(scenario === 'weight'
+        ? 'How did my weight change during January 2026? Use my saved records only. Keep it brief, with no advice, changes or messages to anyone.'
+        : scenario === 'reminders'
+          ? 'What reminders do I currently have active? Just their names. Do not change anything or send anything to anyone.'
+          : 'What supplements am I currently taking? Include the saved doses and timing. Use saved records only, with no advice, changes or messages to anyone.', {
+        executionContext: { hosted: { memberId: 'synthetic-record-recall-member', userEnvKeys: [],
+          progressDeliveryDependencies: { async sendLinq() { return { providerMessageId: 'synthetic-record-progress', sentAt: new Date().toISOString() } } },
+        } },
+      })
+      const commands = actions.filter(action => action.kind === 'command').map(action => action.command)
+      if (scenario === 'weight') {
+        expect(commands.some(command => /measurement list\b/u.test(command))).toBe(false)
+        const reads = commands.filter(command => /measurement entry list/u.test(command) && !/--help|--schema/u.test(command))
+        expect(reads).toHaveLength(1)
+        expect(reads[0]).toContain('--metric')
+        expect(reads[0]).toContain('--from 2026-01-01')
+        expect(reads[0]).toContain('--to 2026-01-31')
+        expect(result.response).toMatch(/70/u)
+        expect(result.response).toMatch(/69/u)
+        expect(result.response).toMatch(/73/u)
+        expect(result.response).toMatch(/conflict|different|disagree|unclear|can.t|cannot/iu)
+      } else if (scenario === 'supplements') {
+        expect(commands.some(command => /supplement show|regimen (?:list|show)/u.test(command))).toBe(false)
+        const reads = commands.filter(command => /supplement list/u.test(command) && !/--help|--schema/u.test(command))
+        expect(reads).toHaveLength(1)
+        expect(reads[0]).toContain('--include-details')
+        expect(reads[0]).toContain('--status active')
+        expect(result.response).toMatch(/2 capsules/iu)
+        expect(result.response).toMatch(/every other evening/iu)
+        expect(result.response).toMatch(/(?:do not|don.t|no) reorder/iu)
+        expect(result.response).toMatch(/powder/iu)
+        expect(result.response).toMatch(/(?:not|no|unspecified|unknown|missing|isn.t).{0,50}(?:saved|dose|frequency)|(?:dose|frequency).{0,50}(?:not|unknown|missing|unspecified)/iu)
+        expect(result.response).not.toMatch(/old capsules/iu)
+      }
+      if (scenario === 'reminders') {
+        const reads = commands.filter(command => /automation list/u.test(command) && !/--help|--schema/u.test(command))
+        expect(reads).toHaveLength(1)
+        expect(reads[0]).toContain('--compact')
+        expect(reads[0]).toContain('--status active')
+        expect(reads[0]).toContain('--exclude-maintenance')
+        expect(result.response).toMatch(/desk break/iu)
+        expect(result.response).not.toMatch(/paused walk|internal upkeep/iu)
+        expect(actions.some(action => action.kind === 'dynamic' && /automation/u.test(action.tool))).toBe(false)
+      }
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
+      process.stdout.write(`[bounded-record-recall] ${JSON.stringify({ model: config.model, scenario, canonicalWrites: 0, reply: result.response })}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 240_000)
+})
+
 describeRealCodex('real natural goal canary journey', () => {
   it.each([
     { name: 'onboarding canary goal proposal sends one early update from a fresh thread', capabilities: undefined },

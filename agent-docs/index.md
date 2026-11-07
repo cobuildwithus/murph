@@ -113,6 +113,9 @@ The weekly game architecture remains the behavior owner.
 Assistant current-state deduplication and deferred tool discovery are owned by
 `../packages/assistant-engine/README.md`; implementation and paired provider-input
 proof are recorded in [the efficiency plan](exec-plans/completed/2026-11-06-assistant-token-efficiency.md).
+Follow-up bounded measurement, supplement and reminder reads are documented in
+[the record-read plan](exec-plans/completed/2026-11-06-assistant-bounded-record-reads.md)
+and the assistant-engine and vault-usecases READMEs.
 
 Idle Codex resume retention is owned by `../packages/assistant-engine/README.md`;
 implementation and recovery proof: [retention plan](exec-plans/completed/2026-11-02-rollout-retention.md).

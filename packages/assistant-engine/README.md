@@ -208,6 +208,11 @@ authenticated read boundary. Mutations retain their full typed contract and vers
 checks. Discovery guidance avoids dumping full tool inventories or loading an
 already available contract twice. Sleep summaries prefer the existing bounded
 pattern read and retain missingness, coverage, and exact-detail retrieval.
+Scalar history starts with metric-filtered measurement entries rather than broad
+imports. Supplement inventories use the opt-in detailed canonical list: complete
+typed fields and narrative body, with no repeated frontmatter or truncated notes.
+Personal reminder inventories exclude registered maintenance routines by default
+and check list coverage; explicit requests can include those routines.
 
 Idle checkpoint maintenance retires native resume state for every session whose
 `lastTurnAt` (or `updatedAt` when no turn timestamp exists) is strictly older than

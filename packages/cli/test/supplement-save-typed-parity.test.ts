@@ -5,7 +5,7 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 
-import { parseFrontmatterDocument } from '@murphai/core'
+import { parseFrontmatterDocument, upsertRegimen } from '@murphai/core'
 import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from '@murphai/contracts'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
@@ -746,5 +746,58 @@ test('supplement save rejects more than the canonical ingredient limit', async (
       force: true,
       recursive: true,
     })
+  }
+})
+
+
+test('supplement detailed list preserves exact-read facts and body without duplicate frontmatter', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-supplement-inventory-')
+  try {
+    const cli = createSupplementCli()
+    requireData((await runInProcessJsonCli(cli, ['init', '--vault', vaultRoot])).envelope)
+    const note = `${'Synthetic context. '.repeat(25)}Finish remaining supply; do not reorder.`
+    const ingredients = Array.from({ length: 12 }, (_, index) => ({
+      compound: `Synthetic compound ${index}`, amount: index + 1, unit: 'mg',
+    }))
+    for (const [title, status, dose] of [
+      ['Test capsules', 'active', '2'], ['Test powder', 'active', null], ['Old capsules', 'stopped', '1'],
+    ] as const) {
+      const result = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+        'supplement', 'save', title, '--status', status, '--started-on', '2026-04-01',
+        ...(status === 'stopped' ? ['--stopped-on', '2026-04-02'] : []),
+        '--serving-size', '3 capsules',
+        ...(dose ? ['--dose', dose, '--dose-unit', 'capsules', '--schedule', 'every other evening'] : []),
+        ...ingredients.flatMap(ingredient => ['--ingredient', JSON.stringify(ingredient)]),
+        '--vault', vaultRoot,
+      ])
+      const saved = requireData(result.envelope)
+      await upsertRegimen({ vaultRoot, regimenId: saved.regimenId, title, kind: 'supplement',
+        status, startedOn: '2026-04-01', note })
+    }
+    type Entity = { id: string; markdown?: string | null; data: Record<string, unknown> }
+    const list = async (extra: string[]) => requireData((await runInProcessJsonCli<{ items: Entity[]; count: number }>(cli, [
+      'supplement', 'list', '--status', 'active', '--limit', '50', ...extra, '--vault', vaultRoot,
+    ])).envelope)
+    const detailed = await list(['--include-details'])
+    assert.equal(detailed.count, 2)
+    for (const entity of detailed.items) {
+      const shown = requireData((await runInProcessJsonCli<{ entity: Entity }>(cli, [
+        'supplement', 'show', entity.id, '--vault', vaultRoot,
+      ])).envelope).entity
+      assert.deepEqual(entity, { ...shown, markdown: parseFrontmatterDocument(shown.markdown ?? '').body.trim() })
+      assert.equal(entity.data.note, note)
+      assert.deepEqual(entity.data.ingredients, ingredients.map(ingredient => ({
+        ...ingredient, active: true, label: null, note: null,
+      })))
+      assert.equal(typeof entity.markdown, 'string')
+    }
+    assert.equal(detailed.items.filter(item => item.data.dose === 2).length, 1)
+    assert.equal(detailed.items.filter(item => item.data.dose == null).length, 1)
+    const summaries = await list([])
+    assert.equal(summaries.count, 2)
+    assert.ok(summaries.items.every(item => !('markdown' in item)))
+    assert.ok(summaries.items.every(item => String(item.data.note).length < note.length))
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true })
   }
 })

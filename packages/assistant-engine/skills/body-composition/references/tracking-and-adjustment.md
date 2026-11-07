@@ -158,7 +158,7 @@ Never turn an incomplete food log into a claim that the user ate a specific surp
 Current primitives already cover the durable facts:
 
 - `murph measurement add` records open scalar metrics such as body weight or waist with value, unit, timestamp, source, qualifiers, and notes.
-- `murph measurement list` reads measurement events by date range.
+- `vault-cli measurement entry list --metric weight --from <date> --to <date> --limit <bounded-count> --format json` reads lossless metric-filtered values, units, notes and sources. Use a small metric-filtered read first when the latest date is unknown; avoid the broad event list for a single metric. Full pages may omit older readings: narrow the date range or increase the bounded limit before claiming complete coverage.
 - `murph goal save` stores goal identity, status, horizon, priority, dates, domains, and relations.
 - food, meal, exercise or workout, experiment, journal, wearable, and device commands provide surrounding context.
 

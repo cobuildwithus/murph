@@ -1287,6 +1287,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<HealthEntityEnvelope>
   listSupplements(
     input: CommandContext & {
+      includeDetails?: boolean
       status?: string
       limit: number
     },

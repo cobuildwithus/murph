@@ -20,6 +20,12 @@ owner, and planned occurrence before the canonical write. The reader is not a
 command or JSON input, and reminder-backed writes fail closed when it is absent.
 Ordinary experiment logging does not require the assistant reader.
 
+Supplement lists keep their existing compact summaries by default. The optional
+`includeDetails` read returns all typed fields, links and complete narrative body
+from the same filtered canonical query. It omits only the duplicate frontmatter
+serialization; records without a separate body retain their full markdown.
+Exact `supplement show` output and all mutation contracts remain unchanged.
+
 Keep this package thin. Add a surface here only when multiple CLI/headless callers need the same vault usecase orchestration and importing the lower-level owner internals would create the wrong dependency direction.
 
 Exact command paths compose core-owned canonical readers or query-owned bounded
