@@ -1998,3 +1998,8 @@ The reply-email parser correction and production rollout are tracked in
 Named group iMessage acknowledgment eligibility and background usage checks are
 tracked in [group acknowledgments](exec-plans/active/2026-11-06-group-name-tapback.md).
 The egress boundary remains owned by `SECURITY.md`.
+
+Foreground primary, returned-tool and streamed-child usage share one turn ordinal
+owner, documented in `../packages/assistant-engine/README.md`. Red/green collision
+proof and local verification are recorded in
+[the execution record](exec-plans/completed/2026-11-07-usage-ordinal-collision.md).

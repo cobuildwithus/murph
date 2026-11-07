@@ -16,6 +16,17 @@ endpoint. Local execution explicitly selects OpenAI even when the saved target
 omits a provider, and rejects local OSS mode. OpenAI API, ChatGPT subscription,
 and synthetic local-test transports retain their existing execution boundaries.
 
+## Usage record identity
+
+Foreground turns reserve the primary usage ordinal before starting each provider
+request. Streamed child usage, returned tool usage, and reconsideration requests
+share that turn's existing ordinal allocator. A child can settle after its parent
+returns or after reconsideration starts without reusing another record's identity.
+All records retain the original turn and accepted-input attribution. Single-request
+notification and Ask continuation turns keep the provider's local ordinal sequence.
+The immutable hosted usage ledger and pending-settlement guard remain authoritative;
+this producer rule neither rewrites historical usage nor clears failed settlement.
+
 ## Route-planning telemetry
 
 Provider-plan diagnostics time follow-up context resolution as
