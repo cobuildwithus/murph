@@ -1122,6 +1122,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
   let foregroundMailboxImportLoop:
     ReturnType<typeof startHostedForegroundConversationMailboxImportLoop> | null = null;
+  // Deferred delivery outlives this runner. Once closed, the watcher stays closed.
+  let foregroundMailboxImportLoopClosed = false;
   const startForegroundMailboxImportLoop = async (): Promise<
     ReturnType<typeof startHostedForegroundConversationMailboxImportLoop>
   > => {
@@ -1148,8 +1150,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         checkpointCanonicalMailboxImportProgress,
       }),
     );
-    foregroundMailboxImportLoop = startedLoop;
     input.trackLocalWorkspaceMutationCompletion?.(startedLoop.completion);
+    if (foregroundMailboxImportLoopClosed) {
+      await startedLoop.stop();
+      return startedLoop;
+    }
+    foregroundMailboxImportLoop = startedLoop;
     return startedLoop;
   };
   const mailboxImportBeforeForegroundLoop =
@@ -1157,13 +1163,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const foregroundMailboxImportLoopAtBarrier =
     await startForegroundMailboxImportLoop();
   input.kickSystemWork?.();
-  await input.awaitBackgroundMaintenanceBarrier?.({
-    drainPendingForegroundWake: async () =>
-      await foregroundMailboxImportLoopAtBarrier.drainPendingWake(),
-    foregroundConversationWorkObserved: () =>
-      initialForegroundWork
-      || foregroundConversationWorkObserved,
-  });
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
     const activeLoop = foregroundMailboxImportLoop;
     if (!activeLoop) {
@@ -1256,7 +1255,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     persistGeneratedImageCapture,
     prepareAutoReplyDelivery: async () => {
       await stopForegroundMailboxImportLoop();
-      if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
+      if (!foregroundMailboxImportLoopClosed && !foregroundConversationWorkObserved && !input.signal?.aborted) {
         // Stopping the watcher establishes the local pre-dispatch boundary, but
         // it is not the end of foreground admission. Resume the existing
         // conversation watcher so later input can still preempt delivery.
@@ -1293,6 +1292,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let runnerError: unknown = null;
   try {
+    await input.awaitBackgroundMaintenanceBarrier?.({
+      drainPendingForegroundWake: async () =>
+        await foregroundMailboxImportLoopAtBarrier.drainPendingWake(),
+      foregroundConversationWorkObserved: () =>
+        initialForegroundWork
+        || foregroundConversationWorkObserved,
+    });
     assistantPhaseResult = await withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
@@ -1441,6 +1447,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
     throw error;
   } finally {
+    foregroundMailboxImportLoopClosed = true;
     try {
       await stopForegroundMailboxImportLoop();
     } catch (error) {
