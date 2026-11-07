@@ -57,8 +57,8 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
       await db.gameEntry.createMany({ data: Array.from({ length: 365 }, (_, dayIndex) => ({
         id: randomUUID(), gameId, memberId: a, dayIndex, attempt: 1, kind: "photo", receivedAt: new Date(),
       })) });
-      // The ordinary shared reader settles each due game and releases the pair.
-      await readGameChatState(room, [a, b]);
+      // A foreground shared read settles each due game and releases the pair.
+      await readGameChatState(room, [a, b], a);
     }
     const state = await readGameChatState(room, [a, b]);
     expect(state.games).toHaveLength(5);

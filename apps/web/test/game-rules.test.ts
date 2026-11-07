@@ -20,6 +20,10 @@ import {
   dayIndexAt,
   GameRuleError,
   isGameDue,
+  isGameDecided,
+  canChallengeGame,
+  decideChallenge,
+  gameChallengeStatus,
   isScheduledDay,
   outcomeFor,
   parseStoredTerms,
@@ -943,10 +947,10 @@ describe("weekly game: self-play round 1 regressions", () => {
       // Nobody posted the last day: grace keeps it open an hour.
       expect(isGameDue(state, new Date(deadline + 59 * 60 * 1000))).toBe(false);
       expect(isGameDue(state, new Date(deadline + 60 * 60 * 1000))).toBe(true);
-      // Both posted their last day: due at the deadline itself.
+      // Both posted their last day: now due immediately.
       let posted = state;
       for (const memberId of [LEO, AVA]) posted = post(posted, memberId, at(posted, memberId, 2, 9));
-      expect(isGameDue(posted, new Date(deadline - 1))).toBe(false);
+      expect(isGameDue(posted, new Date(deadline - 1))).toBe(true);
       expect(isGameDue(posted, new Date(deadline))).toBe(true);
       // Only the player who finishes first left their last day open: their grace hour may already be over.
       const firstToEnd = lastToEnd === LEO ? AVA : LEO;
@@ -1002,5 +1006,69 @@ describe("scheduled posting admission", () => {
     expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. Back Sunday.");
     state.game.lengthDays = 6;
     expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. No game days left.");
+  });
+});
+
+
+describe("decided pair endings", () => {
+  const at = new Date("2026-10-23T16:00:00Z");
+  function finished(schedule: GameSchedule = EVERY_DAY) {
+    let state = live(invited(schedule), NYC);
+    for (const player of state.players) player.dayOne = "2026-10-17";
+    for (const member of [LEO, AVA]) state = post(state, member, at);
+    return state;
+  }
+  it("ends at both last posts and closes score edits, retakes, withdrawal and Prove it", () => {
+    const state = finished();
+    expect(isGameDecided(state)).toBe(true);
+    expect(isGameDue(state, at)).toBe(true);
+    expect(codeOf(() => decideWithdraw(state, { memberId: LEO, entryId: state.entries[0].id, now: at }))).toBe("GAME_NOT_LIVE");
+    expect(codeOf(() => post(state, LEO, at))).toBe("GAME_NOT_LIVE");
+    expect(codeOf(() => decideDayCompletion(state, { memberId: LEO, date: "2026-10-23", incomplete: true, now: at }))).toBe("GAME_NOT_LIVE");
+    state.game.chatContainerMemberId = "synthetic-room";
+    expect(canChallengeGame(state, [], AVA, at)).toBe(false);
+    expect(codeOf(() => decideChallenge(state, [], { memberId: AVA, entryId: state.entries[0].id, visibleEntryIds: new Set([state.entries[0].id]), now: at }))).toBe("GAME_NOT_LIVE");
+    expect(gameChallengeStatus(state, { id: 1n, actor: AVA, entryId: state.entries[0].id, concessionEventId: null }, at)).toBe("stood");
+  });
+  it("requires both remaining players and complete credit; groups keep their natural end", () => {
+    const state = finished();
+    state.entries[0].incomplete = true;
+    expect(isGameDecided(state)).toBe(false);
+    expect(() => post(state, LEO, at)).not.toThrow();
+    state.entries[0].incomplete = false;
+    state.players[0].leftAt = at;
+    expect(isGameDecided(state)).toBe(false);
+    state.players[0].leftAt = null;
+    state.players[0].dayOne = null;
+    expect(isGameDecided(state)).toBe(false);
+    state.players[0].dayOne = state.players[1].dayOne;
+    state.game.seats = 10;
+    expect(isGameDecided(state)).toBe(false);
+    expect(isGameDue(state, at)).toBe(false);
+  });
+  it("ends after the last scheduled weekday despite trailing days off", () => {
+    let state = live(invited({ days: [0, 1, 2, 3, 4] }), NYC);
+    for (const player of state.players) player.dayOne = "2026-10-19";
+    // Monday Day 1, Friday Day 5, with the weekend still in the seven-day span.
+    const friday = new Date("2026-10-23T16:00:00Z");
+    for (const member of [LEO, AVA]) state = post(state, member, friday);
+    expect(isGameDecided(state)).toBe(true);
+  });
+  it("ends any-3-of-7 only after both reach three, excluding incomplete posts", () => {
+    let state = live(invited({ count: 3 }), NYC);
+    for (let day = 0; day < 3; day++) {
+      const now = new Date(`2026-10-${17 + day}T16:00:00Z`);
+      state = post(state, LEO, now);
+      expect(isGameDecided(state)).toBe(false);
+      state = post(state, AVA, now);
+    }
+    expect(isGameDecided(state)).toBe(true);
+    state.entries[0].incomplete = true;
+    expect(isGameDecided(state)).toBe(false);
+  });
+  it.each(["invited", "negotiating"] as const)("preserves %s expiry", status => {
+    const state = invited(); state.game.status = status;
+    expect(isGameDue(state, new Date("2026-10-22T23:59:59Z"))).toBe(false);
+    expect(isGameDue(state, new Date("2026-10-23T00:00:00Z"))).toBe(true);
   });
 });

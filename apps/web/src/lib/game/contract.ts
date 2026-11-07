@@ -453,6 +453,8 @@ export interface GameView {
    * Absent otherwise. Clients that predate it ignore it.
    */
   recapWatched?: true;
+  /** Brief UI wait for a chat-bound recap, not a generation deadline. */
+  recapPending?: true;
   id: string;
   status: GameStatus;
   /** 1 for a new game, then 2, 3… along its rematch chain. */

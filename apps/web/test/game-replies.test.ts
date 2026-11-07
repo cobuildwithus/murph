@@ -49,10 +49,16 @@ describe("private post reply decisions", () => {
       expect(replyEligibility(viewer, reply.entryId, ctx, now, false)).toBe("NOT_A_PLAYER");
     }
   });
-  it.each(["settled", "void", "invited", "negotiating"] as const)("keeps reads in %s but refuses writes", status => {
+  it.each(["void", "invited", "negotiating"] as const)("keeps reads in %s but refuses writes", status => {
     const ctx = context(); ctx.state.game.status = status;
     expect(replyReadAccess("peer", reply, ctx)).toBe(true);
     expect(replyEligibility("peer", reply.entryId, ctx, now, false)).toBe("GAME_NOT_LIVE");
+  });
+  it("keeps early-settled replies open until the natural end", () => {
+    const ctx = context(); ctx.state.game.status = "settled";
+    expect(replyEligibility("peer", reply.entryId, ctx, now, false)).toBeNull();
+    expect(replyEligibility("peer", reply.entryId, ctx, new Date("2026-11-11T03:59:59Z"), false)).toBeNull();
+    expect(replyEligibility("peer", reply.entryId, ctx, new Date("2026-11-11T04:00:00Z"), false)).toBe("GAME_NOT_LIVE");
   });
   it("uses the canonical due clock and refuses departed players", () => {
     const ctx = context();

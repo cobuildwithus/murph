@@ -1,6 +1,6 @@
 import type { GameReply, Prisma } from "@prisma/client";
 import type { GameErrorCode, GameReplyView } from "./contract";
-import { isGameDue, type RuleState } from "./rules";
+import { settleDueAt, type RuleState } from "./rules";
 
 export interface ReplyContext {
   state: RuleState;
@@ -27,7 +27,7 @@ export function replyReadAccess(viewer: string, reply: ReplyIdentity, context: R
 /** Null means eligible. The same result drives the command and the app affordance. */
 export function replyEligibility(viewer: string, entryId: string, context: ReplyContext, now: Date, occupied: boolean): GameErrorCode | null {
   if (!replyReadAccess(viewer, { entryId, authorMemberId: viewer }, context)) return "NOT_A_PLAYER";
-  if (context.state.game.status !== "live" || isGameDue(context.state, now)) return "GAME_NOT_LIVE";
+  if (!["live", "settled"].includes(context.state.game.status) || settleDueAt(context.state) <= now) return "GAME_NOT_LIVE";
   return occupied ? "REPLY_USED" : null;
 }
 

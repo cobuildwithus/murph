@@ -133,7 +133,7 @@ async function stillValid(notification: ClaimedPostNotification): Promise<boolea
       id: true, memberId: true, dayIndex: true, attempt: true, withdrawnAt: true, receivedAt: true,
     } } } },
   } });
-  if (!row || row.status !== "live" || !isGameOn(row)) return false;
+  if (!row || (row.status !== "live" && row.status !== "settled") || !isGameOn(row)) return false;
   const recipient = row.players.find(player => player.memberId === notification.memberId && !player.leftAt);
   if (!recipient?.timeZone || gameLocalDate(new Date(), recipient.timeZone) !== notification.day) return false;
   const entries = row.players.flatMap(player => player.entries);
@@ -143,7 +143,7 @@ async function stillValid(notification: ClaimedPostNotification): Promise<boolea
   const blocks = await db.gameBlock.findMany({ where: { OR: [{ blockerMemberId: notification.memberId, blockedMemberId: { in: row.players.flatMap(player => player.memberId ?? []) } }, { blockedMemberId: notification.memberId, blockerMemberId: { in: row.players.flatMap(player => player.memberId ?? []) } }] }, select: { blockerMemberId: true, blockedMemberId: true } });
   const hidden = new Set(blocks.map(block => block.blockerMemberId === notification.memberId ? block.blockedMemberId : block.blockerMemberId));
   // Reuse the canonical row conversion and milestone policy; no decrypted content is loaded.
-  const state: RuleState = { game: { id: row.id, seats: row.maxPlayers, status: "live", createdBy: row.createdBy, lengthDays: row.lengthDays,
+  const state: RuleState = { game: { id: row.id, seats: row.maxPlayers, status: row.status, createdBy: row.createdBy, lengthDays: row.lengthDays,
     startsOn: row.startsOn?.toISOString().slice(0, 10) ?? null, inviteExpiresAt: row.inviteExpiresAt, terms: parseStoredTerms(row.terms) },
     players: row.players.flatMap(player => player.memberId && player.timeZone ? [{ ...player, memberId: player.memberId, timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null }] : []),
     entries: entries.map(entry => ({ ...entry, kind: entry.attempt === 0 ? "excuse" : "photo", mediaKeys: [], blurHash: null })),

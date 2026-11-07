@@ -105,6 +105,7 @@ export interface GameViewInput {
   pendingChange?: GamePendingChange | null;
   talkDelivery?: GameView["talkDelivery"];
   recapWatched?: boolean;
+  recapPending?: boolean;
   state: RuleState;
   viewerId: string;
   now: Date;
@@ -343,7 +344,7 @@ export function buildGameView(input: GameViewInput): GameView {
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null, input.viewerId),
     pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
-    ...(input.recapWatched ? { recapWatched: true as const } : {}),
+    ...recapView(input),
     days: game.status === "negotiating" ? [] : dayViews(input, players, entries),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,
@@ -351,7 +352,6 @@ export function buildGameView(input: GameViewInput): GameView {
     lengthDays: game.lengthDays,
     players: playerViews,
     result: resultView(input.result, viewerId, input.multiplayer),
-    recap: input.recap,
     canChallenge: !state.players.some(player => input.hiddenMemberIds?.has(player.memberId))
       && canChallengeGame(state, input.challenges ?? [], viewerId, input.now),
     retakeAvailable: retakeAvailable(state, viewerId, input.now, entries),
@@ -367,6 +367,12 @@ export function buildGameView(input: GameViewInput): GameView {
         && [...ticket.owedBySeats, ...ticket.owedToSeats].includes(player.seat)))
       .map((ticket) => ticketView(ticket, input.words, viewerId, input.now, state.game.terms, input.hiddenMemberIds, input)),
   };
+}
+
+function recapView(input: GameViewInput): Pick<GameView, "recap" | "recapWatched" | "recapPending"> {
+  return { recap: input.recap,
+    ...(input.recapWatched ? { recapWatched: true } : {}),
+    ...(input.state.game.status === "settled" && input.recap === null && input.recapPending ? { recapPending: true } : {}) };
 }
 
 function rosterViews(input: GameViewInput, entries: GameEntryIndex): GamePlayerView[] {

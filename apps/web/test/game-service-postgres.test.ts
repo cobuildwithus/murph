@@ -39,9 +39,10 @@ vi.mock("@/src/lib/apple-push/send", async (original) => ({
 }));
 // A post's push goes after its response; these runs wait for it like the platform does.
 const afterResponse = vi.hoisted(() => [] as Promise<unknown>[]);
+const deferredResponse = vi.hoisted(() => ({ hold: false, tasks: [] as Array<() => Promise<unknown>> }));
 vi.mock("next/server", async (original) => ({
   ...await original<typeof import("next/server")>(),
-  after: (task: () => Promise<unknown>) => { afterResponse.push(task()); },
+  after: (task: () => Promise<unknown>) => { if (deferredResponse.hold) deferredResponse.tasks.push(task); else afterResponse.push(task()); },
 }));
 
 import { bindPairGameChat } from "@/src/lib/game/chat-membership";
@@ -61,6 +62,9 @@ import {
   authorizeMediaRead,
   authorizeMediaReads,
   readGame,
+  readGamePhotoPostingStateTx,
+  readGameRecapMaterial,
+  GAME_RECAP_UI_WAIT_MS,
   readGameChallengeCase,
   readGameChallengeInstructions,
   readGameRematchNotice,
@@ -78,7 +82,7 @@ import { decideNewTerms, gameChallengeKey, parseStoredTerms } from "@/src/lib/ga
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
-import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx } from "@/src/lib/game/chat-lifecycle-receipt";
+import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, markGameChatGenerationQueuedTx } from "@/src/lib/game/chat-lifecycle-receipt";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -258,6 +262,121 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     delete process.env.MURPH_GAME_MEDIA_DIR;
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  it("freezes the post-to-read gap, then settles unequal weekday scores exactly once and delivers the last push", async () => {
+    const a = await member("Alex", "UTC"), b = await member("Sam", "UTC");
+    const db = getPrisma();
+    const { gameId } = await startGame(a, b, { terms: { ...TERMS, schedule: { days: [0, 1, 2, 3, 4] } } }, "UTC");
+    const room = `synthetic_room_${randomUUID()}`; memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room } });
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date("2030-03-04"), timeZone: "UTC" } });
+    const move = async (at: string) => db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(Date.parse(at) - Date.now()) } });
+    await move("2030-03-04T18:00:00Z");
+    await ok(a, await photo(a, gameId, "first-day"));
+    await move("2030-03-08T18:00:00Z");
+    const first = await photo(a, gameId, "last-day-first"); await ok(a, first);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await pushRoute(a); push.mockClear();
+    const last = await photo(b, gameId, "last-day-second");
+    const inChat = (actorMemberId: string, command: GameCommand) => runGameCommand({ actorMemberId, command,
+      chatContainerMemberId: room, chatPlayerMemberIds: [a, b], beforeMutationTx: async () => {} });
+    deferredResponse.hold = true;
+    try {
+      // Chat's committed post has no app projection: deliberately hold the interval
+      // before the settling read, then inject the queued mutations into that gap.
+      expect(await inChat(b, last)).toMatchObject({ ok: true });
+      expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).status).toBe("live");
+      expect(await db.$transaction(tx => readGamePhotoPostingStateTx(tx, gameId, a))).toBeNull();
+      for (const command of [{ type: "withdraw" as const, gameId, entryId: first.entryId }, await photo(a, gameId, "too-late-retake")]) {
+        expect(await inChat(a, command)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+      }
+      expect(await inChat(b, last)).toMatchObject({ ok: true });
+      expect((await db.gameEntry.findUniqueOrThrow({ where: { id: first.entryId } })).withdrawnAt).toBeNull();
+      const [view] = await Promise.all([readGame(gameId, a), readGame(gameId, b), readHome(a)]);
+      expect(view).toMatchObject({ status: "settled", recap: null, recapPending: true,
+        result: { scores: [{ score: 2, seat: 0 }, { score: 1, seat: 1 }] } });
+      expect(view!.tickets).toHaveLength(1);
+      expect(await db.gameTicket.count({ where: { gameId } })).toBe(1);
+      expect(await db.gameEvent.count({ where: { gameId, type: "settled" } })).toBe(1);
+      expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId, template: "game_recap" } })).toBe(1);
+      await Promise.all(deferredResponse.tasks.splice(0).map(task => task()));
+      expect(push).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId, notification: "game_post" } }));
+      expect(await ok(b, last)).toMatchObject({ status: "settled" });
+      expect(await ok(a, { type: "replyToPost", gameId, entryId: last.entryId, replyId: randomUUID(), kind: "text", text: "Nice finish" })).toMatchObject({ status: "settled" });
+      await move("2030-03-11T03:00:00Z");
+      expect(await errorCode(b, { type: "replyToPost", gameId, entryId: first.entryId, replyId: randomUUID(), kind: "text", text: "Too late" })).toBe("GAME_NOT_LIVE");
+      expect(await db.gameTicket.count({ where: { gameId } })).toBe(1);
+      expect(await db.gameEvent.count({ where: { gameId, type: "settled" } })).toBe(1);
+    } finally { deferredResponse.hold = false; await Promise.all(deferredResponse.tasks.splice(0).map(task => task())); }
+  });
+
+  it("bounds recapPending by real settlement time and room binding, without ending late generation", async () => {
+    const a = await member("Alex", "UTC"), b = await member("Sam", "UTC");
+    const { gameId } = await seedSettledGame({ challenger: a, opponent: b, settledAt: new Date() });
+    const db = getPrisma();
+    expect((await readGame(gameId, a))?.recapPending).toBeUndefined();
+    const room = `synthetic_room_${randomUUID()}`; memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room } });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room, devClockOffsetMs: 30n * 86_400_000n } });
+    expect((await readGame(gameId, a))?.recapPending).toBe(true);
+    await db.game.update({ where: { id: gameId }, data: { settledAt: new Date(Date.now() - GAME_RECAP_UI_WAIT_MS) } });
+    expect((await readGame(gameId, a))?.recapPending).toBeUndefined();
+    const recap = { pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A late story" }] }], chatLine: "A finished game." };
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await db.$transaction(tx => reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx }));
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    expect(await sealGameRecap({ beforeMutationTx: async () => {}, gameId, containerMemberId: room, eventId, playerMemberIds: [a, b], recap })).toEqual(recap);
+    expect(await readGame(gameId, a)).toMatchObject({ recap });
+    expect((await readGame(gameId, a))?.recapPending).toBeUndefined();
+  });
+
+  it("ends any-3-of-7, omits blank misses and keeps an immediate rematch's Day 1 and recap binding separate", async () => {
+    const a = await member("Alex", "UTC"), b = await member("Sam", "UTC");
+    const db = getPrisma();
+    const terms = { ...TERMS, schedule: { count: 3 } };
+    const { gameId } = await startGame(a, b, { terms }, "UTC");
+    const room = `synthetic_room_${randomUUID()}`; memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room } });
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date("2030-03-04"), timeZone: "UTC" } });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    for (const day of [4, 6, 7]) {
+      await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(Date.parse(`2030-03-0${day}T10:00:00Z`) - Date.now()) } });
+      for (const actor of [a, b]) await ok(actor, await photo(actor, gameId, `count-${day}-${actor === a ? "first" : "second"}`));
+    }
+    expect((await readGame(gameId, a))?.status).toBe("settled");
+    const before = await readGameRecapMaterial(gameId, room, [a, b]);
+    expect(before?.game.days).toHaveLength(4);
+    expect(JSON.stringify(before?.game.days)).not.toContain('"missed"');
+    const at = new Date("2030-03-07T10:00:00Z"), nextId = randomUUID();
+    const created = await runGameCommand({ actorMemberId: a, now: at, command: { type: "createGame", gameId: nextId,
+      previousGameId: gameId, inviteeFirstName: "Sam", terms: { ...terms, startsOn: undefined } } });
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Expected rematch invite");
+    expect(await runGameCommand({ actorMemberId: b, now: at, command: { type: "join", token: created.game.inviteToken, termsVersion: 1, timeZone: "UTC" } })).toMatchObject({ ok: true });
+    const next = await db.game.findUniqueOrThrow({ where: { id: nextId }, include: { players: true } });
+    expect(next.chatContainerMemberId).toBe(room);
+    expect(next.players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(["2030-03-07", "2030-03-07"]);
+    expect((await readGameRecapMaterial(gameId, room, [a, b]))?.game).toEqual(before?.game);
+    expect(await readGameRecapMaterial(nextId, room, [a, b])).toBeNull();
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId, template: "game_recap" } })).toBe(1);
+  });
+
+  it("expires a pending change on a background read without settling an overnight pair", async () => {
+    const a = await member("Alex", "UTC"), b = await member("Sam", "UTC");
+    const { gameId } = await startGame(a, b, {}, "UTC");
+    const db = getPrisma(), room = `synthetic_room_${randomUUID()}`; memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room } });
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date("2030-03-04"), timeZone: "UTC" } });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room,
+      devClockOffsetMs: BigInt(Date.parse("2030-03-11T04:30:00Z") - Date.now()), pendingChange: {
+        v: 1, id: randomUUID(), proposedByMemberId: a, expectedTermsVersion: 1,
+        change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 1, startsOn: null, origin: "app", deliveryStatus: "pending",
+      } } });
+    expect((await readGameChatState(room, [a, b])).games.find(game => game.id === gameId)?.status).toBe("live");
+    expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "live", pendingChange: null });
+    expect(await db.gameEvent.count({ where: { gameId, type: "change_expired" } })).toBe(1);
+    expect(await db.gameEvent.count({ where: { gameId, type: "settled" } })).toBe(0);
+    expect((await readGameChatState(room, [a, b], a)).games.find(game => game.id === gameId)?.status).toBe("settled");
   });
 
   it("names the inherited task in a Prove it case after a structural-only change", async () => {

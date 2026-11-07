@@ -1,4 +1,4 @@
-import { eligibleFromDay, remainingPlayers, termsForDay, isScheduledDay, liveEntry, type RuleState } from "./rules";
+import { isGameDue, eligibleFromDay, remainingPlayers, termsForDay, isScheduledDay, liveEntry, type RuleState } from "./rules";
 import { addDays, dayStartInstant, GAME_GRACE_MS } from "./time";
 import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 
@@ -58,7 +58,7 @@ export function missedCheckInDueAt(firstMissedDate: string, timeZone: string): D
 
 /** Canonical misses exclude incomplete artifacts and any-days capacity. */
 export function gameMissedCheckInRuns(state: RuleState, now: Date) {
-  if (state.game.status !== "live") return [];
+  if (state.game.status !== "live" || state.game.seats === 2 && isGameDue(state, now)) return [];
   return remainingPlayers(state).flatMap((player) => {
     if (!player.dayOne) return [];
     const days: MissedCheckInDay[] = Array.from({ length: state.game.lengthDays }, (_, dayIndex) => {
@@ -90,4 +90,12 @@ export function gameMissedCheckInHorizons(states: readonly RuleState[], dates?: 
     }
   }
   return horizons;
+}
+
+/** Background settlement waits until the last remaining player's next morning. */
+export function morningAfterLastDay(state: RuleState): Date {
+  const mornings = remainingPlayers(state).map(player => player.dayOne
+    ? missedCheckInDueAt(addDays(player.dayOne, state.game.lengthDays - 1), player.timeZone) : null);
+  return new Date(mornings.length && mornings.every(date => date !== null)
+    ? Math.max(...mornings.map(date => date!.getTime())) : 8.64e15);
 }

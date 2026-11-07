@@ -493,14 +493,29 @@ resulting avatar. No private photo is shared with the subject or other players.
   safe after a commit whose response failed. Malformed input, a foreign or
   genuinely missing media key, an image the store refuses and every rule refusal
   stay final.
-- **Settle.** When the last player's last day ends, the game is over; it waits
-  one more hour only while a player's last day can still take an offline-grace
-  post. Once a player's own last day is over, their view carries `settlesAt`
-  (results soon, at that expected time) and editing is off for both players: score is scheduled days with a live photo (capped at N in any-N games),
-  misses are scheduled days without one (the shortfall from N in any-N games;
-  N counts across the whole game, not per week). The result is frozen on the
-  game. There is no timer: the first read of a finished game settles it, and so
-  does either player accepting their next invite.
+- **Settle.** A pair ends when both remaining players have completed their last
+  scheduled day, or both have reached N in any-N games. Incomplete posts do not
+  decide it. The read following the last post settles under the game lock,
+  freezes the result and writes tickets, the settled event and the bound room's
+  recap reservation exactly once. Retakes, withdrawals, Prove it and score edits
+  already refuse in the interval between that post and the settling read;
+  duplicate post replays still succeed. The last post's push survives settlement.
+  Trailing days off do not delay a decided pair. Groups keep their natural timing.
+  Otherwise the game ends after the last player's final local day, with one more
+  hour only while an offline-grace post remains possible. `settleDueAt` and
+  `settlesAt` retain this natural end. Replies to posts remain open on an
+  early-settled pair until that time, then close. These settled-aware push and
+  reply readers are the rollback floor once early-settled rows exist.
+  Score is completed scheduled days, capped at N across the whole any-N game;
+  misses are scheduled days without credit, or the shortfall from N. Prizes and
+  tie rules are unchanged.
+  Foreground reads settle due games, including overnight reads. Background chat
+  reads expire pending changes but do not settle. For chat-bound pairs nobody
+  opens, the existing sharded room sweep settles at or after the latest next-day
+  9am across remaining players' frozen zones. It does this before choosing the
+  pair or group check-in collector, including mixed rooms and count schedules.
+  Due pairs get no check-ins while awaiting morning. Unbound games still settle
+  on a foreground read.
 - **Missed-day host check-ins.** Around 9am in a player's frozen game time zone,
   after a scheduled day has closed without a post, Murph may address that player
   with one short line in the pair's already-bound group. Consecutive missed days
@@ -551,7 +566,11 @@ resulting avatar. No private photo is shared with the subject or other players.
   The model never selects a game id: trusted notification authority
   binds the tool to the exact settled game and room, even after a rematch starts.
   A finished game can receive its first recap late. Ordinary turns preserve the
-  first saved recap; only the operator regeneration path below may replace it. Versioned schedules mark rest days as off, not missed. The server checks
+  first saved recap; only the operator regeneration path below may replace it.
+  Versioned schedules mark rest days as off, not missed. Settled any-N pair
+  recap material stops at the local day play ended, derived from `settledAt`
+  and the game clock; blank any-N days are off, never missed. Natural endings
+  retain the full game span. The server checks
   entry ownership and shared visibility, visual kinds and counts, text, quote,
   score and chat-line limits, banned language, third-person shared copy, quote
   density and verbatim player chat/post evidence. It also rejects stock chat
@@ -602,6 +621,12 @@ resulting avatar. No private photo is shared with the subject or other players.
   IDs before producing the field. Once saved, compatible Web is the rollback
   floor; old strict Web readers cannot read these sealed records.
 
+- **Recap UI wait.** `GameView.recapPending?: true` appears only when the game is
+  settled, its recap is null, it has a bound chat, and fewer than
+  `GAME_RECAP_UI_WAIT_MS` (10 minutes) have elapsed since `settledAt` on the real
+  clock. The field is otherwise omitted. This limits the app's wait, not recap
+  generation: late recaps remain allowed, and no recap-ready push is added.
+  Older clients ignore the additive field. The companion UI ships separately.
 - **Operator recap regeneration.** An authenticated, allowlisted operator may
   reserve one settled game's recap again through `POST /api/ops/game-recap`, with
   same-origin mutation protection. `scripts/ops-game-recap --game-id <GAME_ID>
@@ -1321,7 +1346,10 @@ obligation is credited. Use `completedEntry`, `eligibleFromDay`, and effective
 never count. Dates with nothing scheduled are skipped. An unfinished current
 date does not break the run until it ends at 3 AM in each game's frozen player
 time zone. Receipt dates do not replace credited day indexes. Frozen game
-results and winners are unchanged. No streak is stored.
+results and winners are unchanged. A settled any-N pair creates obligations
+only through the local day of `settledAt`, adjusted by its game clock offset;
+its remaining blank days cannot break a run or compete with a rematch. Natural
+endings and live count-mode streak behavior are unchanged. No streak is stored.
 
 Reads admit at most 100 games and 5,000 live attempts for this calculation;
 if either bound is exceeded, return null rather than a truncated streak.

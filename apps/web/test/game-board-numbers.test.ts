@@ -304,3 +304,24 @@ describe("pair board current run", () => {
     expect(pairBoardStreak([{ state: game, now: new Date("2030-01-09T03:00:00Z") }], "a")).toBe(3);
   });
 });
+
+
+describe("settled any-days board obligations", () => {
+  it.each([false, true])("stops any-3-of-7 at settlement with rematch=%s", rematch => {
+    const game = state("2030-01-01", 7, [0, 1, 2]);
+    game.game.status = "settled";
+    game.game.terms.versions[0].schedule = { count: 3 };
+    const now = new Date("2030-01-07T12:00:00Z");
+    const settledAt = new Date("2030-01-03T18:00:00Z");
+    const next = state("2030-01-03", 7, [0, 1, 2, 3, 4]);
+    expect(pairBoardStreak([{ state: game, now, settledAt }, ...(rematch ? [{ state: next, now }] : [])], "a")).toBe(rematch ? 7 : 3);
+    game.game.status = "live";
+    expect(pairBoardStreak([{ state: game, now, settledAt }], "a")).toBe(0);
+  });
+  it("preserves natural endings", () => {
+    const game = state("2030-01-01", 7, [4, 5, 6]);
+    game.game.status = "settled";
+    game.game.terms.versions[0].schedule = { count: 3 };
+    expect(pairBoardStreak([{ state: game, now: new Date("2030-01-20"), settledAt: new Date("2030-01-08T04:00:00Z") }], "a")).toBe(3);
+  });
+});
