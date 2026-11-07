@@ -4,11 +4,11 @@ import { classifyHostedBrowserCredential, classifyHostedNativeCredential, serial
 const token = "a".repeat(32);
 const native = serializeHostedNativeSessionToken(token);
 const browser = (cookie: string | null, authorization: string | null = null) => classifyHostedBrowserCredential({ cookie, authorization, production: true });
-const mobile = (authorization: string | null, cookie: string | null = null, legacyAllowed = true) => classifyHostedNativeCredential({ authorization, cookie, legacyAllowed });
+const mobile = (authorization: string | null, cookie: string | null = null) => classifyHostedNativeCredential({ authorization, cookie });
 
 describe("authentication transport firewall", () => {
-  it("keeps valid legacy browser credentials selected when no replacement was presented", () => {
-    expect(browser("__Host-murph-session=legacy-session")).toEqual({ kind: "legacy", token: "legacy-session" });
+  it("ignores retired browser credentials", () => {
+    expect(browser("__Host-murph-session=legacy-session")).toEqual({ kind: "anonymous" });
     expect(browser(null)).toEqual({ kind: "anonymous" });
   });
   it("never falls back from a presented replacement cookie, including malformed values", () => {
@@ -28,9 +28,8 @@ describe("authentication transport firewall", () => {
       expect(() => mobile(`Bearer ${invalid}`)).toThrow();
     },
   );
-  it("requires explicit legacy native admission and keeps replacement admission independent", () => {
-    expect(mobile("Bearer aaaa.bbbb.cccc")).toEqual({ kind: "legacy", token: "aaaa.bbbb.cccc" });
-    expect(() => mobile("Bearer aaaa.bbbb.cccc", null, false)).toThrow();
-    expect(mobile(`Bearer ${native}`, null, false)).toEqual({ kind: "better-auth", token });
+  it("requires an update for retired native credentials while admitting first-party sessions", () => {
+    expect(() => mobile("Bearer aaaa.bbbb.cccc")).toThrow(expect.objectContaining({ code: "AUTH_CLIENT_UPGRADE_REQUIRED", httpStatus: 426 }));
+    expect(mobile(`Bearer ${native}`)).toEqual({ kind: "better-auth", token });
   });
 });

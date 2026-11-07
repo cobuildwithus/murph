@@ -8,6 +8,11 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  encodeHostedPhoneCallBriefFixture,
+  encodeHostedPhoneCallResultFixture,
+} from "./support/phone-call-private-fixtures";
+
+import {
   decryptHostedPhoneCallBrief,
   encryptHostedPhoneCallBrief,
 } from "@/src/lib/phone-calls/crypto";
@@ -124,6 +129,96 @@ const GROUP_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
 };
 
 describe("createHostedPhoneCall", () => {
+  describe.each([false, true])("call audience with transfer allowed=%s", (allowTransferToUser) => {
+    it.each([
+      { name: "member self-call", phoneNumber: "+12125550123", verifiedNumber: "+12125550123", group: false, audience: "member" },
+      { name: "different number", phoneNumber: "+12125550123", verifiedNumber: "+12125550456", group: false, audience: "third_party" },
+      { name: "no verified number", phoneNumber: "+12125550123", verifiedNumber: null, group: false, audience: "third_party" },
+      { name: "international-prefix member number", phoneNumber: "+12125550123", verifiedNumber: "00 1 (212) 555-0123", group: false, audience: "member" },
+      { name: "formatted member number", phoneNumber: "+12125550123", verifiedNumber: "+1 (212) 555-0123", group: false, audience: "member" },
+      { name: "invalid member number", phoneNumber: "+12125550123", verifiedNumber: "invalid", group: false, audience: "third_party" },
+      { name: "group calling requester", phoneNumber: "+12125550123", verifiedNumber: "+12125550123", group: true, audience: "third_party" },
+    ])("classifies $name and preserves transfer permission", async ({
+      phoneNumber, verifiedNumber, group, audience,
+    }) => {
+      const transferNumberResolver = vi.fn(async () => verifiedNumber);
+      const store = createPhoneCallStore({
+        created: buildHostedPhoneCall(),
+        onReserve: () => {
+          expect(transferNumberResolver).toHaveBeenCalledTimes(group ? 0 : 1);
+        },
+      });
+      const runtime = createPhoneCallRuntime({ providerCallId: "retell_audience" });
+      const brief = {
+        ...VALID_BRIEF,
+        allowTransferToUser,
+        to: { label: "Callee", phoneNumber },
+      };
+
+      await createHostedPhoneCall({
+        brief,
+        ...(group ? {
+          groupRequester: GROUP_REQUESTER,
+          groupRequesterActivationAsserter: async () => undefined,
+        } : {}),
+        memberId: "member_1",
+        notificationDestinationResolver: async () => group
+          ? GROUP_NOTIFICATION_DESTINATION
+          : DIRECT_NOTIFICATION_DESTINATION,
+        prisma: store.prisma,
+        requestKey: "phone_call_audience",
+        runtime: runtime.runtime,
+        transferNumberResolver,
+      });
+
+      expect(transferNumberResolver).toHaveBeenCalledTimes(group ? 0 : 1);
+      if (!group) {
+        expect(transferNumberResolver).toHaveBeenCalledWith({ memberId: "member_1" });
+      }
+      expect(runtime.startCalls).toEqual([{
+        brief: { ...brief, allowTransferToUser: group ? false : allowTransferToUser },
+        callAudience: audience,
+        id: store.createCalls[0]!.data.id,
+        memberId: "member_1",
+        transferNumber: !group && allowTransferToUser ? verifiedNumber : null,
+      }]);
+    });
+  });
+
+  it.each(["starting", "calling"] as const)(
+    "does not reread member identity or restart an existing %s call",
+    async (status) => {
+      const existing = buildHostedPhoneCall({
+        briefEncrypted: await encryptHostedPhoneCallBrief({
+          callId: "hpc_existing",
+          memberId: "member_1",
+          value: VALID_BRIEF,
+        }),
+        id: "hpc_existing",
+        providerCallId: status === "calling" ? "retell_existing" : null,
+        resultNotificationChannel: "linq",
+        status,
+        updatedAt: new Date(),
+      });
+      const store = createPhoneCallStore({ existing });
+      const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+      const transferNumberResolver = vi.fn(async () => "+12125550456");
+
+      await createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        memberId: existing.memberId,
+        prisma: store.prisma,
+        requestKey: existing.requestKey,
+        runtime: runtime.runtime,
+        transferNumberResolver,
+      });
+
+      expect(transferNumberResolver).not.toHaveBeenCalled();
+      expect(runtime.startCalls).toEqual([]);
+      expect(store.createCalls).toEqual([]);
+    },
+  );
+
   it("creates the local call row before starting Retell and stores the provider id", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -166,6 +261,7 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls[0]!.data).not.toHaveProperty("briefJson");
     expect(JSON.stringify(store.createCalls[0]!.data)).not.toContain(VALID_BRIEF.goal);
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: createdCallId,
       memberId: "member_1",
@@ -412,7 +508,6 @@ describe("createHostedPhoneCall", () => {
 
   it("allows an origin-less old runner to replay an existing legacy direct call", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       id: "hpc_legacy_direct_replay",
       providerCallId: "retell_legacy_direct_replay",
       status: "calling",
@@ -444,7 +539,6 @@ describe("createHostedPhoneCall", () => {
 
   it("rejects replay under a different direct channel instead of silently rerouting", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       id: "hpc_direct_route_collision",
       resultNotificationChannel: "telegram",
       providerCallId: "retell_direct_route_collision",
@@ -479,7 +573,6 @@ describe("createHostedPhoneCall", () => {
     "needs_user",
   ] as const)("reports a provider-bound %s replay as an accepted call", async (status) => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       endedAt: new Date("2026-06-25T12:00:00.000Z"),
       id: "hpc_existing",
       providerCallId: "retell_existing",
@@ -509,7 +602,6 @@ describe("createHostedPhoneCall", () => {
 
   it("replays duplicate request keys for the same member without starting another provider call", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       id: "hpc_existing",
       providerCallId: "retell_existing",
       status: "calling",
@@ -543,7 +635,6 @@ describe("createHostedPhoneCall", () => {
 
   it("replays an existing call before running new-call prerequisites", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       id: "hpc_existing",
       providerCallId: "retell_existing",
       status: "calling",
@@ -578,7 +669,6 @@ describe("createHostedPhoneCall", () => {
 
   it("rearms stored unsafe cleanup authority without another provider create", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       endedAt: null,
       id: "hpc_existing",
       providerCallId: "retell_unsafe",
@@ -615,7 +705,6 @@ describe("createHostedPhoneCall", () => {
 
   it("keeps exact unsafe-cleanup replay typed when rearm and stop both fail", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: null,
       id: "hpc_existing",
       providerCallId: "retell_unsafe",
       status: "failed",
@@ -1302,10 +1391,13 @@ describe("createHostedPhoneCall", () => {
       id: "hpc_existing",
       providerCallId: "retell_call_123",
       resultDeliveryStatus: "delivered",
-      resultJson: {
-        outcome: "completed",
-        summary: "The requested office confirmed the appointment.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The requested office confirmed the appointment.",
+        },
+      }),
       resultNotificationChannel: "telegram",
       status: "completed",
     });
@@ -1401,10 +1493,13 @@ describe("createHostedPhoneCall", () => {
     store.advanceCurrentCall({
       analyzedAt: new Date("2026-06-25T01:00:00.000Z"),
       resultDeliveryStatus: "delivered",
-      resultJson: {
-        outcome: "completed",
-        summary: "The requested office confirmed the appointment.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The requested office confirmed the appointment.",
+        },
+      }),
       status: "completed",
     });
 
@@ -1472,11 +1567,13 @@ describe("createHostedPhoneCall", () => {
       store.advanceCurrentCall({
         analyzedAt,
         resultDeliveryStatus: "pending",
-        resultEncrypted: "encrypted-start-failure",
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: encodeHostedPhoneCallResultFixture({
+          memberId: "member_1",
+          value: {
+            outcome: "not_completed",
+            summary: "Murph could not start the phone call.",
+          },
+        }),
       });
     });
     const finalizeStoredResult = vi.fn(async () => "pending" as const);
@@ -1505,10 +1602,13 @@ describe("createHostedPhoneCall", () => {
       analyzedAt,
       endedAt: analyzedAt,
       providerCallId: null,
-      resultJson: {
-        outcome: "completed",
-        summary: "The pharmacy confirmed pickup readiness.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The pharmacy confirmed pickup readiness.",
+        },
+      }),
       resultDeliveryStatus: "pending",
       resultNotificationChannel: "telegram",
       status: "completed",
@@ -1573,10 +1673,13 @@ describe("createHostedPhoneCall", () => {
       providerCallId,
       resultDeliveryGeneration: 1,
       resultDeliveryStatus: "pending",
-      resultJson: {
-        outcome: "completed",
-        summary: "The requested office confirmed the appointment.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The requested office confirmed the appointment.",
+        },
+      }),
       resultNotificationChannel: "telegram",
       status: "completed",
     });
@@ -1668,10 +1771,13 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_concurrent_recovery",
       resultDeliveryGeneration: 1,
       resultDeliveryStatus: "pending",
-      resultJson: {
-        outcome: "completed",
-        summary: "The requested office confirmed the appointment.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The requested office confirmed the appointment.",
+        },
+      }),
       resultNotificationChannel: "telegram",
       status: "completed",
     });
@@ -1713,10 +1819,13 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_abort_drain",
       resultDeliveryGeneration: 1,
       resultDeliveryStatus: "pending",
-      resultJson: {
-        outcome: "completed",
-        summary: "The requested office confirmed the appointment.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The requested office confirmed the appointment.",
+        },
+      }),
       resultNotificationChannel: "telegram",
       status: "completed",
     });
@@ -1773,10 +1882,13 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_stored_transfer_result",
       resultDeliveryGeneration: 1,
       resultDeliveryStatus: "delivered",
-      resultJson: {
-        outcome: "completed",
-        summary: "The requested office confirmed the appointment.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "The requested office confirmed the appointment.",
+        },
+      }),
       resultNotificationChannel: "telegram",
       status: "completed",
     });
@@ -1846,10 +1958,13 @@ describe("createHostedPhoneCall", () => {
       finalizeAttempts += 1;
       store.advanceCurrentCall({
         analyzedAt: transferEndedAt,
-        resultJson: {
-          outcome: "needs_user",
-          summary: "The post-handoff outcome is unknown.",
-        },
+        resultEncrypted: encodeHostedPhoneCallResultFixture({
+          memberId: "member_1",
+          value: {
+            outcome: "needs_user",
+            summary: "The post-handoff outcome is unknown.",
+          },
+        }),
         status: "needs_user",
       });
       if (finalizeAttempts === 1) {
@@ -1981,7 +2096,7 @@ describe("createHostedPhoneCall", () => {
     }]);
     expect(store.currentCall()).toMatchObject({
       providerCallId: null,
-      resultJson: null,
+      resultEncrypted: null,
       status: "failed",
     });
   });
@@ -2312,7 +2427,6 @@ describe("createHostedPhoneCall", () => {
 
   it("fails closed when a duplicate request key carries a different brief", async () => {
     const existing = buildHostedPhoneCall({
-      briefJson: VALID_BRIEF,
       providerCallId: "retell_existing",
       status: "calling",
     });
@@ -3283,10 +3397,13 @@ describe("createHostedPhoneCall", () => {
           analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
           id: call.id,
           providerCallId: "retell_started",
-          resultJson: {
-            outcome: "completed",
-            summary: "Booked before the start path finished.",
-          },
+          resultEncrypted: encodeHostedPhoneCallResultFixture({
+            memberId: "member_1",
+            value: {
+              outcome: "completed",
+              summary: "Booked before the start path finished.",
+            },
+          }),
           status: "completed",
         });
       },
@@ -3310,6 +3427,7 @@ describe("createHostedPhoneCall", () => {
       status: "calling",
     });
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: createdCallId,
       memberId: created.memberId,
@@ -3330,10 +3448,13 @@ describe("createHostedPhoneCall", () => {
     }]);
     expect(store.currentCall()).toMatchObject({
       providerCallId: "retell_started",
-      resultJson: {
-        outcome: "completed",
-        summary: "Booked before the start path finished.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "Booked before the start path finished.",
+        },
+      }),
       status: "completed",
     });
     expect(reconciliationWorkflowStarter).toHaveBeenCalledOnce();
@@ -3349,10 +3470,13 @@ describe("createHostedPhoneCall", () => {
           analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
           id: call.id,
           providerCallId: "retell_started",
-          resultJson: {
-            outcome: "completed",
-            summary: "Booked despite the local timeout.",
-          },
+          resultEncrypted: encodeHostedPhoneCallResultFixture({
+            memberId: "member_1",
+            value: {
+              outcome: "completed",
+              summary: "Booked despite the local timeout.",
+            },
+          }),
           status: "completed",
         });
       },
@@ -3378,16 +3502,19 @@ describe("createHostedPhoneCall", () => {
     expect(store.updateManyCalls).toEqual([]);
     expect(store.currentCall()).toMatchObject({
       providerCallId: "retell_started",
-      resultJson: {
-        outcome: "completed",
-        summary: "Booked despite the local timeout.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_1",
+        value: {
+          outcome: "completed",
+          summary: "Booked despite the local timeout.",
+        },
+      }),
       status: "completed",
     });
     expect(reconciliationWorkflowStarter).toHaveBeenCalledOnce();
   });
 
-  it("does not resolve a transfer destination when the brief disallows transfer", async () => {
+  it("resolves audience without enabling transfer when the brief disallows transfer", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
@@ -3409,8 +3536,9 @@ describe("createHostedPhoneCall", () => {
       },
     });
 
-    expect(resolverCalls).toBe(0);
+    expect(resolverCalls).toBe(1);
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief,
       id: store.createCalls[0]!.data.id,
       memberId: "member_1",
@@ -3465,6 +3593,7 @@ describe("createHostedPhoneCall", () => {
     });
     expect(transferNumberResolver).not.toHaveBeenCalled();
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief: effectiveBrief,
       id: store.createCalls[0]!.data.id,
       memberId: "member_1",
@@ -3614,7 +3743,7 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
   });
 
-  it("does not resolve a transfer destination when transfer permission is omitted", async () => {
+  it("resolves audience without enabling transfer when transfer permission is omitted", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
@@ -3640,8 +3769,9 @@ describe("createHostedPhoneCall", () => {
       },
     });
 
-    expect(resolverCalls).toBe(0);
+    expect(resolverCalls).toBe(1);
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief,
       id: store.createCalls[0]!.data.id,
       memberId: "member_1",
@@ -3748,10 +3878,8 @@ function createPhoneCallStore(input: {
       current = {
         ...current,
         ...args.data,
-        briefJson: null,
         providerCallId: null,
         resultEncrypted: null,
-        resultJson: null,
       };
       await input.onReserve?.();
       return {
@@ -3900,8 +4028,10 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
-    briefEncrypted: null,
-    briefJson: VALID_BRIEF,
+    briefEncrypted: encodeHostedPhoneCallBriefFixture({
+      memberId: overrides.memberId ?? "member_1",
+      value: VALID_BRIEF,
+    }),
     createdAt: now,
     endedAt: null,
     id: "hpc_test",
@@ -3914,7 +4044,6 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     resultDeliveryStatus: null,
     resultDeliveryTerminalAt: null,
     resultEncrypted: null,
-    resultJson: null,
     resultNotificationChannel: null,
     status: "starting",
     stopRequestedAt: null,

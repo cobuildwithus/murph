@@ -1,9 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createSocket, type Socket } from "node:dgram";
+import { types } from "node:util";
 import {
-  CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
+  CLI_TIMING_CPU_PHASES, CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
-  cliTimingFailureCode, cliTimingFailureStage, type CliFailureTiming,
+  cliTimingFailureCode, cliTimingFailureStage, cliTimingRejectionFailure, cliTimingValidationFailure, cliTimingSourceCauseFailure,
+  readCliTimingOwnData, type CliFailureTiming,
   type CliPhaseTiming, type CliTiming, type CliTimingOutcome, type CliTimingPhase,
 } from "../cli-timing.ts";
 
@@ -30,7 +32,15 @@ interface Invocation {
 }
 const invocations = new AsyncLocalStorage<Invocation>();
 const noop = () => {};
+// Original errors are live objects, unlike JSON transport input. Native proxy
+// detection rejects even revoked proxies without invoking their descriptor traps.
+function ownData(value: unknown, key: string): unknown {
+  return types.isProxy(value) ? undefined : readCliTimingOwnData(value, key);
+}
 const elapsedUs = (start: bigint) => Number((process.hrtime.bigint() - start) / 1_000n);
+function readProcessCpu(previous?: NodeJS.CpuUsage): NodeJS.CpuUsage | undefined {
+  try { return process.cpuUsage(previous); } catch { return undefined; }
+}
 
 /** Inclusive spans, summed per fixed name. Overlapping/nested spans are NOT additive.
  * No samples from another invocation, completed scope, or unawaited late work escape.
@@ -45,20 +55,46 @@ export function startCliPhase(phase: CliTimingPhase): () => void {
   invocation.spans += 1;
   invocation.activeSpans += 1;
   const started = process.hrtime.bigint();
+  const startedCpu = CLI_TIMING_CPU_PHASES.includes(phase) ? readProcessCpu() : undefined;
   let ended = false;
   return () => {
     if (ended) return;
     ended = true;
     invocation.activeSpans -= 1;
     if (invocation.closed || invocation.collection.closed) return;
-    if (!addCliPhaseSample(invocation.phases, phase, elapsedUs(started))) {
+    const us = elapsedUs(started);
+    const cpu = startedCpu ? readProcessCpu(startedCpu) : undefined;
+    if (!addCliPhaseSample(invocation.phases, phase, us, cpu ? cpu.user + cpu.system : undefined)) {
       invocation.collection.report.droppedSpans = incrementCliTimingDrop(invocation.collection.report.droppedSpans);
     }
   };
 }
+
+/** Publish one accumulated wall sample for work already awaited in this scope.
+ * The caller owns its fixed operation boundary; no work count or CPU is inferred.
+ */
+export function recordCliPhase(phase: CliTimingPhase, durationUs: number): void {
+  const invocation = invocations.getStore();
+  if (!invocation || invocation.closed || invocation.collection.closed) return;
+  if (invocation.spans >= CLI_TIMING_MAX_SPANS) {
+    invocation.collection.report.droppedSpans = incrementCliTimingDrop(invocation.collection.report.droppedSpans);
+    return;
+  }
+  invocation.spans += 1;
+  if (!addCliPhaseSample(invocation.phases, phase, durationUs)) {
+    invocation.collection.report.droppedSpans = incrementCliTimingDrop(invocation.collection.report.droppedSpans);
+  }
+}
+
 export async function timeCliPhase<T>(phase: CliTimingPhase, run: () => Promise<T>): Promise<T> {
   const end = startCliPhase(phase);
   try { return await run(); } finally { end(); }
+}
+
+/** Time synchronous query work without inserting an asynchronous boundary. */
+export function timeCliPhaseSync<T>(phase: CliTimingPhase, run: () => T): T {
+  const end = startCliPhase(phase);
+  try { return run(); } finally { end(); }
 }
 
 /** Called only with Incur's resolved registered path, never argv/display text. */
@@ -110,15 +146,6 @@ export async function withCliTiming<T>(
   });
 }
 
-// Read only own data properties: never run getters, walk prototypes/causes or
-// keep the original error/context. A hostile proxy cannot replace the throw.
-function ownData(value: unknown, key: string): unknown {
-  try {
-    if (typeof value !== "object" || value === null) return undefined;
-    return Object.getOwnPropertyDescriptor(value, key)?.value;
-  } catch { return undefined; }
-}
-
 /** The bridge observes original typed errors before Incur projection. Later
  * dispatch/exit catches only provide a fallback; one invocation contributes at
  * most one observation, regardless of rethrows, wrapping or object reuse.
@@ -134,13 +161,28 @@ export function noteCliTimingFailure(error: unknown): void {
   // code (incur-smoke.test.ts), unlike unpatched upstream ParseError handling.
   const code = rawCode ?? (incurValidation ? "VALIDATION_ERROR" :
     name === "ZodError" ? "invalid_payload" : undefined);
-  const stage = ownData(ownData(error, "context"), "stage") ?? ownData(error, "stage") ??
+  const context = ownData(error, "context");
+  const stage = ownData(context, "stage") ?? ownData(error, "stage") ??
     (validation ? "validation" : undefined);
-  invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1 };
+  const failureCode = cliTimingFailureCode(code, invocation.command);
+  // Pass only a detached own-data value to the portable finite selector. No
+  // original object or nested proxy reaches its descriptor reads.
+  const sourceCause = cliTimingSourceCauseFailure(invocation.command, code,
+    { context: { vaultCode: ownData(context, "vaultCode") } }, "context");
+  if (failureCode === "unknown" && !sourceCause.sourceCause &&
+      (invocation.command === "meal edit" || invocation.command === "meal remove-photo")) {
+    sourceCause.sourceCause = { code: rawCode === undefined ? "missing_code" : "unrecognized_code" };
+  }
+  // Domain validation uses fieldErrors; schema-owned publicIssues take precedence.
+  invocation.failure = { code: failureCode, stage: cliTimingFailureStage(stage), count: 1,
+    ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
+    ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues"),
+    ...cliTimingRejectionFailure(invocation.command, code, error, "cliTimingRejection"),
+    ...sourceCause };
 }
 
 // Incur may call process.exit before an outer finally executes. Observe the
-// authoritative code, then delegate unchanged; unflushed datagrams can be lost.
+// authoritative code, then delegate unchanged; transport remains best-effort.
 export function isCliTimingActive(): boolean {
   const invocation = invocations.getStore();
   return !!invocation && !invocation.closed && !invocation.collection.closed;
@@ -176,8 +218,7 @@ function finishAction(invocation: Invocation): void {
   }
 }
 function isBrokenPipe(error: unknown): boolean {
-  try { return typeof error === "object" && error !== null && "code" in error && error.code === "EPIPE"; }
-  catch { return false; }
+  return ownData(error, "code") === "EPIPE";
 }
 function finishInvocation(invocation: Invocation): void {
   if (invocation.closed) return;
@@ -202,9 +243,10 @@ function finishInvocation(invocation: Invocation): void {
   }] });
 }
 
-/** One loopback datagram per naturally completed subprocess; no await, filesystem,
- * result-channel output, retry or keepalive. Bind early so normal final sends can
- * reach the kernel before process exit. Missing/failed transport is a no-op.
+/** One loopback datagram per subprocess; no await, filesystem, result-channel
+ * output, retry or keepalive. Fixed synchronous lookup lets native bind/send
+ * reach the kernel even immediately before process.exit. Delivery is still
+ * best-effort (including native send-buffer pressure); exits never wait on it.
  */
 function createCliTimingSender(): ((report: CliTiming) => void) | null {
   const endpoint = process.env[CLI_TIMING_ENDPOINT_ENV];
@@ -213,10 +255,15 @@ function createCliTimingSender(): ((report: CliTiming) => void) | null {
   const startedUs = Number(process.hrtime.bigint() / 1_000n);
   let socket: Socket;
   try {
-    socket = createSocket("udp4");
+    socket = createSocket({ type: "udp4",
+      // Even numeric addresses use asynchronous dns.lookup by default. Both
+      // endpoints are source-owned IPv4 loopback; no DNS work is necessary.
+      lookup: (_hostname, _options, callback) => callback(null, "127.0.0.1", 4),
+    });
     socket.unref();
     socket.on("error", () => { try { socket.close(); } catch {} });
-    socket.bind(0, "127.0.0.1");
+    // Avoid cluster's asynchronous shared-handle bind as well.
+    socket.bind({ port: 0, address: "127.0.0.1", exclusive: true });
   } catch { return null; }
   let sent = false;
   return (source) => {

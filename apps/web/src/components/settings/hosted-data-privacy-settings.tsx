@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 
@@ -8,7 +8,6 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
-import { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -31,7 +30,6 @@ import {
   publishBrowserVaultSessionInvalidation,
 } from "@/src/lib/browser-vault/session-invalidation";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import { HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE } from "@/src/lib/hosted-onboarding/errors";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   type HostedAccountExitReasonCode,
@@ -59,7 +57,6 @@ interface HostedAccountDeleteResponse {
     };
     deletedAt: string;
     vendorAccounts: {
-      privyUser: HostedAccountVendorDeletionSummary;
       stripeCustomer: HostedAccountVendorDeletionSummary;
       stripeSubscription: HostedAccountVendorDeletionSummary;
     };
@@ -67,7 +64,6 @@ interface HostedAccountDeleteResponse {
 }
 
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
-const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 type SensitiveActionAuthorizer =
   ReturnType<typeof useSensitiveActionAuthorization>["authorize"];
 
@@ -133,25 +129,15 @@ function HostedDataPrivacySettingsContent(props: {
     )
     && !deletePending;
 
-  const redirectToFarewell = useCallback(() => {
-    window.location.replace(buildAccountDeletionFarewellPath(cleanupPending));
-  }, [cleanupPending]);
-
   useEffect(() => {
     if (!deleted) {
       return;
     }
 
-    // Replace the invalidated dashboard with the farewell immediately, then
-    // keep a hard navigation fallback in case Privy's best-effort browser
-    // logout never settles.
+    // Canonical deletion and durable session revocation own completion.
     deletedPageRef.current?.focus();
-    const fallbackTimer = window.setTimeout(
-      redirectToFarewell,
-      POST_DELETE_REDIRECT_FALLBACK_MS,
-    );
-    return () => window.clearTimeout(fallbackTimer);
-  }, [deleted, redirectToFarewell]);
+    window.location.replace(buildAccountDeletionFarewellPath(cleanupPending));
+  }, [deleted, cleanupPending]);
 
   async function handleExportConfirmed() {
     if (!exportReady || !authorize) {
@@ -224,22 +210,16 @@ function HostedDataPrivacySettingsContent(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
-      const stripeEffectPending =
+      // A suspended account cannot reload this page, so these retries stay in the dialog.
+      const dialogRetry =
         requestError instanceof HostedOnboardingApiError
-        && requestError.code === HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE;
-      const connectedAppCompletionRecoveryRequired =
-        requestError instanceof HostedOnboardingApiError
-        && (
-          requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG"
-          || requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS"
-        );
+        && requestError.retryable;
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
         if (
           !providerRecoveryRequired
           && !deviceTokenRefreshRecoveryRequired
-          && !stripeEffectPending
-          && !connectedAppCompletionRecoveryRequired
+          && !dialogRetry
         ) {
           reloadCurrentHostedAuthDocument();
         }
@@ -325,7 +305,6 @@ function HostedDataPrivacySettingsContent(props: {
           ref={deletedPageRef}
           takeover
         />
-        <HostedPrivyLogout onDone={redirectToFarewell} />
       </>
     );
   }
@@ -678,7 +657,6 @@ export function hasIncompleteHostedAccountDeletionCleanup(
   }
 
   const vendorStatuses = [
-    result.vendorAccounts.privyUser.status,
     result.vendorAccounts.stripeCustomer.status,
     result.vendorAccounts.stripeSubscription.status,
   ];

@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
 import { useEffect } from "react";
+
+import { LINK_PAGE_PILL_CLASS } from "@/src/components/link-page/link-page-shell";
 
 export function CalendarHandoff({
   autoOpen,
@@ -25,20 +26,8 @@ export function CalendarHandoff({
   }, [autoOpen, downloadHref, payload]);
 
   return (
-    <div className="grid gap-4 sm:grid-cols-[minmax(220px,280px)_1fr] sm:items-center">
-      <a
-        className="group flex min-h-13 items-center justify-between rounded-xl bg-[#19231d] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#315a40] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#b8e26f]"
-        href={downloadHref}
-      >
-        Add to Calendar
-        <ArrowUpRight
-          aria-hidden="true"
-          className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-        />
-      </a>
-      <p className="max-w-xs text-xs leading-5 text-[#667168]">
-        Your calendar app will ask you to confirm before anything is added.
-      </p>
-    </div>
+    <a className={LINK_PAGE_PILL_CLASS} href={downloadHref}>
+      Add to Calendar
+    </a>
   );
 }

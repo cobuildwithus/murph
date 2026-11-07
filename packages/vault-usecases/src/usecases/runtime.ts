@@ -1,3 +1,4 @@
+import { timeCliPhase } from "@murphai/runtime-state/node/cli-timing"
 import { loadRuntimeModule } from "../runtime-import.js"
 import { createRuntimeUnavailableError } from "../runtime-errors.js"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
@@ -33,6 +34,11 @@ function toRuntimeUnavailableCause(error: unknown): unknown {
   return error
 }
 
+/** Fixed diagnostic span for the public service seam's cold integrated-services import. */
+export function timeServiceRuntimeLoad<T>(load: () => Promise<T>): Promise<T> {
+  return timeCliPhase("service-runtime-load", load)
+}
+
 export function createUnwiredMethod<
   TArgs extends unknown[] = [],
   TResult = never,
@@ -43,15 +49,6 @@ export function createUnwiredMethod<
       `CLI integration for ${name} is not wired yet.`,
     )
   }
-}
-
-export function createUnwiredHealthMethodSet<TMethods extends string>(
-  names: readonly TMethods[],
-  group: "core" | "query",
-) {
-  return Object.fromEntries(
-    names.map((name) => [name, createUnwiredMethod(`${group}.${name}`)]),
-  ) as Record<TMethods, () => Promise<never>>
 }
 
 function isPlainObject(value: unknown): value is JsonObject {
@@ -110,7 +107,6 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "summarizeWearableMetricTrendRuntime",
       "summarizeWearableSleepRuntime",
       "summarizeWearableSleepPatternRuntime",
-      "buildPersonalPatternReportRuntime",
       "summarizeWearableActivityRuntime",
       "summarizeWearableBodyStateRuntime",
       "summarizeWearableDayRuntime",
@@ -130,7 +126,9 @@ function isImportersRuntimeModule(value: unknown): value is ImportersFactoryRunt
 }
 
 export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRuntimeModule> {
-  return loadRuntimeModule<ImportersFactoryRuntimeModule>("@murphai/importers")
+  // Every call's native import, including module-cache hits; there is no shared promise.
+  return timeCliPhase("importers-runtime-load", () =>
+    loadRuntimeModule<ImportersFactoryRuntimeModule>("@murphai/importers"))
 }
 
 export async function loadCoreRuntime(): Promise<CoreRuntimeModule> {
@@ -159,7 +157,8 @@ export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
     queryRuntimePromise ??
     (queryRuntimePromise = (async () => {
       try {
-        const queryModule = await loadRuntimeModule("@murphai/query")
+        // Cold shared-promise owner only; the shape check below is excluded.
+        const queryModule = await timeCliPhase("query-runtime-load", () => loadRuntimeModule("@murphai/query"))
 
         if (!isQueryRuntimeModule(queryModule)) {
           throw new TypeError("Query runtime package did not match the expected module shape.")

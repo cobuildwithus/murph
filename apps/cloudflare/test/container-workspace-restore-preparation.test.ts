@@ -47,10 +47,36 @@ afterEach(async () => {
 });
 
 describe("container workspace restore preparation", () => {
+  it.each([401, 503])("preserves media read failure semantics through the production adapter (%s)", async (status) => {
+    const fixture = await createFixture();
+    const requests = serveSnapshot(fixture, fixture.workspace, status);
+    const signal = new AbortController().signal;
+    const preparation = await prepareHostedContainerWorkspaceRestore({ job: createJob(fixture, true), signal });
+    const { restored } = await preparation.promise;
+    const materialization = restored.materializeWorkspaceArtifacts([MEDIA_PATH]);
+    if (status === 401) {
+      await expect(materialization).rejects.toMatchObject({
+        name: "AssistantWorkspaceArtifactMaterializationError",
+        cause: { code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY", status: 401 },
+      });
+    } else {
+      const result = await materialization;
+      expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${MEDIA_PATH}`]: "transport" });
+      expect(result.materializedArtifactPaths.size).toBe(0);
+    }
+    expect(signal.aborted).toBe(false);
+    expect(requests.filter(request => new URL(request.url).pathname === `/media/${MEDIA_ID}`)).toHaveLength(1);
+    await expect(stat(path.join(preparation.vaultRoot, MEDIA_PATH))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it.each([true, false])(
     "restores encrypted bytes through the real composition (prepared: %s)",
     async (prepared) => {
       const fixture = await createFixture();
+      fixture.workspace.redactedStatus = {
+        hostedMailboxConversationImportedSeq: "3",
+        hostedMailboxSystemImportedSeq: "2",
+      };
       const job = createJob(fixture, prepared);
       const requests = serveSnapshot(fixture);
 
@@ -82,6 +108,7 @@ describe("container workspace restore preparation", () => {
       expect(controlRequests.map((request) => new URL(request.url).pathname).sort())
         .toEqual([
           HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead.path,
+          HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path,
           ...(prepared ? [] : [
             `/workspace-snapshots/${fixture.ref.snapshotId}/data-key/unwrap`,
             `/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`,
@@ -94,6 +121,20 @@ describe("container workspace restore preparation", () => {
         expect(request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(job.request.workspaceVersion);
         expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
       }
+      expect(result.initialMailboxPrefetch).toMatchObject({
+        importedSeqByLane: { conversation: "3", system: "2" },
+        limitPerLane: 51,
+      });
+      await expect(result.initialMailboxPrefetch?.response).resolves.toMatchObject({
+        userId: job.request.userId, items: [],
+      });
+      const mailboxRequest = requests.find((request) =>
+        new URL(request.url).pathname === HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path);
+      expect(await mailboxRequest?.json()).toMatchObject({
+        cursorMode: "imported_seq", decodeInlinePayloads: true,
+        lanes: [{ lane: "conversation", importedSeq: "3" }, { lane: "system", importedSeq: "2" }],
+        limitPerLane: 51,
+      });
       // Cold restore leaves media external; selected access uses the real adapter.
       await expect(stat(path.join(preparation.vaultRoot, MEDIA_PATH)))
         .rejects.toMatchObject({ code: "ENOENT" });
@@ -269,7 +310,7 @@ function createJob(fixture: Fixture, prepared: boolean): HostedExecutionWorkspac
   };
 }
 
-function serveSnapshot(fixture: Fixture, workspace = fixture.workspace): Request[] {
+function serveSnapshot(fixture: Fixture, workspace = fixture.workspace, mediaStatus = 200): Request[] {
   const requests: Request[] = [];
   const workspaceUrl = new URL(
     HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead.path,
@@ -280,7 +321,15 @@ function serveSnapshot(fixture: Fixture, workspace = fixture.workspace): Request
     const request = new Request(input, init);
     requests.push(request);
     if (request.url === `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.mediaStore}/media/${MEDIA_ID}`) {
+      if (mediaStatus !== 200) return new Response(null, { status: mediaStatus });
       return new Response(MEDIA_BYTES);
+    }
+    if (new URL(request.url).pathname === HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path) {
+      return Response.json({
+        assistantProvider: "openai", fetchedAt: NOW, items: [],
+        maxSeqByLane: [{ lane: "conversation", maxSeq: "3" }, { lane: "system", maxSeq: "2" }],
+        userId: fixture.workspace.userId,
+      });
     }
     if (request.url === workspaceUrl) {
       return Response.json({ fetchedAt: NOW, workspace });

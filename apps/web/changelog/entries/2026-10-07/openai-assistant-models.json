@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-10-07",
+  "order": 100,
+  "item": {
+    "id": "openai-assistant-models",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Assistant models use OpenAI",
+    "summary": "Murph now uses OpenAI for assistant replies, with model and reasoning choices in Settings.",
+    "details": "Venice and custom inference endpoints are no longer available. Saved model and reasoning preferences remain subject to your plan.",
+    "relevanceTags": [
+      "settings",
+      "models"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Open Settings",
+      "href": "/settings"
+    }
+  }
+}

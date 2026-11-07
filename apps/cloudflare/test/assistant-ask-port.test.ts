@@ -5,9 +5,6 @@ import {
 } from "@murphai/hosted-execution/routes";
 import { createHostedRuntimeAssistantAskPort } from "../src/runtime-platform/assistant-ask-port.ts";
 import {
-  readHostedRunnerWebControlPolicy,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
-import {
   startHostedWebControlStub,
   type HostedWebControlStub,
 } from "./helpers/hosted-web-control-support.js";
@@ -20,23 +17,6 @@ afterEach(async () => {
 });
 
 describe("Hosted Assistant Ask control-plane port", () => {
-  it("allowlists only the exact POST control route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "assistant_ask",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: `${HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH}/arbitrary`,
-    }).allowed).toBe(false);
-  });
 
   it("forwards the opaque request id with cancellation over signed HTTP and parses the bounded response", async () => {
     webControl = await startHostedWebControlStub({

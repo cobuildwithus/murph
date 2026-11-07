@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+import { RunnerInvocationReceiptStore } from "../src/runner-invocation-receipt.ts";
+import { createTestSqlStorage } from "./sql-storage.ts";
+
+describe("native invocation receipts", () => {
+  it("retains uncertain launches across eviction and forbids a successor", () => {
+    const sql = createTestSqlStorage();
+    const first = new RunnerInvocationReceiptStore(sql);
+    expect(first.register({ attemptId: "attempt-1", generation: "1" })).toBe("new");
+    const recovered = new RunnerInvocationReceiptStore(sql);
+    expect(recovered.register({ attemptId: "attempt-1", generation: "1" })).toBe("existing");
+    expect(() => recovered.register({ attemptId: "attempt-2", generation: "2" })).toThrow("unresolved");
+    expect(recovered.read()?.state).toBe("registered");
+  });
+
+  it("allows warm reuse only after completion, fencing delayed launch and completion RPCs", () => {
+    const sql = createTestSqlStorage();
+    const receipt = new RunnerInvocationReceiptStore(sql);
+    const first = { attemptId: "attempt-1", generation: "9007199254740993" };
+    const second = { attemptId: "attempt-2", generation: "9007199254740994" };
+    receipt.register(first);
+    expect(receipt.complete(first)).toBe(true);
+    const recovered = new RunnerInvocationReceiptStore(sql);
+    expect(recovered.read()).toEqual({ ...first, state: "completed" });
+    expect(recovered.register(first)).toBe("existing");
+    expect(recovered.register(second)).toBe("new");
+    expect(() => recovered.register(first)).toThrow("Stale");
+    expect(() => recovered.register({ ...second, attemptId: "wrong-attempt" })).toThrow("Stale");
+    expect(recovered.complete(first)).toBe(false);
+    expect(recovered.read()).toEqual({ ...second, state: "registered" });
+  });
+  it.each(["legacy", "fresh"] as const)("preserves the rollback column through completion and reuse on a %s table", origin => {
+    const sql = createTestSqlStorage();
+    const first = { attemptId: "attempt-1", generation: "1" };
+    if (origin === "legacy") {
+      sql.exec(`CREATE TABLE runner_invocation_receipt (singleton INTEGER PRIMARY KEY, attempt_id TEXT,
+        generation TEXT, state TEXT, immediate_recheck INTEGER NOT NULL DEFAULT 0)`);
+      sql.exec("INSERT INTO runner_invocation_receipt VALUES (1, 'attempt-1', '1', 'registered', 1)");
+    }
+    const store = () => new RunnerInvocationReceiptStore(sql);
+    const rollbackValue = origin === "legacy" ? 1 : 0;
+    const expectRollbackValue = () => expect(sql.exec("SELECT immediate_recheck FROM runner_invocation_receipt").toArray())
+      .toEqual([{ immediate_recheck: rollbackValue }]);
+    expect(store().register(first)).toBe(origin === "legacy" ? "existing" : "new");
+    expect(store().read()).toEqual({ ...first, state: "registered" });
+    expectRollbackValue();
+    expect(store().complete(first)).toBe(true);
+    expect(store().read()).toEqual({ ...first, state: "completed" });
+    expectRollbackValue();
+    expect(store().register(first)).toBe("existing");
+    expectRollbackValue();
+    const next = { attemptId: "attempt-2", generation: "2" };
+    expect(store().register(next)).toBe("new");
+    expect(store().read()).toEqual({ ...next, state: "registered" });
+    expectRollbackValue();
+    expect(store().complete(next)).toBe(true);
+    expectRollbackValue();
+  });
+
+  it("keeps uncertain usage settlement closed across eviction and clears only its exact receipt", () => {
+    const sql = createTestSqlStorage();
+    const runtime = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = new RunnerInvocationReceiptStore(sql);
+    receipt.register(runtime);
+    expect(receipt.usageSettlementAllowsProviders(runtime)).toBe(true);
+    expect(receipt.beginUsageSettlement(runtime, "usage-a")).toBe(true);
+    expect(receipt.beginUsageSettlement(runtime, "usage-b")).toBe(true);
+    const recovered = new RunnerInvocationReceiptStore(sql);
+    expect(recovered.usageSettlementAllowsProviders(runtime)).toBe(false);
+    recovered.finishUsageSettlement(runtime, "usage-a", true);
+    expect(recovered.usageSettlementAllowsProviders(runtime)).toBe(false);
+    expect(recovered.beginUsageSettlement(runtime, "usage-b")).toBe(true);
+    recovered.finishUsageSettlement(runtime, "usage-b", true);
+    expect(recovered.usageSettlementAllowsProviders(runtime)).toBe(true);
+    recovered.beginUsageSettlement(runtime, "usage-denied");
+    recovered.finishUsageSettlement(runtime, "usage-denied", false);
+    recovered.finishUsageSettlement(runtime, "usage-denied", true);
+    expect(recovered.usageSettlementAllowsProviders(runtime)).toBe(false);
+    recovered.complete(runtime);
+    const next = { attemptId: "next-usage-attempt", generation: "2" };
+    recovered.register(next);
+    expect(recovered.beginUsageSettlement(runtime, "stale-report")).toBe(false);
+    expect(recovered.usageSettlementAllowsProviders(next)).toBe(true);
+  });
+
+  it.each([true, false])("keeps denial through racing settlement and replay across eviction (first allowed=%s)", firstAllowed => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    expect(receipt().beginUsageSettlement(identity, "usage-report")).toBe(true);
+    receipt().finishUsageSettlement(identity, "usage-report", firstAllowed);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(firstAllowed);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: !firstAllowed });
+    receipt().finishUsageSettlement(identity, "usage-report", !firstAllowed);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+    receipt().finishUsageSettlement(identity, "usage-report", true);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+    expect(receipt().beginUsageSettlement(identity, "usage-report")).toBe(true);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+  });
+
+  it("persists denial without a prior row and keeps repeated denial idempotent across eviction", () => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    for (let replay = 0; replay < 2; replay++) {
+      receipt().finishUsageSettlement(identity, "usage-report", false);
+      expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+      expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+      expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([{ state: "denied" }]);
+    }
+  });
+
+  it.each([false, true])("keeps a successor clear when denial arrives after completion (successor registered=%s)", registered => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const next = { attemptId: "next-usage-attempt", generation: "2" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    expect(receipt().complete(identity)).toBe(true);
+    if (registered) receipt().register(next);
+    receipt().finishUsageSettlement(identity, "usage-report", false);
+    expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual(registered ? [] : [{ state: "denied" }]);
+    if (!registered) receipt().register(next);
+    expect(receipt().usageSettlementAllowsProviders(next)).toBe(true);
+    expect(receipt().readProviderInvocation()).toMatchObject({ ...next, settlementPending: false });
+  });
+
+  it.each([
+    { attemptId: "wrong-attempt", generation: "1" },
+    { attemptId: "usage-attempt", generation: "2" },
+  ])("ignores denial for a mismatched identity %j", wrongIdentity => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    receipt().finishUsageSettlement(wrongIdentity, "usage-report", false);
+    expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([]);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(true);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: false });
+    receipt().beginUsageSettlement(identity, "usage-report");
+    receipt().finishUsageSettlement(wrongIdentity, "usage-report", false);
+    receipt().finishUsageSettlement(identity, "usage-report", true);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(true);
+  });
+
+  it("retains provider context across eviction and resets it only for a completed successor", () => {
+    const sql = createTestSqlStorage();
+    const first = { attemptId: "provider-1", generation: "1" };
+    const context = { workspaceVersion: "9007199254740993", platformAiUsageAllowed: false };
+    const store = new RunnerInvocationReceiptStore(sql);
+    store.register(first, context);
+    const recovered = new RunnerInvocationReceiptStore(sql);
+    expect(recovered.readProviderInvocation()).toEqual({ ...first, context, settlementPending: false });
+    recovered.register(first, { ...context, platformAiUsageAllowed: true });
+    expect(recovered.readProviderInvocation()?.context?.platformAiUsageAllowed).toBe(false);
+    recovered.complete(first);
+    expect(recovered.readProviderInvocation()).toBeNull();
+    recovered.register({ attemptId: "provider-2", generation: "2" }, { ...context, workspaceVersion: "4", platformAiUsageAllowed: true });
+    expect(recovered.readProviderInvocation()?.context?.workspaceVersion).toBe("4");
+  });
+
+  it("adds context to an old receipt without restoring a stale generation", () => {
+    const sql = createTestSqlStorage();
+    sql.exec(`CREATE TABLE runner_invocation_receipt (singleton INTEGER PRIMARY KEY, attempt_id TEXT,
+      generation TEXT, state TEXT, immediate_recheck INTEGER NOT NULL DEFAULT 0)`);
+    sql.exec("INSERT INTO runner_invocation_receipt VALUES (1, 'legacy-attempt', '1', 'registered', 0)");
+    const store = new RunnerInvocationReceiptStore(sql);
+    const identity = { attemptId: "legacy-attempt", generation: "1" };
+    expect(store.readProviderInvocation()?.context).toBeNull();
+    const context = { workspaceVersion: "0", platformAiUsageAllowed: true };
+    store.restoreProviderContext({ ...identity, generation: "2" }, context);
+    expect(store.readProviderInvocation()?.context).toBeNull();
+    store.restoreProviderContext(identity, context);
+    expect(store.readProviderInvocation()?.context).toEqual(context);
+  });
+
+});

@@ -16,7 +16,7 @@ import {
   type ClinicalImportPlan,
   type ClinicalImportUpsertPayload,
 } from "@murphai/clinical-records";
-import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
+import { findEventByExternalRef, importEventBatch, initializeVault, upsertEvent, validateVault, withCanonicalWriteLock } from "@murphai/core";
 import {
   buildClinicalImportPlanFromSnapshot,
   clinicalPlanToEventImportDecisions,
@@ -63,6 +63,62 @@ afterEach(async () => {
 });
 
 describe("buildClinicalImportPlanFromSnapshot", () => {
+  it("keeps a hash-bound imported clinical observation valid under whole-vault validation", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": {
+        resourceType: "Observation", id: "synthetic-pulse", status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] },
+        valueQuantity: { value: 70, unit: "bpm" },
+      } },
+    });
+    await initializeVault({ vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const imported = await importEventBatch({ vaultRoot, apply: true, decisions: executableDecisions(plan) });
+    expect(imported.createdCount).toBe(1);
+    expect((await validateVault({ vaultRoot })).issues).toEqual([]);
+    await writeFile(path.join(vaultRoot, path.posix.dirname(MANIFEST_PATH), "Observation/page-1.json"), "{}");
+    expect((await validateVault({ vaultRoot })).issues).toContainEqual(expect.objectContaining({ code: "RAW_MANIFEST_INVALID" }));
+  });
+
+  it.each([
+    { code: { text: "Example assessment" }, valueInteger: 3 },
+    { code: { text: "Example assessment ".repeat(20) }, valueInteger: 3 },
+    { code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] }, valueQuantity: { value: 70 } },
+  ])("retains a dated unmapped observation as source prose without inventing a metric or unit %#", async (value) => {
+    const resource = { resourceType: "Observation", id: "source-assessment", status: "final",
+      effectiveDateTime: "2026-07-01T12:05:00.000Z", bodySite: { text: "Source site" }, ...value };
+    const makePlan = async (observation: object) => planFromFixture({ manifestPath: MANIFEST_PATH,
+      vaultRoot: await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+        pages: { "Observation/page-1.json": [observation] } }) });
+    const plan = await makePlan(resource);
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", noteType: "fhir_observation_source", occurredAt: resource.effectiveDateTime })]);
+    const record = upserts(plan)[0];
+    if (record?.kind !== "note") throw new Error("Expected source note");
+    expect(record.title.length).toBeLessThanOrEqual(160);
+    expect(record.note).toContain("without metric normalization or inferred units");
+    expect(record.note).toContain('"text": "Source site"');
+    expect(record).not.toHaveProperty("measurements");
+    // Provider JSON key order cannot create a changed-source conflict on replay.
+    const reordered = await makePlan(Object.fromEntries(Object.entries(resource).reverse()));
+    const replay = upserts(reordered)[0];
+    expect(replay?.kind === "note" && replay.note).toBe(record.note);
+  });
+
+  it.each([
+    { effectiveDateTime: "invalid" },
+    { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
+  ])("keeps invalid dates or semantically uncertain observations held %#", async (override) => {
+    const vaultRoot = await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{ resourceType: "Observation", id: "uncertain-assessment", status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z", code: { text: "Example assessment" }, valueInteger: 3, ...override }] } });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(1);
+  });
+
   it.each([
     ["Condition", "code", { text: "Historical asthma" }],
     ["AllergyIntolerance", "code", { text: "Penicillin allergy" }],
@@ -89,7 +145,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]?.note).toContain(JSON.stringify(value, null, 2).split("\n")[0] ?? "");
     expect(notes[0]?.note).toContain(field);
-    expect(notes[0]?.note).toContain("Clinical event date is not available");
+    // Exact sentence: a record dated by meta.lastUpdated must replay byte-identically
+    // against notes written by earlier importer versions at the same source revision.
+    expect(notes[0]?.note).toContain("Record updated: 2026-07-01T12:00:00.000Z. Clinical event date is not available.");
     expect(notes[0]?.externalRef).toMatchObject({ resourceId: "source-history", version: "2026-07-01T12:00:00.000Z" });
     expect(reviews(plan)).toEqual([]);
     if (resourceType.startsWith("Medication")) expect(notes[0]?.note).toContain("does not establish that a dose was taken");
@@ -480,6 +538,71 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         textValue: "Negative",
       })],
     ]);
+  });
+
+  it("preserves qualitative results with numeric reference bounds as source text", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation", id: "qualitative-with-numeric-bounds", status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+        code: { text: "Example assay" }, valueString: "Below detection",
+        referenceRange: [{ low: { value: 2, unit: "ng/mL" }, high: { value: 8, unit: "ng/mL" }, text: "Assay reference interval" }],
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    const record = upserts(plan)[0];
+    expect(record?.kind).toBe("test");
+    if (record?.kind !== "test") throw new Error("Expected a laboratory result");
+    expect(record.results).toEqual([expect.objectContaining({
+      analyte: "Example assay", textValue: "Below detection",
+      referenceRange: { text: "Assay reference interval; Low: 2 ng/mL; High: 8 ng/mL" },
+    })]);
+    expect(record.results?.[0]).not.toHaveProperty("value");
+    expect(record.results?.[0]).not.toHaveProperty("unit");
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    await importEventBatch({ vaultRoot: canonicalVaultRoot, apply: true, decisions: [{
+      action: "retract", externalRef: record.externalRef,
+      reason: "laboratory observation result is not importable", evidence: record.evidence,
+    }] });
+    const held = await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...record.externalRef, includeDeleted: true });
+    if (!held?.lifecycle) throw new Error("Expected the parser hold");
+    // Explicit reviewed recovery uses the canonical correction API. Ordinary
+    // re-import must still reject changed content at the same source revision.
+    await expect(importEventBatch({ vaultRoot: canonicalVaultRoot, apply: true, decisions: executableDecisions(plan) }))
+      .rejects.toMatchObject({ code: "EVENT_SOURCE_REVISION_CONFLICT" });
+    await withCanonicalWriteLock(canonicalVaultRoot, async () => {
+      expect(await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...record.externalRef, includeDeleted: true })).toEqual(held);
+      await upsertEvent({ vaultRoot: canonicalVaultRoot, payload: { ...record, id: held.id } });
+    });
+    expect(await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...record.externalRef }))
+      .toMatchObject({ kind: "test", id: held.id, results: record.results });
+    expect(await importEventBatch({ vaultRoot: canonicalVaultRoot, apply: true, decisions: executableDecisions(plan) }))
+      .toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+  });
+
+  it.each([
+    { low: { value: "invalid" } },
+    { low: { value: 9, unit: "ng/mL" }, high: { value: 2, unit: "ng/mL" } },
+    { low: { value: 2, unit: "ng/mL" }, high: { value: 8, unit: "mg/dL" } },
+    { low: { value: 2, comparator: ">" } },
+    { high: { value: 8 }, text: "x".repeat(160) },
+    { high: { value: 8 }, type: { text: "Therapeutic" } },
+  ])("keeps unsafe qualitative reference ranges held %#", async (range) => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation", id: "qualitative-held", status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+        code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [range],
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(1);
   });
 
   it("holds ambiguous or unit-incompatible laboratory reference ranges for review", async () => {
@@ -976,23 +1099,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(reviews(plan)).toHaveLength(2);
-    expect(reviews(plan)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resourceId: "lab-local-category",
-          reason: "observation code is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "lab-canonical-short-code",
-          reason: "observation code is not importable",
-        }),
-      ]),
-    );
-    expect(upserts(plan)).toHaveLength(2);
-    expect(upserts(plan).some((candidate) => candidate.externalRef.resourceId === "lab-local-category")).toBe(false);
-    expect(upserts(plan).some((candidate) => candidate.externalRef.resourceId === "lab-canonical-short-code"))
-      .toBe(false);
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toHaveLength(4);
+    for (const resourceId of ["lab-local-category", "lab-canonical-short-code"]) {
+      expect(upserts(plan).find((candidate) => candidate.externalRef.resourceId === resourceId))
+        .toMatchObject({ kind: "note", noteType: "fhir_observation_source" });
+    }
 
     const observation = upserts(plan).find(
       (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
@@ -1099,12 +1211,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
               attachment: {
                 contentType: "text/plain",
                 data: Buffer.from("Follow up in two weeks.").toString("base64"),
-              },
-            },
-            {
-              attachment: {
-                contentType: "application/pdf",
-                url: "https://example.invalid/discharge-instructions.pdf",
               },
             },
           ],
@@ -1459,7 +1565,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     }
   });
 
-  it("fails closed on ambiguous or malformed DocumentReference inline text data", async () => {
+  it("imports all inline document parts and records only metadata for unreadable documents", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -1568,32 +1674,16 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toHaveLength(5);
-    expect(reviews(plan)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resourceId: "document-malformed-base64",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "document-invalid-utf8",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "document-multiple-text",
-          reason: "document reference has multiple inline text attachments",
-        }),
-        expect.objectContaining({
-          resourceId: "document-valid-then-malformed",
-          reason: "document reference has multiple inline text attachments",
-        }),
-        expect.objectContaining({
-          resourceId: "document-numeric-data",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-      ]),
-    );
+    const notes = upserts(plan).filter((payload) => payload.kind === "note");
+    expect(notes.filter((payload) => payload.noteType === "fhir_document_reference")).toEqual([
+      expect.objectContaining({ note: "Attachment 1\n\nDischarge summary.\n\nAttachment 2\n\nAddendum: stop medication." }),
+    ]);
+    const receipts = notes.filter((payload) => payload.noteType === "clinical-document-receipt");
+    expect(receipts.map((payload) => payload.externalRef?.resourceId)).toEqual([
+      "document-malformed-base64", "document-invalid-utf8", "document-valid-then-malformed", "document-numeric-data",
+    ]);
+    expect(receipts.every((payload) => !/Discharge summary|not-base64|1400/u.test(payload.note ?? ""))).toBe(true);
+    expect(reviews(plan)).toEqual([]);
   });
 
   it("plans complete laboratory panels atomically", async () => {
@@ -1839,7 +1929,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", sections: [{ heading: "Provider record — part 1", kind: "other", text: "x".repeat(4001) }] })]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", note: "x".repeat(1001) }), expect.objectContaining({ kind: "note", sections: [{ heading: "Provider record — part 1", kind: "other", text: "x".repeat(4001) }] })]);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1849,10 +1939,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         expect.objectContaining({
           resourceId: "lab-oversize-text-value",
           reason: "laboratory observation result is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "report-oversize-summary",
-          reason: "diagnostic report summary exceeds supported import bounds",
         }),
       ]),
     );
@@ -1918,25 +2004,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        resourceId: "whitespace-report-summary",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "numeric-report-summary",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "numeric-report-narrative",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "whitespace-lab-analyte",
-        reason: "laboratory observation result is not importable",
-      }),
-    ]));
+    expect(upserts(plan)).toEqual([
+      ...["whitespace-report-summary", "numeric-report-summary", "numeric-report-narrative"].map((resourceId) =>
+        expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId }) })),
+    ]);
+    expect(reviews(plan)).toEqual([expect.objectContaining({
+      resourceId: "whitespace-lab-analyte", reason: "laboratory observation result is not importable",
+    })]);
   });
 
   it("preserves lab analytes that do not derive a slug", async () => {
@@ -2864,8 +2938,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "allergy-scoped-negative" }) })]);
-    expect(reviews(plan)).toHaveLength(18);
+    expect(upserts(plan)).toEqual([
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "report-no-summary" }) }),
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "report-date-only-effective" }) }),
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "document-metadata-only" }) }),
+      expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "allergy-scoped-negative" }) }),
+    ]);
+    expect(reviews(plan)).toHaveLength(15);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2907,18 +2986,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         expect.objectContaining({
           resourceId: "lab-date-only",
           reason: "clinical timestamp is missing",
-        }),
-        expect.objectContaining({
-          resourceId: "report-no-summary",
-          reason: "diagnostic report summary is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "report-date-only-effective",
-          reason: "clinical timestamp is missing",
-        }),
-        expect.objectContaining({
-          resourceId: "document-metadata-only",
-          reason: "document reference text is not available in raw FHIR page",
         }),
         expect.objectContaining({
           resourceId: "allergy-missing-status",
@@ -3830,7 +3897,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(reviews(plan)).toEqual([]);
   });
 
-  it.each(["warning", "error", "fatal"])("does not infer no-known allergies from a %s search outcome", async (severity) => {
+  it.each([
+    ...["warning", "error", "fatal"].map((severity) => ({ severity, code: "incomplete" })),
+    ...["4101", "4119"].map((code) => ({ severity: "warning", code: "processing", details: {
+      coding: [{ system: "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369", code }],
+    } })),
+  ])("does not infer no-known allergies from an incomplete search outcome %#", async (issue) => {
     const vaultRoot = await writeClinicalFixture({
       manifest: { grantedScopes: ["patient/*.s"] },
       resourceFiles: [
@@ -3843,7 +3915,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
           type: "searchset",
           entry: [
             { resource: noKnownAllergyResource("negative-with-warning") },
-            { search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [{ severity, code: "incomplete" }] } },
+            { search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [issue] } },
           ],
         },
         "Condition/page-1.json": [],
@@ -4668,6 +4740,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       externalRef,
       reason: "unsupported modifier semantics",
       evidence,
+      retractFacetPrefixes: ["document-extraction"],
     }]);
   });
 
@@ -4923,37 +4996,170 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     }
   });
 
-  it("routes resources without provider freshness to review", async () => {
+  it("imports resources without meta.lastUpdated at the retrieval revision", async () => {
     const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      manifest: { fetchedAt: "2026-07-03T08:00:00.000Z" },
       resourceFiles: [{
         resourceType: "Observation",
         relativePath: "Observation/page-1.json",
         count: 1,
       }],
+      pages: { "Observation/page-1.json": heartRateResource("missing-provider-freshness") },
+    });
+
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([
+      expect.objectContaining({
+        kind: "measurement",
+        externalRef: expect.objectContaining({
+          resourceType: "observation",
+          resourceId: "missing-provider-freshness",
+          version: "2026-07-03T08:00:00.000Z",
+        }),
+      }),
+    ]);
+    expect(executableDecisions(plan)).toHaveLength(1);
+  });
+
+  it("dates an undated history record by the retrieval revision when it has no clinical date", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      manifest: { fetchedAt: "2026-07-03T08:00:00.000Z" },
+      resourceFiles: [{ resourceType: "Condition", relativePath: "Condition/page-1.json", count: 1 }],
+      pages: { "Condition/page-1.json": { resourceType: "Condition", id: "undated-history", code: { text: "Hypertension" } } },
+    });
+
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({
+      kind: "note",
+      occurredAt: "2026-07-03T08:00:00.000Z",
+      note: expect.stringContaining("Record retrieved: 2026-07-03T08:00:00.000Z. Clinical event date is not available."),
+      externalRef: expect.objectContaining({ resourceId: "undated-history", version: "2026-07-03T08:00:00.000Z" }),
+    })]);
+  });
+
+  it("accepts FHIR ids longer than 64 characters for every resource type", async () => {
+    const longId = (prefix: string) => `${prefix}${"a1".repeat(44)}`.slice(0, 88);
+    const observationId = longId("e");
+    const conditionId = longId("f");
+    const allergyId = longId("g");
+    expect([observationId, conditionId, allergyId].map((id) => id.length)).toEqual([88, 88, 88]);
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      resourceFiles: [
+        { resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 },
+        { resourceType: "Condition", relativePath: "Condition/page-1.json", count: 1 },
+        { resourceType: "AllergyIntolerance", relativePath: "AllergyIntolerance/page-1.json", count: 1 },
+      ],
       pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "missing-provider-freshness",
-          meta: null,
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-          },
-          valueQuantity: { value: 70, unit: "bpm" },
+        "Observation/page-1.json": heartRateResource(observationId),
+        "Condition/page-1.json": { resourceType: "Condition", id: conditionId, code: { text: "Hypertension" }, recordedDate: "2026-06-30" },
+        "AllergyIntolerance/page-1.json": {
+          resourceType: "AllergyIntolerance",
+          id: allergyId,
+          code: { text: "Penicillin allergy" },
+          recordedDate: "2026-06-30",
         },
       },
     });
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan).map((payload) => payload.externalRef.resourceId)).toEqual([observationId, conditionId, allergyId]);
+    expect(upserts(plan).map((payload) => payload.evidence[0]?.sourceLabel)).toEqual([
+      `Observation/${observationId}`,
+      `Condition/${conditionId}`,
+      `AllergyIntolerance/${allergyId}`,
+    ]);
+  });
+
+  it("holds same-batch siblings that mix a resource revision with the retrieval fallback", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 2 }],
+      pages: {
+        "Observation/page-1.json": [
+          heartRateResource("mixed-revision-sibling"),
+          {
+            ...heartRateResource("mixed-revision-sibling"),
+            meta: { lastUpdated: "2026-07-02T12:00:00.000Z" },
+            valueQuantity: { value: 80, unit: "bpm" },
+          },
+        ],
+      },
+    });
+
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toEqual([
-      expect.objectContaining({
-        resourceId: "missing-provider-freshness",
-        reason: "FHIR resource lastUpdated is missing",
-      }),
+    expect(reviews(plan).map(({ disposition, reason }) => ({ disposition, reason }))).toEqual([
+      { disposition: "incomplete", reason: "FHIR resource revision cannot be ordered against a same-identity sibling" },
+      { disposition: "incomplete", reason: "FHIR resource revision cannot be ordered against a same-identity sibling" },
     ]);
     expect(executableDecisions(plan)).toEqual([]);
+  });
+
+  it("orders retrieval-revision fallbacks through core without duplicates or resurrection", async () => {
+    const resourceId = "retrieval-revision-heart-rate";
+    const lookup = {
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId,
+    };
+    const resourceFiles = [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }];
+    const heartRate = (value: number, status = "final") => ({
+      ...heartRateResource(resourceId),
+      status,
+      valueQuantity: { value, unit: "bpm" },
+    });
+    const retrieval = async (retrievalJobId: string, fetchedAt: string, resource: Record<string, unknown>) => {
+      const manifestPath = `raw/clinical/fhir/clinical-connection-1/${retrievalJobId}/manifest.json`;
+      const vaultRoot = await writeClinicalFixture({
+        addDefaultRevision: false,
+        manifest: { fetchedAt, retrievalJobId },
+        manifestPath,
+        resourceFiles,
+        pages: { "Observation/page-1.json": resource },
+      });
+      return executableDecisions(await planFromFixture({ manifestPath, vaultRoot }));
+    };
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const apply = (decisions: ReturnType<typeof executableDecisions>) =>
+      importEventBatch({ vaultRoot: canonicalVaultRoot, decisions, apply: true });
+    const liveVersion = async () =>
+      (await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...lookup }))?.externalRef?.version ?? null;
+
+    const first = await apply(await retrieval("retrieval-job-1", "2026-07-01T12:00:00.000Z", heartRate(70)));
+    expect(first.createdCount).toBe(1);
+    expect(await liveVersion()).toBe("2026-07-01T12:00:00.000Z");
+
+    // The same retrieval re-imported (different raw path, same content) is a replay.
+    const replay = await apply(await retrieval("retrieval-job-1-replay", "2026-07-01T12:00:00.000Z", heartRate(70)));
+    expect(replay).toMatchObject({ applied: false, createdCount: 0, skippedExistingCount: 1, supersededCount: 0 });
+
+    // A later retrieval supersedes the earlier one in place.
+    const later = await apply(await retrieval("retrieval-job-2", "2026-07-02T12:00:00.000Z", heartRate(72)));
+    expect(later).toMatchObject({ createdCount: 0, supersededCount: 1 });
+    expect(await liveVersion()).toBe("2026-07-02T12:00:00.000Z");
+
+    // An earlier retrieval replayed afterwards is stale and cannot roll the fact back.
+    const stale = await apply(await retrieval("retrieval-job-3", "2026-07-01T12:00:00.000Z", heartRate(70)));
+    expect(stale).toMatchObject({ applied: false, skippedExistingCount: 1, supersededCount: 0 });
+    expect(await liveVersion()).toBe("2026-07-02T12:00:00.000Z");
+
+    // A later non-importable representation withdraws the fact; an older delayed
+    // revision cannot resurrect it; a newer retrieval can.
+    const hold = await apply(await retrieval("retrieval-job-4", "2026-07-03T12:00:00.000Z", heartRate(72, "preliminary")));
+    expect(hold.retractedCount).toBe(1);
+    expect(await liveVersion()).toBeNull();
+    const delayed = await apply(await retrieval("retrieval-job-5", "2026-07-02T12:00:00.000Z", heartRate(72)));
+    expect(delayed).toMatchObject({ applied: false, createdCount: 0, supersededCount: 0 });
+    expect(await liveVersion()).toBeNull();
+    const recovery = await apply(await retrieval("retrieval-job-6", "2026-07-04T12:00:00.000Z", heartRate(74)));
+    expect(recovery.createdCount).toBe(1);
+    expect(await liveVersion()).toBe("2026-07-04T12:00:00.000Z");
   });
 
   it("routes oversized FHIR ids and source revisions to review without aborting the plan", async () => {
@@ -4996,12 +5202,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     expect(upserts(plan)).toEqual([]);
     expect(retractions(plan)).toEqual([]);
-    expect(reviews(plan).map((decision) => decision.reason)).toEqual([
-      "FHIR resource id is missing",
-      "FHIR resource id is missing",
-      "FHIR resource lastUpdated is missing",
-      "FHIR resource id is missing",
+    expect(reviews(plan).map((decision) => [decision.disposition, decision.reason])).toEqual([
+      ["raw-only", "FHIR resource id is missing"],
+      ["raw-only", "FHIR resource id is missing"],
+      ["incomplete", "FHIR resource lastUpdated is not a comparable revision"],
+      ["raw-only", "FHIR resource id is missing"],
     ]);
+    expect(executableDecisions(plan)).toEqual([]);
   });
 
   it("namespaces FHIR external refs by source base and patient", async () => {
@@ -5134,6 +5341,8 @@ async function initializeCanonicalFixtureVault(): Promise<string> {
 
 async function writeClinicalFixture(input: {
   addDefaultPatientReference?: boolean;
+  /** Mirror servers that omit `meta.lastUpdated` entirely when false. */
+  addDefaultRevision?: boolean;
   manifest?: {
     completedResourceTypes?: string[];
     connectionId?: string;
@@ -5180,6 +5389,7 @@ async function writeClinicalFixture(input: {
         value,
         patientId,
         input.addDefaultPatientReference ?? true,
+        input.addDefaultRevision ?? true,
       )),
     ]),
   );
@@ -5226,10 +5436,11 @@ function withClinicalFixtureDefaults(
   value: unknown,
   patientId: string,
   addDefaultPatientReference: boolean,
+  addDefaultRevision = true,
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) =>
-      withClinicalFixtureDefaults(entry, patientId, addDefaultPatientReference)
+      withClinicalFixtureDefaults(entry, patientId, addDefaultPatientReference, addDefaultRevision)
     );
   }
   if (!isFixtureRecord(value) || typeof value.resourceType !== "string") {
@@ -5248,6 +5459,7 @@ function withClinicalFixtureDefaults(
                       entry.resource,
                       patientId,
                       addDefaultPatientReference,
+                      addDefaultRevision,
                     ),
                   }
                 : entry
@@ -5258,7 +5470,9 @@ function withClinicalFixtureDefaults(
   }
 
   const resource = { ...value };
-  if (resource.meta === undefined) {
+  if (!addDefaultRevision) {
+    // Leave `meta` untouched (absent stays absent).
+  } else if (resource.meta === undefined) {
     resource.meta = { lastUpdated: "2026-07-01T12:00:00.000Z" };
   } else if (isFixtureRecord(resource.meta) && resource.meta.lastUpdated === undefined) {
     resource.meta = { ...resource.meta, lastUpdated: "2026-07-01T12:00:00.000Z" };

@@ -1,0 +1,199 @@
+"use client";
+
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Phone } from "lucide-react";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
+import { Button } from "@/src/components/ui/button";
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Spinner } from "@/src/components/ui/spinner";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import { requestHostedOnboardingJson } from "./client-api";
+import { declineHostedLaunchConsent, logoutHostedAppSession, verifyHostedAppSession } from "./hosted-app-session-client";
+import { HostedAuthEntryLayout } from "./hosted-auth-entry-layout";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
+import { HostedContactCodeForm } from "./hosted-contact-code-form";
+import { HostedTelegramProofButton } from "./hosted-telegram-proof-button";
+import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
+
+type Method = "phone" | "email" | "telegram";
+export type HostedFirstPartyAuthPanelView = "auth" | "auth-active" | "consent";
+export interface HostedFirstPartyAuthPanelProps {
+  autoSendPastedPhoneNumber?: boolean;
+  inviteCode?: string | null;
+  initialEmailAddress?: string;
+  methods: readonly Method[];
+  reauthenticate?: boolean;
+  onReauthenticated?: () => void;
+  onCompleted?: (payload: HostedAuthenticationCompletionPayload) => Promise<void> | void;
+  onSignOut?: () => Promise<void> | void;
+  onViewChange?: (view: HostedFirstPartyAuthPanelView) => void;
+  phoneInputAutoFocus?: boolean;
+  requireLaunchConsentOnCompletion?: boolean;
+  showPassiveLegalNotice?: boolean;
+  size?: "default" | "compact";
+}
+
+export function HostedFirstPartyAuthPanel({
+  methods, inviteCode, initialEmailAddress, onCompleted, onSignOut, onViewChange,
+  reauthenticate, onReauthenticated,
+  requireLaunchConsentOnCompletion = false, showPassiveLegalNotice = false,
+  autoSendPastedPhoneNumber = false, phoneInputAutoFocus = false, size = "default",
+}: HostedFirstPartyAuthPanelProps) {
+  const request = authRequestContext(reauthenticate, inviteCode);
+  const [method, setMethod] = useState<Method>(methods[0] ?? "phone");
+  const [step, setStep] = useState<"entry" | "completing" | "resume" | "consent">("entry");
+  const [active, setActive] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [declining, setDeclining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [completion, setCompletion] = useState<HostedAuthenticationCompletionPayload | null>(null);
+  const operation = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const ending = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; operation.current?.abort(); };
+  }, []);
+  useEffect(() => {
+    // Going back through the bfcache would otherwise revive the redirect's loading state with no way forward.
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) setStep((current) => current === "completing" ? "resume" : current);
+    };
+    window.addEventListener("pageshow", restore);
+    return () => window.removeEventListener("pageshow", restore);
+  }, []);
+  const view = step === "consent" ? "consent" : active || step !== "entry" ? "auth-active" : "auth";
+  useLayoutEffect(() => { onViewChange?.(view); }, [onViewChange, view]);
+
+  async function complete() {
+    if (operation.current || ending.current || !mounted.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setPending(true); setError(null);
+    // Success keeps this loading state until the redirect replaces the page.
+    setStep((current) => current === "consent" ? current : "completing");
+    try {
+      const payload = await requestHostedOnboardingJson<HostedAuthenticationCompletionPayload>({
+        url: "/api/auth/complete", method: "POST", payload: {}, signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (requireLaunchConsentOnCompletion && !payload.launchConsentGranted
+        && (payload.stage === "checkout" || isHostedOnboardingAccessibleStage(payload.stage))) {
+        setCompletion(payload); setStep("consent"); return;
+      }
+      if (onCompleted) await onCompleted(payload);
+      else navigateHostedAuthRedirect(isHostedOnboardingAccessibleStage(payload.stage) ? HOSTED_APP_HOME_PATH : payload.joinUrl);
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        setError(caught instanceof Error ? caught.message : "Your account could not load. Try again.");
+        setStep((current) => current === "completing" ? "resume" : current);
+      }
+    } finally {
+      if (!controller.signal.aborted) { operation.current = null; setPending(false); }
+    }
+  }
+
+  async function verify(url: "/api/auth/otp/verify" | "/api/auth/telegram/verify", payload: Record<string, unknown>, signal: AbortSignal) {
+    await verifyHostedAppSession({ url, payload: { ...payload, ...request.verify() }, signal });
+    if (signal.aborted || !mounted.current) return;
+    if (reauthenticate) {
+      if (!onReauthenticated) throw new Error("Sign-in completed. Please try the request again.");
+      onReauthenticated();
+      return;
+    }
+    setActive(false);
+    await complete();
+  }
+
+  async function endSession(decline: boolean) {
+    if (ending.current) return;
+    ending.current = true;
+    operation.current?.abort(); operation.current = null;
+    setPending(true); setDeclining(decline); setError(null);
+    try {
+      if (decline) await declineHostedLaunchConsent();
+      else await logoutHostedAppSession();
+      if (!mounted.current) return;
+      setCompletion(null); setStep("entry"); setActive(false);
+      try { await onSignOut?.(); } catch { /* The server session has already ended. */ }
+    } catch (caught) {
+      if (mounted.current) setError(caught instanceof Error ? caught.message : "Sign-out could not be confirmed. Try again.");
+    } finally {
+      ending.current = false;
+      if (mounted.current) { setPending(false); setDeclining(false); }
+    }
+  }
+
+  return <div className="flex flex-col gap-4">
+    {step === "consent" && completion ? <HostedLegalConsentCard
+      declinePending={declining} initialStatus={completion.launchConsentStatus} mode="compact"
+      onAccepted={() => complete()} onDecline={() => void endSession(true)}
+      onRequirementChange={(required) => { if (!required) void complete(); }}
+      preferredScope="launch.legal" source="homepage-auth-dialog"
+    /> : step !== "entry" ? <HostedAuthCompletion completing={step === "completing"} pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <HostedAuthEntryLayout showPassiveLegalNotice={showPassiveLegalNotice} alternativeError={telegramError}
+      alternatives={!active && methods.some((entry) => entry !== method) ? (
+        (["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
+            key={entry} purpose={request.purpose} label="Telegram" onErrorChange={setTelegramError}
+            onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
+          /> : <HostedInlineAuthButton
+            key={entry}
+            onClick={() => { setMethod(entry); setError(null); }}
+            icon={entry === "phone" ? <Phone aria-hidden="true" className="h-5 w-5" />
+              : <EmailIcon className="h-5 w-5" />}
+          >
+            {entry === "phone" ? "Phone" : "Email"}
+          </HostedInlineAuthButton>)
+      ) : null}
+    >
+      {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose={request.purpose}
+        onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)} />
+        : <HostedContactCodeForm key={method} method={method} size={size} autoFocus={method === "email" || phoneInputAutoFocus}
+          initialValue={method === "email" ? initialEmailAddress : undefined}
+          autoSendPastedPhoneNumber={autoSendPastedPhoneNumber} onActiveChange={setActive}
+          onSend={async (value, signal) => {
+            const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/auth/otp/send", payload: { kind: method, value, ...request.send }, signal });
+            if (result.ok !== true) throw new Error("The code could not be sent. Try again.");
+          }}
+          onVerify={(value, code, signal) => verify("/api/auth/otp/verify", { kind: method, value, code }, signal)}
+        />}
+    </HostedAuthEntryLayout>}
+    {error ? <Alert variant="destructive"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
+  </div>;
+}
+
+// Reauthentication proves the current member again; it never carries signup context.
+function authRequestContext(reauthenticate: boolean | undefined, inviteCode?: string | null) {
+  if (reauthenticate) return { purpose: "reauthenticate" as const, send: { reauthenticate: true }, verify: () => ({ reauthenticate: true }) };
+  return { purpose: "login" as const, send: {}, verify: () => signupContext(inviteCode) };
+}
+
+function signupContext(inviteCode?: string | null) {
+  let timeZone: string | undefined;
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* The server owns the fallback. */ }
+  return { ...(inviteCode ? { inviteCode } : {}), ...(timeZone ? { timeZone } : {}) };
+}
+
+export function HostedAuthCompletionStatus() {
+  return <p role="status" className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+    <Spinner aria-hidden="true" />Loading your account...
+  </p>;
+}
+
+// Completion holds one quiet loading state; retry controls appear only after it fails.
+export function HostedAuthCompletion({ completing, pending, onContinue, onSignOut }: {
+  completing: boolean;
+  pending: boolean;
+  onContinue: () => void;
+  onSignOut: () => void;
+}) {
+  if (completing) return <HostedAuthCompletionStatus />;
+  return <>
+      <p className="text-sm text-muted-foreground">You’re signed in. Continue to your account.</p>
+      <Button type="button" size="xl" className="w-full" disabled={pending} onClick={onContinue}>Continue</Button>
+      <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" disabled={pending} onClick={onSignOut}>Use a different account</Button>
+  </>;
+}

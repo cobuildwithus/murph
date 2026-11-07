@@ -1,0 +1,58 @@
+name: Vercel Machine Route Firewall
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-machine-route-firewall
+  cancel-in-progress: false
+
+jobs:
+  firewall-check:
+    name: Check machine routes against active Vercel firewall
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify trusted main controller
+        shell: bash
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          [[ "${CONTROLLER_REF}" == refs/heads/main ]] || { echo "::error::Firewall check requires the main controller."; exit 1; }
+          test "$(git rev-parse HEAD)" = "${CONTROLLER_SHA}"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${CONTROLLER_SHA}" origin/main
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Check active firewall and attack mode
+        env:
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+        run: pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/check-vercel-machine-routes.ts

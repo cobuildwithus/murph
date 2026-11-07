@@ -92,6 +92,9 @@ function buildDisclosureStoreHarness(input: {
   };
 
   const tx = createPrismaStub({
+    // Keep exercising the legacy grant replay guard without a retained receipt.
+    // Receipt replay itself is proven through real PostgreSQL adapters.
+    hostedGroupOfferGestureReceipt: { createMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: vi.fn(async (query: TemplateStringsArray) => {
       void query;
       return [];

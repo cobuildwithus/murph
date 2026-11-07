@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:improve-insulin-sensitivity
 slug: improve-insulin-sensitivity
-title: Improve My Insulin Sensitivity
-summary: Help muscle, liver, and fat tissue respond better to insulin through activity, sleep, sustainable nutrition, and fat loss when appropriate.
+title: Understand Insulin Sensitivity
+summary: Learn what insulin sensitivity means, how it is assessed, and how everyday habits relate to it.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:improve-blood-sugar-control
   outcomeKind: biomarker
-  goalPhrase: improve my insulin sensitivity
+  goalPhrase: understand insulin sensitivity
   successSignals:
     - id: insulin_sensitivity_outcomes
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me improve my insulin sensitivity.
+  startPrompt: Hey Murph, help me understand insulin sensitivity.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -90,4 +90,4 @@ If you use insulin or medicines that cause hypoglycemia, you may need dose adjus
 
 ## Related goals
 
-[Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Move Out of the Prediabetes Range](/goals/move-out-of-prediabetes-range) · [Reduce My Liver Fat](/goals/reduce-liver-fat)
+[Track My Blood Sugar](/goals/improve-blood-sugar-control) · [Understand My Prediabetes](/goals/move-out-of-prediabetes-range) · [Understand My Liver Fat](/goals/reduce-liver-fat)

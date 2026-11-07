@@ -2,6 +2,8 @@
 
 This package is the public/reference knowledge layer for Murph health pages. It stores wiki-like Markdown pages plus small JSON/JSONL sidecars, then builds deterministic runtime catalog artifacts.
 
+Current content covers biomarkers, outcome-first Goal guides, measurement methods, and source pages, plus the assistant knowledge index built from them. The public experiment catalog (protocol variants and experiment families) is retired; private assistant-led experiments do not depend on this package. The product contract lives in `agent-docs/product-specs/health-commons.md`.
+
 The source of truth is intentionally small and forkable:
 
 - `content/**/*.md` — typed Markdown pages with YAML-frontmatter-like metadata.

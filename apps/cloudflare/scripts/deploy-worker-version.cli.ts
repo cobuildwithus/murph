@@ -13,11 +13,20 @@ import {
   requireConfiguredString,
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
+import { assertPrivateGameImageVariants } from "./deploy-game-images.ts";
+import { assertHostedWebProtocolAdmission } from "./deploy-web-protocol.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
-import { prepareSmallRunnerNamespaceBootstrap, stageHostedRunnerRelease } from "./stage-runner-release.ts";
+import { assertReleaseNotBehindLive } from "./deploy-release-order.ts";
+import { readLiveRunnerReleaseSha, stageHostedRunnerRelease } from "./stage-runner-release.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
+import {
+  assertRecoveryWorkerVersion,
+  assertRetiredInferenceSecretsRemoved,
+  hasRetiredInferenceSecrets,
+  readExpectedWorkerSecrets,
+} from "./deploy-retired-inference-secrets.ts";
 import {
   createCloudflareContainerProvider,
   buildContainerReleaseEntries,
@@ -59,6 +68,19 @@ export async function runDeployWorkerVersionCli(
     dependencies: {
       async deployDirect(input) {
         const retainServingRunner = input.containerRolloutMode === "worker-only";
+        const immediate = input.containerRolloutMode === "immediate";
+        const recovery = readRecoveryVersion(env, input.includeSecrets);
+        // Retaining an image does not attest an older protocol requirement.
+        // Worker-only deployments must preserve the same Web consumer floor.
+        const admitWeb = () => assertHostedWebProtocolAdmission(env);
+        const assertActivationAllowed = async (expectedLiveVersion: string): Promise<void> => {
+          await admitWeb();
+          await assertPrivateGameImageVariants(env);
+          // Recheck Worker identity after the bounded Web I/O, not before it.
+          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
+        };
+        await admitWeb();
+        await assertPrivateGameImageVariants(env);
         const containerProvider = createCloudflareContainerProvider({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
@@ -68,71 +90,91 @@ export async function runDeployWorkerVersionCli(
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
         });
         const current = await readCurrentDeployment(input.workerName, input.configPath);
-        let currentVersionId = requireSingleLiveVersion(current);
-        let currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
-        const bootstrapPath = await prepareSmallRunnerNamespaceBootstrap({
-          allowed: env.CF_BOOTSTRAP_SMALL_RUNNER === "true" && !retainServingRunner,
-          configPath: input.configPath, currentVersion, currentVersionId,
-          listApplications: containerProvider.listApplications,
-        });
-        if (bootstrapPath) {
-          const retainedContainers = await readRenderedContainerIdentities(bootstrapPath);
-          const before = await readCloudflareContainerApplicationIdentities(
-            retainedContainers, containerProvider.listApplications, "before", containerProvider.readRollout,
-          );
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
-          const output = await runWranglerLoggedCaptured([
-            "deploy", "--config", bootstrapPath, "--name", input.workerName, "--containers-rollout=none",
-            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-          ]);
-          currentVersionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
-          const after = await readCloudflareContainerApplicationIdentities(
-            retainedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
-          );
-          buildContainerReleaseEntries({ before, after,
-            actions: retainedContainers.map(entry => ({ ...entry, action: "unchanged" })),
-          });
-          currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
-        }
+        const currentVersionId = requireSingleLiveVersion(current);
+        const currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
         const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
+        await assertReleaseNotBehindLive({
+          releaseSha, liveReleaseSha: readLiveRunnerReleaseSha(currentVersion), checkoutDir: deployRoot,
+        });
+        const stageSourceVersionId = recovery?.id ?? currentVersionId;
+        const assertUploadSource = async (expectedSourceVersionId: string): Promise<void> => {
+          const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+          if (before[0] !== expectedSourceVersionId
+            || (expectedSourceVersionId === recovery?.id && (before.length !== 2 || before[1] !== currentVersionId))) {
+            throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
+          }
+        };
+        if (recovery) {
+          assertRecoveryWorkerVersion({
+            currentVersion, currentVersionId,
+            currentDeploymentCreatedOn: current!.created_on,
+            recoveryVersion: await releaseProvider.readWorkerVersion(input.workerName, recovery.id),
+            recoveryVersionId: recovery.id, recoveryVersionTag: recovery.tag,
+          });
+          await assertUploadSource(stageSourceVersionId);
+        }
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           configPath: input.configPath,
-          ...(retainServingRunner ? {} : { release: { currentVersion, releaseSha, listApplications: containerProvider.listApplications } }),
+          ...(retainServingRunner ? {} : { release: { currentVersion, immediate, releaseSha, listApplications: containerProvider.listApplications } }),
         });
         await applyHostedTransientLifecycleRules({ deployRoot, source: env });
         const staged = await stageHostedRunnerRelease({
           configPath: preparedConfigPath,
-          currentVersion, releaseSha, retainServingRunner,
+          currentVersion, releaseSha, retainServingRunner, immediate,
           currentVersionId,
           listApplications: containerProvider.listApplications,
         });
         const renderedContainers = await readRenderedContainerIdentities(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
-        const uploadVersion = async (configPath: string): Promise<string> => {
+        const uploadVersion = async (configPath: string, expectedSourceVersionId: string): Promise<string> => {
+          const expectedSecrets = await readExpectedWorkerSecrets({
+            configPath, currentVersion, currentVersionId,
+            ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
+          });
+          await assertUploadSource(expectedSourceVersionId);
           const output = await runWranglerLoggedCaptured([
             "versions", "upload", "--config", configPath, "--name", input.workerName,
             "--message", input.deploymentMessage, "--tag", input.versionTag,
             ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
           ]);
-          return parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          let versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+          if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
+            throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
+          }
+          let version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
+          if (hasRetiredInferenceSecrets(version, versionId)) {
+            const beforePatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (beforePatch[0] !== versionId) throw new Error("Worker version changed before secret retirement; no patch attempted.");
+            const patchedId = await releaseProvider.removeRetiredInferenceSecrets({
+              workerName: input.workerName, versionMessage: input.deploymentMessage, versionTag: input.versionTag,
+            });
+            const afterPatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (patchedId === versionId || afterPatch.length !== 2 || afterPatch[0] !== patchedId || afterPatch[1] !== versionId) {
+              throw new Error("Worker version history changed during secret retirement; patched version will not be activated.");
+            }
+            versionId = patchedId;
+            version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
+          }
+          assertRetiredInferenceSecretsRemoved(version, versionId, expectedSecrets);
+          return versionId;
         };
         const activateVersion = async (configPath: string, versionId: string, expectedLiveVersion: string): Promise<void> => {
-          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
+          await assertActivationAllowed(expectedLiveVersion);
           await runWranglerLogged([
             "versions", "deploy", `${versionId}@100%`, "--yes", "--config", configPath,
             "--name", input.workerName, "--message", input.deploymentMessage,
           ]);
           await assertLiveVersion(input.workerName, input.configPath, versionId);
         };
-        const stageVersionId = await uploadVersion(staged.configPath);
+        const stageVersionId = await uploadVersion(staged.configPath, stageSourceVersionId);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         // One-time retirement is drain-proven and happens before increasing the
         // serving ceiling. Never refill the retired application on a retry.
         for (const retirement of staged.retirements) {
           await releaseProvider.assertDrained(retirement.applicationId);
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          await assertActivationAllowed(currentVersionId);
           await releaseProvider.retireApplication(retirement);
         }
         const before = await readCloudflareContainerApplicationIdentities(
@@ -144,7 +186,7 @@ export async function runDeployWorkerVersionCli(
         });
         // Prove the isolated artifact before making the compatibility reader live.
         for (const application of staged.applications.filter(application => application.className === "DeploySmokeRunnerContainer")) {
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          await assertActivationAllowed(currentVersionId);
           await releaseProvider.admitApplication(application);
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }
@@ -162,21 +204,9 @@ export async function runDeployWorkerVersionCli(
               HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
             },
           });
-          await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-          const rolloutSteps = input.containerRolloutMode === "gradual"
-            ? [10, 25, 50, 100].slice(-Math.min(serving.specification.max_instances, 4)) : [100];
-          await releaseProvider.admitApplication({ ...serving,
-            rolloutStepPercentage: rolloutSteps.length === 1 ? 100 : rolloutSteps,
-          });
-          await releaseProvider.assertApplicationReady({ ...serving, listApplications: containerProvider.listApplications,
-            rolloutStepCount: rolloutSteps.length });
-        }
-        // Small runners carry member work: their old image needs the same
-        // compatibility reader before native mutation as the normal fleet.
-        for (const application of staged.applications.filter(application => application.className === "SmallRunnerContainer")) {
-          await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-          await releaseProvider.admitApplication({ ...application, rolloutStepPercentage: 100 });
-          await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
+          await assertActivationAllowed(stageVersionId);
+          await releaseProvider.admitApplication(serving);
+          await releaseProvider.assertApplicationReady({ ...serving, listApplications: containerProvider.listApplications });
         }
         const prepared = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
@@ -202,7 +232,7 @@ export async function runDeployWorkerVersionCli(
           },
         });
         await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-        const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath);
+        const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath, stageVersionId);
         if (!staged.workerOnly) await activateVersion(staged.promotionConfigPath, workerVersionId, stageVersionId);
         const after = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
@@ -235,6 +265,20 @@ export async function runDeployWorkerVersionCli(
   }
 
   return result;
+}
+
+function readRecoveryVersion(source: EnvSource, includeSecrets: boolean): { id: string; tag: string } | null {
+  const id = source.HOSTED_EXECUTION_RECOVERY_VERSION_ID;
+  const tag = source.HOSTED_EXECUTION_RECOVERY_VERSION_TAG;
+  if (!id && !tag) return null;
+  if (!id || !tag || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id)
+    || !tag.trim() || tag !== tag.trim()) {
+    throw new Error("Worker recovery requires an exact full version UUID and nonempty version tag together.");
+  }
+  if (!includeSecrets) {
+    throw new Error("Worker recovery requires synchronized secrets.");
+  }
+  return { id, tag };
 }
 
 async function applyHostedTransientLifecycleRules(input: {

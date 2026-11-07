@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
@@ -28,12 +29,10 @@ import {
   deleteEvent,
   importDocument,
   initializeVault,
-  listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   readJsonlRecords,
-  readStoredWriteOperation,
   stopExperiment,
   updateExperiment,
   upsertEvent,
@@ -90,6 +89,8 @@ afterEach(async () => {
   );
 });
 
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
+
 test("applyCanonicalWriteBatch records raw contents without receipts and protected deletes with receipts", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-batch");
   const receiptRoot = await makeTempDirectory("murph-core-batch-receipts");
@@ -145,8 +146,8 @@ test("applyCanonicalWriteBatch records raw contents without receipts and protect
   await assert.rejects(() => fs.access(deleteAbsolutePath));
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const operation = operations.find(
@@ -370,7 +371,7 @@ test("event upserts hold the canonical lock across read, plan, and append", asyn
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
-test("specialized event rewrites reject cross-kind updates and meal deletes retain canonical attachment paths", async () => {
+test("specialized event rewrites reject cross-kind updates and meal deletes retire photos while retaining other attachment paths", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-event-rewrite-thresholds");
   const sourceRoot = await makeTempDirectory("murph-core-event-rewrite-thresholds-source");
   await initializeVault({ vaultRoot });
@@ -423,11 +424,8 @@ test("specialized event rewrites reject cross-kind updates and meal deletes reta
     audioPath,
   });
 
-  const mealAttachmentPaths = meal.event.attachments?.map((attachment) => attachment.relativePath) ?? [];
-  const expectedRetainedPaths = [...new Set([
-    ...mealAttachmentPaths,
-    ...(meal.event.rawRefs ?? []),
-  ])].sort((left, right) => left.localeCompare(right));
+  const expectedRetainedPaths = meal.event.attachments?.filter(attachment => attachment.kind !== "photo")
+    .map(attachment => attachment.relativePath) ?? [];
 
   assert.equal(meal.event.attachments?.length, 2);
   assert.equal(meal.event.rawRefs?.length, 2);
@@ -440,6 +438,8 @@ test("specialized event rewrites reject cross-kind updates and meal deletes reta
   assert.equal(deleted.deleted, true);
   assert.equal(deleted.kind, "meal");
   assert.deepEqual(deleted.retainedPaths, expectedRetainedPaths);
+  assert.equal(JSON.parse(await fs.readFile(path.join(vaultRoot, meal.photo!.relativePath), "utf8")).reason, "meal_deleted");
+  assert.equal(await fs.readFile(path.join(vaultRoot, meal.audio!.relativePath), "utf8"), "audio");
 });
 
 test("specialized event upserts reject cold writes and permit rewrites against an existing meal event", async () => {

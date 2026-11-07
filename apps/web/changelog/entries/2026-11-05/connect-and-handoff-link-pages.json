@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 70,
+  "item": {
+    "id": "connect-and-handoff-link-pages",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer pages for connecting devices, apps, and records",
+    "summary": "When Murph sends a link to connect a device, an app, or your medical records, the page now shows just that step, even if you need to sign in first.",
+    "details": "A link that no longer works now says so plainly and tells you what to do next, and unexpected errors get a real page instead of a blank one.",
+    "relevanceTags": ["connections", "records"],
+    "sourcePullRequests": [4630]
+  }
+}

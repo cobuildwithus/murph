@@ -257,18 +257,17 @@ function uniqueXPostUrls(candidates: string[]): string[] {
       continue
     }
     const hostname = parsed.hostname.toLowerCase().replace(/^www\./u, '')
-    if (
-      (hostname !== 'x.com' && hostname !== 'twitter.com')
-      || !/(?:^|\/)status\/\d+(?:$|\/)/u.test(parsed.pathname)
-    ) {
+    // x.com/<handle>/status/<id> and x.com/i/status/<id> are the same post, so
+    // the status id is the identity; the first-seen spelling is kept.
+    const statusId = /(?:^|\/)status\/(\d+)(?:$|\/)/u.exec(parsed.pathname)?.[1]
+    if ((hostname !== 'x.com' && hostname !== 'twitter.com') || !statusId) {
       continue
     }
     parsed.hash = ''
     parsed.search = ''
-    const url = parsed.toString()
-    if (!seen.has(url)) {
-      seen.add(url)
-      urls.push(url)
+    if (!seen.has(statusId)) {
+      seen.add(statusId)
+      urls.push(parsed.toString())
       if (urls.length === ASK_GROK_MAX_SOURCE_URLS) {
         break
       }

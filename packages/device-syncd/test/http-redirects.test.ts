@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { buildCallbackErrorRedirectLocation } from "../src/http.ts";
+import { buildDeviceSyncCallbackErrorRedirectLocation } from "../src/callback-redirect.ts";
 
 test("callback error redirects keep only safe machine-readable params", () => {
-  const location = buildCallbackErrorRedirectLocation({
+  const location = buildDeviceSyncCallbackErrorRedirectLocation({
     returnTo: "https://app.example.test/settings/devices?tab=wearables",
     provider: "demo",
     errorCode: "OAUTH_CALLBACK_REJECTED",
@@ -25,7 +25,7 @@ test("callback error redirects keep only safe machine-readable params", () => {
 
 test("callback error redirects return null without a returnTo destination", () => {
   assert.equal(
-    buildCallbackErrorRedirectLocation({
+    buildDeviceSyncCallbackErrorRedirectLocation({
       returnTo: null,
       provider: "demo",
       errorCode: "OAUTH_CALLBACK_REJECTED",
@@ -36,7 +36,7 @@ test("callback error redirects return null without a returnTo destination", () =
 
 test("callback error redirects fail closed for malformed or non-http destinations", () => {
   assert.equal(
-    buildCallbackErrorRedirectLocation({
+    buildDeviceSyncCallbackErrorRedirectLocation({
       returnTo: "javascript:alert(1)",
       provider: "demo",
       errorCode: "OAUTH_CALLBACK_REJECTED",
@@ -45,7 +45,7 @@ test("callback error redirects fail closed for malformed or non-http destination
   );
 
   assert.equal(
-    buildCallbackErrorRedirectLocation({
+    buildDeviceSyncCallbackErrorRedirectLocation({
       returnTo: "https://app.example.test:bad/settings",
       provider: "demo",
       errorCode: "OAUTH_CALLBACK_REJECTED",
@@ -55,7 +55,7 @@ test("callback error redirects fail closed for malformed or non-http destination
 });
 
 test("callback error redirects scrub stale callback params from returnTo", () => {
-  const location = buildCallbackErrorRedirectLocation({
+  const location = buildDeviceSyncCallbackErrorRedirectLocation({
     returnTo:
       "https://app.example.test/settings/devices?tab=wearables&deviceSyncStatus=connected&deviceSyncProvider=demo&deviceSyncAccountId=acct_leak&deviceSyncError=OLD_ERROR&deviceSyncErrorMessage=leak",
     provider: "demo",

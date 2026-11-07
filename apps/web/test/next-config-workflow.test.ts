@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
+import type { WorkflowManifest } from "@workflow/builders";
 
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
@@ -17,25 +19,17 @@ vi.mock("workflow/next", () => ({
   withWorkflow: workflowMock.withWorkflow,
 }));
 
-test("next.config passes lazy discovery options into Workflow", async () => {
+test("next.config uses the v5 Workflow defaults", async () => {
   vi.resetModules();
   workflowMock.withWorkflow.mockClear();
 
   const configModule = await import("../next.config");
 
   assert.equal(workflowMock.withWorkflow.mock.calls.length, 1);
-  assert.deepEqual(workflowMock.withWorkflow.mock.calls[0]?.[1], {
-    workflows: {
-      lazyDiscovery: true,
-    },
-  });
+  assert.equal(workflowMock.withWorkflow.mock.calls[0]?.[1], undefined);
   assert.deepEqual(configModule.default, {
     config: workflowMock.withWorkflow.mock.calls[0]?.[0],
-    options: {
-      workflows: {
-        lazyDiscovery: true,
-      },
-    },
+    options: undefined,
     wrapped: true,
   });
 });
@@ -60,7 +54,7 @@ test("next.config config callback re-roots Workflow local-world data for dev", a
 
     assert.equal(
       process.env.WORKFLOW_LOCAL_DATA_DIR,
-      path.join(".next-dev", "workflow-data"),
+      path.join(".next-dev", "workflow-data-v5"),
     );
   } finally {
     restoreEnvValue("WORKFLOW_TARGET_WORLD", previousTargetWorld);
@@ -77,3 +71,17 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
   process.env[key] = value;
 }
+
+const buildManifestPath = process.env.MURPH_TEST_WORKFLOW_BUILD_MANIFEST;
+test.skipIf(!buildManifestPath)("production build bundles all operational and product Workflows", async () => {
+  const manifest: WorkflowManifest = JSON.parse(await readFile(buildManifestPath!, "utf8"));
+  const workflowNames = Object.values(manifest.workflows ?? {}).flatMap(Object.keys).sort();
+  assert.deepEqual(workflowNames, [
+    "hostedLinqTerminalRetryWorkflow",
+    "hostedOperationalHeartbeatWorkflow",
+    "hostedPhoneCallReconciliationWorkflow",
+    "hostedStripeWebhookReconciliationWorkflow",
+  ]);
+  const steps = Object.values(manifest.steps ?? {}).flatMap(Object.keys);
+  assert.ok(steps.includes("heartbeatStep"));
+});

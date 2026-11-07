@@ -9,12 +9,19 @@ import {
   type AssistantInputSource,
 } from './input-source.js'
 import {
+  compareAssistantInputCursors,
   readLatestAssistantInputCursor,
   type AssistantInputCursor,
 } from './input-store.js'
 
 type AssistantAutoReplyEntry = AssistantAutomationState['autoReply'][number]
 const LATEST_ASSISTANT_INPUT_PAGE_LIMIT = 100
+
+export interface AssistantAutoReplyCursorProposal {
+  channel: string
+  cursor: AssistantInputCursor
+  observed: Pick<AssistantAutoReplyEntry, 'eligibleAfter' | 'enabledAt'>
+}
 
 function defaultManagedChannelPredicate(): boolean {
   return true
@@ -238,4 +245,33 @@ export async function enableAssistantAutoReplyChannelLocal(input: {
   })
 
   return state.autoReply.some((entry) => entry.channel === input.channel)
+}
+
+export async function advanceAssistantAutoReplyCursorLocal(input: {
+  proposal: AssistantAutoReplyCursorProposal
+  vault: string
+}): Promise<AssistantAutomationState> {
+  const { proposal } = input
+  return updateAssistantAutomationState(input.vault, (state) => {
+    const entry = state.autoReply.find((candidate) => candidate.channel === proposal.channel)
+    if (
+      !entry ||
+      entry.enabledAt !== proposal.observed.enabledAt ||
+      // A cursor reseeded behind the scan's baseline leaves inputs the scan never covered.
+      (proposal.observed.eligibleAfter !== null &&
+        (entry.eligibleAfter === null ||
+          compareAssistantInputCursors(entry.eligibleAfter, proposal.observed.eligibleAfter) < 0)) ||
+      (entry.eligibleAfter !== null &&
+        compareAssistantInputCursors(proposal.cursor, entry.eligibleAfter) <= 0)
+    ) {
+      return state
+    }
+    return {
+      ...state,
+      autoReply: state.autoReply.map((current) => current === entry
+        ? { ...current, eligibleAfter: proposal.cursor }
+        : current),
+      updatedAt: new Date().toISOString(),
+    }
+  })
 }

@@ -29,7 +29,6 @@ import {
   extractKnowledgeRelatedSlugs,
   renderKnowledgePageBody,
   renderDerivedKnowledgeIndex,
-  sameKnowledgeStringSet,
   searchDerivedKnowledgeGraph,
   searchDerivedKnowledgeVault,
   stripGeneratedKnowledgeSections,
@@ -53,6 +52,44 @@ afterEach(async () => {
 });
 
 describe("automation helpers", () => {
+  it("reads historical minute-precision timestamps before filtering archived records", async () => {
+    const vaultRoot = await createVaultRoot();
+    for (const status of ["active", "archived"]) {
+      await writeAutomationDocument(vaultRoot, `legacy-${status}`, [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        `automationId: auto_legacy_${status}`,
+        `slug: legacy-${status}`,
+        "title: Legacy schedule",
+        `status: ${status}`,
+        "activeUntil: 2026-10-21T09:00-04:00",
+        "schedule:",
+        "  kind: at",
+        "  at: 2026-10-20T09:00-04:00",
+        "route:",
+        "  channel: email",
+        "  deliveryTarget: null",
+        "continuityPolicy: fresh",
+        "createdAt: 2026-10-19T09:00Z",
+        "updatedAt: 2026-10-19T09:00Z",
+        "---",
+        "Send the stored reminder.",
+      ].join("\n"));
+    }
+
+    const records = await listAutomations(vaultRoot);
+    expect(records).toHaveLength(2);
+    for (const record of records) {
+      expect(record.schedule).toEqual({ kind: "at", at: "2026-10-20T09:00-04:00" });
+      expect(record.activeUntil).toBe("2026-10-21T09:00-04:00");
+      expect(record.createdAt).toBe("2026-10-19T09:00Z");
+    }
+    expect(await listAutomations(vaultRoot, { status: ["active"] })).toEqual([
+      expect.objectContaining({ automationId: "auto_legacy_active" }),
+    ]);
+  });
+
   it("loads, filters, and looks up canonical automation documents", async () => {
     const vaultRoot = await createVaultRoot();
     await writeAutomationDocument(
@@ -661,8 +698,6 @@ describe("knowledge formatting and model helpers", () => {
       ),
     ).toEqual(["alpha"]);
     expect(extractKnowledgeRelatedSlugs("No wiki links here.", "alpha")).toEqual([]);
-    expect(sameKnowledgeStringSet(["alpha", "beta"], ["beta", "alpha"])).toBe(true);
-    expect(sameKnowledgeStringSet(["alpha", "beta"], ["alpha", "gamma"])).toBe(false);
 
     const rendered = renderKnowledgePageBody({
       title: " Sleep quality ",

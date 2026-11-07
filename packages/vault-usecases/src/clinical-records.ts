@@ -7,6 +7,11 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+  clinicalDocumentAttachmentsSchema,
+  clinicalDocumentAttachmentIdentitySchema,
+  decodeClinicalDocumentBase64,
+  hashClinicalDocumentBytes,
+  type ClinicalDocumentAttachment,
   clinicalFhirQueryScopeIdSchema,
   clinicalFhirRetrievalSliceRefSchema,
   clinicalFhirRetrievalSlicesSchema,
@@ -28,6 +33,7 @@ import {
   applyCanonicalWriteBatch,
   importEventBatch,
   isVaultError,
+  withCanonicalWriteLock,
 } from "@murphai/core";
 import {
   resolveRuntimePaths,
@@ -35,12 +41,19 @@ import {
 } from "@murphai/runtime-state/node";
 import * as z from "@murphai/contracts/zod-runtime";
 
+import { clinicalStructuredSources, type ClinicalStructuredSource } from "./clinical-structured-enrichment.ts";
+import { retainUnchangedClinicalParserHolds } from "./clinical-parser-holds.ts";
+
+import { extractClinicalDocumentText } from "./clinical-document-text.js";
+import { readMinimizedClinicalDocument } from "./clinical-document-storage.ts";
+export { minimizeClinicalDocumentImages, readClinicalStoredDocument } from "./clinical-document-storage.ts";
+
 import { loadRuntimeModule } from "./runtime-import.js";
 
 const CLINICAL_IMPORTER_MODULE_SPECIFIER = "@murphai/importers/clinical-records";
 const JSON_MEDIA_TYPE = "application/fhir+json";
 const CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA =
-  "murph.clinical-retrieval-checkpoint.v3";
+  "murph.clinical-retrieval-checkpoint.v4";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
   "EVENT_KIND_MISMATCH",
@@ -50,7 +63,10 @@ const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
 ]);
 
 type ClinicalImporterModule = {
+  readClinicalAttachmentText(bytes: Uint8Array, mediaType: string): string | undefined;
   buildClinicalImportPlanFromSnapshot(input: {
+    attachments?: ClinicalFhirSnapshotAttachment[];
+    previousBatch?: { manifestPath: string; manifestContent: string; page: { relativePath: string; content: string } };
     manifest: unknown;
     manifestPath: string;
     pages: ReadonlyArray<{
@@ -71,7 +87,29 @@ export interface ClinicalFhirSnapshotPage {
   sliceId: string;
 }
 
+export interface ClinicalFhirSnapshotAttachment {
+  relativePath: string;
+  contentBase64: string;
+  extractedText?: string;
+}
+
+export interface ClinicalFhirPendingDocument {
+  parentPageSha256: string;
+  resourceType: "DocumentReference" | "DiagnosticReport";
+  resourceId: string;
+  attachmentIndex: number;
+  ticket: string | null;
+  errorCode?: string;
+}
+
 export interface ClinicalFhirSnapshotImportInput {
+  batch?: {
+    runId: string; index: number;
+    previous?: { manifestPath: string; sha256: string };
+    continuesWith?: { queryScopeId: string; sliceId: string; pageUrlHash: string };
+  };
+  attachments?: ClinicalFhirSnapshotAttachment[];
+  documentAttachments?: ClinicalDocumentAttachment[];
   assertCurrent?: () => Promise<void>;
   completedRetrievalSlices: ClinicalFhirRetrievalSliceRef[];
   connectionId: string;
@@ -114,6 +152,12 @@ export interface ClinicalFhirRetrievalCheckpointIdentity {
 }
 
 export interface ClinicalFhirRetrievalCheckpoint {
+  batchIndex: number;
+  previousBatch?: { manifestPath: string; sha256: string };
+  importedCounts: { createdCount: number; executableDecisionCount: number; labResultCount: number; rawFileCount: number; retractedCount: number; reviewDecisionCount: number; skippedExistingCount: number; supersededCount: number; incompleteRevisionCount: number };
+  attachments: ClinicalFhirSnapshotAttachment[];
+  documentAttachments: ClinicalDocumentAttachment[];
+  pendingDocuments: ClinicalFhirPendingDocument[];
   authorizationRequired: boolean;
   completedRetrievalSlices: ClinicalFhirRetrievalSliceRef[];
   currentResourceIndex: number;
@@ -135,6 +179,7 @@ export interface ClinicalFhirRetrievalCheckpointRecord {
 }
 
 export interface ClinicalFhirSnapshotImportResult {
+  structuredEnrichmentSources?: ClinicalStructuredSource[];
   canonical: {
     applied: boolean;
     createdCount: number;
@@ -146,6 +191,7 @@ export interface ClinicalFhirSnapshotImportResult {
   labResultCount: number;
   incompleteRevisionCount: number;
   manifestPath: string;
+  manifestSha256: string;
   rawFileCount: number;
   reviewDecisionCount: number;
 }
@@ -205,6 +251,25 @@ const clinicalFhirRetrievalCheckpointIdentitySchema = z
 
 const clinicalFhirRetrievalCheckpointSchema = z
   .object({
+    batchIndex: z.number().int().nonnegative(),
+    previousBatch: z.object({ manifestPath: clinicalRawPathSchema, sha256: z.string().regex(SHA256_HEX_PATTERN) }).strict().optional(),
+    importedCounts: z.object({
+      createdCount: z.number().int().nonnegative(), executableDecisionCount: z.number().int().nonnegative(),
+      labResultCount: z.number().int().nonnegative(), rawFileCount: z.number().int().nonnegative(),
+      retractedCount: z.number().int().nonnegative(), reviewDecisionCount: z.number().int().nonnegative(),
+      skippedExistingCount: z.number().int().nonnegative(), supersededCount: z.number().int().nonnegative(),
+      incompleteRevisionCount: z.number().int().nonnegative(),
+    }).strict(),
+    attachments: z.array(z.object({
+      relativePath: z.string().regex(/^attachments\/[a-f0-9]{64}\.bin$/u),
+      contentBase64: z.string(),
+      extractedText: z.string().optional(),
+    }).strict()).max(2_000),
+    documentAttachments: clinicalDocumentAttachmentsSchema,
+    pendingDocuments: z.array(clinicalDocumentAttachmentIdentitySchema.extend({
+      ticket: z.string().min(1).max(16_384).nullable(),
+      errorCode: z.string().min(1).max(128).optional(),
+    }).strict()).max(2_000),
     authorizationRequired: z.boolean(),
     completedRetrievalSlices: z
       .array(clinicalFhirRetrievalSliceRefSchema)
@@ -230,7 +295,7 @@ const clinicalFhirRetrievalCheckpointSchema = z
       .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
     identity: clinicalFhirRetrievalCheckpointIdentitySchema,
     identityHash: z.string().regex(SHA256_HEX_PATTERN),
-    pageFetchCount: z.number().int().nonnegative().max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+    pageFetchCount: z.number().int().nonnegative(),
     pages: z
       .array(
         z
@@ -250,17 +315,9 @@ const clinicalFhirRetrievalCheckpointSchema = z
       .nonnegative()
       .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
     schema: z.literal(CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA),
-    seenCursors: z
-      .array(z.string().min(1).max(2_048))
-      .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
-    seenPageUrlHashes: z
-      .array(z.string().regex(SHA256_HEX_PATTERN))
-      .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
-    successfulPageCount: z
-      .number()
-      .int()
-      .nonnegative()
-      .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+    seenCursors: z.array(z.string().min(1).max(2_048)),
+    seenPageUrlHashes: z.array(z.string().regex(SHA256_HEX_PATTERN)),
+    successfulPageCount: z.number().int().nonnegative(),
     totalBodyBytes: z.number().int().nonnegative().max(CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES),
     totalResourceCount: z
       .number()
@@ -409,10 +466,14 @@ export async function importClinicalFhirSnapshot(
     CLINICAL_IMPORTER_MODULE_SPECIFIER,
   );
   input.signal?.throwIfAborted();
+  const previousBatch = await readPreviousClinicalBatch(input);
+  const attachmentFiles = await prepareClinicalDocumentExtraction(input);
   let plan: ClinicalImportPlan;
   let executableDecisions: EventImportDecision[];
   try {
     plan = importer.buildClinicalImportPlanFromSnapshot({
+      attachments: attachmentFiles,
+      ...(previousBatch ? { previousBatch } : {}),
       manifest: prepared.manifest,
       manifestPath: prepared.manifestPath,
       pages: prepared.pages.map((page) => ({
@@ -427,37 +488,42 @@ export async function importClinicalFhirSnapshot(
   await yieldClinicalFhirImportControl(input.signal ?? null);
   await input.assertCurrent?.();
   input.signal?.throwIfAborted();
-  const reviewDecisionCount = plan.decisions.filter(
+  let reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
-  const rawContents = [
-    ...prepared.pages.map((page) => ({
-      allowExistingMatch: true,
-      content: page.content,
-      mediaType: JSON_MEDIA_TYPE,
-      originalFileName: path.posix.basename(page.relativePath),
-      targetRelativePath: page.rawPath,
-    })),
-    {
-      allowExistingMatch: true,
-      content: `${JSON.stringify(prepared.manifest, null, 2)}\n`,
-      mediaType: "application/json",
-      originalFileName: "manifest.json",
-      targetRelativePath: prepared.manifestPath,
-    },
-  ];
-
+  let rawFileCount = 0;
   try {
-    await applyCanonicalWriteBatch({
-      audit: {
-        action: "raw_copy",
-        commandName: "vault-usecases.importClinicalFhirSnapshot",
-        summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
-      },
-      operationType: "clinical_fhir_snapshot",
-      rawContents,
-      summary: "Persist clinical FHIR retrieval snapshot",
-      vaultRoot: input.vaultRoot,
+    await withCanonicalWriteLock(input.vaultRoot, async () => {
+      const rawContents = [
+        ...await prepareClinicalDocumentRawContents(input, prepared.manifestPath),
+        ...prepared.pages.map((page) => ({
+          allowExistingMatch: true,
+          content: page.content,
+          mediaType: JSON_MEDIA_TYPE,
+          originalFileName: path.posix.basename(page.relativePath),
+          targetRelativePath: page.rawPath,
+        })),
+        {
+          allowExistingMatch: true,
+          content: `${JSON.stringify(prepared.manifest, null, 2)}\n`,
+          mediaType: "application/json",
+          originalFileName: "manifest.json",
+          targetRelativePath: prepared.manifestPath,
+        },
+      ];
+
+      await applyCanonicalWriteBatch({
+        audit: {
+          action: "raw_copy",
+          commandName: "vault-usecases.importClinicalFhirSnapshot",
+          summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
+        },
+        operationType: "clinical_fhir_snapshot",
+        rawContents,
+        summary: "Persist clinical FHIR retrieval snapshot",
+        vaultRoot: input.vaultRoot,
+      });
+      rawFileCount = rawContents.length;
     });
   } catch (error) {
     rethrowClinicalFhirImportError(error);
@@ -469,6 +535,7 @@ export async function importClinicalFhirSnapshot(
     input.signal?.throwIfAborted();
   }
 
+  let retainedLabCount = 0;
   const canonical = executableDecisions.length === 0
     ? {
         applied: false,
@@ -477,10 +544,16 @@ export async function importClinicalFhirSnapshot(
         skippedExistingCount: 0,
         supersededCount: 0,
       }
-    : await importClinicalEventDecisions({
-        decisions: executableDecisions,
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
+    : await withCanonicalWriteLock(input.vaultRoot, async () => {
+        const retained = await retainUnchangedClinicalParserHolds({
+          vaultRoot: input.vaultRoot, decisions: executableDecisions, manifest: prepared.manifest,
+          pages: new Map(prepared.pages.map((page) => [page.rawPath, page.content])),
+        });
+        reviewDecisionCount += retained.retainedCount;
+        retainedLabCount = retained.retainedLabCount;
+        return importClinicalEventDecisions({
+          decisions: retained.decisions, signal: input.signal, vaultRoot: input.vaultRoot,
+        });
       });
 
   return {
@@ -491,11 +564,13 @@ export async function importClinicalFhirSnapshot(
       skippedExistingCount: canonical.skippedExistingCount,
       supersededCount: canonical.supersededCount,
     },
+    structuredEnrichmentSources: clinicalStructuredSources(plan, new Map(prepared.pages.map((page) => [page.rawPath, page.content]))),
     executableDecisionCount: executableDecisions.length,
-    labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length,
+    labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length - retainedLabCount,
     incompleteRevisionCount: plan.decisions.filter((decision) => decision.action === "review" && decision.disposition === "incomplete").length,
     manifestPath: prepared.manifestPath,
-    rawFileCount: rawContents.length,
+    manifestSha256: createHash("sha256").update(`${JSON.stringify(prepared.manifest, null, 2)}\n`, "utf8").digest("hex"),
+    rawFileCount,
     reviewDecisionCount,
   };
 }
@@ -555,6 +630,14 @@ function assertClinicalFhirRetrievalCheckpointConsistent(
     throw new TypeError("Clinical FHIR retrieval checkpoint counters are inconsistent.");
   }
 
+  const attachmentFiles = new Map(checkpoint.attachments.map((attachment) => [attachment.relativePath, attachment]));
+  if (attachmentFiles.size !== checkpoint.attachments.length) throw new TypeError("Clinical checkpoint repeats document bytes.");
+  for (const document of checkpoint.documentAttachments) {
+    if (document.status !== "downloaded") continue;
+    const file = attachmentFiles.get(document.relativePath);
+    const bytes = file ? decodeClinicalDocumentBase64(file.contentBase64) : null;
+    if (!bytes || bytes.length !== document.byteLength || hashClinicalDocumentBytes(bytes) !== document.sha256) throw new TypeError("Clinical checkpoint document integrity is invalid.");
+  }
   let stagedBytes = 0;
   for (const page of checkpoint.pages) {
     const pageBytes = Buffer.byteLength(page.content, "utf8");
@@ -685,9 +768,11 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
   const manifest = clinicalRawManifestSchema.parse({
     ...manifestBase,
     schemaVersion: "murph.clinical-raw-manifest.v3",
+    ...(input.batch ? { batch: input.batch } : {}),
     resourceFiles,
     retrievalSlices: input.retrievalSlices,
     completedRetrievalSlices: input.completedRetrievalSlices,
+    ...(input.documentAttachments ? { documentAttachments: input.documentAttachments } : {}),
     ...(input.errors ? { errors: input.errors } : {}),
   });
 
@@ -696,4 +781,71 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
     manifestPath,
     pages,
   };
+}
+
+async function prepareClinicalDocumentRawContents(
+  input: ClinicalFhirSnapshotImportInput,
+  manifestPath: string,
+) {
+  const files = new Map((input.attachments ?? []).map((attachment) => [attachment.relativePath, attachment]));
+  const prepared = new Map<string, { allowExistingMatch: true; content: Uint8Array; mediaType: string; originalFileName: string; targetRelativePath: string }>();
+  for (const attachment of input.documentAttachments ?? []) {
+    if (attachment.status !== "downloaded" || prepared.has(attachment.relativePath)) continue;
+    const file = files.get(attachment.relativePath);
+    const bytes = file ? decodeClinicalDocumentBase64(file.contentBase64) : null;
+    if (!bytes || bytes.length !== attachment.byteLength || hashClinicalDocumentBytes(bytes) !== attachment.sha256) {
+      throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document bytes do not match the manifest."));
+    }
+    const rawRef = clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`);
+    // Replays still validate the original provider bytes above. Retention receipts
+    // permit an exact existing minimized postimage without restoring omitted data.
+    const retained = await readMinimizedClinicalDocument({ vaultRoot: input.vaultRoot,
+      source: { rawRef, sha256: attachment.sha256, byteLength: attachment.byteLength, mediaType: attachment.mediaType },
+    }) ?? bytes;
+    prepared.set(attachment.relativePath, {
+      allowExistingMatch: true,
+      content: retained,
+      mediaType: attachment.mediaType,
+      originalFileName: path.posix.basename(attachment.relativePath),
+      targetRelativePath: clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`),
+    });
+  }
+  return [...prepared.values()];
+}
+
+async function readPreviousClinicalBatch(input: ClinicalFhirSnapshotImportInput) {
+  if (!input.batch?.previous) return undefined;
+  const previous = input.batch.previous;
+  const expectedPath = `raw/clinical/fhir/${input.connectionId}/${input.batch.runId}-batch-${input.batch.index - 1}/manifest.json`;
+  if (previous.manifestPath !== expectedPath) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor path is invalid."));
+  const manifestContent = await readFile(path.join(input.vaultRoot, clinicalRawPathSchema.parse(previous.manifestPath)), "utf8");
+  if (createHash("sha256").update(manifestContent, "utf8").digest("hex") !== previous.sha256) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor digest is invalid."));
+  const manifest = clinicalRawManifestSchema.parse(JSON.parse(manifestContent));
+  if (manifest.resourceFiles.length !== 1) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor page is invalid."));
+  const relativePath = manifest.resourceFiles[0]!.relativePath;
+  const content = await readFile(path.join(input.vaultRoot, path.posix.dirname(previous.manifestPath), relativePath), "utf8");
+  return { manifestPath: previous.manifestPath, manifestContent, page: { relativePath, content } };
+}
+
+async function prepareClinicalDocumentExtraction(input: ClinicalFhirSnapshotImportInput): Promise<ClinicalFhirSnapshotAttachment[]> {
+  const files: ClinicalFhirSnapshotAttachment[] = [];
+  for (const attachment of input.attachments ?? []) {
+    input.signal?.throwIfAborted();
+    const evidence = input.documentAttachments?.find((document) => document.status === "downloaded" && document.relativePath === attachment.relativePath);
+    if (!evidence || evidence.status !== "downloaded") throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document has no bound evidence."));
+    const bytes = decodeClinicalDocumentBase64(attachment.contentBase64);
+    if (!bytes || hashClinicalDocumentBytes(bytes) !== evidence.sha256 || bytes.length !== evidence.byteLength) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document integrity validation failed."));
+    const extractedText = attachment.extractedText ?? await extractClinicalDocumentText({ bytes, mediaType: evidence.mediaType, signal: input.signal, vaultRoot: input.vaultRoot });
+    files.push({ ...attachment, ...(extractedText ? { extractedText } : {}) });
+  }
+  return files;
+}
+
+/** Reuse the importer-owned clinical charset and markup rules at the runtime boundary. */
+export async function readClinicalDocumentSourceText(input: {
+  bytes: Uint8Array;
+  mediaType: string;
+}): Promise<string | undefined> {
+  const importer = await loadRuntimeModule<ClinicalImporterModule>(CLINICAL_IMPORTER_MODULE_SPECIFIER);
+  return importer.readClinicalAttachmentText(input.bytes, input.mediaType);
 }

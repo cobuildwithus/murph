@@ -30,10 +30,7 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('behavior-followthrough skill is not registered')
     }
 
-    return readFile(
-      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
-      'utf8',
-    )
+    return readWorkflowSkillPolicy('behavior-followthrough')
   }
 
   async function readSelfManagementExperimentsSkill() {
@@ -51,16 +48,29 @@ describe('experiment onboarding skill guidance', () => {
     )
   }
 
+  it('offers bounded follow-through outside onboarding without bypassing consent', async () => {
+    const support = await readBehaviorFollowthroughSkill()
+    const trial = await readSelfManagementExperimentsSkill()
+    expect(support).toContain('advice alone is not the finished proposal')
+    expect(support).toContain('a practical cue, a bounded review point, and an offer of reminders and a check-in')
+    expect(support).toContain('if timing is missing, ask one narrow schedule question after giving the useful plan')
+    expect(support).toContain('Respect declined support and urgent-care priorities')
+    expect(support).toContain('never claim future outreach before it is scheduled')
+    expect(support).toContain('For any private repeated-behavior launch')
+    expect(support).toContain('A current request for help already')
+    expect(support).not.toContain('For the first onboarding launch, this offer is the authorization boundary')
+    expect(trial).toContain('lack of consent means offer or resolve it')
+    expect(trial).toContain('two weeks can be useful but is not a universal duration')
+  })
+
   it('requires every resolved safety question before any active start', async () => {
     const raw = await readExperimentOnboardingSkill()
 
+    expect(raw).toContain('Ask any unanswered safety questions before activation')
+    expect(raw).toContain('do not treat missing answers as negative')
+    expect(raw).toContain('Record positive question ids and the resulting disposition')
     expect(raw).toContain(
-      'For every resolved protocol with `experimentOnboarding.safetyScreen.mustAsk`, ask every listed question',
-    )
-    expect(raw).toContain('even when the protocol is only moderate-caution')
-    expect(raw).toContain('Treat omitted question ids as unanswered, not negative')
-    expect(raw).toContain(
-      'write `--onboarding-completed-at` only after every question was answered',
+      'write `--onboarding-completed-at` only after the review is complete',
     )
     expect(raw).toContain('Never activate a run with a blocking disposition')
   })
@@ -80,7 +90,7 @@ describe('experiment onboarding skill guidance', () => {
       'Preserve the planned intervention window when changing baseline length.',
     )
     expect(selfManagement).toContain(
-      'let `experiment-onboarding` own baseline timing and never override a selected Health Commons test plan',
+      'let `experiment-onboarding` own baseline timing and preserve the selected private experiment plan',
     )
     expect(selfManagement).toContain(
       'the resolved protocol or `experiment-onboarding` decision allows a shorter baseline for a concrete design reason',
@@ -140,7 +150,7 @@ describe('experiment onboarding skill guidance', () => {
       'This is the user\'s first time doing this experiment. If sending, give a brief first-session walkthrough, not just a reminder.',
     )
     expect(raw).toContain(
-      'experimentOnboarding.planDefaults.firstSessionGuidance',
+      'saved plan, protocol snapshot when present, stop conditions, declared session fields, and saved setup answers',
     )
     expect(raw).toContain('Keep it short and do not dump the full protocol.')
     expect(raw).toContain(

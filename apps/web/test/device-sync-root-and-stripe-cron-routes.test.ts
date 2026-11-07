@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   dispatchHostedGroupSponsorshipRefills: vi.fn(),
   drainHostedGroupJoinOutreachSweep: vi.fn(),
   getPrisma: vi.fn(),
+  drainGameChatLifecycle: vi.fn(),
   reconcileDueHostedStripeEvents: vi.fn(),
   requireVercelCronRequest: vi.fn(),
 }));
@@ -33,6 +34,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   reconcileDueHostedStripeEvents: mocks.reconcileDueHostedStripeEvents,
 }));
 
+vi.mock("@/src/lib/game/chat-lifecycle", () => ({ drainGameChatLifecycle: mocks.drainGameChatLifecycle }));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -51,24 +54,27 @@ describe("device-sync root route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.drainGameChatLifecycle.mockResolvedValue({ attempted: 0, queued: 0, deferred: 0 });
     vi.stubEnv(
       "HOSTED_DEVICE_ROUTING_INDEX_KEY",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
-    vi.stubEnv("OURA_CLIENT_ID", "oura-client");
-    vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_REGION", "us");
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       describeProviders: mocks.describeProviders,
     });
     mocks.describeProviders.mockReturnValue([
       {
-        callbackPath: "/oauth/oura/callback",
-        callbackUrl: "https://join.example.test/oauth/oura/callback",
+        callbackPath: "/connect/junction/callback",
+        callbackUrl: "https://join.example.test/connect/junction/callback",
         defaultScopes: ["daily"],
-        provider: "oura",
+        provider: "junction",
         supportsWebhooks: true,
-        webhookPath: "/webhooks/oura",
-        webhookUrl: "https://join.example.test/webhooks/oura",
+        webhookPath: "/webhooks/junction",
+        webhookUrl: "https://join.example.test/webhooks/junction",
       },
     ]);
   });
@@ -90,15 +96,15 @@ describe("device-sync root route", () => {
       ok: true,
       providers: [
         {
-          callbackPath: "/oauth/oura/callback",
-          callbackUrl: "https://join.example.test/api/device-sync/oauth/oura/callback",
-          connectionKind: "oauth2",
-          credentialPolicy: "oauth_tokens",
-          defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
-          provider: "oura",
+          callbackPath: "/connect/junction/callback",
+          callbackUrl: "https://join.example.test/api/device-sync/connect/junction/callback",
+          connectionKind: "external_link",
+          credentialPolicy: "provider_config",
+          defaultScopes: [],
+          provider: "junction",
           supportsWebhooks: true,
-          webhookPath: "/webhooks/oura",
-          webhookUrl: "https://join.example.test/api/device-sync/webhooks/oura",
+          webhookPath: "/webhooks/junction",
+          webhookUrl: "https://join.example.test/api/device-sync/webhooks/junction",
         },
       ],
     });
@@ -106,7 +112,7 @@ describe("device-sync root route", () => {
 
   it("does not advertise providers when authoritative provider config is invalid", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
+    vi.stubEnv("JUNCTION_RECONCILE_DAYS", "soon");
 
     try {
       const response = await deviceSyncRootRoute.GET(
@@ -130,7 +136,7 @@ describe("device-sync root route", () => {
 
   it("maps route wrapper request errors to a no-store JSON error", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
 
     try {
       const response = await deviceSyncRootRoute.GET(
@@ -161,6 +167,7 @@ describe("hosted onboarding Stripe cron route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.drainGameChatLifecycle.mockResolvedValue({ attempted: 0, queued: 0, deferred: 0 });
     mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
     mocks.dispatchHostedGroupSponsorshipRefills.mockResolvedValue({
       attempted: 0,
@@ -207,6 +214,7 @@ describe("hosted onboarding Stripe cron route", () => {
         Number.POSITIVE_INFINITY,
     );
     await expect(response.json()).resolves.toEqual({
+      gameChatLifecycle: { attempted: 0, queued: 0, deferred: 0 },
       groupJoinOutreach: { attempted: 0, results: [], sent: 0 },
       groupSponsorshipRefills: {
         attempted: 0,
@@ -215,6 +223,28 @@ describe("hosted onboarding Stripe cron route", () => {
       },
       reconciledEventIds: ["evt_paid", "evt_trial"],
     });
+  });
+
+  it("logs a failed game drain by fixed reason and still reports Stripe reconciliation", async () => {
+    mocks.drainGameChatLifecycle.mockRejectedValueOnce(new Error("Synthetic private detail."));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await hostedOnboardingStripeCronRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-onboarding/stripe/cron"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      gameChatLifecycle: { kind: "failed" },
+      reconciledEventIds: ["evt_paid", "evt_trial"],
+    });
+    expect(info).toHaveBeenCalledWith(expect.any(String), {
+      diagnostic: "game.chat-lifecycle-drain",
+      kind: "cron_failed",
+      reason: "unhandled",
+    });
+    expect(JSON.stringify(info.mock.calls)).not.toContain("Synthetic private detail");
+    info.mockRestore();
   });
 
   it("still reports Stripe reconciliation when the outreach drain throws", async () => {
@@ -234,6 +264,7 @@ describe("hosted onboarding Stripe cron route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      gameChatLifecycle: { attempted: 0, queued: 0, deferred: 0 },
       groupJoinOutreach: { kind: "failed" },
       groupSponsorshipRefills: {
         attempted: 0,

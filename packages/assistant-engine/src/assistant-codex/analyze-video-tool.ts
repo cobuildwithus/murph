@@ -297,6 +297,7 @@ export async function executeAnalyzeVideoTool(input: {
 
   const prepared = await readVideoAttachmentBestEffort({
     attachment: selection.attachment,
+    signal: input.abortSignal,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     vaultRoot,
   })
@@ -509,6 +510,7 @@ function selectVideoAttachment(input: {
 }
 
 async function readVideoAttachmentBestEffort(input: {
+  signal?: AbortSignal | null
   attachment: AnalyzeVideoAttachmentAuthority
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
@@ -530,13 +532,14 @@ async function readVideoAttachmentBestEffort(input: {
     return { ok: false, failureDiagnostic: toolFailureDiagnostic('authority_rejected'), message: 'The video lacks trusted integrity evidence' }
   }
 
+  const materialization = await input.materializeWorkspaceArtifacts?.([rawPath], {
+    signal: input.signal,
+    maxFileBytes: ANALYZE_VIDEO_MAX_VIDEO_BYTES,
+  })
+  if (materialization && !materialization.materializedArtifactPaths.has(`vault:${rawPath}`)) {
+    return { ok: false, failureDiagnostic: toolFailureDiagnostic('not_found'), message: 'The video bytes are no longer available. Ask the participant to resend the video.' }
+  }
   try {
-    const materialization = await input.materializeWorkspaceArtifacts?.([rawPath], {
-      maxFileBytes: ANALYZE_VIDEO_MAX_VIDEO_BYTES,
-    })
-    if (materialization?.missingArtifactPaths.has(rawPath)) {
-      return { ok: false, failureDiagnostic: toolFailureDiagnostic('not_found'), message: 'The video bytes are no longer available. Ask the participant to resend the video.' }
-    }
     const absolutePath = await resolveAssistantVaultPath(
       input.vaultRoot,
       rawPath,

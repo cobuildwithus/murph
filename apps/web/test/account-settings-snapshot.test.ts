@@ -67,8 +67,8 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   readHostedAccountSettingsPageSnapshot,
   readHostedAccountSettingsSnapshot,
-  withServerApprovedPrivyAccountHints,
-  type HostedAccountSettingsSnapshot,
+
+
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
 const originalHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
@@ -106,7 +106,7 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
     mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
@@ -235,7 +235,7 @@ describe("hosted account settings snapshot", () => {
     });
     expect(result.account).toMatchObject({
       assistant: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       },
       phone: {
         number: "+15550100002",
@@ -318,7 +318,7 @@ describe("hosted account settings snapshot", () => {
     expect(result).toMatchObject({
       account: {
         assistant: {
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         },
         email: {
           address: null,
@@ -407,7 +407,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     });
 
-    expect(snapshot.assistant?.persona).toBe("scientist-with-classic");
+    expect(snapshot.assistant?.persona).toBe("classic");
     expect(snapshot.assistant?.personality).toEqual({
       detail: 8,
       humor: 7,
@@ -429,14 +429,13 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-terra",
-        persona: "scientist-with-classic",
+        model: "gpt-6.1-sol",
+        persona: "classic",
         personality: {
           detail: null,
           humor: null,
           push: null,
         },
-        provider: "openai",
         solAvailable: false,
         tone: "casual",
         voice: "warm",
@@ -455,7 +454,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         persona: null,
         personality: {
           detail: null,
@@ -474,7 +473,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         persona: null,
         personality: {
           detail: null,
@@ -493,8 +492,8 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      model: "gpt-5.6-sol",
+      hostedAssistantModelOverride: "gpt-6.1-sol",
+      model: "gpt-6.1-sol",
       solAvailable: true,
     });
 
@@ -504,7 +503,7 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-sol",
         solAvailable: true,
       },
     });
@@ -518,7 +517,7 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
 
@@ -528,317 +527,13 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: true,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         solAvailable: false,
       },
     });
   });
 
-  it("adds a server-approved Privy Telegram username only when it matches the stored Telegram id", () => {
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            id: 456,
-            type: "telegram",
-            username: "sample_user",
-          },
-        ],
-      },
-    })).toMatchObject({
-      telegram: {
-        telegramUserId: "456",
-        username: "sample_user",
-      },
-    });
-  });
 
-  it("does not add a server-approved Privy Telegram username from a different Telegram id", () => {
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            id: 789,
-            type: "telegram",
-            username: "sample_user",
-          },
-        ],
-      },
-    })).toMatchObject({
-      telegram: {
-        telegramUserId: "456",
-        username: null,
-      },
-    });
-  });
-
-  it("derives one provider agreement state for each sign-in method", () => {
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            address: "member@example.com",
-            type: "email",
-          },
-        ],
-      },
-    })).toMatchObject({
-      privySignInStates: {
-        email: { removable: false, status: "mismatched" },
-        phone: { removable: false, status: "absent" },
-        telegram: { removable: false, status: "absent" },
-      },
-    });
-
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
-      serverApprovedPrivyUser: { linkedAccounts: [] },
-    })).toMatchObject({
-      email: {
-        address: null,
-        verifiedAt: null,
-      },
-      phone: {
-        number: null,
-        verifiedAt: null,
-      },
-      telegram: {
-        telegramUserId: null,
-      },
-      privySignInStates: {
-        email: { removable: false, status: "absent" },
-        phone: { removable: false, status: "absent" },
-        telegram: { removable: false, status: "absent" },
-      },
-    });
-
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
-      serverApprovedPrivyUser: null,
-    }).privySignInStates).toBeNull();
-  });
-
-  it("allows removing a linked identity only when another verified sign-in remains", () => {
-    const snapshot: HostedAccountSettingsSnapshot = {
-      ...makeAccountSettingsSnapshot({ telegramUserId: "456" }),
-      email: {
-        address: "member@example.com",
-        verifiedAt: "2026-05-02T00:00:00.000Z",
-      },
-    };
-
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot,
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            id: 456,
-            type: "telegram",
-          },
-          {
-            address: "member@example.com",
-            latest_verified_at: 1_777_680_000,
-            type: "email",
-          },
-        ],
-      },
-    }).privySignInStates).toMatchObject({
-      email: { removable: true, status: "matched" },
-      telegram: { removable: true, status: "matched" },
-    });
-
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot,
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            id: 456,
-            type: "telegram",
-          },
-          {
-            address: "unverified@example.com",
-            type: "email",
-          },
-        ],
-      },
-    }).privySignInStates).toMatchObject({
-      email: { removable: false, status: "mismatched" },
-      telegram: { removable: false, status: "matched" },
-    });
-
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot,
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            id: 456,
-            type: "telegram",
-          },
-        ],
-      },
-    }).privySignInStates).toMatchObject({
-      email: { removable: false, status: "absent" },
-      telegram: { removable: false, status: "matched" },
-    });
-  });
-
-  it("uses top-level Telegram for matching and as an alternative sign-in", () => {
-    const result = withServerApprovedPrivyAccountHints({
-      snapshot: {
-        email: {
-          address: "member@example.com",
-          verifiedAt: "2026-05-02T00:00:00.000Z",
-        },
-        phone: {
-          number: null,
-          verifiedAt: null,
-        },
-        telegram: {
-          telegramUserId: "456",
-        },
-      },
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            address: "member@example.com",
-            latest_verified_at: 1_777_680_000,
-            type: "email",
-          },
-        ],
-        telegram: {
-          id: 456,
-          username: "sample_user",
-        },
-      },
-    });
-
-    expect(result.privySignInStates).toMatchObject({
-      email: { removable: true, status: "matched" },
-      telegram: { removable: true, status: "matched" },
-    });
-    expect(result.telegram.username).toBe("sample_user");
-  });
-
-  it("fails closed when direct and linked Telegram accounts disagree", () => {
-    const result = withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
-      serverApprovedPrivyUser: {
-        linkedAccounts: [{ id: 789, type: "telegram" }],
-        telegram: { id: 456 },
-      },
-    });
-
-    expect(result.privySignInStates?.telegram).toEqual({
-      removable: false,
-      status: "ambiguous",
-    });
-    expect(result.telegram.username).toBeNull();
-  });
-
-  it("keeps stale canonical projections visible as durable cleanup actions", () => {
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: {
-        email: {
-          address: "member@example.com",
-          murphEmailAddress: "reply@example.test",
-          verifiedAt: "2026-05-02T00:00:00.000Z",
-        },
-        phone: {
-          number: "+14045550123",
-          verifiedAt: "2026-05-02T00:00:00.000Z",
-        },
-        telegram: {
-          telegramUserId: "456",
-          username: "sample_user",
-        },
-      },
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            address: "other@example.com",
-            latest_verified_at: 1_777_680_000,
-            type: "email",
-          },
-        ],
-      },
-    })).toMatchObject({
-      email: {
-        address: "member@example.com",
-        murphEmailAddress: "reply@example.test",
-        verifiedAt: "2026-05-02T00:00:00.000Z",
-      },
-      phone: {
-        number: "+14045550123",
-        verifiedAt: "2026-05-02T00:00:00.000Z",
-      },
-      privySignInStates: {
-        email: { removable: false, status: "mismatched" },
-        phone: { removable: false, status: "absent" },
-        telegram: { removable: false, status: "absent" },
-      },
-      telegram: {
-        telegramUserId: "456",
-        username: null,
-      },
-    });
-  });
-
-  it("derives email cleanup when Privy has no email account", () => {
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: {
-        email: {
-          address: "member@example.com",
-          murphEmailAddress: "reply@example.test",
-          verifiedAt: "2026-05-02T00:00:00.000Z",
-        },
-        phone: {
-          number: "+14045550123",
-          verifiedAt: "2026-05-02T00:00:00.000Z",
-        },
-        telegram: {
-          telegramUserId: null,
-        },
-      },
-      serverApprovedPrivyUser: {
-        linkedAccounts: [
-          {
-            phoneNumber: "+14045550123",
-            latest_verified_at: 1_777_680_000,
-            type: "phone",
-          },
-        ],
-      },
-    }).privySignInStates).toMatchObject({
-      email: { removable: false, status: "absent" },
-      phone: { removable: false, status: "matched" },
-    });
-  });
-
-  it("does not treat an unverified checkout email as pending sign-in cleanup", () => {
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: {
-        email: {
-          address: "payer@example.com",
-          murphEmailAddress: null,
-          verifiedAt: null,
-        },
-        phone: {
-          number: null,
-          verifiedAt: null,
-        },
-        telegram: {
-          telegramUserId: null,
-        },
-      },
-      serverApprovedPrivyUser: { linkedAccounts: [] },
-    }).privySignInStates?.email).toEqual({
-      removable: false,
-      status: "absent",
-    });
-  });
 });
 
 function makeSettingsMemberRecord(
@@ -850,7 +545,7 @@ function makeSettingsMemberRecord(
     assistantHumor: null,
     assistantModelPreference: null,
     assistantPersona: null,
-    assistantProviderPreference: null,
+
     assistantPush: null,
     assistantUnhinged: null,
     assistantReasoningEffortPreference: null,
@@ -874,22 +569,4 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
-}
-
-function makeAccountSettingsSnapshot(input: {
-  telegramUserId: string | null;
-}): HostedAccountSettingsSnapshot {
-  return {
-    email: {
-      address: null,
-      verifiedAt: null,
-    },
-    phone: {
-      number: null,
-      verifiedAt: null,
-    },
-    telegram: {
-      telegramUserId: input.telegramUserId,
-    },
-  };
 }

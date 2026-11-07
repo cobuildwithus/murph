@@ -10,6 +10,25 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-routing-policy";
 
 describe("chooseHostedLinqHomeLine", () => {
+  it.each([0, -1])("never automatically selects weight %s, even when preferred and less loaded", (assignmentWeight) => {
+    const draining = buildLine("+15550100001", { assignmentWeight });
+    const retained = buildLine("+15550100002");
+    const input = {
+      lines: [draining, retained],
+      newAssignmentsByRecipientPhone: new Map<string, number>(),
+      plannedMessagesByRecipientPhone: new Map([[retained.phoneNumber, 10_000]]),
+      preferredRecipientPhone: draining.phoneNumber,
+      recentMessageEffectsByLineLookupKey: new Map([[retained.phoneNumberLookupKey, 10_000]]),
+    };
+    expect(chooseHostedLinqHomeLine({ ...input, ignoreDailyNewConversationLimit: true })).toBe(retained);
+    expect(chooseHostedLinqSignupWelcomeLine(input)).toBe(retained);
+    expect(chooseHostedLinqHomeLine({ ...input, lines: [draining] })).toBeNull();
+    expect(chooseHostedLinqSignupWelcomeLine({
+      ...input,
+      newAssignmentsByRecipientPhone: new Map([[retained.phoneNumber, 50]]),
+    })).toBeNull();
+  });
+
   it("keeps a preferred eligible line below the soft planning target", () => {
     const preferred = buildLine("+15550100001", {
       maxNewConversationsPerDay: 2,

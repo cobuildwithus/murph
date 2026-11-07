@@ -1,3 +1,4 @@
+import type { UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { createHash } from 'node:crypto'
 import type {
   AssistantSession,
@@ -8,12 +9,15 @@ import type {
 } from './codex-turn/planning.js'
 import {
   isHostedProductSupportEscalationFeedback,
+  isHostedUsageOptimizationAuditFeedback,
   type HostedRuntimeProductFeedbackRecord,
+  type HostedUsageOptimizationAuditRejection,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   deliverAssistantProgressUpdate,
 } from './delivery-service.js'
 import {
+  ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
   MAX_PROGRESS_UPDATES_PER_TURN,
   shouldCreateAssistantProgressDelivery,
 } from './progress-constants.js'
@@ -63,7 +67,7 @@ export type AssistantProgressDeliveryResult =
   | { kind: 'sent'; source: AssistantProgressDeliverySource }
   | {
       kind: 'skipped'
-      reason: 'duplicate' | 'empty' | 'limit' | 'unavailable'
+      reason: 'acknowledged' | 'duplicate' | 'empty' | 'limit' | 'unavailable'
       source: AssistantProgressDeliverySource
     }
   | { kind: 'failed'; source: AssistantProgressDeliverySource }
@@ -103,13 +107,14 @@ export { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 export function createAssistantProductFeedbackRecorder(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   getAcceptedInputIds?: (() => readonly string[]) | null
+  usageOptimizerScope?: UsageOptimizerFeedbackScope | null
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
 }): AssistantTurnProductFeedbackRecorder | null {
   const productFeedbackCandidateSink = input.productFeedbackCandidateSink ?? null
   const initialAcceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
     input.acceptedInputItems ?? [],
   )
-  if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0) {
+  if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0 && !input.usageOptimizerScope) {
     return null
   }
 
@@ -122,6 +127,18 @@ export function createAssistantProductFeedbackRecorder(input: {
   return {
     async recordProductFeedback(feedback) {
       const normalized = normalizeAssistantProductFeedback(feedback)
+      if (input.usageOptimizerScope) {
+        let rejection: HostedUsageOptimizationAuditRejection | undefined
+        if (!isHostedUsageOptimizationAuditFeedback(normalized, (reason) => { rejection = reason })) {
+          const error = new Error('Scheduled usage feedback requires one bounded anonymous usage audit.')
+          if (rejection !== undefined) {
+            Object.defineProperty(error, 'productFeedbackAuditRejection', {
+              value: rejection, enumerable: false,
+            })
+          }
+          throw error
+        }
+      }
       const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
       if (supportEscalation) {
         if (supportEscalationOutcome === 'delivered') {
@@ -144,10 +161,12 @@ export function createAssistantProductFeedbackRecorder(input: {
         ?? initialAcceptedInputIds
       const candidate = {
         ...normalized,
-        idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-          acceptedInputIds,
-          feedback: normalized,
-        }),
+        idempotencyKey: input.usageOptimizerScope
+          ? createHash('sha256').update(JSON.stringify({
+              kind: 'weekly-usage-optimizer',
+              ...input.usageOptimizerScope,
+            })).digest('hex')
+          : buildAssistantProductFeedbackIdempotencyKey({ acceptedInputIds, feedback: normalized }),
       }
       const deliverSupportEscalation =
         productFeedbackCandidateSink.deliverProductSupportEscalation
@@ -296,21 +315,45 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       } catch (error) {
-        warnAssistantBestEffortFailure({
-          error,
-          operation: 'progress update delivery',
-        })
-        logOutcome('failed: delivery threw')
-        return {
-          kind: 'failed',
-          source,
-        }
+        return readAssistantProgressDeliveryFailure({ error, logOutcome, source })
       }
     },
     close() {
       abortController.abort()
     },
   }
+}
+
+/**
+ * A hosted send that Web skipped because the member's burst already got an
+ * "on it" tapback is a handled skip, not a delivery failure.
+ */
+function readAssistantProgressDeliveryFailure(input: {
+  error: unknown
+  logOutcome: (outcome: string) => void
+  source: AssistantProgressDeliverySource
+}): AssistantProgressDeliveryResult {
+  if (hasAssistantErrorCode(input.error, ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE)) {
+    input.logOutcome('skipped: acknowledged')
+    return { kind: 'skipped', reason: 'acknowledged', source: input.source }
+  }
+  warnAssistantBestEffortFailure({
+    error: input.error,
+    operation: 'progress update delivery',
+  })
+  input.logOutcome('failed: delivery threw')
+  return { kind: 'failed', source: input.source }
+}
+
+function hasAssistantErrorCode(error: unknown, code: string): boolean {
+  let current: unknown = error
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    if ((current as { code?: unknown }).code === code) {
+      return true
+    }
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
 }
 
 export function buildAssistantProductFeedbackIdempotencyKey(input: {

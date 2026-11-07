@@ -350,9 +350,8 @@ End the grid with **Monthly revenue**: restrained sage bars where each bar
 estimates one UTC month from the month's latest snapshot MRR plus fulfilled
 live-mode top-up and group-sponsorship cash. The card copy must say it is an
 estimate rather than invoices, that refunds are not subtracted, and that
-account deletion can remove past purchase cash or leave an old one-time group
-gift counted as a regular top-up, and it must name hover, tap, and focus as the
-breakdown affordances. The bar carries only the total; the keyboard-reachable
+account deletion can remove past purchase cash, and it must name hover, tap,
+and focus as the breakdown affordances. The bar carries only the total; the keyboard-reachable
 tooltip lists personal subscriptions, family subscriptions, group sponsorship,
 and usage top-ups with a summed total row, and labels the window-end month
 "month to date". Months whose snapshots predate the subscription split columns
@@ -370,59 +369,6 @@ pair the trial timestamp with the member-record creation date or age so delayed
 activation is visible. Historical rows without event-time provenance stay
 Unknown. Label raw member creation metrics as member records, never as proof of
 an acquisition channel.
-
-### Measured Biomarker Index
-
-On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
-band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
-or give it a contrasting card background. Lab health areas follow as native
-`<details>` disclosures, expanded by default, with a Fraunces area name and one
-rotating chevron in the summary. Search and `All` / `Review` / `In range`
-filters apply only to saved lab biomarkers. The opened contents are one
-partitioned notebook surface rather than a stack of nested cards: one column on
-every viewport, with one full-width biomarker row between warm one-pixel seams.
-Each lab row uses a narrow 48px-tall semantic status rail beside the biomarker
-name; length supplies rhythm while color carries the source-reported status.
-On phones the name and result stack; from `sm` the name sits left and the
-status/value sits right. Each row is one full-size link showing only the
-biomarker name, source status, and latest value; flagged results sort before
-in-range and unflagged results within their health area. Render `normal` in
-sage, source flags that need review in sienna, and missing flags neutrally as
-`Reported`.
-Use explicit health-area classification; never show an `Other` dump, infer that
-an unflagged result is in range, or turn a source flag into a diagnosis.
-
-### Measured Biomarker Result Detail
-
-On `/biomarkers/results/[metricKey]`, use a sparse reading order: biomarker name
-and saved-history span, latest source status, value, collection date, then the
-numeric history chart. Do not repeat the latest value in comparison, reference,
-or count tiles above the chart. Use sage for a source-reported normal result,
-sienna for flags that need review, and slate for an unflagged reported result.
-Keep the complete result ledger below the chart, including the date, exact
-reported value, source reference range, and lab/source label. Comparator,
-qualitative, and incompatible-unit context stays explicit near the chart or in
-the ledger. When the latest comparable result has a normalized lab range, place
-one quiet `Latest lab range` legend above dashed boundary rules for its
-two-sided band or one-sided limit. Preserve exact `<`, `<=`, `>`, and `>=`
-source boundaries in the legend. Fit the vertical scale to the union of the
-comparable results and the available range bounds. Shade the source range with
-very light sage and the visible below/above regions with very light sienna; keep
-the legend and dashed rules as non-color cues. Label source context as latest so
-it does not imply that older labs shared the same range. If the latest comparable
-result has no usable numeric source range, an exact-unit authored Health Commons
-range may appear instead as `Published adult comparator`; it never changes the
-source status and appears only when the result's normalized specimen kind is
-explicitly eligible. State in the legend that the published comparator is not
-the reporting lab's range, and render it with neutral dashed boundaries only,
-without sage/sienna bands. Missing, mismatched, and context-dependent specimens
-omit it. Keep the authored source label in the chart legend. Qualified source
-ranges remain ledger-only and block a comparator from superseding more specific
-source context. Do not add a visible chart title or single-result trend
-instruction above or below this graph. Simplifying the hierarchy must not imply
-that excluded values were plotted. The loading skeleton mirrors the same
-latest-result, chart, and ledger structure rather than substituting a generic
-card grid.
 
 ### Home Experiment History Cards
 
@@ -515,61 +461,6 @@ Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precau
 
 Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
 
-### Murph Safe Search and Product Evidence
-
-The public `/search` page uses the editorial paper system without an app-shell
-dashboard. Lead with one direct question, one large explicit-submit field, and
-short privacy/evidence framing. Group results by Supplements and Branded foods;
-each flat row shows identity, source, and exact-linked test count without a
-safe/unsafe badge. Detail pages read like evidence files: identity, tests,
-ingredients, nutrition, unknowns, provenance, correction contact. Use sienna
-only for genuine warnings or failures. Evidence gaps stay neutral and explicit.
-At phone widths, metadata wraps under identity and long product/source strings
-must break without horizontal scrolling.
-
-### Food Label Lab
-The public `/food` page uses the same editorial paper system with less text.
-Start with one search field. A category choice loads four useful products from
-different popular brands. An exact product choice adds only that record.
-Keep the active search phrase in the field after a product or example loads.
-The quiet catalog count may open one compact facts popover with current counts,
-and source families. Put the brand, the differentiating product name, and the
-package or serving size in each column. When configured, use Brandfetch Search
-for the brand logo. Add the broad product category to the brand query and accept
-only a result whose name contains the requested brand. Cache each result in
-memory for the page session. Fall back to deterministic brand color and local
-category art. Mark the winner
-in each complete metric row with one sage check only; no tinted rows, no Lowest
-or Highest labels. Nothing may read as a health or safety score. Keep four fixed
-product slots so add and remove actions do not resize the table. Scroll
-horizontally for up to ten and show a subtle edge shadow only while meaningful
-content remains hidden to the right. Four products fit without that shadow on
-desktop. Keep one clear-comparison action in the header.
-
-Show related products below the table in three desktop columns. Reveal four
-rows at a time, then load 12 more. Keep an added card in place and replace its
-action with a quiet selected state. Do not create a nested scroll area.
-
-Keep evidence in one separate row as a five-segment coverage meter that opens
-one combined evidence drawer. Use sienna only for a confirmed result above an
-available screening limit, amber for unknown or not comparable, and sage for
-within a comparable limit. Product headers and metric cells open the same
-drawer. Never
-assign a winner when a selected product lacks that metric, and
-never give tied values unequal ordinal ranks. Treat a source nutrition panel
-whose every reported value is zero as unusable comparison data. Keep a product
-only when it still has linked lab evidence; otherwise reject it before it enters
-the table. Also reject impossible per-100-gram values caused by a bad source
-scale. The drawer shows coverage and record source in one compact popover.
-It formats the ingredient statement as a list and explains source-backed
-ingredient flags in tooltips. Lab observations group repeated analytes and show
-compact status marks before optional exact measurements. Gap explanations stay
-in tooltips. Observation summaries must show returned versus total scope when
-the public DTO is truncated. The tests sheet must not infer sample identity or
-coverage from report metadata.
-At phone widths, preserve the first label column and let product columns scroll
-horizontally.
-
 ### Choice Cards
 
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
@@ -596,105 +487,136 @@ navigation or as a substitute for ordinary buttons.
 
 The group join consent checkpoint may request the complete selectable sharing
 catalog. Keep every requested choice selected for a new invitee until they
-explicitly uncheck it, state the selected count when the catalog is long, and
-place the checklist in one bounded, keyboard-scrollable region so the primary
-join action remains visible. Beside a long-catalog count, include one quiet
-button that clears all optional sharing so joining without health or email
-sharing is a single action; members can then re-enable exact choices below.
-Each row stays a full-width checkbox card with its
-plain-language scope description; do not compress a consequential permission
-into a dense table, hide choices behind categories, or imply that the defaults
-have already been granted. Existing members reopen the same surface with only
-their currently active shares selected, and the list includes both the current
-group request and every older share that member can still revoke.
+explicitly uncheck it, state the selected count, and place the checklist in one
+bounded, keyboard-scrollable region so the primary join action remains visible.
+Beside the count, include one quiet `Clear all` button so joining without health
+or email sharing is a single action; members can then re-enable exact choices
+below. An existing member's short list leaves it out, because they stop sharing
+one row at a time.
+
+Each row stays a full-width checkbox card that shows the choice's name. The exact
+plain-language scope description is one tap away: `Details` opens a drawer that
+lists every choice with its description word for word. Do not compress a
+consequential permission into a dense table, hide choices behind categories, or
+imply that the defaults have already been granted. Existing members reopen the
+same surface with only their currently active shares selected, and the list
+includes both the current group request and every older share that member can
+still revoke.
+
+Joining always shares the member's name, so the visible sentence says so in every
+state, including an invite with no optional choices. Do not rely on Details for
+it, because Details only appears when there are choices.
+
+### Link Pages
+
+A page someone reaches from a link in a Murph message sits on the app's night
+ground, the twin of a challenge invite link: `LinkPageFrame`, then
+`LinkPageScreen` for each state. A state is one Fraunces headline ending in a
+period, at most one supporting sentence, and at most one cream pill plus one
+quiet link. The headline is the state, so there is no fixed header and no status
+box. Paint `html` and `body` night too, so overscroll and Safari's bars don't
+show the cream page beneath. Render `LinkPageFrame` at page level; the catalog
+uses `LinkPageSurface`, because the frame repaints the whole document.
+
+Give a page one object where the funding dial sits, when it has something real
+to show: `LinkPageSheet` for a file or a record, a ticket for an invite, a
+calendar page for a date, `LinkPagePair` for a connection, and `LinkPageDots`, the
+logo's dot grid, while the page is working on something. Do not add one to a page
+with nothing to act on, such as a dead link.
+
+A choice between plans is one row per plan and one pill that names the selected
+plan. The rows lock while that plan's checkout runs, so the plan that opens is
+always the one on the pill, and coming back from checkout restores them.
+
+A private link keeps its reason for being opened: `LinkPageSignIn` puts the
+sign-in form on the page under a headline that names the task, and finishes the
+way the sign-in dialog does unless the page owns its own finish, as group join
+and group start do. Never show the private subject of a link, such as a file
+name, before sign-in.
+
+A link can share its URL with a dashboard page: `/connect` with a connect intent
+in the fragment, or `/home` returning from a connection. It cannot replace the
+dashboard frame, so `LinkPageTakeover` covers the frame, and `LinkPageVeil` hides
+it until then, because a fragment never reaches the server. The plain page under
+it stays as it was. A consent gate always sits above a takeover.
+
+A signed-out link on a dashboard route that renders on the server, such as
+Settings, uses `LinkPageCover`, which also hides the frame from the tab order and
+screen readers.
+
+A link to Add usage opens the same purchase as a night page, with the amount left
+unselected. The button can charge a saved card straight away, so a link must
+never arrive with an amount already chosen. This is why it has no dial: the
+funding dial always shows an amount, and funding confirms at Stripe.
+
+Consent wording, sharing descriptions, and privacy promises keep their exact
+words on these pages. A group's sharing descriptions keep them in the Details
+drawer. An approval keeps the server's sentence word for word, because it is
+what the member is authorizing.
 
 ### Group Usage Funding
 
-An authenticated group funding link opens its relevant funding control
-immediately: monthly sponsorship for an unsponsored chat, one-time contribution
-for an already sponsored chat, or payment recovery when a purchase is in
-progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
-that control. Do not add a second sales card, decorative status badge, duplicate
-headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
-secondary action.
+The funding link is a link page. The page does not add a drawer, a sales card, a
+status badge, a note under the button, an optional form, or a list of supporters.
 
-A signed-out funding link first shows one neutral sign-in handoff and returns to
-the exact funding URL after authentication. Do not reveal whether the group or
-the viewer has a private sponsorship relationship before that handoff. An
-authenticated payer keeps the cancellation path even when the group is no
-longer eligible for new funding; authenticated non-payers see the ordinary
-unavailable state. After cancellation, replace the action with a durable receipt
-that confirms future automatic refills stopped and existing usage credit stays
-with the group. Do not reload into an unrelated unavailable state.
+A signed-out link shows one sign-in action and returns to the exact funding URL.
+Do not reveal whether the viewer has a private sponsorship relationship before
+that. An authenticated payer keeps the cancellation path even when the group is
+no longer eligible for new funding; authenticated non-payers see the ordinary
+unavailable state. After cancellation, keep a durable receipt on the page instead
+of reloading into an unrelated state.
 
-For a signed-in active group participant, append one quiet **Supporters** list
-beneath the funding action when a current monthly sponsorship or recent
-one-time contribution exists. Use only a public alias entered after the dialog
-discloses its signed-in-group audience and active-monthly-or-recent-20 duration,
-and only after verified settlement preserved the sponsor's group authority;
-otherwise use `Anonymous`. Label each row only as
-`Monthly sponsor` or `One-time contribution`. Do not show amounts, monthly
-maximums, dates, payer identity, payment status, or automatic-refill history.
-Signed-out visitors and non-participants never see the supporter list. Keep the
-list absent when there is nothing to recognize. Stream it beneath the complete
-primary action in its own best-effort Suspense boundary with a null fallback so
-recognition cannot delay funding, management, cancellation, or recovery. Render
-its real component with synthetic states in both the components catalog and
-this section study.
+`GroupFundingDial` is the amount control: $5, $10, $20, and $50 a month, or the
+one-time amounts. Only its knob takes a drag, and only the knob sets
+`touch-action: none`, so a scroll that starts anywhere else on the dial scrolls
+the page. The amount updates live during the drag, and the knob cannot cross the
+gap between the two ends. Tapping a printed amount and Arrow, Home, and End keys
+reach the same stops. The dial shrinks with the viewport height, down to a floor,
+so the pill stays in view under Safari's bars; a phone shows far less height than
+its screen size. The number and knob scale with the dial. Nothing on the dial may
+extend past its own box; a rotated full-size layer makes the whole page scroll
+sideways.
 
-Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
-$20, and $50 as visually prominent monthly maximums. On desktop, use the shared
-choice cards. On phones, use a near-full-height bottom drawer with one large
-circular cap slider. The handle follows a pointer anywhere around the arc and
-snaps to the nearest available maximum on release; Arrow keys and Home/End
-provide the same four-stop selection. Keep the opening explanation to
-`Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
-the initial $5 activation purchase, whose amount is shown before payment;
-selecting a maximum alone does not charge the card. Keep both funding actions
-available at every current group-capacity state; capacity changes urgency and
-automatic refill timing, not the ability to fund. Keep an explicit one-time
-contribution as the secondary action. On phones, open that contribution in the
-same bottom-drawer pattern as monthly sponsorship; keep the centered dialog on
-larger screens. Customer-facing amount choices say `usage`; cost weighting is
-an accounting detail, not interface copy. Keep the contribution action at the
-drawer's safe-area edge while its body scrolls. Dollar amounts remain usage
-capacity, never an owned or promised number of messages. Every cap increase
-requires fresh payer confirmation. Keep the alias, note, and eligible temporary
-running bit in one collapsible `Add a note` section, open by default, and attach
-them only to the activation or one-time purchase, never to automatic refills.
-Optional text fields use the sage focus border without an outer glow. The
-drawer body owns overflow while the sponsor action stays available at the safe
-area edge, so expanded note fields never become unreachable. Preserve visible
-focus and selection states. Render the production activation,
-active-management, near-cap/recovery, paused, and one-time states at desktop and
-mobile sizes on `/design` with controls inert, including content rendered
-through a dialog or drawer portal.
+The pill states the chosen amount: `Sponsor up to $10 a month` or `Give $10`.
+Choosing an amount alone never charges the card. Keep funding available at every
+group capacity state; capacity changes urgency and refill timing, not the ability
+to fund. Dollar amounts remain usage capacity, never a promised number of
+messages.
 
-In active sponsorship management, reveal the apply action only after the payer
-selects a different maximum. Use the large primary button at full width on
-phones and label an increase as a review step, not as completed confirmation.
-The review opens a focus-safe responsive alert dialog with the current and new
-monthly maximums, the rule that $5 usage purchases happen only while automatic
-refills are active, and explicit `Keep current setup` and `Increase to $N`
-actions. Keep the dialog visible when the result cannot be confirmed. For limit
-changes, replace the secondary action with `Check current setup` and make
-dismissal reload authoritative state while retaining the primary retry. For
-cancellation, keep the dialog open and use the exact authorized cancellation
-request as an idempotent status check so a lost response still reaches the
-terminal receipt. Never use a browser alert or confirm prompt for sponsorship
-changes.
+Monthly and one-time share one purchase controller, so an unresolved payment has
+a single owner. The quiet `Give once instead` and `Sponsor monthly instead` links
+switch between them, and neither appears while an attempt is unresolved. A chat
+sponsored by someone else offers only one-time.
 
-When group funding is fulfilled, switch from the payment-status composition to
-one confident success hierarchy: a compact sage confirmation mark, the
-Fraunces headline `This group has more Murph`, one sentence confirming that the
-contribution is ready, and one full-width **Open Messages** action. State that
-Messages opens without a group deep link and the member must choose the group.
-Keep the desktop dialog and mobile drawer at content height, and use their
-standard close control as the only separate exit. Do not add a congratulatory
-kicker, divider band, second dismissal action, bordered status card,
-payment-pending copy, invented amount, or celebration graphics. Once
-fulfillment is verified, do not carry frozen sponsor details or their
-payment-recovery instructions into the success receipt.
+A canceled or failed checkout returns to the normal page with one sentence, such
+as `Checkout canceled. Nothing was charged.`, and the dial ready to use. Never
+treat the cancel return as proof: follow the authoritative purchase status, which
+can still confirm a payment. When an attempt may have reached payment, offer only
+`Check payment`, which reuses the same request and cannot start a second payment.
+Every state keeps a way forward. Move focus to the new headline or sentence when
+an outcome replaces the control the person just used.
+
+When funding is fulfilled, the headline is `This group has more Murph.` with a
+small gold ticket and one **Open Messages** pill. Messages has no group deep link.
+The ticket prints no amount. A monthly sponsor back from checkout gets the same
+ending once the payment is confirmed, with `Automatic refills are on.` as the
+sentence and a quiet `Manage sponsorship` link to the dial, however long the
+payment took to confirm. A payment recovered on the page without leaving it stays
+on the controls with `Payment confirmed.`
+
+An active sponsor sees the same dial set to their monthly limit, with what was
+charged and when the month resets in the sentence. The pill appears only after
+they choose a different limit. Paused and failed-payment states set the dial
+aside until refills are running. Raising a limit opens the app's night drawer
+stating the new limit and that $5 charges happen only while refills are on. Keep
+that drawer visible when a result cannot be confirmed. For limit changes, offer
+`Check current setup` and reload authoritative state on dismissal. For
+cancellation, keep the drawer open and repeat the exact authorized request as an
+idempotent status check so a lost response still reaches the receipt. Never use a
+browser alert or confirm prompt for sponsorship changes.
+
+Render each state with its real component on `/screenshots/groups` at phone and
+desktop widths.
 
 ### Hosted AI Usage Activity
 
@@ -709,13 +631,14 @@ Missions heading, and hide it when the member has no supported conversation
 route or new missions are disabled.
 
 Personal and owner-seat Family usage-credit checkout returns reconcile against
-the authenticated beneficiary's existing aggregate meter without opening a
-success confirmation when that meter is present. Expose the fulfilled transition
-through one visually hidden polite status region that is mounted before
-reconciliation and receives the verified result once, but do not add a
-post-purchase messaging handoff.
-Keep those returns visually quiet while payment is confirming and
-after fulfillment; if the bounded status check fails, remains unresolved, or
+the authenticated beneficiary's existing aggregate meter. Keep them visually quiet
+while payment is confirming. Once the purchase is verified as fulfilled with
+nothing left to resolve, and the member has a way to reach Murph, end on the night
+`Usage added.` page: a ticket, the chat pill, and a quiet way back to Settings.
+Hold the page refresh until they close it, because a refresh can unmount the page.
+A member with no way to reach Murph keeps the quiet return, through one visually
+hidden polite status region that is mounted before reconciliation and receives the
+verified result once. If the bounded status check fails, remains unresolved, or
 reports a terminal failure, open only the compact payment-recovery dialog with
 its safe check/retry and close actions. Another active Family member and
 former-member recovery keep one compact target-specific result because their
@@ -771,10 +694,9 @@ Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-a
 
 ### Concept Icon Sets
 
-Bespoke iconography lives on its own track from Lucide. Two registers coexist:
+Bespoke iconography lives on its own track from Lucide.
 
-- **Quiver-authored filled paths** (e.g. `public/icons/biomarker-about/*.svg` — the heartbeat, watch face, and bidirectional arrow used in the About Intro Grid). `fill="currentColor"`, complex multi-path, hand-lettered feel. Inline the markup with `dangerouslySetInnerHTML` so callers can drive color via the surrounding text class (`text-primary/85`).
-- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/biomarkers/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
+- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/experiments/experiment-detail/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
 
 When in doubt, prefer authoring a bespoke glyph over a generic Lucide pick. The "lucide-heart for resting heart rate, lucide-droplet for glucose" reflex is the SaaS-cliché tell — Murph's whole point is that the metaphor is hand-drawn.
 
@@ -806,29 +728,6 @@ Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunr
 > Create an ultra-wide social header for Murph. Keep a lone figure small on the right side of the frame and leave a calm, open copy area on the left. Use soft golden-hour light, low-contrast atmosphere, and a grounded natural landscape. The image should feel warm, spacious, and quietly intelligent, not epic or motivational.
 
 Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room for copy, (3) real place with real light, (4) quiet human presence, (5) still feels like Murph without the logo.
-
-### Personal Patterns Matrix
-
-Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and outcomes on columns. Use one marker size. The arrow shows direction, and the percentage shows the size of the difference. Color reflects the meaning of the outcome, not the arrow alone: sage for a favorable change, red for an unfavorable change, and a warm neutral when higher or lower is contextual.
-
-Keep the matrix focused on usable comparisons. Hide a factor row or outcome
-column when every cell still needs more data. Use distinct compact icons for
-`No clear pattern` and `Not enough data`, with details on hover or focus. Show
-factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` as the
-title and gives the exact recorded-case count below it. Label total sleep time
-as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
-their calculations separate and identify the metric in each result popover.
-Keep outcome headings clear without separate help controls. Keep `No clear pattern`
-descriptions to one short sentence.
-
-Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts out of the main result grid; expose them in supporting detail. On narrow screens, use one card per factor with its illustration, compact evidence-coverage bars, and available comparisons in a two-column grid. Use serif values for changed results. Show changed results without a neutral-results footer. Neutral-only cards use a compact factor header with a plain `No clear changes` status beneath the name and no expandable list. Omit measures without enough comparable data from mobile cards. Open mobile result details in a bottom drawer with comparison bars, evidence dates, a close control, and safe-area spacing. Keep mobile result headlines free of redundant metric eyebrows. Show the number of days beside each comparison label in mobile detail drawers. Coverage bars open their own mobile drawer leading with the recorded-day count and the factor name underneath. Reuse the detail content in desktop hover popovers. Desktop keeps the sortable comparison matrix.
-
-Comparison details keep their average bars and expose saved dates in one
-`Days compared` disclosure. Use a week-column calendar with filled factor marks,
-bordered sand confirmed-absence marks, and hollow unrecorded marks. Dates reveal
-their group on selection or keyboard focus. Keep the unrecorded-basis warning,
-label partial arrays, and omit the calendar when no valid saved dates exist.
-Do not repeat statistics, evidence grades, or idle tap instructions below it.
 
 ## 6. Do's and Don'ts
 

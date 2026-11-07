@@ -1,3 +1,5 @@
+export const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+
 export type HostedLinqProviderOperation =
   | "attachment_create"
   | "attachment_read"

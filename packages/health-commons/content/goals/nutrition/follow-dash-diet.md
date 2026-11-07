@@ -93,4 +93,4 @@ Kidney disease, heart failure, adrenal conditions, and medicines such as ACE inh
 
 ## Related goals
 
-[Lower My Blood Pressure](/goals/lower-blood-pressure) · [Eat Less Sodium](/goals/eat-less-sodium) · [Eat More Fruits and Vegetables](/goals/eat-more-fruits-and-vegetables)
+[Track My Blood Pressure](/goals/lower-blood-pressure) · [Eat Less Sodium](/goals/eat-less-sodium) · [Eat More Fruits and Vegetables](/goals/eat-more-fruits-and-vegetables)

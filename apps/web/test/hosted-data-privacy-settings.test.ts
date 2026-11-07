@@ -12,19 +12,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
 
 const mocks = vi.hoisted(() => ({
-  ConnectedAccountCard: vi.fn(({ action, label, value }: {
-    action?: React.ReactNode;
-    label: string;
-    value: string;
-  }) =>
-    createElement(
-      "section",
-      {
-        "data-card-label": label,
-        "data-card-value": value,
-      },
-      action,
-    )),
   HostedSettingsSessionState: vi.fn(() =>
     createElement("div", {
       "data-hosted-settings-session-state": "true",
@@ -33,7 +20,6 @@ const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
-  privyLogoutOnDone: null as (() => void) | null,
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultExport: vi.fn(),
@@ -103,19 +89,8 @@ vi.mock("@/src/lib/browser-vault/export", () => ({
     error instanceof Error ? error.message : "Your dashboard data is not available right now.",
 }));
 
-vi.mock("../src/components/settings/connected-account-card", () => ({
-  ConnectedAccountCard: mocks.ConnectedAccountCard,
-}));
-
 vi.mock("../src/components/settings/hosted-settings-session-state", () => ({
   HostedSettingsSessionState: mocks.HostedSettingsSessionState,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
-  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
-    mocks.privyLogoutOnDone = onDone;
-    return null;
-  },
 }));
 
 vi.mock("@/src/components/ui/alert", () => ({
@@ -165,9 +140,9 @@ beforeEach(() => {
   mocks.useStateRecords = [];
   mocks.useStateSetters = [];
   mocks.useStateValues = [];
-  mocks.privyLogoutOnDone = null;
   mocks.authorize.mockResolvedValue({
-    signature: `0x${"11".repeat(65)}`,
+    method: "passkey",
+    assertion: { id: "synthetic-passkey", type: "public-key", response: { authenticatorData: "synthetic", clientDataJSON: "synthetic", signature: "synthetic" } },
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
   });
   mocks.loadBrowserVaultExport.mockResolvedValue({
@@ -188,7 +163,6 @@ beforeEach(() => {
       },
       deletedAt: "2026-04-29T01:02:03.000Z",
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
         stripeCustomer: { errorCode: null, status: "completed" },
         stripeSubscription: { errorCode: null, status: "completed" },
       },
@@ -211,7 +185,6 @@ describe("HostedDataPrivacySettings", () => {
       cloudflare: { configured: false, deleted: false },
       deletedAt: "2026-07-26T12:00:00.000Z",
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
         stripeCustomer: { errorCode: null, status: "completed" },
         stripeSubscription: { errorCode: null, status: "completed" },
       },
@@ -221,7 +194,6 @@ describe("HostedDataPrivacySettings", () => {
       cloudflare: { configured: false, deleted: false },
       deletedAt: "2026-07-26T12:00:00.000Z",
       vendorAccounts: {
-        privyUser: { errorCode: null, status: "completed" },
         stripeCustomer: { errorCode: null, status: "completed" },
         stripeSubscription: { errorCode: null, status: "completed" },
       },
@@ -353,7 +325,8 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
     expect(mocks.loadBrowserVaultExport).toHaveBeenCalledWith({
       authorization: {
-        signature: `0x${"11".repeat(65)}`,
+        method: "passkey",
+    assertion: { id: "synthetic-passkey", type: "public-key", response: { authenticatorData: "synthetic", clientDataJSON: "synthetic", signature: "synthetic" } },
         token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
       },
     });
@@ -653,7 +626,6 @@ describe("HostedDataPrivacySettings", () => {
           cloudflare: { configured: true, deleted: true },
           deletedAt: "2026-04-29T01:02:03.000Z",
           vendorAccounts: {
-            privyUser: { errorCode: null, status: "completed" },
             stripeCustomer: { errorCode: null, status: "completed" },
             stripeSubscription: { errorCode: null, status: "completed" },
           },
@@ -857,6 +829,26 @@ describe("HostedDataPrivacySettings", () => {
       code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
       message: "Multiple connected-app setups are still finishing. Try account deletion again after they finish or time out.",
     },
+    {
+      code: "ACCOUNT_DELETION_GAME_HISTORY_PENDING",
+      message: "We're still removing your game history. Retry account deletion.",
+    },
+    {
+      code: "ACCOUNT_DELETION_GAME_STATE_CHANGED",
+      message: "A game changed while your account was being deleted. Retry account deletion.",
+    },
+    {
+      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
+      message: "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing.",
+    },
+    {
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      message: "Billing is not configured, so your subscription could not be canceled. Contact support to delete your account.",
+    },
+    {
+      code: "UNRECOGNIZED_DELETION_FAILURE",
+      message: "Something went wrong while deleting your account. Retry account deletion, or contact support if it keeps failing.",
+    },
   ])("keeps $code guidance and confirmation in the open dialog", async ({
     code,
     message,
@@ -866,7 +858,7 @@ describe("HostedDataPrivacySettings", () => {
       "@/src/components/hosted-onboarding/client-api"
     );
     mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
-      new HostedOnboardingApiError({ code, message }),
+      new HostedOnboardingApiError({ code, message, retryable: true }),
     );
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -1110,7 +1102,7 @@ describe("HostedDataPrivacySettings", () => {
     assert.equal([...container.querySelectorAll("button")].length, 0);
   });
 
-  test("replaces the deleted dashboard with the public farewell after Privy logout", async () => {
+  test("replaces the deleted dashboard with the public farewell after canonical deletion", async () => {
     mockHostedDataPrivacyDeletedState();
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -1135,17 +1127,11 @@ describe("HostedDataPrivacySettings", () => {
     await act(async () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
-    assert.ok(mocks.privyLogoutOnDone);
-
-    await act(async () => {
-      mocks.privyLogoutOnDone?.();
-    });
 
     expect(replace).toHaveBeenCalledWith("/farewell");
   });
 
-  test("falls back to the pending-cleanup farewell when Privy logout does not settle", async () => {
-    vi.useFakeTimers();
+  test("preserves pending cleanup on the immediate farewell navigation", async () => {
     mockHostedDataPrivacyDeletedState({ cleanupPending: true });
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -1169,11 +1155,6 @@ describe("HostedDataPrivacySettings", () => {
 
     await act(async () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
-    });
-    expect(replace).not.toHaveBeenCalled();
-
-    await act(async () => {
-      vi.advanceTimersByTime(8_000);
     });
 
     expect(replace).toHaveBeenCalledWith("/farewell?cleanup=pending");
@@ -1440,6 +1421,7 @@ function installGlobals(
   window: Window & typeof globalThis,
   document: Document,
 ) {
+  if (!window.location) Object.defineProperty(window, "location", { configurable: true, value: { replace: vi.fn() } });
   vi.stubGlobal("window", window);
   vi.stubGlobal("self", window);
   vi.stubGlobal("document", document);

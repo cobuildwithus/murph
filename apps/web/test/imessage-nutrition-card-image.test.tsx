@@ -30,9 +30,6 @@ const mocks = vi.hoisted(() => ({
     const value = String(path);
     if (value.includes("DMSans-400.ttf")) return Buffer.from([4, 5, 6]);
     if (value.includes("DMSans-600.ttf")) return Buffer.from([7, 8, 9]);
-    if (value.includes("murph-mark.svg")) {
-      return Buffer.from('<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>');
-    }
     throw new Error("Unexpected nutrition card asset read.");
   }),
 }));
@@ -341,7 +338,7 @@ test("nutrition card image route renders the bounded V2 snapshot without caching
   assert.equal(response.headers.get("Content-Type"), "image/png");
   assert.equal(response.headers.get("Cache-Control"), "private, no-store");
   assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
-  expect(mocks.readFile).toHaveBeenCalledTimes(3);
+  expect(mocks.readFile).toHaveBeenCalledTimes(2);
   expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
 
   const [imageTree, init] = getImageResponseCall();
@@ -376,8 +373,7 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /data-goal-status="under_target"/u);
   assert.match(serialized, /data-calorie-goal-status="under_target"/u);
   assert.match(serialized, /top:171px/u);
-  assert.match(serialized, /data-murph-card-badge="svg"/u);
-  assert.match(serialized, /data-murph-card-logo="true"/u);
+  assert.doesNotMatch(serialized, /<img/u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
@@ -522,11 +518,11 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /Wednesday/u);
   assert.match(serialized, />16</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
-  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-badge-space="true"/u);
+  assert.doesNotMatch(serialized, /<img/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
   assert.match(serialized, /margin-left:-15px/u);
-  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
   assert.match(serialized, /data-imessage-card-title-row="true"/u);
   assert.match(serialized, /transform:translateY\(-8px\)/u);
   assert.match(serialized, /margin-left:15px/u);
@@ -591,11 +587,11 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /data-exercise-checkmark="true"/u);
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
-  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-badge-space="true"/u);
+  assert.doesNotMatch(serialized, /<img/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
   assert.match(serialized, /margin-left:-15px/u);
-  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
   assert.match(serialized, /data-imessage-card-title-row="true"/u);
   assert.match(serialized, /transform:translateY\(-8px\)/u);
   assert.match(serialized, /<h1/u);
@@ -847,11 +843,11 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   );
   assert.ok(rootTag);
   assert.doesNotMatch(rootTag[0], /border-radius|overflow:hidden/u);
-  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-badge-space="true"/u);
+  assert.doesNotMatch(serialized, /<img/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
   assert.match(serialized, /margin-left:-15px/u);
-  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
   assert.match(serialized, /data-imessage-card-title-row="true"/u);
   assert.match(serialized, /transform:translateY\(-8px\)/u);
   assert.match(serialized, /margin-left:15px/u);
@@ -993,3 +989,23 @@ function getImageResponseCall(): [ReactElement, MockImageResponseInit] {
 function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
   return Object.fromEntries(new Headers(headers).entries());
 }
+
+
+test("totals-only nutrition keeps the native metric layout without extra copy or goal judgments", async () => {
+  const { NutritionCardImage } = await import("@/src/components/imessage/nutrition-card-image");
+  const card: DailyNutritionResponseCardV2 = { ...CARD, localDate: "2026-09-11",
+    goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } };
+  const markup = renderToStaticMarkup(<NutritionCardImage card={card} />);
+  assert.match(markup, /imessage-native-nutrition-card/u);
+  assert.doesNotMatch(markup, /<img/u);
+  assert.match(markup, /1,840/u);
+  for (const label of ["PROTEIN", "CARBS", "FAT", "FIBER"]) {
+    assert.match(markup, new RegExp(label, "u"));
+  }
+  assert.doesNotMatch(markup, /estimated|logged|2026-09-11|everything eaten|partial estimates/iu);
+  assert.doesNotMatch(markup, /data-calorie-progress|stroke-dasharray|#B3332B|#995E08|#337338|target unavailable|Goal unavailable/u);
+  const unknown = renderToStaticMarkup(<NutritionCardImage card={{ ...card,
+    totals: { ...card.totals, fiberGrams: { total: null, mealCount: 0 } } }} />);
+  assert.match(unknown, />—</u);
+  assert.doesNotMatch(unknown, /0g fiber/u);
+});

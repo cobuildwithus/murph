@@ -1,12 +1,10 @@
+import { runtimeResourcePurgeRoutes } from "./route-handlers/runtime-resource-purge.ts";
 import {
   browserVaultRoutes,
 } from "./route-handlers/browser-vault-session.ts";
 import {
   deploySmokeRoutes,
 } from "./route-handlers/deploy-smoke.ts";
-import {
-  inferenceVerificationRoutes,
-} from "./route-handlers/inference-verification.ts";
 import {
   runtimeProcessingRoutes,
   userStatusRoutes,
@@ -17,27 +15,25 @@ import {
 import {
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
+import { gameImageRoutes } from "./route-handlers/game-images.ts";
+import { gameMediaRoutes } from "./route-handlers/game-media.ts";
+import { mealThumbnailRoutes } from "./route-handlers/meal-thumbnail.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
-import {
-  environmentVoiceRoutes,
-} from "./route-handlers/environment-voice-stage.ts";
 import {
   deviceWebhookEnqueueRoutes,
 } from "./route-handlers/device-webhook-enqueue.ts";
-import {
-  environmentRealtimeRoutes,
-} from "./route-handlers/environment-realtime.ts";
 
 export const workerInternalRoutes = [
   ...deviceWebhookEnqueueRoutes,
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
-  ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
+  ...runtimeResourcePurgeRoutes,
   ...telegramUsageLimitNoticeRoutes,
-  ...environmentRealtimeRoutes,
-  ...environmentVoiceRoutes,
   ...mealPhotoRoutes,
+  ...mealThumbnailRoutes,
+  ...gameMediaRoutes,
+  ...gameImageRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,
 ] as const;

@@ -44,24 +44,16 @@ describe('assistant return contact kind', () => {
     expect(hostedToolContext.currentHostedDeliveryContext()).toBeNull()
   })
 
-  it.each([
-    ['hosted-openai', 'openai'],
-    ['venice', 'venice'],
-  ])(
-    'projects the internal %s target as the product provider %s',
-    (modelProvider, expectedProvider) => {
-      const hostedToolContext = createAssistantHostedToolContext({
-        messageInput: createMessageInput({
-          channel: 'linq',
-          hostedDeliveryIdempotency: null,
-        }),
-        session: createAssistantSession(modelProvider),
-      })
-
-      expect(hostedToolContext.currentAssistantTarget?.().provider)
-        .toBe(expectedProvider)
-    },
-  )
+  it('projects only the current model and reasoning controls', () => {
+    const hostedToolContext = createAssistantHostedToolContext({
+      messageInput: createMessageInput({ channel: 'linq', hostedDeliveryIdempotency: null }),
+      session: createAssistantSession('hosted-openai'),
+    })
+    expect(hostedToolContext.currentAssistantTarget?.()).toEqual({
+      model: 'gpt-6.1-sol',
+      reasoningEffort: 'medium',
+    })
+  })
 
   it('keeps the return contact kind when durable delivery authority exists', () => {
     const hostedToolContext = createAssistantHostedToolContext({
@@ -269,7 +261,7 @@ function createAssistantSession(modelProvider: string | null = null): AssistantS
   const providerOptions = serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider,
     oss: false,
     profile: 'default',

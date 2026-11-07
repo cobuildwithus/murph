@@ -1,3 +1,4 @@
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { CheckIcon } from "lucide-react";
@@ -91,6 +92,7 @@ export function HostedBillingSettings(props: {
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageAddedContactOption?: MurphContactOption | null;
   usageTopUpScope?: "family" | "personal";
   usageTopUpTargetLabel?: string;
 }) {
@@ -187,27 +189,10 @@ export function HostedBillingSettings(props: {
   const hasPendingGroupSwitch =
     scheduledPlanCode === "launch_group_monthly" &&
     scheduledBillingEffectiveAt !== null;
-  const hasPendingPulseSwitch =
-    scheduledPlanCode === "launch_monthly" &&
-    scheduledBillingEffectiveAt !== null;
-  const hasPendingEdgeSwitch =
-    scheduledPlanCode === "launch_edge_monthly" &&
-    scheduledBillingEffectiveAt !== null;
-  const hasPendingMaxSwitch =
-    scheduledPlanCode === "launch_max_monthly" &&
-    scheduledBillingEffectiveAt !== null;
-  const pendingGroupSwitchDate = hasPendingGroupSwitch
+  const scheduledPlanSwitchDate = scheduledPlanCode !== null && scheduledBillingEffectiveAt !== null
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
     : null;
-  const pendingPulseSwitchDate = hasPendingPulseSwitch
-    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
-    : null;
-  const pendingEdgeSwitchDate = hasPendingEdgeSwitch
-    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
-    : null;
-  const pendingMaxSwitchDate = hasPendingMaxSwitch
-    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
-    : null;
+  const pendingGroupSwitchDate = hasPendingGroupSwitch ? scheduledPlanSwitchDate : null;
 
   const pulseAction: ReactNode = (() => {
     if (activeFamilyOwner) {
@@ -415,25 +400,13 @@ export function HostedBillingSettings(props: {
       name: "Pulse",
       note: activeFamilyOwner
         ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
-        : pulseCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
-          ? (
-              <PendingPlanChangeNote
-                currentPlanName="Pulse"
-                effectiveAt={pendingGroupSwitchDate}
-                targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-              />
-            )
-          : pulseCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
-            ? (
-                <PendingPlanChangeNote
-                  currentPlanName="Pulse"
-                  effectiveAt={pendingMaxSwitchDate}
-                  targetPlanName="Max"
-                />
-              )
-            : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-              ? `Scheduled to start ${pendingPulseSwitchDate}`
-              : null,
+        : renderScheduledPlanNote({
+            current: pulseCurrent,
+            planCode: "launch_monthly",
+            scheduledPlanCode,
+            scheduledDate: scheduledPlanSwitchDate,
+            changeTargets: ["launch_group_monthly", "launch_max_monthly"],
+          }),
       price: formatHostedBillingPrice(
         getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents,
       ),
@@ -447,33 +420,13 @@ export function HostedBillingSettings(props: {
       name: "Edge",
       note: activeFamilyOwner
         ? "End or change the Family plan first, then switch to an individual plan."
-        : !edgeCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
-          ? `Scheduled to start ${pendingEdgeSwitchDate}`
-          : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-          ? (
-              <PendingPlanChangeNote
-                currentPlanName="Edge"
-                effectiveAt={pendingPulseSwitchDate}
-                targetPlanName="Pulse"
-              />
-            )
-          : edgeCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
-            ? (
-                <PendingPlanChangeNote
-                  currentPlanName="Edge"
-                  effectiveAt={pendingGroupSwitchDate}
-                  targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-                />
-              )
-            : edgeCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
-              ? (
-                  <PendingPlanChangeNote
-                    currentPlanName="Edge"
-                    effectiveAt={pendingMaxSwitchDate}
-                    targetPlanName="Max"
-                  />
-                )
-              : null,
+        : renderScheduledPlanNote({
+            current: edgeCurrent,
+            planCode: "launch_edge_monthly",
+            scheduledPlanCode,
+            scheduledDate: scheduledPlanSwitchDate,
+            changeTargets: ["launch_monthly", "launch_group_monthly", "launch_max_monthly"],
+          }),
       price: formatHostedBillingPrice(
         getHostedBillingPlanDefinition("launch_edge_monthly")
           .recurringAmountUsdCents,
@@ -488,33 +441,13 @@ export function HostedBillingSettings(props: {
             features: SETTINGS_MAX_FEATURES,
             key: "launch_max_monthly",
             name: "Max",
-            note: maxCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
-              ? (
-                  <PendingPlanChangeNote
-                    currentPlanName="Max"
-                    effectiveAt={pendingEdgeSwitchDate}
-                    targetPlanName="Edge"
-                  />
-                )
-              : maxCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-                ? (
-                    <PendingPlanChangeNote
-                      currentPlanName="Max"
-                      effectiveAt={pendingPulseSwitchDate}
-                      targetPlanName="Pulse"
-                    />
-                  )
-                : maxCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
-                  ? (
-                      <PendingPlanChangeNote
-                        currentPlanName="Max"
-                        effectiveAt={pendingGroupSwitchDate}
-                        targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-                      />
-                    )
-                  : !maxCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
-                    ? `Scheduled to start ${pendingMaxSwitchDate}`
-                    : null,
+            note: renderScheduledPlanNote({
+              current: maxCurrent,
+              planCode: "launch_max_monthly",
+              scheduledPlanCode,
+              scheduledDate: scheduledPlanSwitchDate,
+              changeTargets: ["launch_edge_monthly", "launch_monthly", "launch_group_monthly"],
+            }),
             price: formatHostedBillingPrice(
               getHostedBillingPlanDefinition("launch_max_monthly")
                 .recurringAmountUsdCents,
@@ -659,6 +592,7 @@ export function HostedBillingSettings(props: {
           usageTopUpInitialOpen={props.usageTopUpInitialOpen}
           usageTopUpOffers={usageTopUpOffers}
           payerMemberId={props.payerMemberId}
+          usageAddedContactOption={props.usageAddedContactOption}
           usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
           usageTopUpScope={props.usageTopUpScope}
           usageTopUpTargetLabel={props.usageTopUpTargetLabel}
@@ -696,6 +630,33 @@ export function HostedBillingSettings(props: {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function renderScheduledPlanNote(input: {
+  current: boolean;
+  planCode: HostedBillingPlanCode;
+  scheduledPlanCode: HostedBillingPlanCode | null;
+  scheduledDate: string | null;
+  changeTargets: readonly HostedBillingPlanCode[];
+}): ReactNode {
+  if (!input.scheduledPlanCode || !input.scheduledDate) {
+    return null;
+  }
+  if (!input.current) {
+    return input.scheduledPlanCode === input.planCode
+      ? `Scheduled to start ${input.scheduledDate}`
+      : null;
+  }
+  if (!input.changeTargets.includes(input.scheduledPlanCode)) {
+    return null;
+  }
+  return (
+    <PendingPlanChangeNote
+      currentPlanName={getHostedBillingPlanDefinition(input.planCode).displayName}
+      effectiveAt={input.scheduledDate}
+      targetPlanName={getHostedBillingPlanDefinition(input.scheduledPlanCode).displayName}
+    />
   );
 }
 
@@ -801,6 +762,7 @@ function PlanUsageBand(props: {
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId?: string | null;
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageAddedContactOption?: MurphContactOption | null;
   usageTopUpScope?: "family" | "personal";
   usageTopUpTargetLabel?: string;
 }) {
@@ -817,9 +779,11 @@ function PlanUsageBand(props: {
         checkoutUrl={props.usageTopUpCheckoutUrl}
         deferTerminalRefreshUntilClose
         initialOpen={props.usageTopUpInitialOpen}
+        linkPage={props.usageTopUpInitialOpen}
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        usageAddedContactOption={props.usageAddedContactOption}
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
       />
@@ -857,9 +821,11 @@ function PlanUsageBand(props: {
         activePurchase={props.usageTopUpActivePurchase}
         checkoutUrl={props.usageTopUpCheckoutUrl}
         initialOpen={props.usageTopUpInitialOpen}
+        linkPage={props.usageTopUpInitialOpen}
         offers={eligibleUsageTopUpOffers}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        usageAddedContactOption={props.usageAddedContactOption}
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
         triggerClassName="min-h-11 w-full sm:w-auto"
@@ -933,9 +899,11 @@ function PlanUsageBand(props: {
       activePurchase={props.usageTopUpActivePurchase}
       checkoutUrl={props.usageTopUpCheckoutUrl}
       initialOpen={props.usageTopUpInitialOpen}
+        linkPage={props.usageTopUpInitialOpen}
       offers={eligibleUsageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      usageAddedContactOption={props.usageAddedContactOption}
       quietSuccessfulReturn
       scope={props.usageTopUpScope}
       targetLabel={props.usageTopUpTargetLabel}

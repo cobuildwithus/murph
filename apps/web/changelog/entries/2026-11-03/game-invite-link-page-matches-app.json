@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "game-invite-link-page-matches-app",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Challenge links look like the app",
+    "summary": "Opening a challenge link without Murph now shows the same invite card as the app: both tasks, when the game runs, and the prize or dare on its ticket, with one Get the app button.",
+    "details": "If the game needs a photo or heart rate from a wearable, the page says so before you accept. A link that no longer works now says why: already accepted, ran out, or called off.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4536]
+  }
+}

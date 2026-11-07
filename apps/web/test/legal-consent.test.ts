@@ -21,8 +21,8 @@ describe("hosted legal consent registry", () => {
     );
     expect(legalVersions).toEqual({
       "health-ai-safety-disclosure": "2026-07-23",
-      "privacy-policy": "2026-07-23",
-      "terms-of-service": "2026-07-23",
+      "privacy-policy": "2026-10-26",
+      "terms-of-service": "2026-10-26",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: legalVersions,
@@ -78,7 +78,7 @@ describe("hosted legal consent registry", () => {
   it("rejects accepted document versions outside the requested scope", () => {
     const acceptedDocumentVersions = {
       ...buildCurrentHostedConsentDocumentVersions("feature.health-ai"),
-      "terms-of-service": "2026-07-23",
+      "terms-of-service": "2026-10-26",
     };
 
     expect(() => parseHostedConsentAcceptRequest({
@@ -141,8 +141,8 @@ describe("hosted legal consent registry", () => {
   it("marks stale grants as not currently granted", () => {
     const legalGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "privacy-policy": "2026-07-23",
-        "terms-of-service": "2026-07-23",
+        "privacy-policy": "2026-10-26",
+        "terms-of-service": "2026-10-26",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
       lastEventId: "hbce_test_legal",
@@ -180,6 +180,44 @@ describe("hosted legal consent registry", () => {
       current: false,
       granted: false,
     });
+  });
+
+  it("keeps grants at or after the minimum accepted versions current, and nothing older or malformed", () => {
+    const legalGrant = (documentVersions: Record<string, string>): HostedConsentGrantSnapshot => ({
+      documentVersions,
+      grantedAt: "2026-08-01T00:00:00.000Z",
+      lastEventId: "hbce_minimum",
+      revokedAt: null,
+      scope: "launch.legal",
+      source: "test",
+      status: "granted",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const legalGranted = (documentVersions: Record<string, string>) => buildHostedConsentStatus({
+      grants: [legalGrant(documentVersions)],
+      now: new Date("2026-10-27T00:00:00.000Z"),
+    }).scopes.find((scope) => scope.scope === "launch.legal")?.granted;
+
+    expect(legalGranted({
+      "health-ai-safety-disclosure": "2026-07-23",
+      "privacy-policy": "2026-07-23",
+      "terms-of-service": "2026-07-23",
+    })).toBe(true);
+    expect(legalGranted(buildCurrentHostedConsentDocumentVersions("launch.legal"))).toBe(true);
+    expect(legalGranted({
+      "health-ai-safety-disclosure": "2026-07-23",
+      "privacy-policy": "2026-07-22",
+      "terms-of-service": "2026-07-23",
+    })).toBe(false);
+    expect(legalGranted({
+      "health-ai-safety-disclosure": "2026-07-23",
+      "privacy-policy": "latest",
+      "terms-of-service": "2026-07-23",
+    })).toBe(false);
+    expect(legalGranted({
+      "privacy-policy": "2026-10-26",
+      "terms-of-service": "2026-10-26",
+    })).toBe(false);
   });
 
   it("requires existing members on the previous document set to re-accept", () => {

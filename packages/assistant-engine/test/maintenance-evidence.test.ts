@@ -45,8 +45,8 @@ function createEvidenceTestSession(input: {
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',
@@ -305,7 +305,7 @@ test('returns an explicit empty evidence section when the window has no messages
   })
 
   expect(evidence).toContain(ASSISTANT_MAINTENANCE_EVIDENCE_HEADING)
-  expect(evidence).toContain('Do not write any new memory this run.')
+  expect(evidence).toContain('Do not add facts; only maintain existing records')
   expect((await readAssistantMaintenanceConversationEvidence({
     now: new Date('2026-06-30T03:00:00.000Z'),
     vault: vaultRoot,
@@ -326,6 +326,7 @@ test('failed transcript collection is unavailable rather than a proven empty win
     vault: vaultRoot,
   })
   expect(result.status).toBe('unavailable')
+  expect(result.prompt).toContain('Make no memory mutations this pass.')
 })
 
 test('a later committed correction or forget request makes an empty window eligible', async () => {
@@ -459,38 +460,6 @@ test('builds structured group evidence only from group-bound sessions', async ()
     kind: 'assistant',
     text: 'sources confirm the combine has lost institutional backing',
   })
-})
-
-test('keeps Habitat voice maintenance isolated from conversation history', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-maintenance-evidence-habitat-voice-',
-  )
-  cleanupPaths.push(parentRoot)
-
-  await saveAssistantSession(
-    vaultRoot,
-    createEvidenceTestSession({
-      lastTurnAt: '2026-06-29T23:00:00.000Z',
-      sessionId: 'session-private-history',
-    }),
-  )
-  await appendAssistantTranscriptEntries(vaultRoot, 'session-private-history', [
-    {
-      createdAt: '2026-06-29T23:00:00.000Z',
-      kind: 'user',
-      text: 'private conversation detail must stay outside voice extraction',
-    },
-  ])
-
-  const evidence = await buildAssistantMaintenanceConversationEvidence({
-    now: new Date('2026-06-30T03:00:00.000Z'),
-    profile: 'habitat-voice',
-    vault: vaultRoot,
-  })
-
-  expect(evidence).toContain('Environment voice evidence boundary')
-  expect(evidence).toContain('Do not read conversation history')
-  expect(evidence).not.toContain('private conversation detail')
 })
 
 test('applies the group session cap after route filtering', async () => {

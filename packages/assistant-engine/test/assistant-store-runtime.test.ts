@@ -45,12 +45,6 @@ const outboxMocks = vi.hoisted(() => ({
   saveAssistantOutboxIntent: vi.fn(),
 }))
 
-const statusMocks = vi.hoisted(() => ({
-  getAssistantStatus: vi.fn(),
-  readAssistantStatusSnapshot: vi.fn(),
-  refreshAssistantStatusSnapshot: vi.fn(),
-}))
-
 const diagnosticsMocks = vi.hoisted(() => ({
   readAssistantDiagnosticsSnapshot: vi.fn(),
   recordAssistantDiagnosticEvent: vi.fn(),
@@ -109,19 +103,6 @@ vi.mock('../src/assistant/outbox.js', async () => {
     listAssistantOutboxIntents: outboxMocks.listAssistantOutboxIntents,
     readAssistantOutboxIntent: outboxMocks.readAssistantOutboxIntent,
     saveAssistantOutboxIntent: outboxMocks.saveAssistantOutboxIntent,
-  }
-})
-
-vi.mock('../src/assistant/status.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant/status.ts')>(
-    '../src/assistant/status.ts',
-  )
-
-  return {
-    ...actual,
-    getAssistantStatus: statusMocks.getAssistantStatus,
-    readAssistantStatusSnapshot: statusMocks.readAssistantStatusSnapshot,
-    refreshAssistantStatusSnapshot: statusMocks.refreshAssistantStatusSnapshot,
   }
 })
 
@@ -590,9 +571,7 @@ describe('assistant runtime state service', () => {
       alias: 'runtime-service',
       sessionId: 'asst_runtime_service',
     })
-    const statusSnapshot = {
-      ok: true,
-    }
+
     const diagnosticSnapshot = {
       diagnostics: [],
     }
@@ -636,9 +615,7 @@ describe('assistant runtime state service', () => {
     outboxMocks.listAssistantOutboxIntents.mockResolvedValue([outboxIntent])
     outboxMocks.readAssistantOutboxIntent.mockResolvedValue(outboxIntent)
     outboxMocks.saveAssistantOutboxIntent.mockResolvedValue(outboxIntent)
-    statusMocks.getAssistantStatus.mockResolvedValue(statusSnapshot)
-    statusMocks.readAssistantStatusSnapshot.mockResolvedValue(statusSnapshot)
-    statusMocks.refreshAssistantStatusSnapshot.mockResolvedValue(statusSnapshot)
+
     turnReceiptMocks.appendAssistantTurnReceiptEvent.mockResolvedValue(undefined)
     turnReceiptMocks.createAssistantTurnReceipt.mockResolvedValue(turnReceipt)
     turnReceiptMocks.finalizeAssistantTurnReceipt.mockResolvedValue(turnReceipt)
@@ -705,14 +682,7 @@ describe('assistant runtime state service', () => {
       }),
     ).resolves.toBe(session)
     await expect(service.sessions.save(session)).resolves.toBe(session)
-    await expect(service.status.get()).resolves.toBe(statusSnapshot)
-    await expect(
-      service.status.get({
-        includeDiagnostics: true,
-      } as never),
-    ).resolves.toBe(statusSnapshot)
-    await expect(service.status.readSnapshot()).resolves.toBe(statusSnapshot)
-    await expect(service.status.refreshSnapshot()).resolves.toBe(statusSnapshot)
+
     await expect(
       service.transcripts.append(session.sessionId, [
         {
@@ -769,13 +739,7 @@ describe('assistant runtime state service', () => {
       alias: 'runtime-service',
       vault,
     })
-    expect(statusMocks.getAssistantStatus).toHaveBeenNthCalledWith(1, {
-      vault,
-    })
-    expect(statusMocks.getAssistantStatus).toHaveBeenNthCalledWith(2, {
-      includeDiagnostics: true,
-      vault,
-    })
+
     expect(turnReceiptMocks.updateAssistantTurnReceipt).toHaveBeenCalledWith({
       turnId: 'turn-1',
       vault,
@@ -788,7 +752,6 @@ describe('assistant turn shared plan', () => {
     const cliAccess = {
       env: {},
       rawCommand: 'vault-cli' as const,
-      setupCommand: 'murph' as const,
     }
 
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue(cliAccess)
@@ -858,7 +821,6 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
       audience: {
@@ -931,7 +893,6 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
       audience: {
@@ -1002,7 +963,6 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
       audience: {
@@ -1062,8 +1022,8 @@ function createTarget(
 ): AssistantModelTarget {
   const target = createAssistantModelTarget({
     approvalPolicy: 'never',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     provider: 'codex-cli',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',

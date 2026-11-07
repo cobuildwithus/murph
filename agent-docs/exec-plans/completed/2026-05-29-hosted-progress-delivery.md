@@ -24,7 +24,7 @@ Updated: 2026-05-29
 - Out of scope:
   - Changing final assistant reply outbox semantics.
   - Adding a model-facing final response tool.
-  - Changing unrelated device-sync/Junction/Murph Age work already dirty in the tree.
+  - Changing unrelated device-sync/Junction work already dirty in the tree.
 
 ## Constraints
 

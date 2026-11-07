@@ -50,6 +50,13 @@ import {
   type HostedWebMigrationEnvironment,
 } from "../scripts/run-prisma-migrate-deploy";
 
+import {
+  assertHostedWebSchemaContract,
+  findMissingHostedWebSchemaObjects,
+  readHostedWebSchemaContract,
+  type HostedWebSchemaContract,
+} from "../scripts/hosted-web-schema-contract";
+
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
 const normalizeShellContinuations = (source: string): string =>
@@ -116,30 +123,11 @@ describe("hosted web production migration guard", () => {
       /### Hosted phone-call private-content migration\n(?<section>[\s\S]*?)(?=\n#{1,3} )/u,
     )?.groups?.section;
     assert.ok(phoneCallMigration, "the phone-call migration guide must remain present");
-    assert.match(
-      phoneCallMigration,
-      /no approved local execution path/u,
-    );
-    assert.match(
-      phoneCallMigration,
-      /discuss the required\s+operation and execution owner with the user/u,
-    );
-    const phoneCallStopIndex = phoneCallMigration.search(
-      /Stop before any\s+production migration/u,
-    );
-    assert.ok(phoneCallStopIndex >= 0, "the phone-call guide must contain its stop gate");
-    for (const productionAction of [
-      /Any later user-authorized path must deploy the additive migration/u,
-      /freeze production deploys and rollbacks/u,
-      /count-only dry runs/u,
-      /`HOSTED_WEB_VERCEL_\*` operator environment/u,
-    ]) {
-      const productionActionIndex = phoneCallMigration.search(productionAction);
-      assert.ok(
-        productionActionIndex > phoneCallStopIndex,
-        `the phone-call stop gate must precede ${productionAction}`,
-      );
-    }
+    assert.match(phoneCallMigration, /no approved local execution path/u);
+    assert.match(phoneCallMigration, /20260910210000_require_hosted_phone_call_encrypted_private_content/u);
+    assert.match(phoneCallMigration, /before[^.]*merge[^.]*deploy/iu);
+    assert.match(phoneCallMigration, /deployment-pinned[^.]*Workflows/iu);
+    assert.doesNotMatch(phoneCallMigration, /privacy:backfill-phone-calls/u);
 
     const linqGuide = await readFile(
       path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
@@ -170,11 +158,6 @@ describe("hosted web production migration guard", () => {
   test("renders the production-secret boundary in changed script help", () => {
     const repoRoot = path.resolve(appRoot, "..", "..");
     const helpExpectations = [
-      {
-        path: "apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
-        productionOwner: /no approved local production execution path/u,
-        requiresDiscussion: true,
-      },
       {
         path: "apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
         productionOwner: /no approved local production execution path/u,
@@ -595,12 +578,178 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("phone-call notification enum matches schema for fresh and previously applied Telegram-only histories", async () => {
+    const enumName = "HostedPhoneCallResultNotificationChannel";
+    const schema = await readFile(path.join(appRoot, "prisma/schema.prisma"), "utf8");
+    const schemaBody = schema.match(new RegExp(`enum ${enumName}\\s*\\{([^}]+)\\}`, "u"))?.[1];
+    assert.ok(schemaBody);
+    const expected = schemaBody.trim().split(/\s+/u).sort();
+    const migrationsDir = path.join(appRoot, "prisma/migrations");
+    const fresh = new Set<string>();
+    const previouslyApplied = new Set(["telegram"]);
+    let created = false;
+    let forwardAdds = 0;
+    for (const entry of (await readdir(migrationsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+      const sql = await readFile(path.join(migrationsDir, entry.name, "migration.sql"), "utf8");
+      const create = sql.match(new RegExp(`CREATE TYPE "${enumName}"\\s+AS ENUM \\(([^)]+)\\)`, "u"));
+      if (create) {
+        created = true;
+        for (const value of create[1].matchAll(/'([^']+)'/gu)) fresh.add(value[1]);
+      }
+      for (const add of sql.matchAll(new RegExp(`ALTER TYPE "${enumName}" ADD VALUE IF NOT EXISTS '([^']+)'`, "gu"))) {
+        assert.ok(created, "enum extension must follow its creation migration");
+        fresh.add(add[1]);
+        previouslyApplied.add(add[1]);
+        forwardAdds += 1;
+      }
+    }
+    assert.ok(created);
+    assert.ok(forwardAdds > 0, "an applied Telegram-only history needs a forward migration");
+    assert.deepEqual([...fresh].sort(), expected);
+    assert.deepEqual([...previouslyApplied].sort(), expected);
+  });
+
   test("keeps existing hosted web Prisma migration history exempt", async () => {
     await assert.doesNotReject(() =>
       assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
         path.join(appRoot, "prisma", "migrations"),
       ),
     );
+  });
+
+  test("limits Linq recovery compatibility to its additive defaulted fields", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261008210000_linq_bounded_terminal_recovery";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nDROP TABLE "hosted_member";`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the game graph expansion to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261021180000_game_heart_rate_entry";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nDROP TABLE "game_entry";`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the cold-ingest media expansion to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261102120000_hosted_cold_ingest_media";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nALTER TABLE hosted_runtime_media DROP COLUMN expires_at;`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP COLUMN" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits many-game compatibility to the two obsolete roster guards", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "game-many-migration-"));
+    const migrationId = "20261101230000_game_many_per_pair";
+    try {
+      const directory = path.join(root, migrationId);
+      await mkdir(directory);
+      const sql = await readFile(path.join(appRoot, "prisma/migrations", migrationId, "migration.sql"), "utf8");
+      await writeFile(path.join(directory, "migration.sql"), sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(root), []);
+      await writeFile(path.join(directory, "migration.sql"), sql + '\nALTER TABLE "game" DROP COLUMN "terms";');
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(root)).length, 1);
+      await writeFile(path.join(directory, "migration.sql"), sql + '\nDROP INDEX "unrelated_index";');
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(root)).length, 1);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  test("limits negotiation compatibility to the exact reviewed game constraint expansion", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261022071000_game_negotiation";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      for (const [extra, reason] of [
+        ['ALTER TABLE "game" ADD CONSTRAINT "unreviewed_check" CHECK ("length_days" > 7);', "ADD CONSTRAINT CHECK"],
+        ['ALTER TABLE "game" DROP CONSTRAINT "game_length_days_check";', "DROP CONSTRAINT"],
+        ['DROP TABLE "game_entry";', "DROP TABLE"],
+      ]) {
+        await writeMigrationSql(migrationsDir, migrationId, `${sql}\n${extra}`);
+        assert.deepEqual(
+          (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ reason }) => reason),
+          [reason],
+        );
+      }
+      // Reusing a reviewed constraint name cannot authorize a tighter check.
+      await writeMigrationSql(migrationsDir, migrationId, sql.replace("'invited', 'negotiating',", "'negotiating',"));
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))[0]?.reason, "ADD CONSTRAINT CHECK");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      await writeMigrationSql(migrationsDir, "20261022071001_unreviewed_game_change", sql);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ migrationId }) => migrationId),
+        ["20261022071001_unreviewed_game_change"],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits v1 compatibility to the exact reviewed game constraint expansion", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261022220000_game_v1";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      for (const [extra, reason] of [
+        ['ALTER TABLE "game" ADD CONSTRAINT "unreviewed_check" CHECK ("length_days" > 7);', "ADD CONSTRAINT CHECK"],
+        ['ALTER TABLE "game" DROP CONSTRAINT "game_status_check";', "DROP CONSTRAINT"],
+        ['DROP TABLE "game_entry";', "DROP TABLE"],
+      ]) {
+        await writeMigrationSql(migrationsDir, migrationId, `${sql}\n${extra}`);
+        assert.deepEqual(
+          (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ reason }) => reason),
+          [reason],
+        );
+      }
+      // Reusing a reviewed constraint name cannot authorize a tighter check.
+      await writeMigrationSql(migrationsDir, migrationId, sql.replace("BETWEEN 1 AND 365", "BETWEEN 3 AND 365"));
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))[0]?.reason, "ADD CONSTRAINT CHECK");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      await writeMigrationSql(migrationsDir, "20261022220001_unreviewed_game_change", sql);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ migrationId }) => migrationId),
+        ["20261022220001_unreviewed_game_change"],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
   });
 
   test("limits the detached direct-proof predeploy exception to its proved DDL", async () => {
@@ -932,6 +1081,22 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("permits only the exact owner-approved direct game storage cutover", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "game-storage-cutover-"));
+    const migrationId = "20261102230000_game_seat_storage";
+    const sql = await readFile(new URL(`../prisma/migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
+    try {
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nDROP TABLE game_profile;`);
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).length, 1);
+      await writeMigrationSql(migrationsDir, "20261102230001_unreviewed_game_cutover", sql);
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).length, 2);
+    } finally {
+      await rm(migrationsDir, { recursive: true, force: true });
+    }
+  });
+
   test("blocks newly introduced backdated destructive Prisma migrations", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -1186,13 +1351,17 @@ describe("hosted web production migration guard", () => {
           events.push("verify:complete");
           verifiedUrls.push(databaseUrl);
         },
+        async verifySchemaContract(databaseUrl) {
+          events.push("schema");
+          verifiedUrls.push(databaseUrl);
+        },
       },
     );
 
     const expectedOwnerUrl =
       "postgresql://direct.example.com:5432/app?sslmode=require&options=-c%20role%3Dpostgres";
-    assert.deepEqual(events, ["verify:start", "verify:complete", "run"]);
-    assert.deepEqual(verifiedUrls, [expectedOwnerUrl]);
+    assert.deepEqual(events, ["verify:start", "verify:complete", "run", "schema"]);
+    assert.deepEqual(verifiedUrls, [expectedOwnerUrl, expectedOwnerUrl]);
     assert.deepEqual(calls, [
       {
         command: hostedWebPrismaMigrateDeployCommand.command,
@@ -2031,7 +2200,7 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
-    assert.match(productionNextBuildScript, /typecheck_old_space_mb=6144/u);
+    assert.match(productionNextBuildScript, /\.\.\/\.\.\/scripts\/run-typescript\.mjs web/u);
     assert.match(
       productionNextBuildScript,
       /build_cache_epoch=webpack-next-16\.3-v6-isolated-worker-no-webpack-cache/u,
@@ -2551,7 +2720,7 @@ fi
         },
         {
           path: "/api/internal/hosted-execution/retention/external/cron",
-          schedule: "35 * * * *",
+          schedule: "2-59/5 * * * *",
         },
         {
           path: "/api/internal/hosted-execution/retention/nonces/cron",
@@ -2581,7 +2750,7 @@ fi
       ),
       {
         path: "/api/internal/hosted-growth/usage-referral/cron",
-        schedule: "* * * * *",
+        schedule: "*/5 * * * *",
       },
     );
     assert.deepEqual(
@@ -2766,3 +2935,135 @@ class FakeContractMigrationDatabase implements HostedWebContractMigrationClient 
     return { rows: [] };
   }
 }
+
+describe("hosted web schema presence contract", () => {
+  const contract: HostedWebSchemaContract = {
+    enums: [{ name: "HostedPhoneCallResultNotificationChannel", values: ["telegram", "linq"] }],
+    tables: [{ name: "phone_call", columns: ["id", "channel"] }],
+  };
+
+  test("passes a matching catalog and ignores extra database objects and cosmetic metadata", async () => {
+    const catalog = {
+      enums: [
+        { name: contract.enums[0]!.name, values: ["telegram", "linq", "future"] },
+        { name: "old_enum", values: ["old"] },
+      ],
+      tables: [
+        { name: "phone_call", columns: ["id", "channel", "old_column"],
+          defaults: { id: "different" }, indexes: ["different_name"],
+          constraints: ["different_pk"], timestampPrecision: 6 },
+        { name: "old_table", columns: ["id"] },
+      ],
+    };
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, contract), []);
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, catalog), []);
+    let queries = 0;
+    await assertHostedWebSchemaContract({
+      async query(sql, values) {
+        queries += 1;
+        assert.match(sql, /LIMIT \$2/u);
+        assert.equal(values?.[1], 1);
+        return { rows: sql.includes("pg_catalog.pg_enum") ? catalog.enums : catalog.tables };
+      },
+    }, contract);
+    assert.equal(queries, 2);
+  });
+
+  test("lists the missing enum value without catalog data or connection details", async () => {
+    const catalog = {
+      ...contract,
+      enums: [{ name: contract.enums[0]!.name, values: ["telegram"] }],
+    };
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, catalog), [
+      'enum value "HostedPhoneCallResultNotificationChannel"."linq"',
+    ]);
+    await assert.rejects(() => assertHostedWebSchemaContract({
+      async query(sql) {
+        return { rows: sql.includes("pg_catalog.pg_enum") ? catalog.enums : catalog.tables };
+      },
+    }, contract), {
+      message: 'Hosted web schema contract failed; missing database objects:\n- enum value "HostedPhoneCallResultNotificationChannel"."linq"',
+    });
+  });
+
+  test("reports a missing enum or table once, and a missing column precisely", () => {
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, { enums: [], tables: [] }), [
+      'enum "HostedPhoneCallResultNotificationChannel"',
+      'table "phone_call"',
+    ]);
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, {
+      ...contract, tables: [{ name: "phone_call", columns: ["id"] }],
+    }), ['column "phone_call"."channel"']);
+  });
+
+  test("fails catalog verification for a missing table or column", async () => {
+    for (const tables of [[], [{ name: "phone_call", columns: ["id"] }]]) {
+      await assert.rejects(() => assertHostedWebSchemaContract({
+        async query(sql) {
+          return { rows: sql.includes("pg_catalog.pg_enum") ? contract.enums : tables };
+        },
+      }, contract), {
+        message: "Hosted web schema contract failed; missing database objects:\n- "
+          + (tables.length === 0 ? 'table "phone_call"' : 'column "phone_call"."channel"'),
+      });
+    }
+  });
+
+  test("derives all enum, table and stored column mappings from schema, excluding relations", async () => {
+    const expected = await readHostedWebSchemaContract(`
+      datasource db {
+        provider = "postgresql"
+      }
+      enum Channel {
+        TELEGRAM @map("telegram")
+        LINQ @map("linq")
+        @@map("delivery_channel")
+      }
+      enum Unused {
+        UNUSED
+      }
+      model Call {
+        id String @id
+        channel Channel @map("delivery_channel")
+        ownerId String @map("owner_id")
+        owner Owner @relation(fields: [ownerId], references: [id])
+        @@map("phone_call")
+      }
+      model Owner {
+        id String @id
+        calls Call[]
+      }
+    `);
+    assert.deepEqual(expected, {
+      enums: [
+        { name: "delivery_channel", values: ["telegram", "linq"] },
+        { name: "Unused", values: ["UNUSED"] },
+      ],
+      tables: [
+        { name: "phone_call", columns: ["id", "delivery_channel", "owner_id"] },
+        { name: "Owner", columns: ["id"] },
+      ],
+    });
+  });
+
+  test("propagates schema failure after migration success and skips verification after migration failure", async () => {
+    for (const migrationFails of [false, true]) {
+      const events: string[] = [];
+      await assert.rejects(() => runHostedWebPrismaMigrateDeploy(
+        { DATABASE_URL: "postgresql://local.example.test/app" },
+        async () => {
+          events.push("migrate");
+          if (migrationFails) throw new Error("migration failed");
+        },
+        {
+          async verifyMigrationOwner() { events.push("owner"); },
+          async verifySchemaContract() {
+            events.push("schema");
+            throw new Error("schema missing linq");
+          },
+        },
+      ), { message: migrationFails ? "migration failed" : "schema missing linq" });
+      assert.deepEqual(events, migrationFails ? ["owner", "migrate"] : ["owner", "migrate", "schema"]);
+    }
+  });
+});

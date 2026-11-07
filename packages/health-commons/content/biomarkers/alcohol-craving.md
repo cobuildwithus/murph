@@ -68,24 +68,15 @@ biomarker:
     - relationship conflict
     - withdrawal-like symptoms
 relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
--
-  type: cites
-  target: source_artifact:doi-10.1080-07347324.2024.2419616
--
-  type: cites
-  target: source_artifact:pmid-29668736
--
-  type: cites
-  target: source_artifact:pmid-30016350
--
-  type: cites
-  target: source_artifact:pmid-28957493
+  - type: cites
+    target: source_artifact:doi-10.1080-07347324.2024.2419616
+  - type: cites
+    target: source_artifact:pmid-29668736
+  - type: cites
+    target: source_artifact:pmid-30016350
+  - type: cites
+    target: source_artifact:pmid-28957493
+
 claims:
 -
   claimId: craving-not-guaranteed-to-improve

@@ -187,7 +187,7 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
         credentialSource: "platform",
         materializeWorkspaceArtifacts: async () => ({
           materializedArtifactPaths: new Set<string>(),
-          missingArtifactPaths: new Set<string>(),
+          missingArtifactPaths: new Map(),
         }),
         memberId: TEST_USER_ID,
         model: null,

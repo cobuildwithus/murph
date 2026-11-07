@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
@@ -8,6 +9,7 @@ import {
   verifyHostedWebMigrationOwner,
   withHostedWebMigrationOwner,
 } from "./hosted-web-migration-owner";
+import { verifyHostedWebSchemaContract } from "./hosted-web-schema-contract";
 
 const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOSTED_WEB_PRISMA_MIGRATIONS_DIR = path.join(CONFIG_DIR, "prisma", "migrations");
@@ -105,6 +107,77 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261102120000_hosted_cold_ingest_media",
+    // Widens media_kind with integration-ingest and adds a check that only
+    // constrains that new kind; every existing row and old writer stays valid.
+    // Atomic NOT VALID replacement bounds the metadata lock before validation.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20261021180000_game_heart_rate_entry",
+    // Only widens photo/excuse to include heart_rate; all old rows and writers
+    // remain valid. Atomic NOT VALID replacement bounds the metadata lock;
+    // retained-row validation runs separately before new native writes.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20261008210000_linq_bounded_terminal_recovery",
+    // Constant zero/empty-array defaults preserve existing rows and old inserts.
+    // All other new fields are nullable; no recovery starts during migration.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915223000_hosted_runtime_legacy_import",
+    // The new cursor/count fields have constant defaults, so existing rows and
+    // old writers retain the empty-inventory shape before cutover begins.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915224500_hosted_runtime_upload_recovery",
+    // All three new fields are nullable. The kind check only widens admission;
+    // old writers produce the accepted all-null upload/key pair. The broad
+    // ADD COLUMN scanner also matches the later pair check's IS NOT NULL.
+    new Set(["ADD COLUMN NOT NULL", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915230000_hosted_runtime_media_registration",
+    // A constant true default preserves existing registered/imported metadata;
+    // only the new admission writer explicitly creates provisional false rows.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915234500_hosted_runtime_member_cutover",
+    // Backend phase is a new column with a legacy default accepted by its
+    // new check. Predeploy leaves legacy serving unchanged; campaign start is
+    // a separate operation after compatible readers have converged.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260915234600_hosted_runtime_rolling_campaign",
+    // This replacement only widens the existing phase vocabulary. Old phase
+    // values remain valid; predeploy does not start the rolling campaign.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915234700_hosted_runtime_managed_snapshots",
+    // Every new byte-verification field is nullable and the all-null old-writer
+    // shape passes. The broad ADD COLUMN scanner also sees the later check.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260916044500_hosted_runtime_member_enrollment",
+    // The phase check widens to pending. The insert trigger grants no new
+    // execution authority and changes ownership only after rolling begins;
+    // both current and older creators remain valid in the legacy deploy window.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260916053000_hosted_runtime_late_sources",
+    // The selection is nullable. Existing source rows receive the baseline
+    // default accepted by the new check; predeploy changes no serving phase.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
     "20260810010000_member_owned_device_provider_applications",
     // Both application-binding columns are introduced nullable in this same
     // migration, so every existing row has the accepted all-null shape. The
@@ -177,6 +250,44 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // before a new Web build can present or persist it.
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
+  [
+    "20260910210000_require_hosted_phone_call_encrypted_private_content",
+    // Every supported phone writer already supplies a nonempty encrypted brief
+    // and never writes plaintext. Validate the completed hosted deletion before
+    // removing readers; retain legacy columns through the old reader drain.
+    new Set(["ADD CONSTRAINT CHECK", "ALTER COLUMN SET NOT NULL"]),
+  ],
+  [
+    "20260922170000_hosted_sponsorship_topup_margin",
+    // A strict expansion from the historical $5 grant to $4 or $5 grants.
+    // Preserve old writers and frozen purchases before deploying the new catalog.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+]);
+
+// Negotiation adds a status and reserves its pair without changing any old
+// status/roster combination. Exempt only these exact constraint replacements;
+// another check or drop in the same migration must still fail closed.
+const gameNegotiationCompatibleStatements = new Set([
+  'ALTER TABLE "game" DROP CONSTRAINT IF EXISTS "game_status_check"',
+  `ALTER TABLE "game" ADD CONSTRAINT "game_status_check" CHECK ("status" IN ('invited', 'negotiating', 'live', 'settled', 'void')) NOT VALID`,
+  'ALTER TABLE "game" DROP CONSTRAINT IF EXISTS "game_live_roster_check"',
+  `ALTER TABLE "game" ADD CONSTRAINT "game_live_roster_check" CHECK (("live_roster_key" IS NULL) = ("status" NOT IN ('negotiating', 'live'))) NOT VALID`,
+]);
+
+// Retire only the redundant roster guards; old writers remain valid while
+// the nullable column survives until postdeploy cleanup.
+const gameManyPerPairCompatibleStatements = new Set([
+  'ALTER TABLE "game" DROP CONSTRAINT IF EXISTS "game_live_roster_check"',
+  'DROP INDEX IF EXISTS "game_live_roster_key_key"',
+]);
+
+// V1 only widens existing checks. No other constraint changes are exempt.
+const gameV1CompatibleStatements = new Set([
+  'ALTER TABLE "game" DROP CONSTRAINT "game_length_days_check"',
+  'ALTER TABLE "game" ADD CONSTRAINT "game_length_days_check" CHECK ("length_days" BETWEEN 1 AND 365) NOT VALID',
+  'ALTER TABLE "game_entry" DROP CONSTRAINT "game_entry_attempt_check"',
+  `ALTER TABLE "game_entry" ADD CONSTRAINT "game_entry_attempt_check" CHECK ("kind" IN ('photo', 'heart_rate', 'words', 'route', 'reps', 'excuse') AND "attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse')) NOT VALID`,
 ]);
 
 const incompatiblePredeploySqlPatterns = [
@@ -222,6 +333,7 @@ export type HostedWebMigrationRunner = (
 export interface HostedWebPrismaMigrateDeployOptions {
   prismaMigrationsDir?: string;
   verifyMigrationOwner?: (databaseUrl: string) => Promise<void>;
+  verifySchemaContract?: (databaseUrl: string) => Promise<void>;
 }
 
 export interface HostedWebMigrationDatabaseUrl {
@@ -341,6 +453,7 @@ export async function runHostedWebPrismaMigrateDeploy(
     hostedWebPrismaMigrateDeployCommand.args,
     childEnvironment,
   );
+  await (options.verifySchemaContract ?? verifyHostedWebSchemaContract)(ownerDatabaseUrl);
 }
 
 export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
@@ -377,7 +490,18 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     }
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
-    const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"));
+    const sql = await readFile(sqlPath, "utf8");
+    // Owner-approved direct game cutover (2026-11-02): exact bytes only.
+    // Old Web game routes are unavailable until the replacement deploy is live.
+    if (entry.name === "20261102230000_game_seat_storage"
+      && createHash("sha256").update(sql).digest("hex") === "4e0e426e22ebeda0969b90e91f0543dc1efcc33eaeb6eb24bf78e1397be18dff") continue;
+    const sqlStatements = splitSqlStatements(sql)
+      .filter((statement) => entry.name !== "20261022071000_game_negotiation"
+        || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
+      .filter((statement) => entry.name !== "20261022220000_game_v1"
+        || !gameV1CompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
+      .filter((statement) => entry.name !== "20261101230000_game_many_per_pair"
+        || !gameManyPerPairCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(

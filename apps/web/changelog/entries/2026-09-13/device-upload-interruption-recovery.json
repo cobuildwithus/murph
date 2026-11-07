@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "device-upload-interruption-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer delays after brief device sync interruptions",
+    "summary": "Murph can recover from a brief interruption while saving a device update without waiting for another sync pass.",
+    "details": "Recovery stays within the current sync attempt's time limit. Longer interruptions still use the existing retry schedule.",
+    "relevanceTags": [
+      "devices"
+    ],
+    "sourcePullRequests": [
+      3409
+    ]
+  }
+}

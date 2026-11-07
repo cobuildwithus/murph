@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 90,
+  "item": {
+    "id": "invite-and-group-link-pages",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Simpler pages for invites, groups, and calendar links",
+    "summary": "Links from Murph for joining a group, accepting a Family invite, adding an appointment, or opening a recap now show one clear thing to do.",
+    "details": "Joining a group is shorter too: pick what to share from a plain list, and tap Details to see exactly what each choice shares.",
+    "relevanceTags": ["groups", "family"],
+    "sourcePullRequests": [4628]
+  }
+}

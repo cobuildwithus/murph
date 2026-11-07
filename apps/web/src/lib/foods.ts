@@ -5,22 +5,12 @@ import type {
   ProductLabelDetail,
   ProductLabelsQueryClient,
   ProductLabelSearchItem,
-  PublicProductLabelRecord,
-  PublicProductLabelSearchItem,
-  PublicProductTestEvidence,
 } from "./product-labels";
 import {
   createProductLabelsQueries,
-  createPublicProductLabelsQueries,
   getDefaultProductLabelsPool,
 } from "./product-labels";
-import { normalizePublicProductLabel } from "./public-products/normalize-label";
-import {
-  getPopularFoodBrands,
-  getPopularFoodCategorySearchQuery,
-  getPopularFoodDirectBrandNames,
-  orderFoodsByPopularity,
-} from "./food-popularity";
+import { normalizeFoodNutritionLabel } from "./food-nutrition-label";
 
 const GENERIC_FOOD_DATA_ORIGINS = [
   "usda_foundation",
@@ -34,8 +24,10 @@ const FOOD_MEAL_NUTRIENT_NAME_PATTERNS = [
   /^(?:calories?|energy)(?:\b|\s*\()/u,
   /^protein\b/u,
   /^(?:carbohydrate|total carbohydrate|carbs?)\b/u,
-  /^(?:total lipid \(fat\)|total fat|fat)\b/u,
-  /^(?:fiber|dietary fiber|fiber, total dietary)\b/u,
+  // USDA names fat "Total lipid (fat)"; no word boundary follows its ")".
+  /^(?:total lipid \(fat\)|total fat\b|fat\b)/u,
+  // Foundation foods report "Total dietary fiber (AOAC 2011.25)".
+  /^(?:fiber|dietary fiber|fiber, total dietary|total dietary fiber)\b/u,
 ] as const;
 
 export type FoodSearchItem = ProductLabelSearchItem;
@@ -46,8 +38,8 @@ export type FoodNutritionSearchItem = Omit<
 > & {
   contaminantSummary: FoodContaminantSearchSummary;
   label: {
-    nutrition: ReturnType<typeof normalizePublicProductLabel>["nutrition"];
-    serving: ReturnType<typeof normalizePublicProductLabel>["serving"];
+    nutrition: ReturnType<typeof normalizeFoodNutritionLabel>["nutrition"];
+    serving: ReturnType<typeof normalizeFoodNutritionLabel>["serving"];
   };
 };
 
@@ -111,9 +103,6 @@ export type FoodContaminantSearchSummary = {
 
 let defaultFoodsQueriesInstance: ReturnType<typeof createFoodsQueries> | null =
   null;
-let defaultPublicFoodsQueriesInstance: ReturnType<
-  typeof createPublicFoodsQueries
-> | null = null;
 
 export function createFoodsQueries(client: ProductLabelsQueryClient): {
   getFoodById: (input: {
@@ -144,58 +133,6 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
   };
 }
 
-export function createPublicFoodsQueries(client: ProductLabelsQueryClient): {
-  searchPublicFoods: (input: {
-    comparisonReadyOnly?: boolean;
-    foodSearchOrder?: "relevance" | "evidence" | "popular";
-    limit: number;
-    offset?: number;
-    q: string;
-  }) => Promise<PublicProductLabelSearchItem[]>;
-  getPublicFoodRecordById: (input: {
-    id: string;
-  }) => Promise<PublicProductLabelRecord | null>;
-  getPublicFoodEvidence: (input: {
-    id: string;
-  }) => Promise<PublicProductTestEvidence>;
-} {
-  const queries = createPublicProductLabelsQueries(client, "foods", {
-    excludedDataOrigins: GENERIC_FOOD_DATA_ORIGINS,
-  });
-
-  return {
-    searchPublicFoods: async (input) => {
-      const popularBrands =
-        input.foodSearchOrder === "popular"
-          ? getPopularFoodBrands(input.q)
-          : [];
-      const directBrandNames =
-        input.foodSearchOrder === "popular"
-          ? getPopularFoodDirectBrandNames(input.q)
-          : [];
-      const popularCategorySearchQuery =
-        input.foodSearchOrder === "popular"
-          ? getPopularFoodCategorySearchQuery(input.q)
-          : null;
-      const rows = await queries.searchCompact({
-        ...input,
-        popularBrandKeys: popularBrands.map((brand) => brand.key),
-        popularBrandNames: [
-          ...new Set(
-            directBrandNames.flatMap((name) => [name, name.toUpperCase()]),
-          ),
-        ],
-        popularCategorySearchQuery,
-      });
-      return input.foodSearchOrder === "popular"
-        ? orderFoodsByPopularity(rows, input.q)
-        : rows;
-    },
-    getPublicFoodRecordById: queries.getRecordById,
-    getPublicFoodEvidence: queries.getEvidence,
-  };
-}
-
 export async function searchFoods(input: {
   q: string;
   limit: number;
@@ -222,8 +159,7 @@ export async function getFoodByUpc(input: {
 export function toFoodNutritionSearchItem(
   item: FoodSearchItem,
 ): FoodNutritionSearchItem {
-  const normalized = normalizePublicProductLabel({
-    kind: "food",
+  const normalized = normalizeFoodNutritionLabel({
     label: item.label,
     servingGrams: null,
   });
@@ -332,42 +268,10 @@ function toFoodContaminantSearchSummary(
   };
 }
 
-export async function searchPublicFoods(input: {
-  comparisonReadyOnly?: boolean;
-  foodSearchOrder?: "relevance" | "evidence" | "popular";
-  q: string;
-  limit: number;
-  offset?: number;
-}): Promise<PublicProductLabelSearchItem[]> {
-  return await defaultPublicFoodsQueries().searchPublicFoods(input);
-}
-
-export async function getPublicFoodRecordById(input: {
-  id: string;
-}): Promise<PublicProductLabelRecord | null> {
-  return await defaultPublicFoodsQueries().getPublicFoodRecordById(input);
-}
-
-export async function getPublicFoodEvidence(input: {
-  id: string;
-}): Promise<PublicProductTestEvidence> {
-  return await defaultPublicFoodsQueries().getPublicFoodEvidence(input);
-}
-
 function defaultFoodsQueries(): ReturnType<typeof createFoodsQueries> {
   defaultFoodsQueriesInstance ??= createFoodsQueries(
     getDefaultProductLabelsPool(),
   );
 
   return defaultFoodsQueriesInstance;
-}
-
-function defaultPublicFoodsQueries(): ReturnType<
-  typeof createPublicFoodsQueries
-> {
-  defaultPublicFoodsQueriesInstance ??= createPublicFoodsQueries(
-    getDefaultProductLabelsPool(),
-  );
-
-  return defaultPublicFoodsQueriesInstance;
 }

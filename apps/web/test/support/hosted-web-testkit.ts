@@ -1,3 +1,4 @@
+export { readPostgresRuntimeIdentityForTest, startStuckPostgresRuntimeForTest, agePostgresRuntimeForTest } from "./hosted-runtime-owner-testkit";
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,
@@ -9,6 +10,7 @@ export {
 export {
   issueHostedWebInviteForTest,
   readHostedBillingProjectionForTest,
+  readHostedBillingUsageGateForTest,
   readHostedFamilyProjectionForTest,
   seedHostedBillingMemberForTest,
   waitForHostedBillingProjectionForTest,
@@ -67,7 +69,7 @@ import { readdir, readFile } from "node:fs/promises";
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
-import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
+import type { HostedPhoneCallBrief } from "@murphai/hosted-execution/phone-calls";
 import {
   parseHostedExecutionWake,
   parseHostedRuntimeLatencyTraceEvent,
@@ -98,6 +100,8 @@ export async function postHostedDeviceSyncSnapshotForTest(request: Request): Pro
   return POST(request);
 }
 
+// Mixed-version callbacks use the real Web authentication and canonical consumer.
+
 // The same pre-parse body limit as usage ingestion, without callback auth or DB
 // effects. Keep cross-app contract tests on this existing public testkit seam.
 export async function readHostedUsageRecordRequestForTest(
@@ -116,6 +120,14 @@ const hostedRuntimeLogTestMigrationsRoot = new URL(
   import.meta.url,
 );
 const hostedPrismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
+const hostedLinqDeliveryStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-delivery-store.ts",
+  import.meta.url,
+).href;
+const hostedLinqObservabilityIdentifiersModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-observability-identifiers.ts",
+  import.meta.url,
+).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-mailbox/store.ts",
   import.meta.url,
@@ -140,10 +152,6 @@ const hostedActionApprovalModuleSpecifier = new URL(
   "../../src/lib/action-approvals.ts",
   import.meta.url,
 ).href;
-const hostedAssistantModelPreferenceModuleSpecifier = new URL(
-  "../../src/lib/hosted-onboarding/assistant-model-preference.ts",
-  import.meta.url,
-).href;
 const hostedUsageCreditModuleSpecifier = new URL(
   "../../src/lib/hosted-execution/usage-credits.ts",
   import.meta.url,
@@ -162,6 +170,10 @@ const hostedVaultShareGrantStoreModuleSpecifier = new URL(
 ).href;
 const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-vault-share/projection-store.ts",
+  import.meta.url,
+).href;
+const hostedPhoneCallCryptoModuleSpecifier = new URL(
+  "../../src/lib/phone-calls/crypto.ts",
   import.meta.url,
 ).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
@@ -313,6 +325,7 @@ interface HostedTestPrismaFactoryClient {
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    deleteMany(args: { where: { id: { in: string[] } } }): Promise<{ count: number }>;
     update(args: unknown): Promise<{ id: string }>;
   };
 }
@@ -436,6 +449,15 @@ interface HostedPhoneCallForTestPrismaClient {
   };
 }
 
+interface HostedPhoneCallCryptoModule {
+  encryptHostedPhoneCallBrief(input: {
+    callId: string;
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    value: HostedPhoneCallBrief;
+  }): Promise<string>;
+}
+
 export interface HostedPhoneCallForTest {
   analyzedAt: Date | null;
   endedAt: Date | null;
@@ -445,7 +467,6 @@ export interface HostedPhoneCallForTest {
   providerCallId: string | null;
   requestKey: string;
   resultEncrypted: string | null;
-  resultJson: unknown;
   status: "calling" | "completed" | "ended" | "failed" | "needs_user" | "starting";
 }
 
@@ -456,6 +477,8 @@ interface HostedUsageLimitForTestPrismaClient {
   };
   hostedLinqDelivery: {
     findMany(args: unknown): Promise<HostedLinqDeliveryForTest[]>;
+    findUnique(args: unknown): Promise<HostedLinqDeliveryForTest | null>;
+    update(args: unknown): Promise<unknown>;
   };
 }
 
@@ -607,6 +630,30 @@ interface HostedTestPrismaModule {
     databaseUrl: string;
     poolMax?: number;
   }): HostedTestPrismaClient;
+}
+
+interface HostedLinqFirstTurnSeedStoreModule {
+  HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA: string;
+  HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE: string;
+  HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE: string;
+  claimHostedLinqDeliveryProviderDispatchTx(input: {
+    expectedAttemptedAt?: Date;
+    idempotencyKey: string;
+    linqChatId: string;
+    prisma: unknown;
+    source: string;
+    sourceRef: string;
+    status: string;
+    targetKind: string;
+    template: string;
+  }): Promise<{ attemptedAt?: Date; claimed: boolean; id: string | null }>;
+  markHostedLinqDeliverySendFailedTx(input: {
+    expectedAttemptedAt: Date;
+    failureCode: string;
+    idempotencyKey: string;
+    linqChatId: string;
+    prisma: unknown;
+  }): Promise<void>;
 }
 
 interface HostedMailboxAppendForTestStoreModule {
@@ -809,18 +856,6 @@ interface HostedActionApprovalModuleForTest {
     now: Date;
     prisma: unknown;
   }): Promise<HostedActionApprovalIdentityForTest>;
-}
-
-interface HostedAssistantModelPreferenceModule {
-  updateHostedMemberAssistantConfigurationTx(input: {
-    memberId: string;
-    prisma: unknown;
-    provider: HostedAssistantProvider;
-  }): Promise<{
-    effectiveProviderUpdated: boolean;
-    provider: HostedAssistantProvider;
-    updated: boolean;
-  }>;
 }
 
 interface HostedUsageCreditModule {
@@ -1659,6 +1694,71 @@ export async function seedHostedWorkspaceWakeForTest(input: {
   });
 }
 
+/** Seeds a rejected first-turn retry through the delivery owners, for held-row journeys. */
+export async function seedHostedLinqHeldFirstTurnForTest(input: {
+  chatId: string;
+  environment?: NodeJS.ProcessEnv;
+  eventId: string;
+  idempotencyKey: string;
+  memberId: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async ({ prisma }) => {
+    const store = await import(hostedLinqDeliveryStoreModuleSpecifier) as HostedLinqFirstTurnSeedStoreModule;
+    const claimInput = {
+      idempotencyKey: input.idempotencyKey,
+      linqChatId: input.chatId,
+      prisma,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: input.eventId,
+      targetKind: "thread",
+      template: store.HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    };
+    const reserved = await store.claimHostedLinqDeliveryProviderDispatchTx({
+      ...claimInput, status: "attempted",
+    });
+    const dispatched = await store.claimHostedLinqDeliveryProviderDispatchTx({
+      ...claimInput,
+      expectedAttemptedAt: reserved.attemptedAt,
+      status: "provider_dispatch_started",
+    });
+    if (!dispatched.claimed || !dispatched.id || !dispatched.attemptedAt) {
+      throw new Error("Hosted Linq held first-turn seed could not claim dispatch.");
+    }
+    await prisma.hostedLinqDelivery.update({
+      data: {
+        payloadCiphertext: "synthetic-sealed-reply",
+        payloadOwnerMemberId: input.memberId,
+        payloadSchema: store.HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
+      },
+      where: { id: dispatched.id },
+    });
+    await store.markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: dispatched.attemptedAt,
+      failureCode: store.HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
+      idempotencyKey: input.idempotencyKey,
+      linqChatId: input.chatId,
+      prisma,
+    });
+  });
+}
+
+export async function readHostedLinqFirstTurnDeliveryForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  idempotencyKey: string;
+}): Promise<Pick<HostedLinqDeliveryForTest, "acceptedAt" | "failureCode" | "status"> | null> {
+  return withHostedWebTestkitDeps(input.environment, async ({ prisma }) => {
+    const identifiers = await import(hostedLinqObservabilityIdentifiersModuleSpecifier) as {
+      createHostedLinqDeliveryIdempotencyLookupKey(value: string): string | null;
+    };
+    return await prisma.hostedLinqDelivery.findUnique({
+      select: { acceptedAt: true, failureCode: true, status: true },
+      where: {
+        idempotencyKey: identifiers.createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey) ?? "",
+      },
+    });
+  });
+}
+
 export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   userId: string;
@@ -1828,23 +1928,33 @@ export async function seedHostedPhoneCallForTest(input: {
   providerCallId: string;
   requestKey: string;
 }): Promise<HostedPhoneCallForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedPhoneCall.create({
-      data: {
-        briefJson: {
-          allowTransferToUser: input.brief.allowTransferToUser ?? false,
-          goal: input.brief.goal,
-          instructions: input.brief.instructions ?? [],
-          shareableFacts: input.brief.shareableFacts ?? {},
-          successCriteria: input.brief.successCriteria,
-          timeZone: input.brief.timeZone,
-          to: {
-            ...input.brief.to,
-          },
-          ...(input.brief.callerName
-            ? { callerName: input.brief.callerName }
-            : {}),
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const cryptoModule = await import(
+      hostedPhoneCallCryptoModuleSpecifier
+    ) as HostedPhoneCallCryptoModule;
+    applyHostedWebTestkitEnvironment(deps.environment);
+    const briefEncrypted = await cryptoModule.encryptHostedPhoneCallBrief({
+      callId: input.id,
+      memberId: input.memberId,
+      prisma: deps.prisma,
+      value: {
+        allowTransferToUser: input.brief.allowTransferToUser ?? false,
+        goal: input.brief.goal,
+        instructions: input.brief.instructions ?? [],
+        shareableFacts: input.brief.shareableFacts ?? {},
+        successCriteria: input.brief.successCriteria,
+        timeZone: input.brief.timeZone,
+        to: {
+          ...input.brief.to,
         },
+        ...(input.brief.callerName
+          ? { callerName: input.brief.callerName }
+          : {}),
+      },
+    });
+    return deps.prisma.hostedPhoneCall.create({
+      data: {
+        briefEncrypted,
         id: input.id,
         memberId: input.memberId,
         originSessionId: input.originSessionId,
@@ -1853,8 +1963,8 @@ export async function seedHostedPhoneCallForTest(input: {
         requestKey: input.requestKey,
         status: "calling",
       },
-    })
-  );
+    });
+  });
 }
 
 export async function readHostedPhoneCallForTest(input: {
@@ -2302,6 +2412,7 @@ export async function signalHostedManualRunRuntimeForTest(input: {
 export async function signalHostedMailboxAppendRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
+  knownCheckpoint?: Parameters<HostedRuntimeSignalModule["signalHostedMailboxAppendRuntime"]>[0]["knownCheckpoint"];
   mailboxItemId: string;
 }): Promise<{
   signalAccepted: true;
@@ -2313,6 +2424,7 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
       client: deps.temporalSignalClient,
       environment: deps.environment,
       expectedUserId: input.expectedUserId ?? null,
+      knownCheckpoint: input.knownCheckpoint,
       mailboxItemId: input.mailboxItemId,
       prisma: deps.prisma,
     });
@@ -2386,27 +2498,6 @@ export async function signalHostedRuntimeWakeRuntimeForTest(input: {
       prisma: deps.prisma,
       userId: input.userId,
     });
-  });
-}
-
-export async function updateHostedMemberAssistantProviderForTest(input: {
-  environment?: NodeJS.ProcessEnv;
-  provider: HostedAssistantProvider;
-  userId: string;
-}): Promise<{
-  effectiveProviderUpdated: boolean;
-  provider: HostedAssistantProvider;
-  updated: boolean;
-}> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const preferenceModule = await loadHostedAssistantModelPreferenceModule();
-    return await deps.prisma.$transaction(async (tx) =>
-      await preferenceModule.updateHostedMemberAssistantConfigurationTx({
-        memberId: input.userId,
-        prisma: tx,
-        provider: input.provider,
-      })
-    );
   });
 }
 
@@ -2540,14 +2631,6 @@ async function loadHostedActionApprovalModuleForTest(): Promise<
   return await import(
     hostedActionApprovalModuleSpecifier
   ) as HostedActionApprovalModuleForTest;
-}
-
-async function loadHostedAssistantModelPreferenceModule(): Promise<
-  HostedAssistantModelPreferenceModule
-> {
-  return await import(
-    hostedAssistantModelPreferenceModuleSpecifier
-  ) as HostedAssistantModelPreferenceModule;
 }
 
 async function loadHostedUsageCreditModule(): Promise<HostedUsageCreditModule> {

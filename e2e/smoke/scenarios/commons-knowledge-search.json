@@ -1,0 +1,10 @@
+{
+  "id": "commons-knowledge-search",
+  "command": "vault-cli commons knowledge search <query> [--limit <n>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/search",
+  "purpose": "Documents the frozen command surface entry for release fixture coverage."
+}

@@ -14,9 +14,6 @@ import {
 import {
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
 } from '@murphai/hosted-execution/contracts'
-import type {
-  HostedGroupRunningBitProjection,
-} from '@murphai/hosted-execution/runtime-control'
 import { isMissingFileError, normalizeNullableString } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
@@ -32,7 +29,6 @@ const ASSISTANT_HOSTED_MAILBOX_ITEM_ID_PATTERN =
 export interface HostedMailboxAssistantInputItem {
   groupParticipantAdded?: true
   groupReactionContext?: string
-  groupRunningBit?: HostedGroupRunningBitProjection
   inputId: string
   mailboxItemId: string
   usageRunningLow?: true
@@ -50,7 +46,6 @@ export interface HostedMailboxAssistantInputItemInventory {
 export async function recordHostedMailboxAssistantInputItem(input: {
   groupParticipantAdded?: true
   groupReactionContext?: string
-  groupRunningBit?: HostedGroupRunningBitProjection
   inputId: string
   mailboxItemId: string
   usageRunningLow?: true
@@ -413,7 +408,6 @@ function normalizeHostedMailboxAssistantInputItem(
   const record = value as {
     groupParticipantAdded?: unknown
     groupReactionContext?: unknown
-    groupRunningBit?: unknown
     inputId?: unknown
     mailboxItemId?: unknown
     usageRunningLow?: unknown
@@ -441,54 +435,17 @@ function normalizeHostedMailboxAssistantInputItem(
   ) {
     throw new TypeError('groupReactionContext must be a bounded string when present.')
   }
-  const groupRunningBit = record.groupRunningBit === undefined
-    ? null
-    : normalizeHostedGroupRunningBitProjection(record.groupRunningBit)
   return {
     ...(record.groupParticipantAdded === true
       ? { groupParticipantAdded: record.groupParticipantAdded }
       : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
-    ...(groupRunningBit ? { groupRunningBit } : {}),
     inputId: normalizeAssistantInputEventId(record.inputId, 'inputId'),
     mailboxItemId: normalizeHostedMailboxItemId(
       record.mailboxItemId,
       'mailboxItemId',
     ),
     ...(record.usageRunningLow === true ? { usageRunningLow: true } : {}),
-  }
-}
-
-function normalizeHostedGroupRunningBitProjection(
-  value: unknown,
-): HostedGroupRunningBitProjection {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError('groupRunningBit must be an object when present.')
-  }
-  const record = value as Record<string, unknown>
-  if (
-    record.schema !== 'murph.group-sponsorship-bit.v1' ||
-    typeof record.expiresAt !== 'string' ||
-    !Number.isFinite(new Date(record.expiresAt).getTime()) ||
-    new Date(record.expiresAt).toISOString() !== record.expiresAt ||
-    typeof record.requestedBit !== 'string' ||
-    [...record.requestedBit].length < 1 ||
-    [...record.requestedBit].length > 240 ||
-    (
-      record.publicAlias !== null &&
-      (
-        typeof record.publicAlias !== 'string' ||
-        [...record.publicAlias].length > 80
-      )
-    )
-  ) {
-    throw new TypeError('groupRunningBit is invalid.')
-  }
-  return {
-    expiresAt: record.expiresAt,
-    publicAlias: record.publicAlias,
-    requestedBit: record.requestedBit,
-    schema: 'murph.group-sponsorship-bit.v1',
   }
 }
 

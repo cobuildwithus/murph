@@ -107,10 +107,11 @@ describe("hosted retention cron routes", () => {
   it("isolates external provider cleanup from the database owners", async () => {
     expect(externalRoute.maxDuration).toBe(300);
 
-    const response = await externalRoute.GET(requestFor("external"));
+    const request = requestFor("external");
+    const response = await externalRoute.GET(request);
 
     expectCronResponse(response);
-    expect(mocks.runHostedExternalRetentionCleanup).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedExternalRetentionCleanup).toHaveBeenCalledExactlyOnceWith({ request });
     await expect(response.json()).resolves.toMatchObject({
       cleanup: { expiredComputerRunsCleanedUp: 4 },
     });

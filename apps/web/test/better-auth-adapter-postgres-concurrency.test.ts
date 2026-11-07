@@ -6,6 +6,8 @@ import { deleteExpiredHostedAuthRecords } from "../src/lib/hosted-retention/clea
 import { getPrisma } from "../src/lib/prisma";
 import { createHostedBetterAuth } from "../src/lib/better-auth/auth";
 import { commitHostedAuthOtp, type HostedAuthOtp } from "../src/lib/better-auth/otp-transaction";
+import { sendHostedAuthSmsOtp, prepareHostedAuthSmsOtp } from "../src/lib/better-auth/sms-otp";
+import { syntheticSmsVerification } from "./support/better-auth-sms-verification";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { hostedAuthRateLimitStorage } from "../src/lib/better-auth/rate-limit";
 import { authLookupKey } from "../src/lib/better-auth/record-crypto";
@@ -17,8 +19,8 @@ const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['127.0.0.1', 'localhost'].includes(url.hostname)
-    || url.searchParams.has("host") || url.pathname !== "/murph_dev_better_auth_login") {
-    throw new Error("Authentication adapter proof requires its isolated local task database.");
+    || url.search || !/^\/(?:murph_dev_better_auth_login|murph_dev_twilio_verify|murph_test(?:_[a-z0-9_]+)?)$/u.test(url.pathname)) {
+    throw new Error("Authentication adapter proof requires an isolated local test database.");
   }
 }
 const options: BetterAuthOptions = {
@@ -46,6 +48,25 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     } finally { await prisma.hostedMember.deleteMany({ where: { id: memberId } }); }
   }
 
+  it("admits a suspended owner only for deletion and still honors revocation", () => fixture(async ({ memberId, token, adapter }) => {
+    const prisma = getPrisma();
+    const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma,
+      credential: token, transport: "native" as const };
+    const original = await readHostedAuthSession(configuration);
+    expect(original.session?.member.id).toBe(memberId);
+    await prisma.hostedMember.update({ where: { id: memberId }, data: { suspendedAt: new Date() } });
+    await expect(readHostedAuthSession(configuration)).rejects.toMatchObject({ code: "HOSTED_MEMBER_SUSPENDED" });
+    const retry = await readHostedAuthSession({ ...configuration, purpose: "account-deletion" });
+    expect(retry.session?.member.id).toBe(memberId);
+    expect(retry.session?.member.suspendedAt).toBeInstanceOf(Date);
+    if (!retry.session) throw new Error("Expected deletion session");
+    await expect(prisma.$transaction((tx) => assertHostedAuthSessionCurrentTx({
+      credential: token, memberId, sessionId: retry.session!.sessionId, proof: retry.session!.proof, prisma: tx,
+    }))).rejects.toMatchObject({ code: "HOSTED_MEMBER_SUSPENDED" });
+    await adapter.delete({ model: "session", where: [{ field: "token", value: token }] });
+    expect((await readHostedAuthSession({ ...configuration, purpose: "account-deletion" })).session).toBeNull();
+  }));
+
   it("atomically limits concurrent pre-authentication requests without retaining raw selectors", async () => {
     const prisma = getPrisma(); const key = `synthetic-limit-${randomUUID()}`;
     const digest = authLookupKey("verification", "rate-limit", key); const id = `arl_${digest}`;
@@ -66,7 +87,7 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     let delivered = "";
     const auth = createHostedBetterAuth({
       baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma(),
-      delivery: { email: async ({ address, code }) => { expect(address).toBe(email); delivered = code; }, sms: async () => { throw new Error("Unexpected SMS"); } },
+      delivery: { email: async ({ address, code }) => { expect(address).toBe(email); delivered = code; } },
     });
     const headers = new Headers({ origin: "https://www.withmurph.ai" });
     await auth.api.sendVerificationOTP({ headers, body: { email, type: "sign-in" } });
@@ -87,26 +108,24 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
   it("runs phone-only signup without marking its opaque email alias verified", () => fixture(async ({ memberId }) => {
     const prisma = getPrisma();
     await prisma.hostedAuthRecord.deleteMany({ where: { model: "user", id: memberId } });
-    let delivered = ""; const phone = "+12025550123";
-    const auth = createHostedBetterAuth({
-      baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma,
-      generateId: ({ model }) => model === "user" ? memberId : randomUUID(),
-      delivery: { email: async () => { throw new Error("Unexpected email"); }, sms: async ({ phoneNumber, code }) => { expect(phoneNumber).toBe(phone); delivered = code; } },
-    });
-    await auth.api.sendPhoneNumberOTP({ body: { phoneNumber: phone } });
-    const response = await auth.api.verifyPhoneNumber({ body: { phoneNumber: phone, code: delivered } });
-    expect(response.user?.id).toBe(memberId);
-    expect(response.user?.email).toMatch(/@auth\.invalid$/u);
-    expect(response.user?.emailVerified).toBe(false);
-    expect(response.user).toMatchObject({ phoneNumber: phone, phoneNumberVerified: true });
-    await expect(auth.api.verifyPhoneNumber({ body: { phoneNumber: phone, code: delivered } })).rejects.toThrow();
+    const phone = "+12025550123"; const verification = syntheticSmsVerification();
+    await sendHostedAuthSmsOtp({ prisma, phoneNumber: phone, verification });
+    const code = verification.codes.get(phone)!;
+    const verificationId = await prepareHostedAuthSmsOtp({ prisma, phoneNumber: phone, code, verification });
+    const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma };
+    const otp: HostedAuthOtp = { kind: "phone", phoneNumber: phone, code, verificationId };
+    await commitHostedAuthOtp({ ...configuration, memberId, otp, commitMember: async () => undefined });
+    const user = await hostedAuthAdapter(prisma)(options).findOne<AuthRecord>({ model: "user", where: [{ field: "id", value: memberId }] });
+    expect(user?.email).toMatch(/@auth\.invalid$/u);
+    expect(user).toMatchObject({ id: memberId, emailVerified: false, phoneNumber: phone, phoneNumberVerified: true });
+    await expect(commitHostedAuthOtp({ ...configuration, memberId, otp, commitMember: async () => undefined })).rejects.toThrow();
   }));
 
   it("enforces the pinned email plugin's failed-attempt budget", () => fixture(async ({ email }) => {
     let delivered = "";
     const auth = createHostedBetterAuth({
       baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma(),
-      delivery: { email: async ({ code }) => { delivered = code; }, sms: async () => { throw new Error("Unexpected SMS"); } },
+      delivery: { email: async ({ code }) => { delivered = code; } },
     });
     await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
     const wrong = `${delivered[0] === "0" ? "1" : "0"}${delivered.slice(1)}`;
@@ -121,7 +140,7 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma };
     let code = "";
     const auth = createHostedBetterAuth({ ...configuration, delivery: {
-      email: async (input) => { code = input.code; }, sms: async () => { throw new Error("Unexpected SMS"); },
+      email: async (input) => { code = input.code; },
     } });
     await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
     const issued = await commitHostedAuthOtp({ ...configuration, memberId, otp: { kind: "email", address: email, code }, commitMember: async () => undefined });
@@ -155,12 +174,17 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     let delivered = "";
     const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma };
     const auth = createHostedBetterAuth({ ...configuration,
-      delivery: { email: async ({ code }) => { delivered = code; }, sms: async ({ code }) => { delivered = code; } },
+      delivery: { email: async ({ code }) => { delivered = code; } },
     });
+    const verification = syntheticSmsVerification();
     if (kind === "email") await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
-    else await auth.api.sendPhoneNumberOTP({ body: { phoneNumber: phone } });
+    else {
+      await sendHostedAuthSmsOtp({ prisma, phoneNumber: phone, verification });
+      delivered = verification.codes.get(phone)!;
+    }
     const otp: HostedAuthOtp = kind === "email"
-      ? { kind, address: email, code: delivered } : { kind, phoneNumber: phone, code: delivered };
+      ? { kind, address: email, code: delivered } : { kind, phoneNumber: phone, code: delivered,
+          verificationId: await prepareHostedAuthSmsOtp({ prisma, phoneNumber: phone, code: delivered, verification }) };
     try {
       await expect(commitHostedAuthOtp({ ...configuration, memberId, otp, commitMember: async (tx) => {
         await tx.hostedMember.create({ data: { id: memberId } });
@@ -168,6 +192,10 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
       } })).rejects.toThrow();
       expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
       expect(await prisma.hostedAuthRecord.count({ where: { memberId } })).toBe(0);
+      if (kind === "phone") {
+        expect(await prepareHostedAuthSmsOtp({ prisma, phoneNumber: phone, code: delivered, verification })).toBe(otp.kind === "phone" && otp.verificationId);
+        expect(verification.check).toHaveBeenCalledTimes(1);
+      }
       const attempts = await Promise.allSettled(Array.from({ length: 4 }, () => commitHostedAuthOtp({
         ...configuration, memberId, otp,
         commitMember: async (tx) => { await tx.hostedMember.create({ data: { id: memberId } }); },
@@ -187,14 +215,21 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     let delivered = ""; const commitMember = vi.fn(async () => undefined);
     const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma };
     const auth = createHostedBetterAuth({ ...configuration,
-      delivery: { email: async ({ code }) => { delivered = code; }, sms: async ({ code }) => { delivered = code; } },
+      delivery: { email: async ({ code }) => { delivered = code; } },
     });
+    const verification = syntheticSmsVerification();
     if (kind === "email") await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
-    else await auth.api.sendPhoneNumberOTP({ body: { phoneNumber: phone } });
+    else {
+      await sendHostedAuthSmsOtp({ prisma, phoneNumber: phone, verification });
+      delivered = verification.codes.get(phone)!;
+    }
     const wrong = `${delivered[0] === "0" ? "1" : "0"}${delivered.slice(1)}`;
     for (const code of [wrong, wrong, wrong, delivered]) {
-      const otp: HostedAuthOtp = kind === "email" ? { kind, address: email, code } : { kind, phoneNumber: phone, code };
-      await expect(commitHostedAuthOtp({ ...configuration, memberId, otp, commitMember })).rejects.toThrow();
+      if (kind === "phone") {
+        await expect(prepareHostedAuthSmsOtp({ prisma, phoneNumber: phone, code, verification })).rejects.toMatchObject({ code: "AUTH_CODE_INVALID" });
+      } else {
+        await expect(commitHostedAuthOtp({ ...configuration, memberId, otp: { kind, address: email, code }, commitMember })).rejects.toThrow();
+      }
     }
     expect(commitMember).not.toHaveBeenCalled();
     expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();

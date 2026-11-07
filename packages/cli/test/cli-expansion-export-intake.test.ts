@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { initializeVault } from '@murphai/core'
+import { initializeVault, readAssessmentResponse } from '@murphai/core'
 import { buildExportPack, readVault } from '@murphai/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -82,6 +82,9 @@ test('intake import schema exposes the richer importer-backed metadata options',
   assert.equal('occurredAt' in schema.options.properties, true)
   assert.equal('importedAt' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)
+  assert.equal('assessmentType' in schema.options.properties, true)
+  assert.equal('questionnaireSlug' in schema.options.properties, true)
+  assert.equal('relatedId' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
@@ -159,11 +162,25 @@ test.sequential(
         '2026-03-12T09:45:00Z',
         '--source',
         'manual',
+        '--assessment-type',
+        'clinical-observation',
+        '--questionnaire-slug',
+        'baseline-intake',
+        '--related-id',
+        'evt_01J00000000000000000000001',
       ])
 
       assert.equal(imported.ok, true)
       assert.equal(imported.meta?.command, 'intake import')
       assert.match(requireData(imported).assessmentId, /^asmt_/u)
+      const saved = await readAssessmentResponse({
+        vaultRoot,
+        assessmentId: requireData(imported).assessmentId,
+      })
+      assert.equal(saved?.assessmentType, 'clinical-observation')
+      assert.equal(saved?.questionnaireSlug, 'baseline-intake')
+      assert.deepEqual(saved?.relatedIds, ['evt_01J00000000000000000000001'])
+      assert.deepEqual(saved?.responses, JSON.parse(await readFile(assessmentPath, 'utf8')))
 
       const manifestResult = await runSliceCli<{
         entityId: string

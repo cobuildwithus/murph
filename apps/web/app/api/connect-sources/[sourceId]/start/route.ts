@@ -1,5 +1,5 @@
 import {
-  listConfiguredDeviceSyncReconnectTargets,
+  listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncConnectTargetConfigs,
@@ -66,7 +66,7 @@ function resolveHostedConnectSourceTarget(
   const configs = readHostedConnectSourceTargetConfigs();
   const target = selector && isSpecificHostedConnectSourceTargetSelector(selector)
     ? resolveSelectedHostedConnectSourceTarget(
-        listConfiguredDeviceSyncReconnectTargets(configs),
+        listConfiguredDeviceSyncConnectTargets(configs),
         sourceId,
         selector,
       )

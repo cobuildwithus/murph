@@ -1,6 +1,11 @@
 import * as z from "./zod-runtime.ts";
+import { companionMealIdSchema } from "./companion-meals.ts";
+import { memoryDisplayNameSchema, memoryDemographicsPatchSchema } from "./memory.ts";
 import {
   workoutSessionPresentationV1Schema,
+  workoutSessionCardV1Bounds,
+  parseWorkoutSessionAppCardEnvelopeV4,
+  type WorkoutSessionAppCardEnvelopeV6,
 } from "./workout-session-card.ts";
 import {
   workoutMemberActionExpectedSetResultV1Schema,
@@ -15,11 +20,12 @@ export {
 export const memberActionV1Bounds = {
   actionId: 36,
   exerciseName: 60,
-  exercises: 8,
+  exercises: workoutSessionCardV1Bounds.exercises,
   expectedFreeformResult: 400,
   freeformResult: 200,
-  mutations: 72,
-  setsPerExercise: 8,
+  mutations: 2 * workoutSessionCardV1Bounds.exercises
+    * workoutSessionCardV1Bounds.setsPerExercise,
+  setsPerExercise: workoutSessionCardV1Bounds.setsPerExercise,
 } as const;
 
 const UUID_PATTERN =
@@ -471,9 +477,44 @@ export type WorkoutLiveSnapshotMemberActionV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionV1Schema
 >;
 
+// Read-only compatibility for encrypted mailbox outcomes and checkpoint receipts
+// produced before retirement. Remove only after retained snapshots and rows drain.
+const legacyMealNamesRepairResultSchema = z.object({
+  kind: z.literal("meal.names.repair"), version: z.literal(1),
+  batch: z.number().int().min(0), done: z.boolean(),
+  scanned: z.number().int().min(0), renamed: z.number().int().min(0), skipped: z.number().int().min(0),
+  invalid: z.number().int().min(0), changed: z.number().int().min(0),
+}).strict();
+
+export const demographicsSetMemberActionV1Schema = z.object({
+  kind: z.literal("demographics.set"),
+  version: z.literal(1),
+  patch: memoryDemographicsPatchSchema,
+}).strict();
+
+export const displayNameSetMemberActionV1Schema = z.object({
+  kind: z.literal("display-name.set"),
+  version: z.literal(1),
+  displayName: memoryDisplayNameSchema,
+}).strict();
+
+export const measurementAddMemberActionV1Schema = z.object({
+  kind: z.literal("measurement.add"),
+  version: z.literal(1),
+  metric: z.enum(["estimated-vo2-max"]),
+  value: z.number().finite().min(10).max(90),
+}).strict();
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
+  measurementAddMemberActionV1Schema,
+  demographicsSetMemberActionV1Schema,
+  displayNameSetMemberActionV1Schema,
+  // Decode queued/restored legacy requests only; the runner consumes this as a
+  // no-op. Keep until old producers and retained snapshots have drained.
+  z.object({ kind: z.literal("meal.names.repair"), version: z.literal(1), batch: z.number().int().min(0).max(100000) }).strict(),
   workoutLiveApplyMemberActionV1Schema,
   workoutLiveSnapshotMemberActionV1Schema,
+  z.object({ kind: z.literal("meal.delete"), version: z.literal(1), mealId: companionMealIdSchema }).strict(),
 ]);
 
 export type MemberActionV1 = z.infer<typeof memberActionV1Schema>;
@@ -483,11 +524,16 @@ export const memberActionIdV1Schema = z
   .length(memberActionV1Bounds.actionId)
   .regex(UUID_PATTERN, "Expected a UUID action identity.");
 
+export const companionDemographicsRequestSchema = memoryDemographicsPatchSchema.safeExtend({
+  actionId: memberActionIdV1Schema,
+  requestedAt: z.isoDateTime({ offset: true }),
+});
+
 export const memberActionRequestV1Schema = z
   .object({
     action: memberActionV1Schema,
     actionId: memberActionIdV1Schema,
-    requestedAt: z.string().datetime({ offset: true }),
+    requestedAt: z.isoDateTime({ offset: true }),
     schemaVersion: z.literal(1),
   })
   .strict();
@@ -497,6 +543,9 @@ export type MemberActionRequestV1 = z.infer<
 >;
 
 export const memberActionRejectionReasonV1Schema = z.enum([
+  "demographics_unresolved",
+  "meal_not_found",
+  "meal_changed",
   "multiple_active_workouts",
   "no_active_workout",
   "workout_changed",
@@ -506,13 +555,26 @@ export type MemberActionRejectionReasonV1 = z.infer<
   typeof memberActionRejectionReasonV1Schema
 >;
 
+const workoutLiveCardResultShape = {
+  card: z.custom<WorkoutSessionAppCardEnvelopeV6>((value) =>
+    value !== null && typeof value === "object" && "schemaVersion" in value
+    && value.schemaVersion === 6 && parseWorkoutSessionAppCardEnvelopeV4(value) !== null,
+  ).optional(),
+  // Read compatibility for already persisted results from the URL-based producer.
+  cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN).optional(),
+};
+
+function hasExactlyOneWorkoutCard(value: { card?: unknown; cardUrl?: string }): boolean {
+  return (value.card !== undefined) !== (value.cardUrl !== undefined);
+}
+
 export const workoutLiveSnapshotMemberActionResultV1Schema = z
   .object({
-    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
+    ...workoutLiveCardResultShape,
     kind: z.literal("workout.live.snapshot"),
     version: z.literal(1),
   })
-  .strict();
+  .strict().refine(hasExactlyOneWorkoutCard, "Expected exactly one authoritative workout card.");
 
 export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionResultV1Schema
@@ -520,17 +582,18 @@ export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
 
 export const workoutLiveApplyMemberActionResultV1Schema = z
   .object({
-    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
+    ...workoutLiveCardResultShape,
     kind: z.literal("workout.live.apply"),
     version: z.literal(1),
   })
-  .strict();
+  .strict().refine(hasExactlyOneWorkoutCard, "Expected exactly one authoritative workout card.");
 
 export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
   typeof workoutLiveApplyMemberActionResultV1Schema
 >;
 
 export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
+  legacyMealNamesRepairResultSchema,
   workoutLiveApplyMemberActionResultV1Schema,
   workoutLiveSnapshotMemberActionResultV1Schema,
 ]);
@@ -540,7 +603,7 @@ export type MemberActionResultV1 = z.infer<typeof memberActionResultV1Schema>;
 export const memberActionOutcomeV1Schema = z
   .object({
     actionId: memberActionIdV1Schema,
-    completedAt: z.string().datetime({ offset: true }),
+    completedAt: z.isoDateTime({ offset: true }),
     reason: memberActionRejectionReasonV1Schema.nullable(),
     result: memberActionResultV1Schema.optional(),
     schemaVersion: z.literal(1),

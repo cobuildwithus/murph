@@ -21,6 +21,10 @@ export {
   showBloodTest,
 } from "./blood-tests.ts";
 export {
+  readCurrentBloodType,
+  selectCurrentBloodType,
+} from "./blood-type.ts";
+export {
   listImmunizations,
   readImmunization,
   showImmunization,
@@ -59,6 +63,7 @@ export type {
   BloodTestListOptions,
   BloodTestQueryRecord,
 } from "./blood-tests.ts";
+export type { CurrentBloodTypeRecord } from "./blood-type.ts";
 export type {
   ImmunizationListOptions,
   ImmunizationQueryRecord,

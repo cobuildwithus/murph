@@ -37,3 +37,13 @@ Build layout:
 
 - library entrypoints emit to `dist/*.js` and `dist/*.d.ts`
 - package-local scripts emit to `dist/scripts/*.js`
+
+## Clinical source facts
+
+Canonical note events may carry `clinicalFact`, exported as `clinicalFactSchema`.
+This is a typed source statement with an explicit nullable clinical date, distinct
+from the note's documentation timestamp. Values without units remain unitless;
+status, subject, coding and qualifiers preserve historical or uncertain meaning.
+It does not activate a condition, normalize a measurement or record medication
+intake. Deploy readers supporting this optional field before producing new notes;
+older strict readers cannot consume the extended record shape.

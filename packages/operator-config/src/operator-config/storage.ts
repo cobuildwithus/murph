@@ -20,24 +20,6 @@ export function resolveOperatorConfigPath(
   return path.join(homeDirectory, OPERATOR_CONFIG_PATH)
 }
 
-export function normalizeVaultForConfig(
-  vault: string,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): string {
-  const absoluteVault = path.resolve(vault)
-  const normalizedHome = path.resolve(homeDirectory)
-
-  if (absoluteVault === normalizedHome) {
-    return '~'
-  }
-
-  if (absoluteVault.startsWith(`${normalizedHome}${path.sep}`)) {
-    return `~${absoluteVault.slice(normalizedHome.length)}`
-  }
-
-  return absoluteVault
-}
-
 export function expandConfiguredVaultPath(
   configuredPath: string,
   homeDirectory = resolveOperatorHomeDirectory(),

@@ -27,6 +27,9 @@ const CONTRACT_MIGRATION_LOCK_NAME = "hosted_web_contract_migrations";
 const CONTRACT_MIGRATION_LOCK_TIMEOUT = "5s";
 const CONTRACT_MIGRATION_STATEMENT_TIMEOUT = "30s";
 const SUPERSEDED_CONTRACT_MIGRATION_IDS = new Set([
+  // The direct game storage cutover removes its legacy departure field.
+  // Existing recovery receipts survive; new requests use the ordinary Ops owner.
+  "20261031190000_recover_missing_game_recap",
   // Prisma migration 20260809160000_add_hosted_family_max_plan_code now owns
   // the complete Pulse/Edge/Max constraints for fresh and upgraded databases.
   "20260714150000_require_hosted_family_plan_codes",

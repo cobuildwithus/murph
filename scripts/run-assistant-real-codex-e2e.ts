@@ -7,6 +7,7 @@ export type AssistantRealCodexAuthMode = 'provider' | 'subscription'
 export interface AssistantRealCodexRunOptions {
   authMode: AssistantRealCodexAuthMode
   codexHome: string | null
+  codexCommand: string | null
   help: boolean
   model: string | null
   testPattern: string | null
@@ -37,11 +38,19 @@ export interface AssistantRealCodexRunDependencies {
 const DEFAULT_OPTIONS: AssistantRealCodexRunOptions = {
   authMode: 'subscription',
   codexHome: null,
+  codexCommand: null,
   help: false,
   model: null,
   testPattern: null,
 }
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
+const LIVE_TEST_DISCOVERY_HINT = [
+  'List exact names without running a journey:',
+  'MURPH_RUN_REAL_CODEX_E2E=1 pnpm --dir packages/assistant-engine exec vitest list',
+  '--config vitest.config.ts test/assistant-codex-real-e2e.test.ts',
+  `--tagsFilter ${REAL_CODEX_E2E_TAG} --json`,
+].join(' ')
+const MAX_DIAGNOSTIC_MATCHES = 20
 export const ASSISTANT_REAL_CODEX_COMMAND = fileURLToPath(
   new URL(
     `../packages/assistant-engine/node_modules/.bin/${
@@ -57,7 +66,8 @@ const USAGE = [
   'Options:',
   '  --auth subscription|provider  Use local ChatGPT auth (default) or provider env.',
   '  --codex-home <absolute-path>   Use a dedicated local Codex home for subscription auth.',
-  '  --model <model>               Override the default gpt-5.6-terra model.',
+  '  --codex-command <absolute-path> Use a native Codex build instead of the pinned npm binary.',
+  '  --model <model>               Override the default gpt-6.1-sol model.',
   '  -h, --help                    Show this help.',
 ].join('\n')
 
@@ -85,12 +95,9 @@ export function parseAssistantRealCodexRunArgs(
       index += 1
       continue
     }
-    if (argument === '--codex-home') {
-      const codexHome = readRequiredValue(argv, index, argument)
-      if (!isAbsolute(codexHome)) {
-        throw new Error('--codex-home requires an absolute path.')
-      }
-      options.codexHome = codexHome
+    if (argument === '--codex-home' || argument === '--codex-command') {
+      const selectedPath = readRequiredAbsolutePath(argv, index, argument)
+      options[argument === '--codex-home' ? 'codexHome' : 'codexCommand'] = selectedPath
       index += 1
       continue
     }
@@ -140,7 +147,7 @@ export function buildAssistantRealCodexRunEnv(input: {
     delete env.MURPH_REAL_CODEX_AUTH
     delete env.MURPH_REAL_CODEX_HOME
   }
-  env.MURPH_REAL_CODEX_COMMAND = ASSISTANT_REAL_CODEX_COMMAND
+  env.MURPH_REAL_CODEX_COMMAND = input.options.codexCommand ?? ASSISTANT_REAL_CODEX_COMMAND
 
   if (input.options.model) {
     env.MURPH_REAL_CODEX_MODEL = input.options.model
@@ -196,6 +203,7 @@ export function buildAssistantRealCodexVitestArgs(
     '--config',
     'vitest.config.ts',
     '--no-coverage',
+    '--reporter=default',
     'test/assistant-codex-real-e2e.test.ts',
     '--testNamePattern',
     `^${escapeRegularExpression(matcherName)}$`,
@@ -228,12 +236,17 @@ export function requireSingleAssistantRealCodexTest(
     return []
   })
   if (names.length === 0) {
-    throw new Error('The test-name pattern did not match a live journey.')
+    throw new Error(`The test-name pattern did not match a live journey.\n${LIVE_TEST_DISCOVERY_HINT}`)
   }
   if (names.length !== 1) {
-    throw new Error(
+    const matches = names.slice(0, MAX_DIAGNOSTIC_MATCHES)
+    const omitted = names.length - matches.length
+    throw new Error([
       `The test-name pattern matched ${names.length} live journeys; make it more specific.`,
-    )
+      ...matches.map((name) => `  ${name}`),
+      ...(omitted > 0 ? [`  ... ${omitted} more matches.`] : []),
+      LIVE_TEST_DISCOVERY_HINT,
+    ].join('\n'))
   }
   return names[0] as string
 }
@@ -276,7 +289,7 @@ export function executeAssistantRealCodexRun(
   if (options.authMode === 'subscription') {
     const loginStatus = dependencies.runCommand({
       args: ['login', 'status'],
-      command: ASSISTANT_REAL_CODEX_COMMAND,
+      command: options.codexCommand ?? ASSISTANT_REAL_CODEX_COMMAND,
       env: buildAssistantRealCodexLoginEnv(
         dependencies.sourceEnv,
         options.codexHome,
@@ -294,7 +307,7 @@ export function executeAssistantRealCodexRun(
   const effectiveModel =
     options.model
     ?? dependencies.sourceEnv.MURPH_REAL_CODEX_MODEL?.trim()
-    ?? 'gpt-5.6-terra'
+    ?? 'gpt-6.1-sol'
   dependencies.writeStdout(
     `Running one real Murph assistant journey with ${effectiveModel} via ${options.authMode} auth.\n`,
   )
@@ -330,6 +343,18 @@ function readRequiredValue(
   const value = argv[index + 1]?.trim()
   if (!value) {
     throw new Error(`${option} requires a value.`)
+  }
+  return value
+}
+
+function readRequiredAbsolutePath(
+  argv: readonly string[],
+  index: number,
+  option: string,
+): string {
+  const value = readRequiredValue(argv, index, option)
+  if (!isAbsolute(value)) {
+    throw new Error(`${option} requires an absolute path.`)
   }
   return value
 }

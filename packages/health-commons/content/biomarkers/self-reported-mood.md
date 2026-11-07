@@ -68,9 +68,8 @@ biomarker:
     - expectation
     - novelty
     - time of day
-relations:
-- type: related_protocol
-  target: protocol_variant:cold-water-immersion/cold-plunge
+relations: []
+
 ---
 
 ## Bottom line

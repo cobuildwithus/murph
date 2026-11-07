@@ -90,13 +90,13 @@ afterEach(async () => {
 })
 
 describe('assistant runtime residue pruning', () => {
-  it('prunes terminal and orphan flat runtime deliveries while retaining active media and ordinary exports', async () => {
+  it.each(['zip', 'jpg', 'mp3', 'mp4'])('prunes terminal and orphan %s deliveries while retaining active media and ordinary exports', async (extension) => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-deliveries-',
     )
     const active = await writeGeneratedDeliveryFile({
       contents: 'active delivery',
-      refSuffix: 'active.zip',
+      refSuffix: `active.${extension}`,
       vaultRoot,
     })
     await createGeneratedDeliveryIntent({
@@ -107,7 +107,7 @@ describe('assistant runtime residue pruning', () => {
     })
     const terminal = await writeGeneratedDeliveryFile({
       contents: 'terminal delivery',
-      refSuffix: 'terminal.zip',
+      refSuffix: `terminal.${extension}`,
       vaultRoot,
     })
     await createGeneratedDeliveryIntent({
@@ -118,7 +118,7 @@ describe('assistant runtime residue pruning', () => {
     })
     const orphan = await writeGeneratedDeliveryFile({
       contents: 'orphan delivery',
-      refSuffix: 'orphan.pdf',
+      refSuffix: `orphan.${extension}`,
       vaultRoot,
     })
     const genericFilePath = path.join(

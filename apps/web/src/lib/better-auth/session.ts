@@ -1,14 +1,14 @@
 import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { HostedAuthRecord, Prisma, PrismaClient } from "@prisma/client";
+import { isNativeError } from "node:util/types";
+import { Prisma, type HostedAuthRecord, type PrismaClient } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
-import { createHostedBetterAuth, hostedBetterAuthOptions } from "./auth";
+import { hostedBetterAuthOptions } from "./auth";
 import { AuthRecordChangedError } from "./adapter";
 import { openAuthRecord } from "./record-crypto";
 import type { HostedAuthTransport } from "./admission";
@@ -25,6 +25,7 @@ export interface HostedAuthSessionProof {
 export async function readHostedAuthSession(input: {
   baseURL: string; secret: string; prisma: PrismaClient;
   credential: string; transport: HostedAuthTransport; refresh?: boolean;
+  purpose?: "account-deletion";
 }) {
   const headers = input.transport === "browser"
     ? new Headers({ cookie: `${hostedAuthCookieName(process.env.NODE_ENV === "production")}=${input.credential}` })
@@ -40,13 +41,14 @@ export async function readHostedAuthSession(input: {
     || !(current.expiresAt instanceof Date) || current.expiresAt <= new Date()) return { session: null, headers: result.headers };
   const member = await readHostedMemberCoreState({ memberId: user.id, prisma: input.prisma });
   if (!member) return { session: null, headers: result.headers };
-  assertHostedMemberNotSuspended(member);
-  const identity = await readHostedMemberIdentity({ memberId: member.id, prisma: input.prisma });
+  // Suspension fences runtime access, but must not prevent an authenticated
+  // owner from finishing deletion after a provider failure.
+  if (input.purpose !== "account-deletion") assertHostedMemberNotSuspended(member);
   const proof: HostedAuthSessionProof = {
     credentialDigest: credentialDigest(input.credential), expiresAt: current.expiresAt, row,
   };
   return { headers: result.headers, session: {
-    member, sessionId: row.id, expiresAt: current.expiresAt, privyUserId: identity?.privyUserId ?? null,
+    member, sessionId: row.id, expiresAt: current.expiresAt,
     primaryAuthenticatedAt: current.primaryAuthenticatedAt instanceof Date ? current.primaryAuthenticatedAt : null, proof,
   } };
 }
@@ -62,7 +64,7 @@ export async function assertHostedAuthSessionCurrentTx(input: {
   if (proof.row.model !== "session" || proof.row.id !== input.sessionId || proof.row.memberId !== input.memberId
     || proof.expiresAt <= (input.now ?? new Date())
     || !timingSafeEqual(proof.credentialDigest, credentialDigest(input.credential))) throw authRequired();
-  await lockHostedMemberRow(input.prisma, input.memberId, { timeoutMs: 5_000 });
+  await lockHostedMemberRow(input.prisma, input.memberId, { timeoutMs: 5_000, noKeyUpdate: true });
   await input.prisma.$queryRaw`SELECT id FROM hosted_auth_record WHERE model = 'session' AND id = ${input.sessionId} FOR UPDATE`;
   const [row, member] = await Promise.all([
     input.prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "session", id: input.sessionId } } }),
@@ -108,10 +110,55 @@ export function buildHostedAuthSessionClearCookie(): string {
 }
 
 function createSessionAuth(input: { baseURL: string; secret: string; prisma: PrismaClient }) {
-  return createHostedBetterAuth({ ...input, delivery: sessionOnlyDelivery });
+  return betterAuth({
+    ...hostedBetterAuthOptions({ ...input, delivery: sessionOnlyDelivery }),
+    logger: {
+      level: "error",
+      log(level, message, ...args) {
+        // The pinned getSession catch logs this exact call before masking it.
+        // All other library logging remains suppressed, including on this instance.
+        if (level !== "error" || message !== "INTERNAL_SERVER_ERROR" || args.length !== 1) return;
+        try {
+          console.error("Hosted auth session read failed.", {
+            observedErrorCategory: observedSessionErrorCategory(args[0]),
+          });
+        } catch {
+          // Observation must not interrupt the library's original failure handling.
+        }
+      },
+    },
+  });
+}
+
+function observedSessionErrorCategory(error: unknown) {
+  // Native branding rejects plain objects and proxies without invoking getters.
+  // Compare only the immediate prototype; do not traverse an untrusted chain.
+  if (!isNativeError(error)) return "unknown";
+  const prototype = Object.getPrototypeOf(error);
+  const codeField = prototype === Prisma.PrismaClientKnownRequestError.prototype ? "code"
+    : prototype === Prisma.PrismaClientInitializationError.prototype ? "errorCode" : null;
+  if (codeField) {
+    const descriptor = Object.getOwnPropertyDescriptor(error, codeField);
+    const code = descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+    switch (code) {
+      case "P1001": return "database_unreachable";
+      case "P1002":
+      case "P1008": return "database_timeout";
+      case "P2024": return "database_pool_timeout";
+      case "P2034": return "database_transaction_conflict";
+      default: return "database_unknown";
+    }
+  }
+  switch (prototype) {
+    case AuthRecordChangedError.prototype: return "auth_record_changed";
+    case TypeError.prototype: return "native_type";
+    case RangeError.prototype: return "native_range";
+    case SyntaxError.prototype: return "native_syntax";
+    case Error.prototype: return "native_error";
+    default: return "unknown";
+  }
 }
 
 const sessionOnlyDelivery = {
   email: async () => { throw new Error("Session operations cannot send codes."); },
-  sms: async () => { throw new Error("Session operations cannot send codes."); },
 };

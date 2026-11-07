@@ -21,10 +21,12 @@ export async function GET(): Promise<Response> {
 export const POST = withClinicalJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const body = await readJsonObject(request, { limitBytes: MAX_BODY_BYTES });
-  if (Object.keys(body).sort().join(",") !== "claim,providerDirectoryEntryId") {
+  if (Object.keys(body).some((key) => !["claim", "providerDirectoryEntryId", "keepUpdated"].includes(key))
+    || (body.keepUpdated !== undefined && typeof body.keepUpdated !== "boolean")) {
     throw invalidStartRequestError();
   }
   const started = await startClinicalRecordConnection({
+    keepUpdated: body.keepUpdated === true,
     claim: readClaim(body.claim),
     providerDirectoryEntryId: readProviderEntryId(body.providerDirectoryEntryId),
     request,

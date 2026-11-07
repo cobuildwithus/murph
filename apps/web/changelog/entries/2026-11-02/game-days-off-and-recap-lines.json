@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "game-days-off-and-recap-lines",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Days off and more personal game recaps",
+    "summary": "Game posts now respect scheduled days off, and Murph writes a different “Most likely to…” line for each player.",
+    "details": "A day-off message tells you when to return. Recap lines draw on the posts and words both players shared during the game.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4448
+    ]
+  }
+}

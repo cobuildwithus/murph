@@ -32,10 +32,9 @@ function buildDirectPrompt(): string {
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
     channel: 'imessage',
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-08-09',
     currentTimeZone: 'America/New_York',
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
   })
@@ -64,7 +63,7 @@ describe('assistant manual provider export guidance', () => {
       'without a proven direct Murph connection',
     )
     expect(buildDirectPrompt()).toContain(
-      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
+      'For account changes, provider writes, other built-in services, or unsupported-provider exports, read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
     )
     expect(skill).toContain('references/provider-data-exports.md')
     expect(normalizedSkill).toContain(

@@ -18,7 +18,6 @@ import {
   DEFAULT_DATABASE_URL,
 } from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 import { loadHostedLocalBaseEnvironment } from "@murphai/hosted-local-harness/dev-hosted-local/environment";
-import { shouldUseHostedWebProductionStart } from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
@@ -112,9 +111,7 @@ interface HostedActiveMemberSeedArgs {
 interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   homePhone: string;
   memberPhone: string;
-  privyUserId?: string | null;
   recentInboundAt?: Date | string | null;
-  walletAddress?: string | null;
 }
 
 type HostedJunctionDeviceSyncReplaySeedArgs =
@@ -122,6 +119,11 @@ type HostedJunctionDeviceSyncReplaySeedArgs =
 
 type HostedJunctionDeviceSyncConnectionSeedArgs =
   Omit<HostedJunctionDeviceSyncConnectionSeedInput, "environment">;
+
+interface HostedLocalProviderCountDiagnosticScope {
+  providerBaseline: number;
+  promptMarker: string;
+}
 
 export interface HostedLocalFullStackScenario {
   assistantProviderRequests: HostedLocalAssistantProviderStubRequest[];
@@ -176,6 +178,8 @@ export interface HostedLocalFullStackScenario {
     userId: string,
     input?: {
       pollIntervalMs?: number;
+      /** Require new work since the last completion; defaults to true. */
+      requireProgress?: boolean;
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
@@ -188,14 +192,17 @@ export interface HostedLocalFullStackScenario {
   ): Promise<HostedRunnerStatusResponse>;
   /** Passively observes new hosted work; it never triggers runtime processing. */
   waitForLatestPendingWake(userId: string): Promise<HostedRunnerStatusResponse>;
-  buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
+  buildFailureMessage(
+    userId: string,
+    summaryLines: readonly string[],
+    providerCountScope?: HostedLocalProviderCountDiagnosticScope,
+  ): Promise<string>;
   /**
    * Mints a real hosted app session cookie for a seeded member using the same
    * HMAC key the hosted web process runs with.
    */
   issueHostedAppSession(input: {
     memberId: string;
-    privyUserId: string;
   }): Promise<HostedAppSessionForTest>;
   issueHostedIMessageMiniAppCredential(input: {
     memberId: string;
@@ -378,9 +385,8 @@ async function startHostedLocalFullStackScenarioAttempt(
       ...hostedAssistantDevEnv,
       ...buildHostedLocalDeviceSyncProviderEnvClearances(),
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "125000",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "120000",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
@@ -421,7 +427,10 @@ async function startHostedLocalFullStackScenarioAttempt(
 
     harness = await startHostedLocalDevHarness({
       abortSignal,
-      env: runtimeEnv,
+      env: {
+        ...runtimeEnv,
+        ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),
+      },
       persistDirOverride: input.persistDirOverride,
       persistDirPrefix: input.persistDirPrefix,
       resetPersistDir: input.resetPersistDir,
@@ -432,7 +441,7 @@ async function startHostedLocalFullStackScenarioAttempt(
       streamLogs: input.streamLogs,
       testControls,
       webProcessEnvOverrides: {
-        ...buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+        ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),
         ...(input.webProcessEnvOverrides ?? {}),
         HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       },
@@ -480,15 +489,38 @@ async function startHostedLocalFullStackScenarioAttempt(
       buildFailureMessage: async (
         userId: string,
         summaryLines: readonly string[],
+        providerCountScope?: HostedLocalProviderCountDiagnosticScope,
       ): Promise<string> => {
+        // Snapshot the capture before awaiting the secondary status read.
+        const providerCounts = providerCountScope
+          ? summarizeAssistantProviderRequestCounts(assistantProviderRequests, providerCountScope)
+          : null;
         const status = await scenarioHarness.readUserStatus(userId).catch(() => null);
+        if (providerCounts) {
+          // Count failures need bounded observations, without request paths or log tails.
+          return [
+            ...summaryLines,
+            `assistant provider request counts: ${JSON.stringify(providerCounts)}`,
+            `hosted count-check status: ${JSON.stringify({
+              available: status !== null,
+              lastErrorPresent: status ? Boolean(status.lastErrorCode) : null,
+              mailboxLaggingLaneCount: status
+                ? status.mailboxLag.filter((lane) => lane.lag !== "0").length
+                : null,
+            })}`,
+          ].join("\n");
+        }
         const assistantProviderRequestLog = assistantProviderRequests.map((request) => ({
           bodyBytes: Buffer.byteLength(request.body, "utf8"),
           bodyFingerprint: fingerprintProviderRequestBody(
             request.body,
             providerRequestBodyFingerprintSecret,
           ),
+          fixtureMatch: request.fixtureMatch ?? "not_applicable",
           method: request.method,
+          queuedResponseCount: request.queuedResponseCount ?? null,
+          requestKind: request.requestKind ?? "unknown",
+          responseStatus: request.responseStatus ?? null,
           url: request.url,
         }));
         const recentLogs = status ? summarizeHostedRecentLogsForFailure(status) : [];
@@ -552,12 +584,11 @@ async function startHostedLocalFullStackScenarioAttempt(
         await issueHostedAppSessionForTest({
           environment: buildScenarioSeedEnvironment({
             HOSTED_APP_SESSION_HMAC_KEY: scenarioHarness.hostedAppSessionHmacKey,
-            NODE_ENV: await shouldUseHostedWebProductionStart({
-              env: scenarioRuntimeEnv,
-            }) ? "production" : "test",
+            HOSTED_BETTER_AUTH_SECRET: scenarioHarness.hostedBetterAuthSecret,
+            HOSTED_AUTH_STORAGE_KEY: scenarioHarness.hostedAuthStorageKey,
+            NODE_ENV: "test",
           }),
           memberId: sessionInput.memberId,
-          privyUserId: sessionInput.privyUserId,
           secureCookieMode: scenarioHarness.webUsesProductionArtifact,
         }),
       issueHostedIMessageMiniAppCredential: async (credentialInput) =>
@@ -578,13 +609,11 @@ async function startHostedLocalFullStackScenarioAttempt(
           homePhone: seedInput.homePhone,
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
-          privyUserId: seedInput.privyUserId,
           recentInboundAt: seedInput.recentInboundAt === undefined
             ? new Date().toISOString()
             : seedInput.recentInboundAt,
           stripeCustomerId: seedInput.stripeCustomerId,
           stripeSubscriptionId: seedInput.stripeSubscriptionId,
-          walletAddress: seedInput.walletAddress,
         });
       },
       seedActiveHostedMember: async (seedInput) => {
@@ -653,7 +682,11 @@ async function startHostedLocalFullStackScenarioAttempt(
       waitForHostedCompletion: async (userId, waitInput) => {
         const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
         const previousCompletion = lastCompletedStatusByUser.get(userId);
-        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+        if (
+          waitInput?.requireProgress !== false
+          && !progressWasAlreadyObserved
+          && previousCompletion !== undefined
+        ) {
           await scenarioHarness.waitForHostedProgress(userId, {
             afterStatus: previousCompletion,
             pollIntervalMs: waitInput?.pollIntervalMs,
@@ -739,7 +772,7 @@ function isHostedLocalPortBindCollision(error: unknown): boolean {
     || /\bport \d+ is already in use\b/ui.test(error.message);
 }
 
-export function buildHostedLocalFullStackWebProcessEnvOverrides(
+export function buildHostedLocalFullStackHostProcessEnvOverrides(
   source: Readonly<NodeJS.ProcessEnv>,
 ): NodeJS.ProcessEnv {
   const overrides: NodeJS.ProcessEnv = {};
@@ -760,9 +793,9 @@ export function buildHostedLocalFullStackWebProcessEnvOverrides(
     return overrides;
   }
 
-  // The Linq E2E stub listens on one host port. Runner containers reach that
-  // port through Docker's host alias, while the host web process must use
-  // loopback on Linux. Keep the runner URL authoritative everywhere else.
+  // Web and Workerd run on the host and share the loopback Linq upstream.
+  // The container environment owner separately projects canonical provider
+  // HTTPS URLs so runner requests still cross production interception.
   if (linqBaseUrl.protocol !== "http:" || linqBaseUrl.hostname !== "host.docker.internal") {
     return overrides;
   }
@@ -851,6 +884,66 @@ function summarizeHostedRuntimeAuthFailureLog(log: HostedRuntimeLogForTestRow): 
 function readHostedRuntimeLogString(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
+}
+
+export async function rethrowHostedLocalProviderCountFailure(
+  error: unknown,
+  input: HostedLocalProviderCountDiagnosticScope & {
+    scenario: Pick<HostedLocalFullStackScenario, "buildFailureMessage">;
+    userId: string;
+  },
+): Promise<never> {
+  let diagnostics = "assistant provider count diagnostics: unavailable";
+  try {
+    diagnostics = await input.scenario.buildFailureMessage(input.userId, [], {
+      providerBaseline: input.providerBaseline,
+      promptMarker: input.promptMarker,
+    });
+  } catch {
+    // A secondary diagnostic failure must never replace the original assertion.
+  }
+  if (error instanceof Error) {
+    error.message += `\n${diagnostics}`;
+  }
+  throw error;
+}
+
+function summarizeAssistantProviderRequestCounts(
+  requests: readonly HostedLocalAssistantProviderStubRequest[],
+  scope: HostedLocalProviderCountDiagnosticScope,
+) {
+  const countedRequests = requests.filter((request) => request.url === "/v1/responses");
+  const requestsSinceBaseline = countedRequests.slice(scope.providerBaseline);
+  const categories = new Map<string, {
+    promptMarkerPresent: boolean;
+    requestKind: NonNullable<HostedLocalAssistantProviderStubRequest["requestKind"]>;
+    fixtureMatch: NonNullable<HostedLocalAssistantProviderStubRequest["fixtureMatch"]>;
+    count: number;
+  }>();
+  let promptMarkerMatchesSinceBaseline = 0;
+  for (const request of requestsSinceBaseline) {
+    // Marker presence is an observation, not proof of request ownership or replay.
+    const promptMarkerPresent = request.body.includes(scope.promptMarker);
+    if (promptMarkerPresent) promptMarkerMatchesSinceBaseline += 1;
+    const requestKind = (["turn", "prewarm", "compaction", "memory", "unknown"] as const)
+      .find((kind) => kind === request.requestKind) ?? "unknown";
+    const fixtureMatch = (["scoped", "unscoped", "none", "compaction", "not_applicable"] as const)
+      .find((match) => match === request.fixtureMatch) ?? "not_applicable";
+    const key = `${promptMarkerPresent}:${requestKind}:${fixtureMatch}`;
+    const category = categories.get(key);
+    if (category) category.count += 1;
+    else categories.set(key, { promptMarkerPresent, requestKind, fixtureMatch, count: 1 });
+  }
+  return {
+    providerBaseline: scope.providerBaseline,
+    observedGlobalCount: countedRequests.length,
+    promptMarkerMatchesBeforeBaseline: countedRequests.slice(0, scope.providerBaseline)
+      .filter((request) => request.body.includes(scope.promptMarker)).length,
+    requestsSinceBaseline: requestsSinceBaseline.length,
+    promptMarkerMatchesSinceBaseline,
+    // At most 2 marker states × 5 request kinds × 5 fixture categories.
+    categories: [...categories.values()],
+  };
 }
 
 function fingerprintProviderRequestBody(value: string, secret: string): string {

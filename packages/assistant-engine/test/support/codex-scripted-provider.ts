@@ -9,9 +9,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
-export const SCRIPTED_MODEL = 'gpt-5.6-terra'
+export const SCRIPTED_MODEL = 'gpt-6.1-sol'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
-const codexCommand = path.resolve(
+const codexCommand = process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../node_modules/.bin/codex',
 )
@@ -20,6 +20,15 @@ interface ScriptedResponseRoute {
   beforeRespond?: () => Promise<void>
   completionLabel?: string
   delayMs?: number
+  delayAfterCreatedMs?: number
+  // Streams an unfinished final message, then holds until the client drops the
+  // stream or the hold elapses and the message completes normally.
+  partialText?: {
+    delta: string
+    holdMs: number
+    onSent?: () => void
+  }
+  reasoningIntervalMs?: number
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
   usageInputTokens?: number
@@ -64,6 +73,7 @@ export type ScriptedResponse = ScriptedResponseRoute & (
 )
 
 export interface ScriptedStub {
+  abortedResponseCountSinceBaseline(): number
   baseUrl: string
   captureProviderRequestDiagnostics(options?: { completeInput?: boolean }): void
   close(): Promise<void>
@@ -103,6 +113,7 @@ export async function prepareScriptedTurnScenario(
   scriptedStub: ScriptedStub,
   temporaryPaths: string[],
   options: {
+    websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
     model?: string
     modelProvider?: string
@@ -164,6 +175,7 @@ export async function prepareScriptedTurnScenario(
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
     modelProvider?: string
     multiAgentV2?: boolean
@@ -188,7 +200,11 @@ function buildScriptedCodexConfigToml(
     'wire_api = "responses"',
     'requires_openai_auth = false',
     'request_max_retries = 4',
-    'stream_max_retries = 5',
+    `stream_max_retries = ${options.websocket ? 0 : 5}`,
+    ...(options.websocket ? [
+      'supports_websockets = true',
+      `stream_idle_timeout_ms = ${options.websocket.streamIdleTimeoutMs}`,
+    ] : []),
     '',
     ...(options.multiAgentV2
       ? [
@@ -207,12 +223,15 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   const queuedResponses: ScriptedResponse[] = []
   const requestSummaries: ScriptedProviderRequestSummary[] = []
   const completedResponseLabels: string[] = []
+  let abortedResponseCount = 0
+  let abortedResponseBaseline = 0
   let responseSequence = 0
   let responsesRequestCount = 0
   let requestBaseline = 0
   let requestSummaryBaseline = 0
   let providerRequestDiagnosticsEnabled = false
   let completeProviderInputEnabled = false
+  let unmatchedRequestReported = false
 
   const server: Server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -240,6 +259,30 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
       : undefined
     if (!scripted) {
+      if (providerRequestDiagnosticsEnabled && !unmatchedRequestReported) {
+        unmatchedRequestReported = true
+        const summary = requestSummaries[requestSummaries.length - 1]!
+        const outputs = [...(summary.customToolCallOutputs ?? []), ...(summary.functionCallOutputs ?? [])].join('\n')
+        // Only structural metadata and fixed classifiers: never print request,
+        // tool output, paths, or matcher text from model-visible fixtures.
+        process.stdout.write(`[scripted-provider-unmatched] ${JSON.stringify({
+          requestIndex: responsesRequestCount - requestBaseline,
+          nativeChildTask: requestBody.includes('Message Type: NEW_TASK'),
+          outputCount: (summary.customToolCallOutputs?.length ?? 0) + (summary.functionCallOutputs?.length ?? 0),
+          outputSignals: {
+            sandbox: /sandbox|bwrap|bubblewrap|landlock/i.test(outputs),
+            denied: /denied|not permitted/i.test(outputs),
+            missingFile: /no such file/i.test(outputs),
+            running: /Script running|Process running|session_id/i.test(outputs),
+            timedOut: /"timed_out":true/.test(outputs),
+          },
+          remainingRoutes: queuedResponses.map((candidate, index) => ({
+            index,
+            missingIncludes: (candidate.requestIncludes ?? []).flatMap((value, index) => requestBody.includes(value) ? [] : [index]),
+            presentExcludes: (candidate.requestExcludes ?? []).flatMap((value, index) => requestBody.includes(value) ? [index] : []),
+          })),
+        })}\n`)
+      }
       response.statusCode = 500
       response.end(JSON.stringify({
         error: 'scripted responses stub received a request without a queued response',
@@ -357,13 +400,18 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
                     type: 'message',
                   },
         ]
-    writeScriptedSseResponse({
+    const completed = await writeScriptedSseResponse({
       outputItems,
+      partialText: scripted.partialText,
       response,
       responseId,
       usageInputTokens: scripted.usageInputTokens,
+      delayAfterCreatedMs: scripted.delayAfterCreatedMs,
+      reasoningIntervalMs: scripted.reasoningIntervalMs,
     })
-    if (scripted.completionLabel) {
+    if (!completed) {
+      abortedResponseCount += 1
+    } else if (scripted.completionLabel) {
       completedResponseLabels.push(scripted.completionLabel)
     }
   })
@@ -378,6 +426,8 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   }
 
   return {
+    abortedResponseCountSinceBaseline: () =>
+      abortedResponseCount - abortedResponseBaseline,
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     captureProviderRequestDiagnostics: (options) => {
       providerRequestDiagnosticsEnabled = true
@@ -394,6 +444,8 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       completedResponseLabels.splice(0)
       providerRequestDiagnosticsEnabled = false
       completeProviderInputEnabled = false
+      unmatchedRequestReported = false
+      abortedResponseBaseline = abortedResponseCount
       requestBaseline = responsesRequestCount
       requestSummaryBaseline = requestSummaries.length
     },
@@ -572,12 +624,15 @@ function readProviderToolOutputText(value: unknown): string | null {
   return textItems.length > 0 ? textItems.join('\n') : null
 }
 
-function writeScriptedSseResponse(input: {
+async function writeScriptedSseResponse(input: {
   outputItems: readonly Record<string, unknown>[]
+  partialText?: ScriptedResponseRoute['partialText']
   response: ServerResponse
   responseId: string
   usageInputTokens?: number
-}): void {
+  delayAfterCreatedMs?: number
+  reasoningIntervalMs?: number
+}): Promise<boolean> {
   const inputTokens = input.usageInputTokens ?? 12
   const usage = {
     input_tokens: inputTokens,
@@ -606,27 +661,71 @@ function writeScriptedSseResponse(input: {
     },
     type: 'response.created',
   })
+  let remainingDelayMs = input.delayAfterCreatedMs ?? 0
+  let reasoningItems = 0
+  const reasoningOutput: Record<string, unknown>[] = []
+  while (input.reasoningIntervalMs && remainingDelayMs > 0) {
+    const item = { id: `rs_${input.responseId}_${reasoningItems}`, type: 'reasoning', summary: [] }
+    reasoningOutput.push(item)
+    writeScriptedSseEvent(input.response, 'response.output_item.added', {
+      type: 'response.output_item.added', item, output_index: reasoningItems,
+    })
+    const waitMs = Math.min(input.reasoningIntervalMs, remainingDelayMs)
+    await delay(waitMs)
+    remainingDelayMs -= waitMs
+    writeScriptedSseEvent(input.response, 'response.output_item.done', {
+      type: 'response.output_item.done', item, output_index: reasoningItems,
+    })
+    reasoningItems += 1
+  }
+  if (remainingDelayMs) await delay(remainingDelayMs)
   for (const [outputIndex, outputItem] of input.outputItems.entries()) {
+    const partialText = input.partialText && outputItem.type === 'message'
+      ? input.partialText
+      : null
     writeScriptedSseEvent(input.response, 'response.output_item.added', {
       item: {
         ...outputItem,
+        ...(partialText ? { content: [] } : {}),
         status: 'in_progress',
       },
-      output_index: outputIndex,
+      output_index: outputIndex + reasoningItems,
       type: 'response.output_item.added',
     })
+    if (partialText) {
+      writeScriptedSseEvent(input.response, 'response.output_text.delta', {
+        content_index: 0,
+        delta: partialText.delta,
+        item_id: outputItem.id,
+        output_index: outputIndex + reasoningItems,
+        type: 'response.output_text.delta',
+      })
+      partialText.onSent?.()
+      const clientClosed = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), partialText.holdMs)
+        input.response.once('close', () => {
+          clearTimeout(timer)
+          resolve(true)
+        })
+      })
+      if (clientClosed) {
+        return false
+      }
+    }
     writeScriptedSseEvent(input.response, 'response.output_item.done', {
       item: outputItem,
-      output_index: outputIndex,
+      output_index: outputIndex + reasoningItems,
       type: 'response.output_item.done',
     })
   }
+  completedResponse.output = [...reasoningOutput, ...input.outputItems]
   writeScriptedSseEvent(input.response, 'response.completed', {
     response: completedResponse,
     type: 'response.completed',
   })
   input.response.write('data: [DONE]\n\n')
   input.response.end()
+  return true
 }
 
 function writeScriptedSseEvent(

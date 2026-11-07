@@ -106,9 +106,9 @@ proves the claim.
 
 ## Review Ownership
 
-The parent reviews this plan and walkthrough during candidate/final review;
-there is no preliminary Product UX specialist gate. Start with the irreducible
-purpose and inspect the normal path through the promised result. Review only
+The parent reviews this plan and walkthrough during candidate/final review.
+Start with the irreducible purpose and inspect the normal path through the
+promised result. Review only
 problems caused or materially worsened by the change, except a pre-existing gap
 that prevents the requested result from working.
 

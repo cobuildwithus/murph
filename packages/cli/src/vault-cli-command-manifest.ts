@@ -21,7 +21,7 @@ import type {
   DeviceSyncServices,
 } from './device-services.js'
 import { ensureCliVaultServices } from './device-services.js'
-import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
+import { registerAssistantOnboardingCommands } from './commands/assistant-onboarding.js'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
 import {
@@ -38,9 +38,6 @@ import {
 import {
   commonsGoalListResultSchema,
   commonsGoalShowResultSchema,
-  commonsProtocolExploreResultSchema,
-  commonsProtocolListResultSchema,
-  commonsProtocolShowResultSchema,
   registerCommonsCommands,
 } from './commands/commons.js'
 import {
@@ -102,6 +99,11 @@ import {
   registerImmunizationCommands,
 } from './commands/health-immunization-save.js'
 import { registerHabitatCommands } from './commands/habitat.js'
+import {
+  profileSetResultSchema,
+  profileShowResultSchema,
+  registerProfileCommands,
+} from './commands/profile.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
@@ -121,24 +123,12 @@ import {
   foodLabelBatchSearchResultSchema,
   foodLabelSearchResultSchema,
 } from './food-labels.js'
-import { registerResearchCommands } from './commands/research.js'
-import {
-  RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE,
-  researchScoutResultSchema,
-} from './research-scout.js'
+
 import { registerRouteCommands } from './commands/route.js'
 import {
   knowledgeChallengeScoreCommandDescription,
 } from './commands/knowledge-challenge-score.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
-import { registerModelCommands } from './commands/model.js'
-import {
-  murphAgeInputReadinessResultSchema,
-  murphAgeModelCardStatusResultSchema,
-  murphAgeReportResultSchema,
-  murphAgeSubmittedPreviewPayloadSchema,
-  registerMurphAgeCommands,
-} from './commands/murph-age.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
   supplementLabelBatchSearchResultSchema,
@@ -148,12 +138,12 @@ import {
   groupChallengeScoreResultSchema,
 } from '@murphai/assistant-engine'
 import {
-  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from '@murphai/query'
 import { registerReadCommands } from './commands/read.js'
@@ -180,7 +170,6 @@ import {
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
-  wearablesPersonalPatternsResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
@@ -539,9 +528,9 @@ export const vaultCliCommandDescriptors = [
   {
     id: 'assistant',
     bindingMode: 'indirect',
-    rootCommandNames: ['assistant', 'run', 'status', 'doctor', 'stop'],
-    register({ cli, services, inboxServices }) {
-      registerAssistantCommands(cli, inboxServices, services)
+    rootCommandNames: ['assistant'],
+    register({ cli, services }) {
+      registerAssistantOnboardingCommands(cli, services)
     },
   },
   {
@@ -779,24 +768,6 @@ export const vaultCliCommandDescriptors = [
           'Show one compact public Health Commons outcome guide by key, slug, route id, or alias, including exact revisions.',
         output: commonsGoalShowResultSchema,
       },
-      {
-        path: ['commons', 'protocol', 'list'],
-        description:
-          'List public Health Commons protocol variants with optional text, status, and category filters.',
-        output: commonsProtocolListResultSchema,
-      },
-      {
-        path: ['commons', 'protocol', 'show'],
-        description:
-          'Show one public Health Commons protocol variant by key, slug, or alias, including exact revision ids.',
-        output: commonsProtocolShowResultSchema,
-      },
-      {
-        path: ['commons', 'protocol', 'explore'],
-        description:
-          'Explore candidate public Health Commons protocol variants for a broad or fuzzy protocol request.',
-        output: commonsProtocolExploreResultSchema,
-      },
     ],
     register({ cli }) {
       registerCommonsCommands(cli)
@@ -862,9 +833,6 @@ export const vaultCliCommandDescriptors = [
         'showAccount',
         'reconcileAccount',
         'disconnectAccount',
-        'daemonStatus',
-        'daemonStart',
-        'daemonStop',
       ],
     },
     register({ cli, services }) {
@@ -905,69 +873,33 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'profile',
+    bindingMode: 'none',
+    rootCommandNames: ['profile'],
+    leafCommands: [
+      {
+        path: ['profile', 'show'],
+        description:
+          'Show the saved blood type. Null means no recognizable blood type is saved in blood-test history.',
+        output: profileShowResultSchema,
+      },
+      {
+        path: ['profile', 'set'],
+        description:
+          "Save the member's blood type as one blood-test result. Returns unchanged only for an exact retry.",
+        output: profileSetResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerProfileCommands(cli)
+    },
+  },
+  {
     id: 'memory',
     bindingMode: 'none',
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
-    },
-  },
-  {
-    id: 'model',
-    bindingMode: 'none',
-    rootCommandNames: ['model'],
-    register({ cli }) {
-      registerModelCommands(cli)
-    },
-  },
-  {
-    id: 'murph-age',
-    bindingMode: 'none',
-    rootCommandNames: ['age'],
-    leafCommands: [
-      {
-        path: ['age', 'inputs'],
-        description:
-          'Return metadata-only Murph Age input readiness for labs, body metrics, blood pressure, and wearable context in the selected vault.',
-        hint:
-          'This command reports input readiness only. It does not calculate an age, expose metric values, or make product claims.',
-        output: murphAgeInputReadinessResultSchema,
-      },
-      {
-        path: ['age', 'report'],
-        description:
-          'Return the public Murph Age calculator report for labs, body metrics, and wearable context already present in the selected vault.',
-        hint:
-          'Product mode is the default and may return abstain while Murph Age remains research-only. Research mode is for local model development, not user-facing product claims.',
-        output: murphAgeReportResultSchema,
-      },
-      {
-        path: ['age', 'scaffold'],
-        description:
-          'Emit the canonical research-preview JSON payload shape for submitted labs, body metrics, blood pressure, and wearable summaries.',
-        hint:
-          'Edit the emitted payload, save it as JSON, then run age preview --input @payload.json. Wearable values are accepted as context but do not affect the score yet.',
-        output: murphAgeSubmittedPreviewPayloadSchema,
-      },
-      {
-        path: ['age', 'preview'],
-        description:
-          'Return a research-only Murph Age preview from a submitted JSON payload of labs, body metrics, blood pressure, and wearable summaries.',
-        hint:
-          'This command is research-only. It is for local model development and demos, not product claims or medical recommendations.',
-        output: murphAgeReportResultSchema,
-      },
-      {
-        path: ['age', 'model-cards'],
-        description:
-          'Return metadata-only readiness status for local Murph Age model-card artifacts and current policy blockers.',
-        hint:
-          'This command reports policy and artifact presence only. It does not expose model internals, row values, predictions, or product claims.',
-        output: murphAgeModelCardStatusResultSchema,
-      },
-    ],
-    register({ cli, services }) {
-      registerMurphAgeCommands(cli, services)
     },
   },
   {
@@ -988,32 +920,7 @@ export const vaultCliCommandDescriptors = [
       registerRouteCommands(cli)
     },
   },
-  {
-    id: 'research',
-    bindingMode: 'none',
-    rootCommandNames: ['research'],
-    leafCommands: [
-      {
-        path: ['research', 'payload-schema'],
-        description:
-          'Emit the exact finite focused-scope JSON body schema for research scout --input.',
-        hint:
-          'Use this before research scout when constructing the stdin or @file JSON body.',
-        output: payloadSchemaResultSchema,
-      },
-      {
-        path: ['research', 'scout'],
-        description:
-          'Search Exa for bounded human-research candidates from one finite focused structured scope without writing vault records.',
-        hint:
-          `Requires EXA_API_KEY and {"mode":"focused"}. Use only exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. If the question cannot be represented exactly, make no Exa call. Managed broad discovery and automation use research scout-batch. Never include arbitrary values, names, organizations, private notes, or personal data. Trust only candidates whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.`,
-        output: researchScoutResultSchema,
-      },
-    ],
-    register({ cli }) {
-      registerResearchCommands(cli)
-    },
-  },
+
   {
     id: 'meal',
     bindingMode: 'none',
@@ -1571,11 +1478,6 @@ export const vaultCliCommandDescriptors = [
         description: 'Explain the biggest normalized wearable drift Murph sees across the current wearable surfaces.',
         output: wearablesDriftResultSchema,
       },
-      {
-        path: ['wearables', 'patterns'],
-        description: 'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
-        output: wearablesPersonalPatternsResultSchema,
-      },
     ],
     directVaultServiceBindings: assumeDirectVaultServiceBindings({
       query: [
@@ -1590,7 +1492,6 @@ export const vaultCliCommandDescriptors = [
         'listWearableRecovery',
         'listWearableSources',
         'showWearableDrift',
-        'showPersonalPatterns',
       ],
     }),
     register({ cli, services }) {
@@ -1605,7 +1506,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['experiment', 'start'],
         description:
-          'Start a typed experiment run from a Health Commons protocol; custom runs require explicit no-public-protocol fallback.',
+          'Start a private typed experiment run with an explicit outcome, schedule, and analysis plan.',
       },
       {
         path: ['experiment', 'show'],
@@ -1803,7 +1704,8 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['knowledge', 'show'],
-        description: 'Show one derived knowledge page by slug.',
+        description:
+          'Show one derived knowledge page body, metadata, and revision digest. `--raw` also includes the exact stored Markdown. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
         output: knowledgeShowResultSchema,
       },
       {
@@ -2038,7 +1940,6 @@ assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set([
   'commons',
   'model',
-  'research',
   'route',
 ])
 

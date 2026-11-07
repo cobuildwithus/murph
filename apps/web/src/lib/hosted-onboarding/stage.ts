@@ -17,12 +17,6 @@ export type HostedAccessibleOnboardingStage = Extract<
   "activating" | "active"
 >;
 
-export function resolveHostedAccessibleOnboardingStage(
-  activationPending?: boolean,
-): HostedAccessibleOnboardingStage {
-  return activationPending ? "activating" : "active";
-}
-
 export function isHostedOnboardingAccessibleStage(
   stage: HostedOnboardingStage,
 ): stage is HostedAccessibleOnboardingStage {

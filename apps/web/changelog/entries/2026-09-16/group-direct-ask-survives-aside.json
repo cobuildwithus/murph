@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-16",
+  "order": 100,
+  "item": {
+    "id": "group-direct-ask-survives-aside",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Asking Murph in a group chat still gets an answer when a friend replies at the same moment",
+    "summary": "When you ask Murph something by name in a group and someone else replies to a different person seconds later, Murph now answers your request instead of going quiet.",
+    "details": "Murph still stays out of the way when the later message is only people talking to each other and nobody asked it anything, and it stays quiet if you say never mind before it replies.",
+    "relevanceTags": [
+      "groups",
+      "conversation"
+    ],
+    "sourcePullRequests": [
+      3515
+    ]
+  }
+}

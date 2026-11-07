@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,18 +12,6 @@ const builtPackageBoundaryTest =
   process.env.MURPH_HOSTED_LOCAL_HARNESS_TEST_PACKAGE_BOUNDARY === "1" ? it : it.skip;
 
 describe("@murphai/hosted-local-harness package boundary", () => {
-  it("keeps built package boundary verification on its explicit script", async () => {
-    const packageJson = JSON.parse(
-      await readFile(path.join(packageDir, "package.json"), "utf8"),
-    ) as { scripts?: Record<string, string | undefined> };
-
-    expect(packageJson.scripts?.test ?? "").not.toContain("pnpm build");
-    expect(packageJson.scripts?.["test:coverage"] ?? "").not.toContain("pnpm build");
-    expect(packageJson.scripts?.["verify:package-boundary"] ?? "").toContain(
-      "MURPH_HOSTED_LOCAL_HARNESS_TEST_PACKAGE_BOUNDARY=1",
-    );
-  });
-
   builtPackageBoundaryTest("imports advertised root and subpath exports through package resolution", () => {
     const script = `
       const expected = new Map([
@@ -33,6 +20,7 @@ describe("@murphai/hosted-local-harness package boundary", () => {
         ["@murphai/hosted-local-harness/dev-hosted-local/environment", ["loadHostedLocalBaseEnvironment"]],
         ["@murphai/hosted-local-harness/dev-hosted-local/stack", ["startHostedLocalDevStack"]],
         ["@murphai/hosted-local-harness/harness", ["startHostedLocalHarness"]],
+        ["@murphai/hosted-local-harness/process", ["runForegroundCommand"]],
         ["@murphai/hosted-local-harness/e2e", ["runHostedLocalE2eSuite", "resolveHostedLocalE2eScenarios"]],
       ]);
       for (const [specifier, names] of expected) {

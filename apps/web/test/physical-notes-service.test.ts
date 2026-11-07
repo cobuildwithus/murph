@@ -46,7 +46,7 @@ vi.mock("@/src/lib/hosted-groups/participant-action-authority", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveAccess,
-  readActiveHostedMemberAccess: mocks.readActiveAccess,
+  readStrictHostedMemberAccess: mocks.readActiveAccess,
 }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
@@ -225,6 +225,30 @@ describe("createHostedPhysicalNote", () => {
       recipient: request.recipient,
       signal: undefined,
     });
+  });
+
+  it("keeps the complimentary note behind usage for product-only access", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([]);
+    mocks.readActiveAccess.mockResolvedValue(false);
+    mocks.readUsageGate.mockResolvedValue({ allowed: false });
+
+    const response = await createHostedPhysicalNote({
+      ...buildRequest(1),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(response).toEqual({
+      complimentary: false,
+      costUsdMicros: COST_USD_MICROS.toString(),
+      physicalNoteId: null,
+      status: "insufficient_usage",
+    });
+    expect(mocks.assertActiveAccess).toHaveBeenCalledOnce();
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(store.allRows()).toHaveLength(0);
   });
 
   it("records subsequent accepted notes through the existing usage ledger", async () => {

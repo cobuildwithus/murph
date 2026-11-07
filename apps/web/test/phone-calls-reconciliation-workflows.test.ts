@@ -1,7 +1,9 @@
-import { Prisma, type HostedPhoneCall } from "@prisma/client";
+import type { HostedPhoneCall } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HookConflictError, HookNotFoundError } from "workflow/errors";
 import { RetryableError } from "workflow";
+
+import { encodeHostedPhoneCallBriefFixture } from "./support/phone-call-private-fixtures";
 
 const mocks = vi.hoisted(() => ({
   createHook: vi.fn(),
@@ -224,6 +226,21 @@ describe("hosted phone-call reconciliation Workflow", () => {
     });
 
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not acknowledge the call while its registration signal is unsettled", async () => {
+    const registration = createDeferred();
+    mocks.resumeHook.mockReturnValue(registration.promise);
+    const acknowledged = vi.fn();
+    const pending = startHostedPhoneCallReconciliationWorkflow({
+      phoneCallId: "hpc_123",
+    }, { signal: new AbortController().signal }).then(acknowledged);
+
+    await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
+    expect(acknowledged).not.toHaveBeenCalled();
+    registration.resolve();
+    await pending;
+    expect(acknowledged).toHaveBeenCalledWith({ runId: "run_123" });
   });
 
   it("bounds a stalled Workflow start and observes late settlement", async () => {
@@ -462,19 +479,21 @@ describe("hosted phone-call reconciliation Workflow", () => {
     const endedAt = new Date("2026-08-16T12:00:00.000Z");
     let currentCall: HostedPhoneCall | null = {
       analyzedAt: null,
-      briefEncrypted: null,
-      briefJson: {
-        allowTransferToUser: false,
-        goal: "Confirm the office schedule.",
-        instructions: [],
-        shareableFacts: {},
-        successCriteria: "The office confirms its schedule.",
-        timeZone: "America/Chicago",
-        to: {
-          label: "the office",
-          phoneNumber: "+15550102020",
+      briefEncrypted: encodeHostedPhoneCallBriefFixture({
+        memberId: "member_late_analysis",
+        value: {
+          allowTransferToUser: false,
+          goal: "Confirm the office schedule.",
+          instructions: [],
+          shareableFacts: {},
+          successCriteria: "The office confirms its schedule.",
+          timeZone: "America/Chicago",
+          to: {
+            label: "the office",
+            phoneNumber: "+15550102020",
+          },
         },
-      },
+      }),
       createdAt: endedAt,
       endedAt,
       id: "hpc_late_analysis",
@@ -487,7 +506,6 @@ describe("hosted phone-call reconciliation Workflow", () => {
       resultDeliveryStatus: null,
       resultDeliveryTerminalAt: null,
       resultEncrypted: null,
-      resultJson: null,
       resultNotificationChannel: "telegram",
       status: "failed",
       stopRequestedAt: null,
@@ -572,9 +590,6 @@ describe("hosted phone-call reconciliation Workflow", () => {
           resultDeliveryStatus:
             args.data.resultDeliveryStatus ?? currentCall.resultDeliveryStatus,
           resultEncrypted: args.data.resultEncrypted ?? currentCall.resultEncrypted,
-          resultJson: args.data.resultJson === Prisma.DbNull
-            ? null
-            : currentCall.resultJson,
           status: args.data.status,
         };
         resultCommitted.resolve();

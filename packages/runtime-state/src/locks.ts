@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
   ensureAssistantStateDirectory,
   resolveAssistantStateFileMode,
 } from "./assistant-state-security.ts";
-import { writeJsonFileAtomic } from "./atomic-write.ts";
 
 interface ProcessDirectoryLockState {
   depth: number;
@@ -123,8 +122,6 @@ export async function acquireDirectoryLock<TMetadata>(
       },
     };
   }
-
-  await ensureAssistantStateDirectory(path.dirname(options.lockPath));
 
   while (true) {
     try {
@@ -251,10 +248,19 @@ async function publishDirectoryLock<TMetadata>(
     getRelativeMetadataPath(options.lockPath, options.metadataPath),
   );
 
-  await ensureAssistantStateDirectory(tempLockPath);
-
   try {
-    await writeJsonFileAtomic(tempMetadataPath, options.metadata);
+    await ensureAssistantStateDirectory(path.dirname(tempMetadataPath));
+    // The directory rename publishes the complete lock. Its private metadata
+    // needs no second atomic publication.
+    const mode = resolveAssistantStateFileMode(tempMetadataPath);
+    await writeFile(tempMetadataPath, `${JSON.stringify(options.metadata, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
+    if (mode !== undefined) {
+      await chmod(tempMetadataPath, mode);
+    }
     await rename(tempLockPath, options.lockPath);
   } catch (error) {
     await cleanupDetachedDirectory(tempLockPath, options);

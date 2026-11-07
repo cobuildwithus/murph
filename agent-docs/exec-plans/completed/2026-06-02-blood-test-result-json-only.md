@@ -76,7 +76,7 @@ Updated: 2026-06-02
 - `pnpm --dir packages/cli test -- health-blood-test-save.test.ts` passed
   before the coverage worker added one extra no-write/no-echo test: 98 files,
   855 tests.
-- `bash scripts/workspace-verify.sh test:diff packages/cli/src/commands/health-blood-test-save.ts packages/cli/test/health-blood-test-save.test.ts packages/cli/test/murph-age-command.test.ts packages/cli/config.schema.json packages/cli/src/incur.generated.ts`
+- `bash scripts/workspace-verify.sh test:diff packages/cli/src/commands/health-blood-test-save.ts packages/cli/test/health-blood-test-save.test.ts packages/cli/config.schema.json packages/cli/src/incur.generated.ts`
   passed before the coverage worker added one extra test: CLI typecheck,
   package shape, generated catalog, 22 files, 363 tests.
 - Coverage worker added a schema-invalid JSON object no-write/no-echo test.

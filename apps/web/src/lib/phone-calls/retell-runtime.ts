@@ -326,37 +326,36 @@ function buildRetellStorageModeMismatchError(input: {
 function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): CallCreatePhoneCallParams {
   assertRetellAgentDataStorageSetting();
   const publicBaseOrigin = readRetellPublicBaseOrigin();
-  const agentOverride = buildRetellAgentOverride(publicBaseOrigin);
 
-  const params: CallCreatePhoneCallParams = {
+  return {
+    agent_override: buildRetellAgentOverride(publicBaseOrigin),
     from_number: requireEnv("RETELL_FROM_NUMBER"),
     to_number: call.brief.to.phoneNumber,
     override_agent_id: requireEnv("RETELL_AGENT_ID"),
-    override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
+    override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "latest_published",
     metadata: {
       murph_phone_call_id: call.id,
     },
     retell_llm_dynamic_variables: buildRetellDynamicVariables(call, publicBaseOrigin),
   };
-  if (agentOverride) {
-    params.agent_override = agentOverride;
-  }
-  return params;
 }
 
 type RetellAgentOverride = NonNullable<CallCreatePhoneCallParams["agent_override"]>;
 
-function buildRetellAgentOverride(publicBaseOrigin: string | null): RetellAgentOverride | null {
-  if (!publicBaseOrigin) {
-    return null;
-  }
-
-  return {
-    agent: {
-      webhook_events: [...RETELL_WEBHOOK_EVENTS],
-      webhook_url: buildRetellCallbackUrl(publicBaseOrigin, RETELL_WEBHOOK_PATH),
+function buildRetellAgentOverride(publicBaseOrigin: string | null): RetellAgentOverride {
+  const override: RetellAgentOverride = {
+    retell_llm: {
+      start_speaker: "agent",
+      begin_message: "Hey",
     },
   };
+  if (publicBaseOrigin) {
+    override.agent = {
+      webhook_events: [...RETELL_WEBHOOK_EVENTS],
+      webhook_url: buildRetellCallbackUrl(publicBaseOrigin, RETELL_WEBHOOK_PATH),
+    };
+  }
+  return override;
 }
 
 function readRetellPublicBaseOrigin(): string | null {
@@ -413,6 +412,7 @@ function buildRetellDynamicVariables(
 ): Record<string, string> {
   const brief = call.brief;
   return {
+    call_audience: call.callAudience,
     call_brief: JSON.stringify(brief),
     murph_timezone: brief.timeZone,
     ...(publicBaseOrigin

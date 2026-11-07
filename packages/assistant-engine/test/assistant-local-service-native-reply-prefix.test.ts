@@ -65,6 +65,44 @@ test.each([
   20_000,
 )
 
+test.each([
+  { channel: 'linq', direct: true, expected: '⏰' },
+  { channel: 'linq', direct: false, expected: '⏰' },
+  { channel: 'telegram', direct: true, expected: undefined },
+] as const)(
+  'a reaction on a $channel direct=$direct target asks for the Web tapback only after authorization',
+  async ({ expected, ...route }) => {
+    const reader = vi.fn(async (_input: { signal: AbortSignal; targetInputId: string }) => '⏰')
+    const result = await runLivePrefixScenario({
+      ...route,
+      expectedAckReaction: expected,
+      readLinqMessageAckReaction: reader,
+    })
+    expect(result.outcome).toMatchObject({ kind: 'completed' })
+    // Rejected refs never reach the lookup; the accepted Linq target does,
+    // by accepted-input id (the runtime maps it to the real Linq ids).
+    expect(reader.mock.calls.map(([input]) => input.targetInputId))
+      .toEqual(route.channel === 'linq' ? [result.laterInputId] : [])
+  },
+  20_000,
+)
+
+test.each([
+  ['stalls', () => new Promise<string | null>(() => undefined)],
+  ['fails', async () => { throw new Error('web unavailable') }],
+] as const)('a Web tapback lookup that %s leaves the reaction queued as before', async (_label, impl) => {
+  const reader = vi.fn(impl)
+  const startedAt = Date.now()
+  const result = await runLivePrefixScenario({
+    channel: 'linq',
+    direct: true,
+    readLinqMessageAckReaction: reader,
+  })
+  expect(result.outcome).toMatchObject({ kind: 'completed' })
+  expect(reader).toHaveBeenCalledOnce()
+  expect(Date.now() - startedAt).toBeLessThan(10_000)
+}, 20_000)
+
 test('native reply prefix rebases held group reconsideration without resending the draft', async () => {
   const result = await runLivePrefixScenario({ held: true })
   expect(result.outcome).toMatchObject({ kind: 'completed' })
@@ -128,9 +166,14 @@ test.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 99])(
 async function runLivePrefixScenario(options: {
   channel?: 'linq' | 'telegram'
   direct?: boolean
+  expectedAckReaction?: string
   futureFinal?: boolean
   held?: boolean
   invalidation?: 'deleted' | 'revoked'
+  readLinqMessageAckReaction?: (input: {
+    signal: AbortSignal
+    targetInputId: string
+  }) => Promise<string | null>
   responseOrdinal?: number
   targetedProgress?: boolean
 }) {
@@ -314,7 +357,10 @@ async function runLivePrefixScenario(options: {
     expect(await authorize({ action: 'reaction', deliveryContextOrdinal: ordinal,
       messageRef: earlier.inputId })).toBeNull()
     expect(await authorize({ action: 'reaction', deliveryContextOrdinal: ordinal,
-      messageRef: later.inputId })).toEqual({ targetInputId: later.inputId })
+      messageRef: later.inputId })).toEqual({
+      ...(options.expectedAckReaction ? { ackReaction: options.expectedAckReaction } : {}),
+      targetInputId: later.inputId,
+    })
     const selected = await executeMurphDynamicToolRequest({
       authorizeAcceptedMessageTarget: authorize,
       deliveryContextOrdinal: ordinal,
@@ -376,6 +422,9 @@ async function runLivePrefixScenario(options: {
     deliverResponse: true,
     executionContext: { hosted: {
       memberId: 'member-synthetic',
+      ...(options.readLinqMessageAckReaction
+        ? { readLinqMessageAckReaction: options.readLinqMessageAckReaction }
+        : {}),
       progressDeliveryDependencies: {
         sendLinq: unexpectedProviderSend,
         sendTelegram: unexpectedProviderSend,
@@ -412,5 +461,5 @@ async function runLivePrefixScenario(options: {
   expect(unexpectedProviderSend).not.toHaveBeenCalled()
   const journal = await readAssistantAcceptedTurnInputJournal(context.vaultRoot, 'turn-1')
   expect(journal?.inputIds).toEqual([earlier.inputId, later.inputId])
-  return { mocks, outcome, plan, precedingInputs, session }
+  return { laterInputId: later.inputId, mocks, outcome, plan, precedingInputs, session }
 }

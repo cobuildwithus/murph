@@ -1,18 +1,24 @@
 import type { PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { privateKeyToAccount } from "viem/accounts";
+import { authenticator } from "./approval-webauthn-fixture";
 
 const mocks = vi.hoisted(() => ({
-  readHostedPrivyUserById: vi.fn(),
+  readApprovalPasskeyState: vi.fn(),
+  prepareApprovalPasskeyWrite: vi.fn(),
+  commitApprovalPasskeyWriteTx: vi.fn(),
   resolveHostedPublicOrigin: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  readHostedPrivyUserById: mocks.readHostedPrivyUserById,
-}));
+
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
   resolveHostedPublicOrigin: mocks.resolveHostedPublicOrigin,
+}));
+
+vi.mock("@/src/lib/sensitive-actions/passkey-store", () => ({
+  readApprovalPasskeyState: mocks.readApprovalPasskeyState,
+  prepareApprovalPasskeyWrite: mocks.prepareApprovalPasskeyWrite,
+  commitApprovalPasskeyWriteTx: mocks.commitApprovalPasskeyWriteTx,
 }));
 
 import {
@@ -23,28 +29,17 @@ import {
   consumeSensitiveActionChallengeTx,
 } from "@/src/lib/sensitive-actions/server";
 
-const PRIVATE_KEY = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
-const account = privateKeyToAccount(PRIVATE_KEY);
+const account = authenticator();
 const now = new Date("2026-06-24T12:00:00.000Z");
 
 describe("sensitive action challenges", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.resolveHostedPublicOrigin.mockReturnValue("https://withmurph.ai");
-    mocks.readHostedPrivyUserById.mockResolvedValue({
-      id: "privy-user-123",
-      linked_accounts: [
-        {
-          address: account.address,
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          type: "wallet",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ],
-      mfa_methods: [{ type: "passkey" }],
-    });
+    vi.resetAllMocks();
+    mocks.readApprovalPasskeyState.mockResolvedValue({ credentials: [account.credential], memberId: "member_123", encrypted: "synthetic" });
+    mocks.prepareApprovalPasskeyWrite.mockResolvedValue({ memberId: "member_123", expectedEncrypted: "synthetic", nextEncrypted: "synthetic-next" });
+
+    mocks.resolveHostedPublicOrigin.mockReturnValue("https://www.withmurph.ai");
+
   });
 
   it("builds a deterministic session-bound settings binding and message", () => {
@@ -59,12 +54,12 @@ describe("sensitive action challenges", () => {
       bindingHash,
       expiresAt: new Date("2026-06-24T12:15:00.000Z"),
       kind: "vault.export",
-      origin: "https://withmurph.ai",
+      origin: "https://www.withmurph.ai",
       token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
     })).toBe([
       "Murph sensitive action authorization",
       "Version: 1",
-      "Origin: https://withmurph.ai",
+      "Origin: https://www.withmurph.ai",
       "Action: vault.export",
       `Binding: sha256:${bindingHash}`,
       "Challenge: sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
@@ -72,7 +67,7 @@ describe("sensitive action challenges", () => {
     ].join("\n"));
   });
 
-  it("accepts one matching signature and rejects replay", async () => {
+  it("accepts one matching passkey assertion and rejects replay", async () => {
     const prisma = createPrismaFake();
     const bindingHash = buildSettingsSensitiveActionBinding({
       kind: "vault.export",
@@ -86,15 +81,15 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const signature = await account.signMessage({ message: challenge.message });
+    const assertion = account.assertion({ customMessage: challenge.message });
     const input = {
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash,
       kind: "vault.export" as const,
       memberId: "member_123",
       now,
       prisma,
-      privyUserId: "privy-user-123",
+
     };
 
     await expect(verifyAndConsumeSensitiveActionChallenge(input)).resolves.toBeUndefined();
@@ -117,22 +112,22 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const signature = await account.signMessage({ message: challenge.message });
+    const assertion = account.assertion({ customMessage: challenge.message });
 
     await expect(verifyAndConsumeSensitiveActionChallenge({
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash: "b".repeat(64),
       kind: "assistant.action.approve",
       memberId: "member_123",
       now,
       prisma,
-      privyUserId: "privy-user-123",
+
     })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
 
     expect(prisma.__rows.size).toBe(1);
   });
 
-  it("rejects expired challenges before consulting Privy", async () => {
+  it("rejects expired challenges before reading approval credentials", async () => {
     const prisma = createPrismaFake();
     const bindingHash = buildSettingsSensitiveActionBinding({
       kind: "vault.export",
@@ -146,19 +141,19 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const signature = await account.signMessage({ message: challenge.message });
+    const assertion = account.assertion({ customMessage: challenge.message });
 
     await expect(verifyAndConsumeSensitiveActionChallenge({
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash,
       kind: "vault.export",
       memberId: "member_123",
       now: new Date(now.getTime() + 16 * 60 * 1000),
       prisma,
-      privyUserId: "privy-user-123",
+
     })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
 
-    expect(mocks.readHostedPrivyUserById).not.toHaveBeenCalled();
+    expect(mocks.readApprovalPasskeyState).not.toHaveBeenCalled();
     expect(prisma.__rows.size).toBe(1);
   });
 
@@ -201,15 +196,15 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const signature = await account.signMessage({ message: challenge.message });
+    const assertion = account.assertion({ customMessage: challenge.message });
     const input = {
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash,
       kind: "vault.export" as const,
       memberId: "member_123",
       now,
       prisma,
-      privyUserId: "privy-user-123",
+
     };
 
     const results = await Promise.allSettled([
@@ -222,9 +217,9 @@ describe("sensitive action challenges", () => {
     expect(prisma.__rows.size).toBe(0);
   });
 
-  it("does not consume when the Privy lookup is unavailable", async () => {
+  it("does not consume when credential storage is unavailable", async () => {
     const prisma = createPrismaFake();
-    mocks.readHostedPrivyUserById.mockRejectedValueOnce(new Error("provider unavailable"));
+    mocks.readApprovalPasskeyState.mockRejectedValueOnce(new Error("storage unavailable"));
     const bindingHash = buildSettingsSensitiveActionBinding({
       kind: "vault.export",
       memberId: "member_123",
@@ -237,22 +232,22 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const signature = await account.signMessage({ message: challenge.message });
+    const assertion = account.assertion({ customMessage: challenge.message });
 
     await expect(verifyAndConsumeSensitiveActionChallenge({
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash,
       kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,
-      privyUserId: "privy-user-123",
-    })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_PROVIDER_UNAVAILABLE" });
+
+    })).rejects.toThrow("storage unavailable");
 
     expect(prisma.__rows.size).toBe(1);
   });
 
-  it("does not consume a challenge signed by another wallet", async () => {
+  it("does not consume a challenge signed by another passkey", async () => {
     const prisma = createPrismaFake();
     const bindingHash = buildSettingsSensitiveActionBinding({
       kind: "vault.export",
@@ -266,38 +261,26 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const other = privateKeyToAccount(
-      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd" as const,
-    );
-    const signature = await other.signMessage({ message: challenge.message });
+    const other = authenticator();
+    const assertion = other.assertion({ customMessage: challenge.message });
 
     await expect(verifyAndConsumeSensitiveActionChallenge({
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash,
       kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,
-      privyUserId: "privy-user-123",
+
     })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_INVALID_SIGNATURE" });
 
     expect(prisma.__rows.size).toBe(1);
   });
 
-  it("fails closed when passkey-only MFA is not enrolled", async () => {
+  it("fails closed when no approval passkey is enrolled", async () => {
     const prisma = createPrismaFake();
-    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
-      id: "privy-user-123",
-      linked_accounts: [{
-        address: account.address,
-        chain_type: "ethereum",
-        connector_type: "embedded",
-        type: "wallet",
-        wallet_client_type: "privy",
-        wallet_index: 0,
-      }],
-      mfa_methods: [{ type: "passkey" }, { type: "sms" }],
-    });
+    mocks.readApprovalPasskeyState.mockResolvedValueOnce({ credentials: [], encrypted: null, memberId: "member_123" });
+
     const bindingHash = buildSettingsSensitiveActionBinding({
       kind: "vault.export",
       memberId: "member_123",
@@ -310,16 +293,16 @@ describe("sensitive action challenges", () => {
       now,
       prisma,
     });
-    const signature = await account.signMessage({ message: challenge.message });
+    const assertion = account.assertion({ customMessage: challenge.message });
 
     await expect(verifyAndConsumeSensitiveActionChallenge({
-      authorization: { signature, token: challenge.token },
+      authorization: { method: "passkey", assertion, token: challenge.token },
       bindingHash,
       kind: "vault.export",
       memberId: "member_123",
       now,
       prisma,
-      privyUserId: "privy-user-123",
+
     })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_SETUP_REQUIRED" });
     expect(prisma.__rows.size).toBe(1);
   });

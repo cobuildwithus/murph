@@ -13,10 +13,6 @@ import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
 import {
-  markHostedLinqOnboardingLinkNoticeSent,
-  releaseHostedLinqOnboardingLinkNoticeClaim,
-} from "./linq-daily-state";
-import {
   projectHostedLinqChatHealthTx,
   projectHostedLinqLineProviderStateTx,
 } from "./linq-provider-health-store";
@@ -125,27 +121,6 @@ export async function ingestHostedLinqProviderEventTx(input: {
     event: input.event,
     prisma: input.prisma,
   });
-  if (deliveryReceipt.reopenOnboardingLink) {
-    const groupJoinReplyContext =
-      deliveryReceipt.reopenOnboardingLink.groupJoinReplyContext;
-    if (
-      !groupJoinReplyContext
-      || deliveryReceipt.reopenOnboardingLink.releaseDailySuppression === true
-    ) {
-      await releaseHostedLinqOnboardingLinkNoticeClaim({
-        memberId: deliveryReceipt.reopenOnboardingLink.memberId,
-        occurredAt: deliveryReceipt.reopenOnboardingLink.occurredAt,
-        prisma: input.prisma,
-      });
-    }
-  }
-  if (deliveryReceipt.restoreOnboardingLink) {
-    await markHostedLinqOnboardingLinkNoticeSent({
-      memberId: deliveryReceipt.restoreOnboardingLink.memberId,
-      occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
-      prisma: input.prisma,
-    });
-  }
   const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
     ? await readHostedLinqDeliveryForProviderMessageTx({
         messageLookupKey: input.event.messageLookupKey,

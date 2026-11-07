@@ -92,7 +92,7 @@ Updated: 2026-05-25
 - `pnpm --dir packages/device-syncd test:coverage` passed.
 - `pnpm typecheck` passed.
 - `git diff --check` passed.
-- `bash scripts/workspace-verify.sh test:diff packages/device-syncd/src/providers/junction.ts packages/device-syncd/src/metadata.ts packages/device-syncd/test` failed in an unrelated CLI Murph Age test expecting candidate feature count `8` but receiving `9`; this diff does not touch CLI or Murph Age logic.
+- `bash scripts/workspace-verify.sh test:diff packages/device-syncd/src/providers/junction.ts packages/device-syncd/src/metadata.ts packages/device-syncd/test` failed in an unrelated CLI test expecting candidate feature count `8` but receiving `9`; this diff does not touch CLI or logic.
 - Required completion audits: security/privacy review, coverage-write, and
   task-finish review completed. Security and final-audit findings were resolved;
   the final task-finish audit reported no findings.

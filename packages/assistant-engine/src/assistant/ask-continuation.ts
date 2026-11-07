@@ -418,13 +418,6 @@ export async function sendAssistantAskContinuationLocal(
         throw error
       }
 
-      await state.status.refreshSnapshot().catch((error) => {
-        warnAssistantBestEffortFailure({
-          error,
-          operation: 'status snapshot refresh',
-        })
-      })
-
       return {
         deliveryOutcome: committedDeliveryOutcome,
         response,

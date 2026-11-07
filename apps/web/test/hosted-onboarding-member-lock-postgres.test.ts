@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -10,20 +11,19 @@ import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { readGame, runGameCommand } from "@/src/lib/game/service";
 import {
-  createHostedEmailLookupKey,
-  createHostedPhoneLookupKey,
-  createHostedPrivyUserLookupKey,
+
+
   createHostedStripeCustomerLookupKey,
   createHostedStripeSubscriptionLookupKey,
-  createHostedTelegramUserLookupKey,
+
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { upgradeHostedBillingPlan } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 import { scheduleHostedBillingPlanSwitch } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
-import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
-import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
+
+
 import {
   createHostedFamilyBillingCheckout,
   HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY,
@@ -41,18 +41,16 @@ import {
 import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/hosted-member-stripe-customer";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
-  lookupHostedMemberByVerifiedEmailAddress,
+
   readHostedMemberBillingSnapshot,
-  readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
+
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
-  ensureHostedMemberForPrivyIdentityResolutionTx,
-  reconcileHostedPrivyIdentityOnMemberTx,
+
+
 } from "@/src/lib/hosted-onboarding/member-identity-service";
-import {
-  readHostedMemberIdByReplyAliasLookupKey,
-} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+
 import {
   acquireHostedLinqParticipantEmailLockTx,
   createHostedLinqParticipantContact,
@@ -67,58 +65,10 @@ import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
-import {
-  persistHostedAccountDeletionCleanupTx,
-  prepareHostedAccountDeletionCleanup,
-  runHostedAccountDeletionCleanup,
-} from "@/src/lib/hosted-privacy/account-deletion-cleanup";
+
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
-const privyProvider = vi.hoisted(() => ({
-  deleteUser: vi.fn(async () => {
-    privyProvider.exists = false;
-    return true;
-  }),
-  emailByUserId: new Map<string, string>(),
-  exists: true,
-  readUser: vi.fn(async (userId: string) => {
-    if (!privyProvider.exists || privyProvider.missingUserIds.has(userId)) {
-      throw new Error("Privy user no longer exists.");
-    }
-    const emailAddress = privyProvider.emailByUserId.get(userId);
-    const phoneNumber = privyProvider.phoneByUserId.get(userId);
-    const telegramUserId = privyProvider.telegramByUserId.get(userId);
-    return {
-      id: userId,
-      linked_accounts: [
-        ...(emailAddress
-          ? [{
-            address: emailAddress,
-            type: "email",
-            verified_at: 1_775_203_200,
-          }]
-          : []),
-        ...(phoneNumber
-          ? [{
-              phone_number: phoneNumber,
-              type: "phone",
-              verified_at: 1_775_203_200,
-            }]
-          : []),
-        ...(telegramUserId
-          ? [{
-              telegram_user_id: telegramUserId,
-              type: "telegram",
-            }]
-          : []),
-      ],
-    };
-  }),
-  missingUserIds: new Set<string>(),
-  phoneByUserId: new Map<string, string>(),
-  telegramByUserId: new Map<string, string>(),
-}));
 
 const accountDeletionBoundaries = vi.hoisted(() => ({
   connectedAppsClient: {
@@ -142,6 +92,7 @@ const stripeProvider = vi.hoisted(() => ({
   customersCreate: vi.fn(),
   customersDelete: vi.fn(),
   eventsRetrieve: vi.fn(),
+  subscriptionsCancel: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
 
@@ -255,14 +206,6 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/privy")>();
-  return {
-    ...actual,
-    deleteHostedPrivyUser: privyProvider.deleteUser,
-    readHostedPrivyUserById: privyProvider.readUser,
-  };
-});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<
@@ -285,6 +228,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       retrieve: stripeProvider.eventsRetrieve,
     },
     subscriptions: {
+      cancel: stripeProvider.subscriptionsCancel,
       retrieve: stripeProvider.subscriptionsRetrieve,
     },
   };
@@ -602,6 +546,83 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         stripeProvider.customersDelete.mockReset();
         await observer.hostedMember.deleteMany({ where: { id: memberId } });
         await disconnectClients([deletion, observer, writer]);
+      }
+    });
+
+    it("commits twenty game pages and resumes account deletion with keys intact", async () => {
+      const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_game_pages_${randomUUID()}`;
+      const holder = globalThis as typeof globalThis & { __murphHostedSecureBoxStringTestCodec?: Parameters<typeof setHostedSecureBoxStringTestCodecForTests>[0] };
+      const codec = holder.__murphHostedSecureBoxStringTestCodec ?? null;
+      setHostedSecureBoxStringTestCodecForTests(null);
+      try {
+        const { sealGameText } = await import("@/src/lib/game/crypto");
+        await deletion.hostedMember.create({ data: { id: memberId } });
+        const { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } = await import("@/src/lib/hosted-crypto/domain-root-store");
+        const { runWithHostedDomainRootUnwrapCache } = await import("@/src/lib/hosted-crypto/domain-root-unwrap-cache");
+        await runWithHostedDomainRootUnwrapCache(async () => {
+          const prepared = await prepareHostedDomainRootForWeb({ domain: "control", reason: "test", userId: memberId });
+          await deletion.$transaction(tx => revalidatePreparedHostedDomainRootForWebTx({ prepared, tx }));
+        });
+        expect(await runGameCommand({ actorMemberId: memberId, command: { type: "setProfile", firstName: "Player", timeZone: "UTC" } })).toMatchObject({ ok: true });
+        const rows: Prisma.GameCreateManyInput[] = [];
+        for (let i = 0; i < 2_101; i++) {
+          const id = randomUUID();
+          rows.push({ id, createdBy: memberId, wordsOwnerMemberId: memberId, status: "void", terms: [],
+            termsWordsEncrypted: (await sealGameText({ table: "game", field: "terms_words", rowId: id, memberId }, "Synthetic game words"))! });
+        }
+        await deletion.game.createMany({ data: rows });
+        await deletion.gamePlayer.createMany({ data: rows.map(row => ({ gameId: row.id, memberId, seat: 0, joinedAt: new Date(), timeZone: "UTC" })) });
+        const envelopes = await deletion.hostedUserCryptoEnvelope.findMany({ where: { userId: memberId }, orderBy: { id: "asc" } });
+        expect(envelopes.length).toBeGreaterThan(0);
+        const request = () => deleteHostedAccountData({ memberId, prisma: deletion, request: new Request("https://app.example.test/settings") });
+        await expect(request()).rejects.toMatchObject({ code: "ACCOUNT_DELETION_GAME_HISTORY_PENDING", retryable: true });
+        expect(await deletion.game.count({ where: { wordsOwnerMemberId: memberId } })).toBe(101);
+        expect(await deletion.hostedMember.findUnique({ where: { id: memberId } })).toMatchObject({ suspendedAt: expect.any(Date) });
+        expect(await deletion.hostedUserCryptoEnvelope.findMany({ where: { userId: memberId }, orderBy: { id: "asc" } })).toEqual(envelopes);
+        expect(await deletion.gameProfile.findUnique({ where: { memberId } })).not.toBeNull();
+        await expect(request()).resolves.toMatchObject({ memberId });
+        expect(await deletion.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(codec);
+        await cleanupGameFixtures(deletion, [memberId]);
+        await deletion.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([deletion]);
+      }
+    }, 180_000);
+
+    it("calls off a deleted member's live game and keeps it for the other player", async () => {
+      const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const leaver = `hbm_game_leaver_${fixtureId}`;
+      const stayer = `hbm_game_stayer_${fixtureId}`;
+      installPassthroughHostedSecureBoxTestCodec();
+      try {
+        await deletion.hostedMember.createMany({ data: [leaver, stayer].map((id) => ({ billingStatus: HostedBillingStatus.not_started, id })) });
+        for (const [id, firstName] of [[leaver, "Leo"], [stayer, "Ava"]] as const) {
+          expect(await runGameCommand({ actorMemberId: id, command: { firstName, timeZone: "UTC", type: "setProfile" } })).toMatchObject({ ok: true });
+        }
+        const gameId = randomUUID();
+        const created = await runGameCommand({ actorMemberId: leaver, command: { gameId, inviteeFirstName: "Ava", type: "createGame",
+          terms: { schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ item: "Breakfast", kind: "prize" }], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] } } });
+        if (!created.ok) throw new Error("game fixture create failed");
+        expect(await runGameCommand({ actorMemberId: stayer, command: { termsVersion: 1, timeZone: "UTC", token: created.game!.inviteToken!, type: "join" } })).toMatchObject({ ok: true });
+
+        await expect(deleteHostedAccountData({
+          memberId: leaver,
+          prisma: deletion,
+          request: new Request("https://app.example.test/settings"),
+        })).resolves.toMatchObject({ memberId: leaver });
+
+        const view = await readGame(gameId, stayer);
+        expect(view).toMatchObject({ status: "void", result: null, tickets: [] });
+        expect(view!.players.map((player) => [player.seat, player.firstName, player.left ?? false, player.isMe])).toEqual([[0, "Leo", true, false], [1, "Ava", false, true]]);
+        expect(await deletion.gamePlayer.count({ where: { gameId, memberId: leaver } })).toBe(0);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await cleanupGameFixtures(deletion, [leaver, stayer]);
+        await deletion.hostedMember.deleteMany({ where: { id: { in: [leaver, stayer] } } });
+        await disconnectClients([deletion]);
       }
     });
 
@@ -2260,8 +2281,36 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 );
 
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "hosted Privy re-creation and account-deletion PostgreSQL concurrency",
+  "hosted canonical account-deletion PostgreSQL concurrency",
   () => {
+    it("keeps a member suspended after Stripe cancellation fails and finishes on retry", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `deletion-stripe-${randomUUID()}`;
+      const subscriptionId = `sub_${randomUUID()}`;
+      installPassthroughHostedSecureBoxTestCodec();
+      stripeProvider.subscriptionsRetrieve.mockResolvedValue({ id: subscriptionId, status: "active" });
+      stripeProvider.subscriptionsCancel.mockRejectedValueOnce(new Error("Synthetic Stripe failure"))
+        .mockResolvedValueOnce({ id: subscriptionId, status: "canceled" });
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId, billingStatus: HostedBillingStatus.active,
+          billingRef: { create: { stripeSubscriptionIdEncrypted: subscriptionId,
+            stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(subscriptionId) } } } });
+        const attempt = () => deleteHostedAccountData({ memberId, prisma, request: new Request("https://app.example.test/settings") });
+        await expect(attempt()).rejects.toMatchObject({ code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED", retryable: true,
+          message: "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing." });
+        expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toMatchObject({ suspendedAt: expect.any(Date) });
+        await expect(attempt()).resolves.toMatchObject({ memberId });
+        expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
+        expect(stripeProvider.subscriptionsCancel).toHaveBeenCalledTimes(2);
+      } finally {
+        stripeProvider.subscriptionsCancel.mockReset();
+        stripeProvider.subscriptionsRetrieve.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([prisma]);
+      }
+    });
+
     it("keeps deletion authoritative over an existing Stripe suspension and terminalizes on retry", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -2421,1145 +2470,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("rejects stale authentication after Privy deletion terminalizes and removes the receipt", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const authenticationClient = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const oldMemberId = `hbm_privy_delete_${fixtureId}`;
-      const privyUserId = `did:privy:delete-race-${fixtureId}`;
-      const privyUserLookupKey = createHostedPrivyUserLookupKey(privyUserId);
-      const authenticationReachedReceiptRead = createDeferred();
-      const allowAuthenticationReceiptRead = createDeferred();
-      const cleanupStartedAt = new Date("2026-07-26T18:00:00.000Z");
-      let authentication: Promise<unknown> | null = null;
 
-      if (!privyUserLookupKey) {
-        throw new Error("Expected a Privy user lookup key for the concurrency fixture.");
-      }
-
-      const preparedCleanup = await prepareHostedAccountDeletionCleanup({
-        now: cleanupStartedAt,
-        privyUserId,
-        runtimeMemberIds: [oldMemberId],
-        stripeCustomerIds: [],
-      });
-      preparedCleanup.cloudflareCompletedAt = cleanupStartedAt;
-      preparedCleanup.stripeCompletedAt = cleanupStartedAt;
-      const cleanupId = preparedCleanup.id;
-
-      privyProvider.exists = true;
-      privyProvider.deleteUser.mockClear();
-      privyProvider.readUser.mockClear();
-      await observer.hostedMember.create({
-        data: { id: oldMemberId },
-      });
-      await observer.hostedMemberIdentity.create({
-        data: {
-          memberId: oldMemberId,
-          privyUserLookupKey,
-        },
-      });
-      await deletionClient.$transaction(async (tx) => {
-        await persistHostedAccountDeletionCleanupTx({
-          cleanup: preparedCleanup,
-          prisma: tx,
-        });
-        await tx.hostedMember.delete({
-          where: { id: oldMemberId },
-        });
-      }, { timeout: transactionTimeoutMs });
-      const memberCountAfterDeletion = await observer.hostedMember.count();
-      setHostedSecureBoxStringTestCodecForTests({
-        decrypt(input) {
-          return input.value;
-        },
-        encrypt() {
-          return "hsb-test:privy-account-deletion-race";
-        },
-      });
-
-      try {
-        authentication = authenticationClient.$transaction(async (tx) =>
-          ensureHostedMemberForPrivyIdentityResolutionTx({
-            authMethod: "telegram",
-            identity: {
-              email: null,
-              phone: null,
-              telegram: {
-                firstName: "Deletion",
-                lastName: "Race",
-                photoUrl: null,
-                telegramUserId: `telegram_${fixtureId}`,
-                username: null,
-              },
-              userId: privyUserId,
-            },
-            now: new Date("2026-07-26T18:00:00.000Z"),
-            prisma: pauseBeforeAccountDeletionReceiptRead({
-              allowAuthenticationReceiptRead,
-              authenticationReachedReceiptRead,
-              tx,
-            }),
-          }), { timeout: transactionTimeoutMs });
-
-        await authenticationReachedReceiptRead.promise;
-        await expect(runHostedAccountDeletionCleanup({
-          cleanupId,
-          now: cleanupStartedAt,
-          prisma: deletionClient,
-        })).resolves.toMatchObject({
-          cleanupPending: false,
-          vendorAccounts: {
-            privyUser: {
-              status: "completed",
-            },
-          },
-        });
-        await expect(observer.hostedAccountDeletionCleanup.findUnique({
-          where: { id: cleanupId },
-        })).resolves.toBeNull();
-        expect(privyProvider.deleteUser).toHaveBeenCalledOnce();
-
-        allowAuthenticationReceiptRead.resolve();
-        await expect(authentication).rejects.toThrow(
-          "Privy user no longer exists.",
-        );
-        expect(privyProvider.readUser).toHaveBeenCalledOnce();
-        await expect(observer.hostedMemberIdentity.count({
-          where: { privyUserLookupKey },
-        })).resolves.toBe(0);
-        await expect(observer.hostedMember.count()).resolves.toBe(
-          memberCountAfterDeletion,
-        );
-        await expect(observer.hostedWebSession.count({
-          where: { privyUserId },
-        })).resolves.toBe(0);
-      } finally {
-        allowAuthenticationReceiptRead.resolve();
-        await Promise.allSettled(authentication ? [authentication] : []);
-        const replacementIdentities = await observer.hostedMemberIdentity.findMany({
-          select: { memberId: true },
-          where: { privyUserLookupKey },
-        });
-        await observer.hostedMember.deleteMany({
-          where: {
-            id: {
-              in: [
-                oldMemberId,
-                ...replacementIdentities.map((identity) => identity.memberId),
-              ],
-            },
-          },
-        });
-        await observer.hostedAccountDeletionCleanup.deleteMany({
-          where: { id: cleanupId },
-        });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer, deletionClient, authenticationClient]);
-      }
-    });
   },
 );
 
-describe.skipIf(!runPostgresConcurrencyProof)(
-  "hosted verified-email Privy rebinding PostgreSQL concurrency",
-  () => {
-    it("rotates the private reply alias from live email authority and keeps agreement stable", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_alias_rebind_${fixtureId}`;
-      const staleBearerAddress = `alias-stale-${fixtureId}@example.test`;
-      const liveAddress = `alias-live-${fixtureId}@example.test`;
-      const privyUserId = `did:privy:alias-live-${fixtureId}`;
-      const previousEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
-      const previousEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
-      const previousEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
-      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-      process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
-      process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
-      process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-rebinding-reply-alias-secret";
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
-      clearHostedOnboardingEnvCache();
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(privyUserId, liveAddress);
-      const originalRoute = await createHostedMemberReplyAliasRoute({
-        generation: 4,
-        memberId,
-      });
-      if (!originalRoute) {
-        throw new Error("Expected the original reply-alias route.");
-      }
-
-      try {
-        await seedVerifiedEmailRebindingMember({
-          emailAddress: staleBearerAddress,
-          memberId,
-          oldPrivyUserId: privyUserId,
-          prisma: observer,
-        });
-        await observer.hostedMemberRouting.create({
-          data: {
-            memberId,
-            replyAliasGeneration: 4,
-            replyAliasLookupKey: originalRoute.replyAliasLookupKey,
-          },
-        });
-
-        await expect(completeHostedPrivyVerification({
-          authMethod: "email",
-          identity: makeVerifiedEmailRebindingIdentity({
-            emailAddress: staleBearerAddress,
-            privyUserId,
-          }),
-          now: new Date("2026-08-20T12:00:00.000Z"),
-          prisma: observer,
-        })).resolves.toMatchObject({ memberId });
-
-        const rotatedRoute = await createHostedMemberReplyAliasRoute({
-          generation: 5,
-          memberId,
-        });
-        if (!rotatedRoute) {
-          throw new Error("Expected the rotated reply-alias route.");
-        }
-        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          verifiedEmailLookupKey: createHostedEmailLookupKey(liveAddress),
-        });
-        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          replyAliasGeneration: 5,
-          replyAliasLookupKey: rotatedRoute.replyAliasLookupKey,
-        });
-        await expect(readHostedMemberIdByReplyAliasLookupKey({
-          prisma: observer,
-          replyAliasLookupKey: originalRoute.replyAliasLookupKey,
-        })).resolves.toBeNull();
-        await expect(readHostedMemberIdByReplyAliasLookupKey({
-          prisma: observer,
-          replyAliasLookupKey: rotatedRoute.replyAliasLookupKey,
-        })).resolves.toBe(memberId);
-
-        await expect(completeHostedPrivyVerification({
-          authMethod: "email",
-          identity: makeVerifiedEmailRebindingIdentity({
-            emailAddress: liveAddress,
-            privyUserId,
-          }),
-          now: new Date("2026-08-20T12:01:00.000Z"),
-          prisma: observer,
-        })).resolves.toMatchObject({ memberId });
-        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          replyAliasGeneration: 5,
-          replyAliasLookupKey: rotatedRoute.replyAliasLookupKey,
-        });
-      } finally {
-        restoreEnvValue("HOSTED_EMAIL_DOMAIN", previousEmailDomain);
-        restoreEnvValue("HOSTED_EMAIL_LOCAL_PART", previousEmailLocalPart);
-        restoreEnvValue("HOSTED_EMAIL_SIGNING_SECRET", previousEmailSigningSecret);
-        restoreEnvValue("HOSTED_ONBOARDING_PUBLIC_BASE_URL", previousPublicBaseUrl);
-        clearHostedOnboardingEnvCache();
-        privyProvider.emailByUserId.delete(privyUserId);
-        await observer.hostedMember.deleteMany({ where: { id: memberId } });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer]);
-      }
-    });
-
-    it("rebinds the existing member without creating another member", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_${fixtureId}`;
-      const emailAddress = `rebind-${fixtureId}@example.test`;
-      const oldPrivyUserId = `did:privy:old-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:replacement-${fixtureId}`;
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
-      const member = await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId,
-        prisma: observer,
-      });
-      const memberCountBefore = await observer.hostedMember.count();
-      const emailAuthorizationBefore =
-        await observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        });
-
-      try {
-        await expect(writer.$transaction((tx) =>
-          reconcileHostedPrivyIdentityOnMemberTx({
-            allowVerifiedEmailRebinding: true,
-            authMethod: "email",
-            identity: makeVerifiedEmailRebindingIdentity({
-              emailAddress,
-              privyUserId: replacementPrivyUserId,
-            }),
-            member,
-            now: new Date("2026-08-03T12:00:00.000Z"),
-            prisma: tx,
-          }), { timeout: transactionTimeoutMs })).resolves.toMatchObject({
-          id: memberId,
-        });
-
-        await expect(observer.hostedMember.count()).resolves.toBe(memberCountBefore);
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          memberId,
-          privyUserIdEncrypted: replacementPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toEqual(emailAuthorizationBefore);
-      } finally {
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        await observer.hostedMember.deleteMany({ where: { id: memberId } });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer, writer]);
-      }
-    });
-
-    it("holds verified-email authority through the identity replacement commit", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const rebindingClient = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const emailWriter = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_lock_${fixtureId}`;
-      const emailAddress = `rebind-lock-${fixtureId}@example.test`;
-      const oldPrivyUserId = `did:privy:old-lock-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:replacement-lock-${fixtureId}`;
-      const rebindingReachedIdentityWrite = createDeferred();
-      const allowRebindingIdentityWrite = createDeferred();
-      let rebinding: Promise<unknown> | null = null;
-      let emailMove: Promise<unknown> | null = null;
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
-      const member = await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId,
-        prisma: observer,
-      });
-
-      try {
-        rebinding = rebindingClient.$transaction((tx) =>
-          reconcileHostedPrivyIdentityOnMemberTx({
-            allowVerifiedEmailRebinding: true,
-            authMethod: "email",
-            identity: makeVerifiedEmailRebindingIdentity({
-              emailAddress,
-              privyUserId: replacementPrivyUserId,
-            }),
-            member,
-            now: new Date("2026-08-03T12:00:00.000Z"),
-            prisma: pauseBeforeHostedIdentityUpsert({
-              allowIdentityWrite: allowRebindingIdentityWrite,
-              identityWriteReached: rebindingReachedIdentityWrite,
-              tx,
-            }),
-          }), { timeout: transactionTimeoutMs });
-
-        await rebindingReachedIdentityWrite.promise;
-        const [emailWriterBackend] = await emailWriter.$queryRaw<Array<{ pid: number }>>(
-          Prisma.sql`SELECT pg_backend_pid()::int AS pid`,
-        );
-        if (!emailWriterBackend) {
-          throw new Error("Expected the email-writer PostgreSQL backend id.");
-        }
-        emailMove = emailWriter.$transaction(async (tx) => {
-          await tx.hostedMemberEmailAuthorization.update({
-            data: {
-              verifiedEmailLookupKey: null,
-              verifiedEmailVerifiedAt: null,
-            },
-            where: { memberId },
-          });
-        }, { timeout: transactionTimeoutMs });
-
-        await waitForPostgresLock({
-          observer,
-          pid: emailWriterBackend.pid,
-        });
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserLookupKey: requirePrivyUserLookupKey(oldPrivyUserId),
-        });
-
-        allowRebindingIdentityWrite.resolve();
-        await expect(rebinding).resolves.toMatchObject({ id: memberId });
-        await expect(emailMove).resolves.toBeUndefined();
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          verifiedEmailLookupKey: null,
-          verifiedEmailVerifiedAt: null,
-        });
-      } finally {
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        allowRebindingIdentityWrite.resolve();
-        await Promise.allSettled([
-          ...(rebinding ? [rebinding] : []),
-          ...(emailMove ? [emailMove] : []),
-        ]);
-        await observer.hostedMember.deleteMany({ where: { id: memberId } });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer, rebindingClient, emailWriter]);
-      }
-    });
-
-    it("rolls back the old binding when the replacement principal belongs to another member", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_conflict_${fixtureId}`;
-      const conflictingMemberId = `hbm_email_rebind_owner_${fixtureId}`;
-      const emailAddress = `rebind-conflict-${fixtureId}@example.test`;
-      const oldPrivyUserId = `did:privy:old-conflict-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:owned-${fixtureId}`;
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
-      const member = await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId,
-        prisma: observer,
-      });
-      await observer.hostedMember.create({ data: { id: conflictingMemberId } });
-      await observer.hostedMemberIdentity.create({
-        data: {
-          memberId: conflictingMemberId,
-          privyUserIdEncrypted: replacementPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        },
-      });
-
-      try {
-        await expect(writer.$transaction((tx) =>
-          reconcileHostedPrivyIdentityOnMemberTx({
-            allowVerifiedEmailRebinding: true,
-            authMethod: "email",
-            identity: makeVerifiedEmailRebindingIdentity({
-              emailAddress,
-              privyUserId: replacementPrivyUserId,
-            }),
-            member,
-            now: new Date("2026-08-03T12:00:00.000Z"),
-            prisma: tx,
-          }), { timeout: transactionTimeoutMs })).rejects.toMatchObject({
-          code: "PRIVY_IDENTITY_CONFLICT",
-          httpStatus: 409,
-        });
-
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserIdEncrypted: oldPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(oldPrivyUserId),
-        });
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId: conflictingMemberId },
-        })).resolves.toMatchObject({
-          privyUserIdEncrypted: replacementPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-      } finally {
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        await observer.hostedMember.deleteMany({
-          where: { id: { in: [memberId, conflictingMemberId] } },
-        });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer, writer]);
-      }
-    });
-
-    it("rejects a stale missing principal without displacing the current email owner", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const authenticationClient = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_stale_${fixtureId}`;
-      const emailAddress = `rebind-stale-${fixtureId}@example.test`;
-      const currentPrivyUserId = `did:privy:current-${fixtureId}`;
-      const stalePrivyUserId = `did:privy:stale-${fixtureId}`;
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId: currentPrivyUserId,
-        prisma: observer,
-      });
-      const memberCountBefore = await observer.hostedMember.count();
-      const webSessionCountBefore = await observer.hostedWebSession.count();
-      privyProvider.missingUserIds.add(stalePrivyUserId);
-
-      try {
-        await expect(authenticationClient.$transaction((tx) =>
-          ensureHostedMemberForPrivyIdentityResolutionTx({
-            allowVerifiedEmailRebinding: true,
-            authMethod: "email",
-            identity: makeVerifiedEmailRebindingIdentity({
-              emailAddress,
-              privyUserId: stalePrivyUserId,
-            }),
-            now: new Date("2026-08-03T12:00:00.000Z"),
-            prisma: tx,
-          }), { timeout: transactionTimeoutMs })).rejects.toThrow(
-          "Privy user no longer exists.",
-        );
-
-        await expect(observer.hostedMember.count()).resolves.toBe(memberCountBefore);
-        await expect(observer.hostedWebSession.count()).resolves.toBe(webSessionCountBefore);
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserIdEncrypted: currentPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(currentPrivyUserId),
-        });
-        await expect(observer.hostedMemberIdentity.count({
-          where: {
-            privyUserLookupKey: requirePrivyUserLookupKey(stalePrivyUserId),
-          },
-        })).resolves.toBe(0);
-      } finally {
-        privyProvider.missingUserIds.delete(stalePrivyUserId);
-        await observer.hostedMember.deleteMany({ where: { id: memberId } });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer, authenticationClient]);
-      }
-    });
-
-    it("rolls back principal recovery when a live-only Telegram account belongs to another member", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_telegram_conflict_${fixtureId}`;
-      const telegramOwnerMemberId = `hbm_telegram_owner_${fixtureId}`;
-      const emailAddress = `rebind-telegram-conflict-${fixtureId}@example.test`;
-      const oldPrivyUserId = `did:privy:old-telegram-conflict-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:replacement-telegram-conflict-${fixtureId}`;
-      const telegramUserId = `telegram-conflict-${fixtureId}`;
-      const telegramUserLookupKey = createHostedTelegramUserLookupKey(telegramUserId);
-
-      if (!telegramUserLookupKey) {
-        throw new Error("Expected a Telegram lookup key for the conflict fixture.");
-      }
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
-      privyProvider.telegramByUserId.set(replacementPrivyUserId, telegramUserId);
-      await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId,
-        prisma: observer,
-      });
-      await observer.hostedMember.create({ data: { id: telegramOwnerMemberId } });
-      await observer.hostedMemberRouting.create({
-        data: {
-          memberId: telegramOwnerMemberId,
-          telegramUserIdEncrypted: telegramUserId,
-          telegramUserLookupKey,
-        },
-      });
-      const emailAuthorizationBefore =
-        await observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        });
-
-      try {
-        await expect(completeHostedPrivyVerification({
-          authMethod: "email",
-          identity: makeVerifiedEmailRebindingIdentity({
-            emailAddress,
-            privyUserId: replacementPrivyUserId,
-          }),
-          now: new Date("2026-08-03T12:00:00.000Z"),
-          prisma: observer,
-          timeZone: "America/New_York",
-        })).rejects.toMatchObject({
-          code: "TELEGRAM_IDENTITY_CONFLICT",
-          httpStatus: 409,
-        });
-
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserIdEncrypted: oldPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(oldPrivyUserId),
-        });
-        await expect(observer.hostedMemberIdentity.count({
-          where: {
-            privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-          },
-        })).resolves.toBe(0);
-        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toEqual(emailAuthorizationBefore);
-        await expect(observer.hostedMemberRouting.findUnique({
-          where: { memberId },
-        })).resolves.toBeNull();
-        await expect(observer.hostedInvite.count({
-          where: { memberId },
-        })).resolves.toBe(0);
-        await expect(observer.hostedMember.findUniqueOrThrow({
-          select: { pendingActivationTimeZone: true },
-          where: { id: memberId },
-        })).resolves.toEqual({ pendingActivationTimeZone: null });
-      } finally {
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
-        await observer.hostedMember.deleteMany({
-          where: { id: { in: [memberId, telegramOwnerMemberId] } },
-        });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer]);
-      }
-    });
-
-    it("commits an unowned live-only Telegram account with principal recovery", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_telegram_${fixtureId}`;
-      const emailAddress = `rebind-telegram-${fixtureId}@example.test`;
-      const oldPrivyUserId = `did:privy:old-telegram-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:replacement-telegram-${fixtureId}`;
-      const telegramUserId = `telegram-${fixtureId}`;
-      const telegramUserLookupKey = createHostedTelegramUserLookupKey(telegramUserId);
-
-      if (!telegramUserLookupKey) {
-        throw new Error("Expected a Telegram lookup key for the success fixture.");
-      }
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
-      privyProvider.telegramByUserId.set(replacementPrivyUserId, telegramUserId);
-      await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId,
-        prisma: observer,
-      });
-      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
-      clearHostedOnboardingEnvCache();
-
-      try {
-        await expect(completeHostedPrivyVerification({
-          authMethod: "email",
-          identity: makeVerifiedEmailRebindingIdentity({
-            emailAddress,
-            privyUserId: replacementPrivyUserId,
-          }),
-          now: new Date("2026-08-03T12:00:00.000Z"),
-          prisma: observer,
-        })).resolves.toMatchObject({
-          memberId,
-        });
-
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserIdEncrypted: replacementPrivyUserId,
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-        const telegramRouting = await observer.hostedMemberRouting.findUniqueOrThrow({
-          where: { memberId },
-        });
-        expect(telegramRouting).toMatchObject({
-          telegramUserLookupKey,
-        });
-        expect(telegramRouting.telegramUserIdEncrypted).toContain(
-          `"telegramUserId":"${telegramUserId}"`,
-        );
-        await expect(observer.hostedMemberRouting.count({
-          where: { telegramUserLookupKey },
-        })).resolves.toBe(1);
-        await expect(observer.hostedInvite.count({
-          where: { memberId },
-        })).resolves.toBe(1);
-      } finally {
-        if (previousPublicBaseUrl === undefined) {
-          delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-        } else {
-          process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
-        }
-        clearHostedOnboardingEnvCache();
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
-        await observer.hostedMember.deleteMany({ where: { id: memberId } });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer]);
-      }
-    });
-
-    it("retains one live authority snapshot across the companion consent retry", async () => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_retry_${fixtureId}`;
-      const canonicalEmailAddress = `rebind-retry-live-${fixtureId}@example.test`;
-      const staleTokenEmailAddress = `rebind-retry-stale-${fixtureId}@example.test`;
-      const storedPhoneNumber = "+15551234567";
-      const unownedLivePhoneNumber = "+15557654321";
-      const oldPrivyUserId = `did:privy:old-retry-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:replacement-retry-${fixtureId}`;
-      const laterEmailOwnerPrivyUserId = `did:privy:later-email-owner-${fixtureId}`;
-      const liveTelegramUserId = `telegram-live-retry-${fixtureId}`;
-      const staleTelegramUserId = `telegram-stale-retry-${fixtureId}`;
-      const liveTelegramLookupKey = createHostedTelegramUserLookupKey(liveTelegramUserId);
-      const staleTelegramLookupKey = createHostedTelegramUserLookupKey(staleTelegramUserId);
-
-      if (!liveTelegramLookupKey || !staleTelegramLookupKey) {
-        throw new Error("Expected Telegram lookup keys for the retry fixture.");
-      }
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, canonicalEmailAddress);
-      privyProvider.phoneByUserId.set(replacementPrivyUserId, unownedLivePhoneNumber);
-      privyProvider.telegramByUserId.set(replacementPrivyUserId, liveTelegramUserId);
-      await seedVerifiedEmailRebindingMember({
-        emailAddress: canonicalEmailAddress,
-        memberId,
-        oldPrivyUserId,
-        phoneNumber: storedPhoneNumber,
-        prisma: observer,
-      });
-      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
-      clearHostedOnboardingEnvCache();
-      let laterEmailOwnerMemberId: string | null = null;
-      const staleBearerIdentity = {
-        email: {
-          address: staleTokenEmailAddress,
-          verifiedAt: 1_754_218_800,
-        },
-        phone: {
-          number: storedPhoneNumber,
-          verifiedAt: 1_754_218_800,
-        },
-        telegram: {
-          firstName: null,
-          lastName: null,
-          photoUrl: null,
-          telegramUserId: staleTelegramUserId,
-          username: null,
-        },
-        userId: replacementPrivyUserId,
-      };
-      const freshBearerIdentity = {
-        ...staleBearerIdentity,
-        phone: {
-          number: unownedLivePhoneNumber,
-          verifiedAt: 1_754_218_860,
-        },
-      };
-
-      try {
-        await expect(ensureHostedCompanionMemberId({
-          identity: staleBearerIdentity,
-          now: new Date("2026-08-03T12:00:00.000Z"),
-          prisma: observer,
-        })).rejects.toMatchObject({
-          code: "HOSTED_CONSENT_REQUIRED",
-          httpStatus: 403,
-        });
-
-        companionBoundaries.consentedMemberIds.add(memberId);
-        await expect(ensureHostedCompanionMemberId({
-          identity: freshBearerIdentity,
-          now: new Date("2026-08-03T12:01:00.000Z"),
-          prisma: observer,
-        })).resolves.toBe(memberId);
-
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          phoneLookupKey: createHostedPhoneLookupKey(storedPhoneNumber),
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-        await expect(observer.hostedMemberIdentity.count({
-          where: {
-            phoneLookupKey: createHostedPhoneLookupKey(unownedLivePhoneNumber),
-          },
-        })).resolves.toBe(0);
-        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          directPublicSenderLookupKey: createHostedEmailLookupKey(canonicalEmailAddress),
-          verifiedEmailLookupKey: createHostedEmailLookupKey(canonicalEmailAddress),
-        });
-        await expect(lookupHostedMemberByVerifiedEmailAddress({
-          address: staleTokenEmailAddress,
-          prisma: observer,
-        })).resolves.toBeNull();
-        await expect(readHostedMemberIdByAuthorizedDirectPublicSenderAddress({
-          address: staleTokenEmailAddress,
-          prisma: observer,
-        })).resolves.toBeNull();
-        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          telegramUserLookupKey: liveTelegramLookupKey,
-        });
-        await expect(observer.hostedMemberRouting.count({
-          where: { telegramUserLookupKey: staleTelegramLookupKey },
-        })).resolves.toBe(0);
-        await expect(observer.hostedInvite.count({
-          where: { memberId },
-        })).resolves.toBe(1);
-
-        privyProvider.emailByUserId.set(
-          laterEmailOwnerPrivyUserId,
-          staleTokenEmailAddress,
-        );
-        const laterEmailOwner = await completeHostedPrivyVerification({
-          authMethod: "email",
-          identity: makeVerifiedEmailRebindingIdentity({
-            emailAddress: staleTokenEmailAddress,
-            privyUserId: laterEmailOwnerPrivyUserId,
-          }),
-          now: new Date("2026-08-03T12:02:00.000Z"),
-          prisma: observer,
-        });
-        laterEmailOwnerMemberId = laterEmailOwner.memberId;
-        expect(laterEmailOwner.memberId).not.toBe(memberId);
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-      } finally {
-        if (previousPublicBaseUrl === undefined) {
-          delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-        } else {
-          process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
-        }
-        clearHostedOnboardingEnvCache();
-        companionBoundaries.consentedMemberIds.delete(memberId);
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        privyProvider.emailByUserId.delete(laterEmailOwnerPrivyUserId);
-        privyProvider.phoneByUserId.delete(replacementPrivyUserId);
-        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
-        await observer.hostedMember.deleteMany({
-          where: {
-            id: {
-              in: [memberId, ...(laterEmailOwnerMemberId ? [laterEmailOwnerMemberId] : [])],
-            },
-          },
-        });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer]);
-      }
-    });
-
-    it.each([
-      {
-        canonicalPhone: "stored",
-        livePhoneOwner: "another member",
-        phoneOwnedByAnother: true,
-        storedPhoneNumber: "+15551234567",
-      },
-      {
-        canonicalPhone: "absent",
-        livePhoneOwner: "another member",
-        phoneOwnedByAnother: true,
-        storedPhoneNumber: undefined,
-      },
-      {
-        canonicalPhone: "absent",
-        livePhoneOwner: "unowned",
-        phoneOwnedByAnother: false,
-        storedPhoneNumber: undefined,
-      },
-    ])("handles a $livePhoneOwner live phone with a $canonicalPhone canonical phone", async ({
-      phoneOwnedByAnother,
-      storedPhoneNumber,
-    }) => {
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const fixtureId = randomUUID();
-      const memberId = `hbm_email_rebind_retry_phone_${fixtureId}`;
-      const phoneOwnerMemberId = `hbm_retry_phone_owner_${fixtureId}`;
-      const emailAddress = `rebind-retry-phone-${fixtureId}@example.test`;
-      const ownedLivePhoneNumber = "+15557654321";
-      const oldPrivyUserId = `did:privy:old-retry-phone-${fixtureId}`;
-      const replacementPrivyUserId = `did:privy:replacement-retry-phone-${fixtureId}`;
-      const liveTelegramUserId = `telegram-live-retry-phone-${fixtureId}`;
-      const ownedLivePhoneLookupKey = createHostedPhoneLookupKey(ownedLivePhoneNumber);
-      const liveTelegramLookupKey = createHostedTelegramUserLookupKey(liveTelegramUserId);
-
-      if (!ownedLivePhoneLookupKey || !liveTelegramLookupKey) {
-        throw new Error("Expected phone and Telegram lookup keys for the retry fixture.");
-      }
-
-      installPassthroughHostedSecureBoxTestCodec();
-      privyProvider.exists = true;
-      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
-      privyProvider.phoneByUserId.set(replacementPrivyUserId, ownedLivePhoneNumber);
-      privyProvider.telegramByUserId.set(replacementPrivyUserId, liveTelegramUserId);
-      await seedVerifiedEmailRebindingMember({
-        emailAddress,
-        memberId,
-        oldPrivyUserId,
-        ...(storedPhoneNumber ? { phoneNumber: storedPhoneNumber } : {}),
-        prisma: observer,
-      });
-      if (phoneOwnedByAnother) {
-        await observer.hostedMember.create({ data: { id: phoneOwnerMemberId } });
-        await observer.hostedMemberIdentity.create({
-          data: {
-            memberId: phoneOwnerMemberId,
-            phoneLookupKey: ownedLivePhoneLookupKey,
-            phoneNumberEncrypted: ownedLivePhoneNumber,
-            phoneNumberVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
-          },
-        });
-      }
-      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
-      clearHostedOnboardingEnvCache();
-      const staleBearerIdentity = {
-        email: {
-          address: emailAddress,
-          verifiedAt: 1_754_218_800,
-        },
-        phone: storedPhoneNumber
-          ? {
-              number: storedPhoneNumber,
-              verifiedAt: 1_754_218_800,
-            }
-          : null,
-        telegram: null,
-        userId: replacementPrivyUserId,
-      };
-      const freshBearerIdentity = {
-        ...staleBearerIdentity,
-        phone: {
-          number: ownedLivePhoneNumber,
-          verifiedAt: 1_754_218_860,
-        },
-      };
-
-      try {
-        await expect(ensureHostedCompanionMemberId({
-          identity: staleBearerIdentity,
-          now: new Date("2026-08-03T12:00:00.000Z"),
-          prisma: observer,
-        })).rejects.toMatchObject({
-          code: "HOSTED_CONSENT_REQUIRED",
-          httpStatus: 403,
-        });
-
-        companionBoundaries.consentedMemberIds.add(memberId);
-        await expect(ensureHostedCompanionMemberId({
-          identity: freshBearerIdentity,
-          now: new Date("2026-08-03T12:01:00.000Z"),
-          prisma: observer,
-        })).resolves.toBe(memberId);
-
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          phoneLookupKey: storedPhoneNumber
-            ? createHostedPhoneLookupKey(storedPhoneNumber)
-            : phoneOwnedByAnother
-              ? null
-              : ownedLivePhoneLookupKey,
-          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
-        });
-        if (phoneOwnedByAnother) {
-          await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-            where: { memberId: phoneOwnerMemberId },
-          })).resolves.toMatchObject({
-            phoneLookupKey: ownedLivePhoneLookupKey,
-          });
-        }
-        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
-          where: { memberId },
-        })).resolves.toMatchObject({
-          telegramUserLookupKey: liveTelegramLookupKey,
-        });
-        await expect(observer.hostedInvite.count({
-          where: { memberId },
-        })).resolves.toBe(1);
-      } finally {
-        if (previousPublicBaseUrl === undefined) {
-          delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-        } else {
-          process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
-        }
-        clearHostedOnboardingEnvCache();
-        companionBoundaries.consentedMemberIds.delete(memberId);
-        privyProvider.emailByUserId.delete(replacementPrivyUserId);
-        privyProvider.phoneByUserId.delete(replacementPrivyUserId);
-        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
-        await observer.hostedMember.deleteMany({
-          where: { id: { in: [memberId, phoneOwnerMemberId] } },
-        });
-        setHostedSecureBoxStringTestCodecForTests(null);
-        await disconnectClients([observer]);
-      }
-    });
-  },
-);
-
-function pauseBeforeAccountDeletionReceiptRead(input: {
-  allowAuthenticationReceiptRead: Deferred<void>;
-  authenticationReachedReceiptRead: Deferred<void>;
-  tx: Prisma.TransactionClient;
-}): Prisma.TransactionClient {
-  const hostedAccountDeletionCleanup = new Proxy(
-    input.tx.hostedAccountDeletionCleanup,
-    {
-      get(target, property) {
-        if (property === "findFirst") {
-          return async (
-            args: Prisma.HostedAccountDeletionCleanupFindFirstArgs,
-          ) => {
-            input.authenticationReachedReceiptRead.resolve();
-            await input.allowAuthenticationReceiptRead.promise;
-            return target.findFirst(args);
-          };
-        }
-
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    },
-  );
-
-  return new Proxy<Prisma.TransactionClient>(input.tx, {
-    get(target, property) {
-      if (property === "hostedAccountDeletionCleanup") {
-        return hostedAccountDeletionCleanup;
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-}
-
-function pauseBeforeHostedIdentityUpsert(input: {
-  allowIdentityWrite: Deferred<void>;
-  identityWriteReached: Deferred<void>;
-  tx: Prisma.TransactionClient;
-}): Prisma.TransactionClient {
-  const hostedMemberIdentity = new Proxy(input.tx.hostedMemberIdentity, {
-    get(target, property) {
-      if (property === "upsert") {
-        return async (args: Prisma.HostedMemberIdentityUpsertArgs) => {
-          input.identityWriteReached.resolve();
-          await input.allowIdentityWrite.promise;
-          return target.upsert(args);
-        };
-      }
-
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-
-  return new Proxy<Prisma.TransactionClient>(input.tx, {
-    get(target, property) {
-      if (property === "hostedMemberIdentity") {
-        return hostedMemberIdentity;
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-}
-
-async function seedVerifiedEmailRebindingMember(input: {
-  emailAddress: string;
-  memberId: string;
-  oldPrivyUserId: string;
-  phoneNumber?: string;
-  prisma: PrismaClient;
-}) {
-  const verifiedEmailLookupKey = createHostedEmailLookupKey(input.emailAddress);
-  if (!verifiedEmailLookupKey) {
-    throw new Error("Expected a verified-email lookup key for the rebinding fixture.");
-  }
-
-  const member = await input.prisma.hostedMember.create({
-    data: { id: input.memberId },
-  });
-  const phoneLookupKey = input.phoneNumber
-    ? createHostedPhoneLookupKey(input.phoneNumber)
-    : null;
-  if (input.phoneNumber && !phoneLookupKey) {
-    throw new Error("Expected a phone lookup key for the rebinding fixture.");
-  }
-  await input.prisma.hostedMemberIdentity.create({
-    data: {
-      memberId: input.memberId,
-      ...(input.phoneNumber
-        ? {
-            phoneLookupKey,
-            phoneNumberEncrypted: input.phoneNumber,
-            phoneNumberVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
-          }
-        : {}),
-      privyUserIdEncrypted: input.oldPrivyUserId,
-      privyUserLookupKey: requirePrivyUserLookupKey(input.oldPrivyUserId),
-    },
-  });
-  await input.prisma.hostedMemberEmailAuthorization.create({
-    data: {
-      memberId: input.memberId,
-      verifiedEmailLookupKey,
-      verifiedEmailVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
-    },
-  });
-  return member;
-}
-
-function makeVerifiedEmailRebindingIdentity(input: {
-  emailAddress: string;
-  privyUserId: string;
-}) {
-  return {
-    email: {
-      address: input.emailAddress,
-      verifiedAt: 1_754_218_800,
-    },
-    phone: null,
-    telegram: null,
-    userId: input.privyUserId,
-  };
-}
-
-function requirePrivyUserLookupKey(privyUserId: string): string {
-  const lookupKey = createHostedPrivyUserLookupKey(privyUserId);
-  if (!lookupKey) {
-    throw new Error("Expected a Privy-user lookup key for the rebinding fixture.");
-  }
-  return lookupKey;
-}
 
 function installPassthroughHostedSecureBoxTestCodec(): void {
   setHostedSecureBoxStringTestCodecForTests({
@@ -3568,17 +2482,6 @@ function installPassthroughHostedSecureBoxTestCodec(): void {
   });
 }
 
-function clearHostedOnboardingEnvCache(): void {
-  Reflect.deleteProperty(globalThis, "__murphHostedOnboardingEnv");
-}
-
-function restoreEnvValue(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-  } else {
-    process.env[key] = value;
-  }
-}
 
 async function waitForPostgresLock(input: {
   observer: PrismaClient;

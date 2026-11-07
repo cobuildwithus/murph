@@ -26,7 +26,11 @@ export type AssistantAcceptedMessageTargetAuthorizer = (input: {
   deliveryContextOrdinal: number
   messageRef: string
 }) => Promise<
-  | { targetInputId: string }
+  | {
+      /** Hosted Linq reactions: Web's tapback already on this message. */
+      ackReaction?: string
+      targetInputId: string
+    }
   | {
       participant: HostedExecutionAcceptedGroupMessageParticipant
       targetInputId: string

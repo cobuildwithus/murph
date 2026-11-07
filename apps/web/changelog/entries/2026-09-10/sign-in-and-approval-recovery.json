@@ -1,0 +1,26 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "sign-in-and-approval-recovery",
+    "kind": "improvement",
+    "priority": 5,
+    "title": "Manage sign-in and recover approval access",
+    "summary": "Sign in with email, phone or Telegram, and manage your verified sign-in methods in account settings.",
+    "details": "Adding a sign-in method keeps your existing sessions. You can also save a recovery key after approving with your passkey. Using that key replaces lost approval passkeys and signs out other devices; keep it somewhere safe.",
+    "relevanceTags": [
+      "account",
+      "sign-in",
+      "security"
+    ],
+    "sourcePullRequests": [
+      3127,
+      3128,
+      3132
+    ],
+    "tryIt": {
+      "label": "Open account settings",
+      "href": "/settings/accounts"
+    }
+  }
+}

@@ -30,7 +30,6 @@ Done:
 - Required completion audits passed: simplify, security/privacy, coverage-write, and task-finish review.
 - Focused hosted-local E2Es passed for idle checkpoint deferred progress and Linq first-contact.
 - Full `pnpm hosted-local e2e` passed.
-- Focused Murph Age CLI product-mode report regression passed after acceptance exposed the existing dirty-worktree blocker.
 - Final `pnpm verify:acceptance` passed.
 
 Now:

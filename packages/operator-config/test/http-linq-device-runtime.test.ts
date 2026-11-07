@@ -6,6 +6,8 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
+  DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
+  renderAssistantResponseCardText,
   renderAssistantWorkoutResponseCardText,
   type CompactTableWorkoutResponseCardV1,
 } from '../src/assistant-response-cards.ts'
@@ -20,8 +22,8 @@ import {
   parseRetryAfterHeaderMs,
   waitForRetryDelay,
 } from '../src/http-retry.ts'
-import { resolveExternalUrlBrowserCommands } from '../src/device-sync-browser-opener.ts'
-import { createDeviceSyncClient } from '../src/device-sync-client.ts'
+
+
 import {
   checkLinqIMessageCapability,
   createLinqChat,
@@ -94,17 +96,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-async function loadDeviceSyncClientWithMockedSpawn(
-  spawn: (
-    command: string,
-    args: string[],
-    options: import('node:child_process').SpawnOptions,
-  ) => EventEmitter & { unref(): void },
-): Promise<typeof import('../src/device-sync-client.ts')> {
-  vi.resetModules()
-  vi.doMock('node:child_process', () => ({ spawn }))
-  return await import('../src/device-sync-client.ts')
-}
+
 
 function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
@@ -488,6 +480,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
         idempotency_key: 'card-delivery-1',
         parts: [{
           app: {
+            app_store_id: 6786145859,
             bundle_id: 'ai.withmurph.app.messages',
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
@@ -544,6 +537,7 @@ test('linq app-card 2xx without provider identity remains ambiguous after one re
       idempotency_key: 'card-delivery-1',
       parts: [{
         app: {
+          app_store_id: 6786145859,
           bundle_id: 'ai.withmurph.app.messages',
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
@@ -559,20 +553,20 @@ test('linq app-card 2xx without provider identity remains ambiguous after one re
   })
 })
 
-test('linq iMessage capability requires a literal available true response', async () => {
-  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
-  for (const payload of [
-    { available: false },
-    { available: 'true' },
-    { supported: true },
-    null,
-  ]) {
-    await expect(checkLinqIMessageCapability({
-      address: '+15550001',
-    }, {
-      env,
-      fetchImplementation: async () => createJsonResponse(payload),
-    })).resolves.toBe(false)
+test('linq iMessage capability accepts only literal booleans', async () => {
+  const env = { LINQ_API_TOKEN: 'synthetic-token' } satisfies NodeJS.ProcessEnv
+  for (const available of [true, false]) {
+    await expect(checkLinqIMessageCapability({ address: 'synthetic@example.test' }, {
+      env, fetchImplementation: async () => createJsonResponse({ available }),
+    })).resolves.toBe(available)
+  }
+  for (const payload of [{ available: 'true' }, { available: 'false' }, { available: 0 }, { available: 1 }, { available: null }, { supported: true }, null, [], true, 'true']) {
+    await expect(checkLinqIMessageCapability({ address: 'synthetic@example.test' }, {
+      env, fetchImplementation: async () => createJsonResponse(payload),
+    })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: { operation: 'check_imessage_capability', retryable: true },
+    })
   }
 })
 
@@ -960,6 +954,34 @@ const missingPrimaryMessageIdentityCases = [
   },
 ] as const
 
+test.each([255, 256, 272])('linq runtime bounds %i-character keys at the provider boundary with stable distinct retries', async (length) => {
+  const env = { LINQ_API_BASE_URL: 'https://linq.example.test', LINQ_API_TOKEN: 'linq-token' }
+  const keys: string[] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(requireStringRequestBody(init.body)) as { message: { idempotency_key: string } }
+    keys.push(body.message.idempotency_key)
+    expect(body.message.idempotency_key.length).toBeLessThanOrEqual(255)
+    const messageId = `message-${keys.indexOf(body.message.idempotency_key)}`
+    return createJsonResponse({
+      chat_id: 'chat-123', message: { id: messageId },
+      chat: { id: 'chat-123', message: { id: messageId } },
+    })
+  })
+  const idempotencyKey = 'k'.repeat(length)
+  const dependencies = { env, fetchImplementation }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await sendLinqChatMessage({ chatId: 'chat-123', idempotencyKey, message: 'Progress saved.\nhttps://example.test/progress' }, dependencies)
+    await createLinqChat({ from: '+15550000', to: ['+15550001'], idempotencyKey, message: 'Progress saved.' }, dependencies)
+    await sendLinqIMessageAppCard({ chatId: 'chat-123', idempotencyKey, card: NUTRITION_CARD }, dependencies)
+  }
+  expect(keys).toHaveLength(8)
+  expect(keys.slice(0, 4)).toEqual(keys.slice(4))
+  expect(keys[0]).not.toBe(keys[1])
+  expect(keys[0]).toBe(keys[2])
+  expect(keys[0]).toBe(keys[3])
+  if (length === 255) expect(keys[0]).toBe(idempotencyKey)
+})
+
 test('linq runtime sends a terminal payment URL as a separate rich-link message', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
@@ -1024,6 +1046,48 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
       },
     },
   ])
+})
+
+test('linq runtime sends each X post link in a reply once', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const coachPost = 'https://x.com/synthetic_coach/status/2100000000000000001'
+  const runnerPost = 'https://x.com/synthetic_runner/status/2100000000000000002'
+  for (const [message, expectedParts] of [
+    [
+      `The screenshot shows a short greeting, then hydration advice.\n\n${coachPost}`,
+      ['The screenshot shows a short greeting, then hydration advice.', coachPost],
+    ],
+    [
+      `The first video shows a squat.\n${coachPost}\n\nThe second video shows strides.\n${runnerPost}`,
+      [`The first video shows a squat.\n${coachPost}\n\nThe second video shows strides.`, runnerPost],
+    ],
+  ] as const) {
+    const bodies: Record<string, unknown>[] = []
+    const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: { id: `message-${bodies.length}` },
+      })
+    })
+
+    await sendLinqChatMessage(
+      { chatId: 'chat-123', idempotencyKey: 'x-post-reply', message },
+      { env, fetchImplementation },
+    )
+
+    assert.deepEqual(
+      bodies.map((body) =>
+        ((body.message as { parts: { value: string }[] }).parts)
+          .map((part) => part.value)
+          .join('')
+      ),
+      expectedParts,
+    )
+  }
 })
 
 test('linq runtime preserves accepted primary media ownership when the rich-link request fails', async () => {
@@ -1602,7 +1666,7 @@ test.each(missingPrimaryMessageIdentityCases)(
   },
 )
 
-test('linq runtime falls back to URL text after a definitive rich-link rejection', async () => {
+test.each(['payment-message-123', 'k'.repeat(272)])('linq runtime falls back to URL text after a definitive rich-link rejection with key %s', async (idempotencyKey) => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
     LINQ_API_TOKEN: 'linq-token',
@@ -1631,7 +1695,7 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
   const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
-      idempotencyKey: 'payment-message-123',
+      idempotencyKey,
       message:
         'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
     },
@@ -1651,9 +1715,11 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
       providerMessageId: 'message-fallback',
     },
   ])
-  assert.deepEqual(bodies[2], {
+  expect(bodies[2]).toEqual({
     message: {
-      idempotency_key: 'payment-message-123:link:fallback',
+      idempotency_key: idempotencyKey.length <= 255
+        ? `${idempotencyKey}:link:fallback`
+        : expect.stringMatching(/^linq-idempotency:sha256:[a-f0-9]{64}$/u),
       parts: [{
         type: 'text',
         value: 'https://pay.example.test/checkout/session_123',
@@ -1661,6 +1727,9 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
     },
   })
   expect(fetchImplementation).toHaveBeenCalledTimes(3)
+  const providerKeys = bodies.map((body) => (body.message as { idempotency_key: string }).idempotency_key)
+  expect(new Set(providerKeys).size).toBe(3)
+  expect(providerKeys.every((key) => key.length <= 255)).toBe(true)
 })
 
 test('linq runtime never fabricates text for a link-only new chat', async () => {
@@ -2122,6 +2191,7 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
     providerThreadId: 'chat-123',
     target: 'chat-123',
     voiceMemoAttachmentId: 'attachment_voice_1',
+    voiceMemoDurationMs: null,
     voiceMemoUrl: 'https://cdn.example.test/voice-memo.mp3',
   })
 
@@ -3306,6 +3376,90 @@ test('linq runtime records safe request and response diagnostics for provider ht
   )
 })
 
+test.each([
+  { message: 'Invalid url in parts: https://private.example.test/member-image.png', hints: 'url,parts' },
+  { message: 'Invalid reply_to.message_id for private-recipient@example.test', hints: 'reply_to,message_id' },
+  { message: 'Invalid parameter value', hints: 'none' },
+  { message: 'private_recipient private_url attachment_identity', hints: 'none' },
+  { message: '', hints: 'none' },
+  { message: null, hints: undefined },
+])('linq error field hints retain only closed schema vocabulary: $hints', async ({ message, hints }) => {
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      { chatId: 'synthetic-chat', message: 'synthetic reply' },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => createJsonResponse(
+          { error: { code: 1005, message }, trace_id: 'synthetic-trace' },
+          { status: 400 },
+        ),
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.context?.providerErrorCode, '1005')
+      assert.equal(error.context?.providerErrorFieldHints, hints)
+      assert.equal(error.context?.providerErrorMessageLength, message?.length)
+      assert.equal(error.context?.retryable, false)
+      const diagnostic = JSON.stringify(error.context)
+      assert.ok(!diagnostic.includes('private.example.test'))
+      assert.ok(!diagnostic.includes('private-recipient'))
+      assert.ok(!diagnostic.includes('member-image'))
+      assert.ok(!diagnostic.includes('private_recipient'))
+      return true
+    },
+  )
+})
+
+test.each([
+  { message: 'Unsupported content_type image/webp for private-file.webp', reasons: 'unsupported', formats: 'webp' },
+  { message: 'Invalid url: failed to download image from private-host', reasons: 'invalid,download', formats: 'none' },
+  { message: 'File too large; size_bytes exceeds maximum', reasons: 'too_large', formats: 'none' },
+  { message: 'Missing required reply_to.message_id; must be a UUID', reasons: 'missing_required,uuid', formats: 'none' },
+  { message: 'Attachment not found or expired', reasons: 'not_found,expired', formats: 'none' },
+  { message: 'Content type mismatch: image/AVIF is not supported', reasons: 'unsupported,type_mismatch', formats: 'avif' },
+  { message: 'Download timed out', reasons: 'download,timeout', formats: 'none' },
+  { message: 'Empty parts are not allowed; minimum size is one', reasons: 'not_allowed,too_small,empty', formats: 'none' },
+  { message: 'HTTPS is required', reasons: 'missing_required,https', formats: 'none' },
+  { message: 'private-recipient@example.test private-secret custom-format', reasons: 'unknown', formats: 'none' },
+])('linq validation hints retain reason vocabulary without provider values: $reasons', async ({ message, reasons, formats }) => {
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'synthetic-chat', message: 'private reply body',
+        media: [
+          { url: 'https://example.test/private-image.webp' },
+          { url: 'https://example.test/private-other.webp' },
+          { url: 'https://example.test/private-photo.png' },
+          { url: 'https://example.test/private-photo.avif' },
+          { url: 'https://imagedelivery.net/synthetic-account/private-image/public' },
+          { attachmentId: 'synthetic-attachment' },
+        ],
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => createJsonResponse(
+          { error: { code: 1005, message }, trace_id: 'synthetic-trace' },
+          { status: 400 },
+        ),
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.context?.providerErrorReasonHints, reasons)
+      assert.equal(error.context?.providerErrorMediaTypeHints, formats)
+      assert.equal(error.context?.requestPublicUrlMediaFormatSummary, 'avif:1,png:1,unknown:1,webp:2')
+      assert.equal(error.context?.providerErrorCode, '1005')
+      assert.equal(error.context?.retryable, false)
+      const diagnostic = JSON.stringify(error.context)
+      for (const value of ['private-', 'example.test', 'imagedelivery.net', 'synthetic-account', 'synthetic-attachment', 'private reply body', 'custom-format']) {
+        assert.ok(!diagnostic.includes(value))
+      }
+      return true
+    },
+  )
+})
+
 test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
   const providerText = 'Plain Linq failure'
 
@@ -3915,283 +4069,58 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
   await timeoutAssertion
 })
 
-test('device sync client covers list, begin, and browser open paths', async () => {
-  const seenRequests: Array<{ method: string; url: string; body: string | null }> = []
-  const openBrowser = vi.fn(async () => true)
-  const client = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    controlToken: 'token-123',
-    fetchImpl: async (input, init) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      seenRequests.push({
-        body: init?.body ? String(init.body) : null,
-        method: init?.method ?? 'GET',
-        url,
-      })
 
-      if (url.endsWith('/providers')) {
-        return createJsonResponse({ providers: [{ id: 'oura', label: 'Oura' }] })
-      }
 
-      if (url.endsWith('/providers/oura/connect')) {
-        return createJsonResponse({
-          authorizationUrl: 'https://example.test/oauth',
-          expiresAt: '2026-04-08T00:00:00.000Z',
-          provider: 'oura',
-          state: 'state-1',
-        })
-      }
 
-      if (url.endsWith('/accounts?provider=oura')) {
-        return createJsonResponse({ accounts: [{ accountId: 'acct-1' }] })
-      }
 
-      if (url.endsWith('/accounts/acct-1')) {
-        return createJsonResponse({ account: { accountId: 'acct-1' } })
-      }
 
-      if (url.endsWith('/accounts/acct-1/reconcile')) {
-        return createJsonResponse({
-          account: { accountId: 'acct-1' },
-          job: { id: 'job-1' },
-        })
-      }
 
-      if (url.endsWith('/accounts/acct-1/disconnect-if-connected-at')) {
-        return createJsonResponse({
-          account: { accountId: 'acct-1', disconnected: true },
-        })
-      }
 
-      throw new Error(`Unexpected request: ${url}`)
-    },
-    openBrowser,
+test('linq totals-only card requests one interactive message and keeps the bounded fallback introduction', async () => {
+  const card = { ...NUTRITION_CARD, mealCount: 1,
+    totals: { calories: { total: 610, mealCount: 1 }, proteinGrams: { total: 28, mealCount: 1 },
+      carbsGrams: { total: 84, mealCount: 1 }, fatGrams: { total: 17, mealCount: 1 }, fiberGrams: { total: 14, mealCount: 1 } },
+    goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } }
+  let request: Record<string, unknown> | null = null
+  const fetchImplementation: LinqFetch = vi.fn(async (_url, init) => {
+    request = parseJsonRequestBody(init.body)
+    return createJsonResponse({ message: { id: 'totals-only-message' } })
   })
-
-  assert.deepEqual(await client.listProviders(), {
-    providers: [{ id: 'oura', label: 'Oura' }],
-  })
-  assert.deepEqual(
-    await client.beginConnection({
-      open: true,
-      provider: 'oura',
-      returnTo: 'https://murph.example.test/return',
-      sourceProviderSlug: 'fitbit',
-    }),
-    {
-      authorizationUrl: 'https://example.test/oauth',
-      expiresAt: '2026-04-08T00:00:00.000Z',
-      openedBrowser: true,
-      provider: 'oura',
-      state: 'state-1',
-    },
-  )
-  assert.deepEqual(await client.listAccounts({ provider: 'oura' }), {
-    accounts: [{ accountId: 'acct-1' }],
-  })
-  assert.deepEqual(await client.showAccount('acct-1'), {
-    account: { accountId: 'acct-1' },
-  })
-  assert.deepEqual(await client.reconcileAccount('acct-1'), {
-    account: { accountId: 'acct-1' },
-    job: { id: 'job-1' },
-  })
-  assert.deepEqual(await client.disconnectAccount('acct-1', '2026-04-08T00:00:00.000Z'), {
-    account: { accountId: 'acct-1', disconnected: true },
-  })
-
-  assert.equal(openBrowser.mock.calls.length, 1)
-  assert.equal(openBrowser.mock.calls.at(0)?.at(0), 'https://example.test/oauth')
-  assert.deepEqual(seenRequests.map(({ method, url }) => ({ method, url })), [
-    { method: 'GET', url: 'http://127.0.0.1:8788/providers' },
-    { method: 'POST', url: 'http://127.0.0.1:8788/providers/oura/connect' },
-    { method: 'GET', url: 'http://127.0.0.1:8788/accounts?provider=oura' },
-    { method: 'GET', url: 'http://127.0.0.1:8788/accounts/acct-1' },
-    { method: 'POST', url: 'http://127.0.0.1:8788/accounts/acct-1/reconcile' },
-    {
-      method: 'POST',
-      url: 'http://127.0.0.1:8788/accounts/acct-1/disconnect-if-connected-at',
-    },
-  ])
-  assert.deepEqual(JSON.parse(seenRequests[1]?.body ?? '{}'), {
-    returnTo: 'https://murph.example.test/return',
-    sourceProviderSlug: 'fitbit',
-  })
-  assert.deepEqual(JSON.parse(seenRequests[5]?.body ?? '{}'), {
-    expectedConnectedAt: '2026-04-08T00:00:00.000Z',
-  })
-
-  const successfulSpawn = vi.fn((_command: string, _args: string[]) => {
-    const child = new EventEmitter() as EventEmitter & {
-      unref(): void
-    }
-    child.unref = vi.fn()
-    queueMicrotask(() => {
-      child.emit('spawn')
-    })
-    return child
-  })
-  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(successfulSpawn)
-  const browserClient = dynamicModule.createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      createJsonResponse({
-        authorizationUrl: 'https://example.test/oauth',
-        expiresAt: '2026-04-08T00:00:00.000Z',
-        provider: 'oura',
-        state: 'state-2',
-      }),
-  })
-  const browserResult = await browserClient.beginConnection({
-    open: true,
-    provider: 'oura',
-  })
-  assert.equal(browserResult.openedBrowser, true)
-  assert.equal(
-    successfulSpawn.mock.calls[0]?.[0],
-    resolveExternalUrlBrowserCommands('https://example.test/oauth')[0]?.[0],
-  )
-
-  const failingSpawn = vi.fn((_command: string, _args: string[]) => {
-    throw new Error('missing browser launcher')
-  })
-  const failureModule = await loadDeviceSyncClientWithMockedSpawn(failingSpawn)
-  const failingBrowserClient = failureModule.createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      createJsonResponse({
-        authorizationUrl: 'https://example.test/oauth',
-        expiresAt: '2026-04-08T00:00:00.000Z',
-        provider: 'oura',
-        state: 'state-3',
-      }),
-  })
-  const failedBrowserResult = await failingBrowserClient.beginConnection({
-    open: true,
-    provider: 'oura',
-  })
-  assert.equal(failedBrowserResult.openedBrowser, false)
+  await sendLinqIMessageAppCard({ card, chatId: 'synthetic-lunch-thread', idempotencyKey: 'totals-intro',
+    companionMessage: renderAssistantResponseCardText(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO),
+  }, { env: { LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3', LINQ_API_TOKEN: 'linq-token' }, fetchImplementation })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  expect(request).toMatchObject({ message: { idempotency_key: 'totals-intro', parts: [{
+    type: 'imessage_app', interactive: true,
+    layout: { subcaption: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO },
+  }] } })
+  expect((request as { message?: { parts?: unknown[] } } | null)?.message?.parts).toHaveLength(1)
 })
 
-test('device sync client resolves Windows authorization URLs without cmd shell parsing', () => {
-  const authorizationUrl = 'https://example.test/oauth?next=alpha&redirect=one|two<input>%SAFE%'
 
-  assert.deepEqual(resolveExternalUrlBrowserCommands(authorizationUrl, 'win32'), [
-    ['C:\\Windows\\System32\\rundll32.exe', ['url.dll,FileProtocolHandler', authorizationUrl]],
-  ])
-  assert.deepEqual(
-    resolveExternalUrlBrowserCommands(authorizationUrl, 'win32', {
-      SystemRoot: 'D:/Windows/',
-    }),
-    [['D:\\Windows\\System32\\rundll32.exe', ['url.dll,FileProtocolHandler', authorizationUrl]]],
-  )
-  assert.deepEqual(resolveExternalUrlBrowserCommands(authorizationUrl, 'win32', {
-    SystemRoot: 'C:\\unsafe-tools',
-  }), [
-    ['C:\\Windows\\System32\\rundll32.exe', ['url.dll,FileProtocolHandler', authorizationUrl]],
-  ])
-})
-
-test('device sync client wraps transport and http failures with control-plane context', async () => {
-  const unavailableClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () => {
-      throw new Error('connect ECONNREFUSED')
+test('linq five-goal cards retain the native interactive request and existing layout', async () => {
+  const card = {
+    ...NUTRITION_CARD,
+    goals: {
+      calories: { target: 2100, status: 'unavailable' as const },
+      proteinGrams: { target: 100, status: 'unavailable' as const },
+      carbsGrams: { target: 220, status: 'unavailable' as const },
+      fatGrams: { target: 40, status: 'unavailable' as const },
+      fiberGrams: { target: 30, status: 'unavailable' as const },
     },
+  }
+  const fetchImplementation: LinqFetch = vi.fn(async (_url, init) => {
+    expect(parseJsonRequestBody(init.body)).toMatchObject({ message: { parts: [{
+      interactive: true,
+      layout: {
+        caption: 'Jul 28 · 4 meals',
+        subcaption: 'Some calorie and nutrition estimates were partial.',
+      },
+    }] } })
+    return createJsonResponse({ message: { id: 'goal-aware-message' } })
   })
-  await assert.rejects(
-    () => unavailableClient.listProviders(),
-    (error) =>
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 'device_sync_unavailable' &&
-      'context' in error &&
-      typeof error.context === 'object' &&
-      error.context !== null &&
-      (error.context as { retryable?: boolean }).retryable === true &&
-      (error.context as { stage?: string }).stage === 'transport' &&
-      (error.context as { baseUrl?: string }).baseUrl === undefined &&
-      (error.context as { cause?: string }).cause === undefined,
-  )
-
-  const httpClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    controlToken: 'token-123',
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          error: {
-            details: { provider: 'oura' },
-            retryable: true,
-          },
-        }),
-        { status: 503 },
-      ),
-  })
-  await assert.rejects(
-    () => httpClient.listProviders(),
-    (error) =>
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 'device_sync_request_failed' &&
-      error.message === 'Device sync request failed with HTTP 503.' &&
-      'context' in error &&
-      typeof error.context === 'object' &&
-      error.context !== null &&
-      (error.context as { retryable?: boolean }).retryable === true &&
-      (error.context as { stage?: string }).stage === 'response' &&
-      (error.context as { status?: number }).status === 503 &&
-      (error.context as { details?: unknown }).details === undefined,
-  )
-
-  const missingTokenClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          error: {
-            code: null,
-            message: '   ',
-          },
-        }),
-        { status: 401 },
-      ),
-  })
-  await assert.rejects(
-    () => missingTokenClient.listProviders(),
-    (error) =>
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 'device_sync_request_failed' &&
-      error.message ===
-        'Device sync control plane requires DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.' &&
-      'context' in error &&
-      typeof error.context === 'object' &&
-      error.context !== null &&
-      (error.context as { status?: number }).status === 401,
-  )
-
-  const invalidResponseClient = createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      new Response('not-json', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        status: 200,
-      }),
-  })
-  await assert.rejects(
-    () => invalidResponseClient.listProviders(),
-    (error) =>
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 'device_sync_invalid_response' &&
-      'context' in error &&
-      typeof error.context === 'object' &&
-      error.context !== null &&
-      (error.context as { retryable?: boolean }).retryable === false &&
-      (error.context as { stage?: string }).stage === 'response' &&
-      (error.context as { path?: string }).path === undefined,
-  )
+  await sendLinqIMessageAppCard({ card, chatId: 'synthetic-thread', idempotencyKey: 'goal-aware',
+    companionMessage: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
+  }, { env: { LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3', LINQ_API_TOKEN: 'linq-token' }, fetchImplementation })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })

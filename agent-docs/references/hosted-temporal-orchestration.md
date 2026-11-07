@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-09-09
+Last verified: 2026-11-03
 
 ## Decision
 
@@ -56,7 +56,16 @@ authorization. After a relevant revision reaches public `main`,
 wire proof for that exact public commit against the then-current private
 `main` and live reader set. Its `Temporal Web production admission` job must be
 configured as a Vercel production Deployment Check so a completed build cannot
-move production domains before the proof succeeds. The controller re-reads
+move production domains before the proof succeeds. The workflow also publishes
+an explicit pending commit status and a final status derived from the completed
+admission job. Only success becomes a successful status; failure, cancellation,
+and skipped proof fail closed. The proof attempt must match the current workflow
+attempt, so retrying only a failed finalizer cannot reuse historical admission.
+Both notifications use the exact `github.sha`
+and the existing check context, with the ordinary job-scoped GitHub token's
+`statuses: write` permission. The finalizer has no checkout or private credential.
+This repairs missed imported-check completion without a second admission owner
+or Vercel promotion authority. The controller re-reads
 both public and private `main` before accepting the result, while the private
 workflow independently re-reads the complete reader set. Every `main` commit
 must create its managed Vercel candidate, and the Git integration is the only
@@ -141,21 +150,49 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint and projects `model_free` when live eligible work
-exists after that prefix, otherwise `default_owned` for retained live work.
-The first-row lookup adds at most one tenant-scoped, ordered, filtered lookup
-when its head requires the default owner. It reads no payloads and uses no
-transaction. This class admits execution; it neither completes the earlier row
-nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
-model-free kind, as is deterministic member-channel reconciliation; Temporal
-does not know their product meaning or select a feature-specific processing
-mode. The wire shape and the existing two processing modes remain unchanged.
-Deploy the runtime consumer before the broader Web readiness producer. Older
-Web producers remain safe but can delay independent work behind a default-owned
-head; older runtime consumers retain that delay with newer Web facts. Neither
-skew may retire a live pointer before its handled prefix advances. No Temporal
-workflow command or history changes are required, and rollback preserves the
-existing snapshot, mailbox, and receipt readers.
+redacted workspace checkpoint. Runtime also publishes
+`hostedMailboxSystemModelFreeWakeAt` (an ISO timestamp or explicit null) and
+`hostedMailboxSystemModelFreeWakeVersion` (the accepted checkpoint's workspace
+version). These are derived projections, not new execution state. Older runners
+can preserve unknown status keys, so Web trusts the deadline only when the
+version matches the current workspace. Missing, invalid, or carried-forward
+projections retain the original handled-prefix lookup exactly.
+
+With a current projection, a due model-free deadline admits `model_free`, even
+when a local continuation has no remaining Web mailbox lag. A future deadline
+participates in `blocked.retryAt`. Explicit null means no imported model-free
+work remains. Web independently checks fresh model-free rows strictly after the
+greater of the imported and handled watermarks; completed imported rows cannot
+keep dispatching behind a retained default head. A due generic `assistant` wake
+cannot identify pending device retries: it may win over their later deadlines.
+The generic wake reason is therefore not a model-free readiness heuristic.
+
+The lookup reads no payloads, uses no transaction, and adds at most one ordered,
+tenant-scoped filtered read after the first live row. Readiness neither completes
+the earlier row nor changes handled progress. Runtime claims still own execution,
+and the existing classifier covers device, Environment, deterministic channel
+reconciliation and eligible exact notifications. Temporal receives the same
+frontier and blocked-retry facts, with the same two processing modes.
+
+Deploy Web first, then the runner. New Web with an older runner retains base
+handled-prefix polling until a current runner publishes the projection. New
+runners with pre-change Web remain readable: redacted JSON permits these scalar
+keys, and old Web ignores them and retains base polling. The superseded Web-only
+candidate that unconditionally trusts imported progress is not a safe release
+or rollback target. Rolling back a runner against new Web is safe: its next
+checkpoint changes the workspace version, so copied status falls back to base
+readiness. Reverting Web to pre-change main also restores polling without losing
+work. No Temporal worker release, workflow command, patch marker, request shape,
+or history change is required. In-flight workflows consume new facts at their
+next Activity; replay keeps the recorded historical Activity results.
+
+Usage restoration does not rely on the system retry timer: Ops resets signal
+`runtime_recheck_requested` after commit, credit fulfillment retries that handoff
+through its Stripe receipt, and allowance-restoring plan transitions collect the
+same post-commit recheck. Ordinary allowance exhaustion returns its period end
+as `blocked.retryAt`, giving Temporal the rollover deadline even with no new
+input. The default-processing wake remains intact throughout the block.
+
 Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
@@ -189,17 +226,17 @@ failure or replaying earlier confirmed work.
 Workspace-version movement may bypass same-version no-progress backoff, but
 cannot prove that the pointed system item was handled.
 
-Web/runtime status is durable truth when no runner owns execution. Cloudflare's
-write fence is the active ownership truth while a run is in flight.
+Web owns the runtime owner row and increments its generation. Cloudflare
+validates and enforces the Web-issued write fence while a run is in flight.
 
 ## Ownership Table
 
 | Owner | Owns | Must not own |
 | --- | --- | --- |
-| `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
+| `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, runtime owner state (generation, target assignment, retirement disposition), mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
 | Temporal | Per-user workflow identity, pointer-only signals, coalesced wake hints, durable timers from web-owned reconciliation facts, retry policy for web facts reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
-| `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
-| Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local pre-floor assistant wake service, assistant `nextWakeAt`/`nextWakeReason` projection including model-free `assistant_delivery` retries, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
+| `apps/cloudflare` | Durable Object routing, write-fence validation and enforcement, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
+| Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local projected wake service for every reason before the live wait deadline, assistant `nextWakeAt`/`nextWakeReason` projection including model-free `assistant_delivery` retries, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
 
 ## Temporal State
 
@@ -216,8 +253,10 @@ Allowed Temporal state is tiny and pointer-only:
   that calls the existing Cloudflare processing adapter when facts are idle. It
   carries no provider value or credential, is discarded while facts are
   blocked, and is cleared after accepted processing only when no newer wake
-  arrived. Authenticated provider changes are the current Web producer of this
-  payload-free signal. Newly committed hosted-group projection grants instead
+  arrived. Settings no longer produce this signal: inference preferences are
+  saved in Postgres and observed through normal invocation and mailbox reads.
+  The signal remains supported for existing histories and operational callers.
+  Newly committed hosted-group projection grants instead
   atomically admit the existing durable `runtime.maintenance-requested`
   system-mailbox row with the grant transaction, then signal its pointer after
   commit.
@@ -267,9 +306,19 @@ the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
-selected by a global scheduled sweep. The existing shared mailbox-handoff sweep
-may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
-mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
+selected by a global scheduled sweep beyond releasing bounded routine Junction
+wake deadlines (see `docs/device-sync-hosted-control-plane.md`). The existing shared mailbox-handoff sweep
+may re-signal one exact unimported pointer per user only after the mailbox item
+is at least one minute old at recovery-command start. This fixed grace applies
+to device-sync, preference, runtime-control, and queued Clinical Records
+candidates before each per-user selection and the bounded page; transaction-start
+creation timestamps need not follow lane-sequence order. The grace period is
+independent of Schedule cadence.
+Scheduled and deferred-wake producers own their first post-commit signal, so
+items created during the command cannot enter its recovery pass even when the
+producer stages run slowly. Failed first signals stay durable for a later
+eligible sweep. Recovery reads mailbox and lane-watermark truth, not dirty rows.
+Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
 rows for drain compatibility, but web no longer produces them.
 
@@ -409,6 +458,14 @@ key and the fixed callback identity `hosted-device-sync-reconciler`. The
 request body is empty JSON. The response is count-only. Temporal history may
 contain counts, timestamps, workflow ids, retry metadata, and schedule ids only.
 
+Web sets one absolute 22-second deadline before authentication, cancels external
+work at that deadline, and joins started work with bounded transaction settling.
+Temporal cancellation reaches only the first gRPC attempt, so the deadline is
+also set on the client's call context; a retry can outlive it by one backoff,
+about six seconds at most.
+A budget stop returns a normal result with unstarted rows left due.
+Lowering the caller's HTTP timeout below this budget requires a Web budget change.
+
 `apps/web` remains the only owner of canonical device-sync facts. The
 signed sweep command reads `DeviceConnection.nextReconcileAt`, records
 due-reconcile `DeviceSyncSignal` facts, and appends bounded `device-sync.wake`
@@ -427,6 +484,18 @@ due connection create one new canonical wake when its matching `v2` wake was
 already consumed under the older handling semantics, while retries within `v3`
 remain deterministic.
 
+An exact, non-conflicting `v3` duplicate can admit a successor when the original
+scheduled item is consumed but the same active connection epoch still has that
+overdue canonical reconcile date. The scheduled mailbox append checks matching
+imported, handled, and consumed system frontiers, an empty system lane, no pending
+item or retained continuation, and no future workspace wake. Older checkpoints
+may omit the optional pending/continuation fields only when the other settled
+frontier evidence agrees. The successor identity includes the consumed frontier;
+the original dedupe lock serializes competing recovery attempts, and the normal
+post-commit signal owns its handoff. Recovery neither rewrites consumed history
+nor changes preflight eligibility or a retained retry's ownership. Conflicting
+payloads and retired payloads without exact duplicate proof remain fail-closed.
+
 The Vercel device-sync dirty-sweeper cron is not registered, and there is no
 Temporal dirty-row sweep replacement. Temporal is the single production owner of
 the due-reconcile scheduled-wake cadence, while the signed web sweep command
@@ -439,6 +508,34 @@ Per-user workflows remain user-runtime execution loops: they react after
 mailbox/signal nudges and read per-user reconciliation facts, but they do not
 scan global device-sync tables or keep users alive just to poll for due
 reconciles.
+
+## Inactive member scheduling
+
+Web's `user_not_active` reconciliation reason suppresses ordinary runtime work
+whether or not a canonical workspace remains. Empty mailbox lag and a null
+system frontier in these blocked facts are redacted scheduling inputs, not
+proof that a carried pointer was consumed. Temporal preserves that pointer for
+a later activation signal and discards system/default backoff and wake ownership.
+Only the workspace's inbox media retention deadline can schedule inactive work;
+a due deadline uses `inbox_media_retention` with its existing failure retry and
+accepted-owner recheck. Stale device-sync or assistant wakes cannot shorten that
+wait. A new signal always re-reads Web's access facts before admission.
+
+The private scheduler guards workspace-present quiescence with
+`hosted-runtime-inactive-workspace-quiescence-v1`, evaluated after each successful
+reconciliation so an existing execution adopts it at the live frontier. Keep
+old command order for histories without the marker during replay. This is a
+patch-introducing, direct-Current release with no older traffic-bearing reader;
+retain the patch until pre-marker histories drain. No operator signal or reset
+is required for a workflow already retrying to reach its next reconciliation.
+
+Defense in depth: Web's owner `claim` also reports `blockedReason: "admission"`
+for these members, and the Worker answers a dispatch that still arrives with a
+five-minute `admission_blocked` retry instead of the three-second contention
+retry (`hosted-postgres-runtime.md` owns that contract). The runtime-log
+runaway alert opens at 60 processing attempts per member-hour. Consent
+withdrawal, disconnect authority, and retention claim checks remain with their
+existing owners.
 
 ## Workflow Replay And Versioning
 
@@ -474,6 +571,37 @@ synthetic pre-patch replay fixture were removed. The workflow must keep the
 deprecatePatch-window histories have drained. Private replay and package
 coverage gates require that marker to remain present.
 
+## Attempt-ended reconciliation
+
+Web checkpoints persist workspace and mailbox facts without signaling Temporal.
+While an invocation is alive, the runtime services its projected wakes for every
+reason through the existing wakeable timer, before the idle floor or a retained
+background-work deadline. Clean voice retention uses that same timer. Due device
+projections enter the existing system mailbox claim/retry owner. Checkpoint-gated
+effects still require durable publication; a no-progress wake key is not retried
+by the timer unless a distinct projection supersedes it.
+
+The owner route emits one advisory `runtime_owner_released {runtimeAttemptId}`
+for the successful final-release CAS: a settled `complete`, `release_completed`,
+or `release`. Early completion keeps the invocation owned and emits no hint;
+stale retries cannot emit another. The hint runs after the response with the
+existing two-second budget and no actionability pre-read. Accepted-owner timeout
+reconciliation remains recovery for a lost hint. This is one emission per durable
+transition, not exactly-once transport delivery.
+
+The workflow contract treats every attempt-ended hint as wait invalidation and
+rereads facts, including future wakes. Only a matching attempt clears accepted
+ownership; a stale release never revokes a successor. Release-before-activity-
+response handling remains required. The private workflow owner version-gates and
+replay-tests that contract.
+
+Deploy the verified workflow first. Then deploy the runtime while old Web still
+signals checkpoints, and drain old warm invocations. Only then deploy Web without
+checkpoint signals. Roll back in reverse order, restoring Web checkpoint signals
+first. Keep `runtime_recheck_signaled_version` and its Prisma field until old Web
+instances drain; no new code reads, carries, invalidates, or writes that receipt.
+Dropping it is a later migration. Rare out-of-attempt rechecks remain unchanged.
+
 ## Final Minimal Contract
 
 The per-user workflow reads source-less reconciliation facts from web:
@@ -508,6 +636,14 @@ Execution eligibility stays unchanged, and explicitly approved continuations
 retain their foreground priority. Foreground/default work must replace an
 active system-mailbox or retention owner instead of waiting for its idle
 checkpoint.
+A completed background preparation carries its existing progress evidence into
+the workspace checkpoint. A system-mailbox invocation that advances the durable
+progress generation and retains the same due device wake requests an immediate
+owner-release recheck, even without mailbox lag. The legacy positive-edge field
+still describes that progress, but Web now signals every final release, including
+failed, unchanged, and future-wake outcomes. Temporal chooses immediate work or
+a future timer from durable facts; the continuation stays model-free unless
+independent foreground authority also requests a handoff.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system
@@ -606,6 +742,13 @@ Request summary:
   standby claim without changing runtime admission, consent, write fences,
   activity priority, or Web-direct latency attribution. Timers, retries, and
   continued executions rederive it; it is not persisted workflow policy.
+- `mailboxWakeHighWater`: optional complete conversation/system maximum sequences
+  from mailbox-only reconciliation. It permits the startup importer to reuse a
+  covering prefetched response; it never advances a cursor or authorizes effects.
+  Due, unknown, or mixed control work omits it. The Worker and container consumer
+  must deploy before the optional Temporal producer; older readers may reject
+  the new ensure field. Disable or roll back the producer before restoring an
+  older Worker parser. Missing hints retain fresh-fetch behavior.
 - `assistantExecutionBlocked`: an optional positive-only execution guard valid
   only with `system_mailbox`. Temporal includes it when Web blocks assistant
   admission but retained model-free system work remains runnable. Cloudflare
@@ -629,10 +772,7 @@ runtime/provider layer still enforces spend before any actual model call. There
 is no Activity-local signed usage-decision endpoint in the Temporal execution
 path.
 
-The facts owner retains authoritative usage admission and queries a selected
-custom inference override only when a denied managed allowance needs that
-exemption. Allowed and consent-withdrawn decisions do not depend on unrelated
-custom inference configuration. The existing route stage callback records
+The facts owner retains authoritative usage admission. The existing route stage callback records
 bounded, numeric durations for authentication and facts processing, including
 repeated stages. Timing records contain no member or request identifiers and
 cannot change the response or failure behavior. Temporal activity duration
@@ -701,7 +841,12 @@ Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
 The Web direct-wake lane supplies a 25-second end-to-end command budget inside
-a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+a shared 29-second outer deadline. Web executes canonical Postgres admission
+locally before each attempt and sends that response with its OIDC request,
+skipping the initial Worker-to-Web claim callback. Local admission consumes the
+same outer deadline; a blocked result stops the direct hint. Temporal callers
+continue to claim through Web, and Temporal still owns durable recovery if a
+Web claim is followed by an uncertain or absent dispatch. Cloudflare starts its server-side clock at
 runtime-control authorization, before route parsing, Durable Object dispatch,
 consent serialization, and health-data admission. Container readiness is capped at 20
 wall-clock seconds end to end: at most 15 seconds for readiness, including
@@ -793,6 +938,17 @@ The hard-cut architecture is accepted when:
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no
   Temporal dirty-row sweep replacement.
+- Background phase changes belong to the existing Temporal Schedule owner,
+  not sleeps inside Web commands or a second scheduler. A fixed interval
+  offset preserves cadence while moving the global recovery sweep away from
+  minute boundaries; it does not spread individual runtime wakes or reduce
+  total work. Review shared mailbox recovery latency, overlap/catch-up policy,
+  and schedule create/update convergence before deploying such a change.
+  Preserve canonical per-user deadlines: the shared `assistant` wake also
+  covers pending input and exact reminders, while device `nextReconcileAt`
+  can represent an earlier provider retry. Onboarding follow-ups already have
+  deterministic per-member staggering. No blanket jitter applies to these
+  aggregate wake timestamps.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code
@@ -852,26 +1008,42 @@ The hard-cut architecture is accepted when:
   no private revision pointer or reader policy. Missing, stale, skipped,
   canceled, duplicated, malformed, or failed proof remains red or pending.
 
-- Every public `main` push runs the exact-main producer and compatibility
+- Every public `main` push runs the exact-candidate producer and compatibility
   controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
   Vercel must select the `Temporal Web production admission` job as a
   production Deployment Check; with that external binding in place, production
-  domains stay on the previous deployment until the current public commit,
+  domains stay on the previous deployment until the pinned public candidate,
   current private `main`, and current live readers produce one accepted proof.
-  That same private run selects the one canonical foreground-priority lane from
-  its integration manifest, forces and observes standby allocation, and emits a
-  second digest bound to both exact main SHAs, the fixed lane, and the public
-  protected environment's expected production Temporal target digest. Private
+  That same private run selects the `production_core` scope from its canonical
+  integration manifest: Linq delivery and hosted-web browser smoke. It emits a
+  second digest bound to both exact main SHAs, the fixed scope, and the public
+  protected environment's expected production Temporal target digest. Both
+  lanes must have unique successful job receipts bound to that same digest;
+  missing, skipped, canceled, duplicated, malformed, or stale receipts block
+  admission. The public controller rejects both missing and unknown lanes, so
+  a change to this lane list merges in Murph Cloud first and in public `main`
+  right after; older foreground-only proof cannot satisfy or downgrade the
+  request. Scheduled reminder, foreground reply priority, foreground checkpoint
+  ordering, and Codex cache-prefix journeys do not gate Web admission or
+  Cloudflare deploys. Murph Cloud runs them once a night against public `main`
+  and opens or updates a GitHub issue when that run fails, so a regression in
+  those journeys can reach production before it is reported. Private
   setup and final attestation derive the live target from protected
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain
   fixture-only and never execute beside private source. The public controller
-  re-reads both branch heads, and private protected attestations re-read the
-  supported reader set and both heads, before success. Every `main` commit creates one managed
+  and private protected attestations re-read both branch heads before success:
+  public main may advance if the exact tested candidate remains its ancestor;
+  private main must still equal the dispatched controller. The supported reader
+  set, lifecycle, routing and target must remain unchanged. Required public main
+  checks use SHA-scoped concurrency; Web admission retains its active run and
+  coalesces waiting pushes to the latest candidate. The private plan, runner
+  bundle and scenarios all retain the requested public SHA, never the newer tip.
+  Deploy this private consumer before the public controller change. Every `main` commit creates one managed
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary
-  and foreground/standby path; Murph Cloud release admission still owns full
+  and the composed core hosted journeys; Murph Cloud release admission still owns full
   worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
@@ -879,6 +1051,31 @@ The hard-cut architecture is accepted when:
   scenario that starts managed local Temporal, signals through web, queries the
   workflow, and proves the worker reaches Cloudflare ensure-processing. Heavier
   continuity/stress cases remain opt-in.
+
+## Compatibility controller upgrades
+
+The pull-request compatibility workflow executes the controller from trusted
+public `main`, not the controller proposed by that pull request. A successor
+controller therefore cannot authorize its own admission. When changing the
+controller and producer fixture together would fail the current controller,
+use two pull requests:
+
+1. Land only the controller/bootstrap change, keeping the candidate producer
+   fixture compatible with the currently trusted controller and supported
+   private readers. Run the existing controller contract tests and require the
+   ordinary exact-head compatibility status to pass under the old controller.
+2. After that merge is on public `main`, open or refresh the producer/runtime
+   change against that base. Require a new exact-head compatibility proof under
+   the successor controller and the private owner's live supported reader set.
+
+Review the first PR's changed paths and fixture diff to confirm it does not
+introduce the incompatible producer field or behavior early. If it cannot pass
+under the old controller, split out a compatible prerequisite at its existing
+owner; do not bypass the required status, execute candidate controller code
+with protected credentials, or temporarily relax private reader policy. A
+private reader prerequisite follows the existing consumer-first release order.
+The later production deployment still requires its separate exact-main
+admission; a bootstrap merge is not production authorization.
 
 ## Related References
 

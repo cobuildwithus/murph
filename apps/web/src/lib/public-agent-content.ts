@@ -34,7 +34,7 @@ Use Murph when a person wants to:
 - run a personal experiment and compare what happened over time;
 - turn health goals into practical follow-through, including reminders and administrative errands;
 - start an opt-in health challenge or share bounded health context with friends or family;
-- use a hosted personal health assistant or inspect and self-host the open-source project.
+- use a hosted personal health assistant with inspectable open-source code.
 
 Murph is not emergency care, a diagnosis service, or a replacement for a qualified clinician. Do not use it to make urgent medical decisions.
 
@@ -52,7 +52,7 @@ Murph is for adults who want practical, ongoing help understanding their own hea
 - [About Murph](${MURPH_PUBLIC_SITE_URL}/about): purpose, audience, and product boundaries
 - [Comparison guides](${MURPH_PUBLIC_SITE_URL}/compare): Murph-authored, non-affiliate desk research comparing wearables, dashboards, labs, coaching products, and health assistants with current official vendor sources; these guides do not claim hands-on testing
 - [Contact](${MURPH_PUBLIC_SITE_URL}/contact): support and privacy contact guidance
-- [Security](${MURPH_PUBLIC_SITE_URL}/security): hosted and local security model
+- [Security](${MURPH_PUBLIC_SITE_URL}/security): hosted security model
 - [Privacy policy](${MURPH_PUBLIC_SITE_URL}/legal/privacy): data practices and rights
 - [Changelog](${MURPH_PUBLIC_SITE_URL}/changelog): recent product changes
 - [Open-source repository](https://github.com/cobuildwithus/murph): code and contributor guidance
@@ -102,7 +102,7 @@ export const MURPH_SOFTWARE_APPLICATION_STRUCTURED_DATA = {
     "Health data and wearable context",
     "Personal health experiments",
     "Opt-in group health challenges",
-    "Hosted and self-hosted use",
+    "Hosted messaging and iOS access",
   ],
   isAccessibleForFree: true,
   name: "Murph",
@@ -112,7 +112,7 @@ export const MURPH_SOFTWARE_APPLICATION_STRUCTURED_DATA = {
     price: "0",
     priceCurrency: "USD",
   },
-  operatingSystem: "Web, iOS, self-hosted",
+  operatingSystem: "Web, iOS",
   provider: {
     "@id": `${MURPH_PUBLIC_SITE_URL}/#organization`,
   },

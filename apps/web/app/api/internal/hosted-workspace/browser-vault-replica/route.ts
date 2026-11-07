@@ -9,8 +9,9 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  publishLatestBrowserVaultReplicaRef,
-} from "@/src/lib/hosted-workspace/store";
+  publishHostedRuntimeBrowserVaultReplica,
+} from "@/src/lib/hosted-workspace/runtime-publication";
+import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 const HOSTED_RUNTIME_LEASE_GENERATION_HEADER = "x-hosted-runtime-lease-generation";
@@ -19,12 +20,14 @@ const HOSTED_BROWSER_VAULT_REPLICA_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
+    runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_BROWSER_VAULT_REPLICA_CALLBACK_BODY_LIMIT_BYTES,
   });
   const writeFence = readHostedRuntimeWriteFenceHeaders(request);
   const rawBody = await readOptionalJsonObject(request);
   const body = parseHostedBrowserVaultReplicaPublishRequest(rawBody);
-  const result = await publishLatestBrowserVaultReplicaRef({
+  const result = await publishHostedRuntimeBrowserVaultReplica({
+    runtimeAuthority: readHostedRuntimeCallbackAuthority(request, writeFence),
     expectedWorkspaceVersion: writeFence.workspaceVersion,
     replicaRef: body.replicaRef,
     userId,

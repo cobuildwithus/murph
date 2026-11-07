@@ -14,15 +14,13 @@ if [[ -r "$review_gpt_local_config" ]]; then
 fi
 
 review_gpt_invalid_browser_lane() {
-  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, mountain, vonneumann, or apollo." >&2
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, mountain, vonneumann, or apollo." >&2
 }
 
 review_gpt_browser_lane_display_name() {
   case "$1" in
     main) printf '%s\n' "Main" ;;
     eragon) printf '%s\n' "Eragon" ;;
-    phlebas) printf '%s\n' "Phlebas" ;;
-    hercules) printf '%s\n' "Hercules" ;;
     mountain) printf '%s\n' "Mountain" ;;
     vonneumann) printf '%s\n' "Vonneumann" ;;
     apollo) printf '%s\n' "Apollo" ;;
@@ -37,8 +35,6 @@ review_gpt_browser_lane_port() {
   case "$1" in
     main) printf '%s\n' "9452" ;;
     eragon) printf '%s\n' "9448" ;;
-    phlebas) printf '%s\n' "9442" ;;
-    hercules) printf '%s\n' "9444" ;;
     mountain) printf '%s\n' "9450" ;;
     vonneumann) printf '%s\n' "9446" ;;
     apollo) printf '%s\n' "9454" ;;
@@ -158,7 +154,7 @@ if [[ -n "$review_gpt_direct_browser_lane_count" ]]; then
 elif [[ -n "$review_gpt_direct_compat_browser_lane_count" ]]; then
   review_gpt_browser_lane_count="$review_gpt_direct_compat_browser_lane_count"
 else
-  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6}}"
+  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
 fi
 
 if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
@@ -170,8 +166,8 @@ if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
   esac
 fi
 
-if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-6]$ ]]; then
-  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6." >&2
+if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-4]$ ]]; then
+  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 4." >&2
   return 1 2>/dev/null || exit 1
 fi
 
@@ -180,7 +176,7 @@ case "$review_gpt_requested_browser_lane" in
     review_gpt_selected_browser_lane="main"
     ;;
   "" | auto | random)
-    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)
+    review_gpt_all_browser_lanes=(eragon mountain vonneumann apollo)
     review_gpt_browser_lanes=("${review_gpt_all_browser_lanes[@]:0:review_gpt_browser_lane_count}")
     review_gpt_usable_browser_lanes=()
 
@@ -200,7 +196,7 @@ case "$review_gpt_requested_browser_lane" in
   aragon | eragon)
     review_gpt_selected_browser_lane="eragon"
     ;;
-  phlebas | hercules | mountain | vonneumann | apollo)
+  mountain | vonneumann | apollo)
     review_gpt_selected_browser_lane="$review_gpt_requested_browser_lane"
     ;;
   *)
@@ -255,6 +251,13 @@ managed_browser_background_mode="${managed_browser_background_mode:-balanced}"
 # JavaScript. Settled local measurement used more CPU and memory, so keep the
 # resource-efficient default headful and leave headless as an explicit override.
 managed_browser_display_mode="${managed_browser_display_mode:-headful}"
+# Dedicated review lanes start without taking focus from the current app.
+# Main uses the personal browser profile; keep its restored-tab startup behavior.
+if [[ "$review_gpt_selected_browser_lane" == "main" ]]; then
+  managed_browser_launch_mode="${managed_browser_launch_mode:-foreground}"
+else
+  managed_browser_launch_mode="${managed_browser_launch_mode:-background}"
+fi
 export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
 
 name_prefix="murph-$review_gpt_selected_browser_lane-chatgpt-audit"
@@ -273,6 +276,10 @@ package_script="scripts/package-audit-context-full.sh"
 app_connector="current"
 model="gpt-6-pro"
 thinking="current"
+# A marked answer faster than this is untrusted. The package's 5 minutes threw
+# out real passes on small PRs (murph-ios #371: 246 s, twice); 2 still catches
+# a cut-off or downgraded round.
+minimum_marked_response_ms="2m"
 response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 
 review_gpt_register_dir_preset "security" "security-audit.md" \

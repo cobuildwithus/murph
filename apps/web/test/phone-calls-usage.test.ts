@@ -1,6 +1,8 @@
 import type { HostedPhoneCall } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
+import { encodeHostedPhoneCallBriefFixture } from "./support/phone-call-private-fixtures";
+
 import {
   accountRetellPhoneCallUsage,
   readRetellTerminalProviderUsage,
@@ -158,8 +160,18 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const createdAt = new Date("2026-06-25T11:00:00.000Z");
   return {
     analyzedAt: null,
-    briefEncrypted: null,
-    briefJson: null,
+    briefEncrypted: encodeHostedPhoneCallBriefFixture({
+      memberId: overrides.memberId ?? "member_123",
+      value: {
+        allowTransferToUser: false,
+        goal: "Confirm the office schedule.",
+        instructions: [],
+        shareableFacts: {},
+        successCriteria: "The office confirms its schedule.",
+        timeZone: "America/Chicago",
+        to: { label: "the office", phoneNumber: "+15550102020" },
+      },
+    }),
     createdAt,
     endedAt: null,
     id: "hpc_123",
@@ -172,7 +184,6 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     resultDeliveryStatus: null,
     resultDeliveryTerminalAt: null,
     resultEncrypted: null,
-    resultJson: null,
     resultNotificationChannel: null,
     status: "calling",
     stopRequestedAt: null,

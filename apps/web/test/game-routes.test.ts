@@ -1,0 +1,1100 @@
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { Buffer } from "node:buffer";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { GameHistoryView, GameView } from "../src/lib/game/contract";
+import { decidePost, GameRuleError, type RuleEntry, type RuleState } from "../src/lib/game/rules";
+import { buildGameView } from "../src/lib/game/views";
+import { hostedOnboardingError, withRetryableServerFailures } from "../src/lib/hosted-onboarding/errors";
+import { isRecord } from "../src/lib/primitives";
+import { buildCurrentHostedConsentDocumentVersions } from "../src/lib/legal/consent";
+
+vi.mock("server-only", () => ({}));
+
+const mocks = vi.hoisted(() => ({
+  authorizeLockedPreviewReads: vi.fn(),
+  authorizeMediaRead: vi.fn(),
+  authorizeMediaReads: vi.fn(),
+  devAdvanceDays: vi.fn(),
+  devSettleNow: vi.fn(),
+  devStartNow: vi.fn(),
+  getPrisma: vi.fn(),
+  canEnterGame: vi.fn(),
+  control: null as null | { gameImageDelivery: ReturnType<typeof vi.fn>; putGameImage?: (input: { bytes: Uint8Array; contentType: "image/jpeg" | "image/heic"; mediaId: string; userId: string }) => Promise<void> },
+  mediaKeyPrefixFor: vi.fn(),
+  readGameReplyAudio: vi.fn(),
+  readGame: vi.fn(),
+  readHistory: vi.fn(),
+  readHome: vi.fn(),
+  readInvitePreview: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
+  runGameCommand: vi.fn(),
+}));
+
+vi.mock("@/src/lib/game/service", () => ({
+  authorizeLockedPreviewReads: mocks.authorizeLockedPreviewReads,
+  authorizeMediaRead: mocks.authorizeMediaRead,
+  authorizeMediaReads: mocks.authorizeMediaReads,
+  devAdvanceDays: mocks.devAdvanceDays,
+  devSettleNow: mocks.devSettleNow,
+  devStartNow: mocks.devStartNow,
+  canEnterGame: mocks.canEnterGame,
+  mediaKeyPrefixFor: mocks.mediaKeyPrefixFor,
+  readGameReplyAudio: mocks.readGameReplyAudio,
+  readGame: mocks.readGame,
+  readHistory: mocks.readHistory,
+  readHome: mocks.readHome,
+  readInvitePreview: mocks.readInvitePreview,
+  runGameCommand: mocks.runGameCommand,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedMemberAuthFromBearerToken: mocks.requireHostedMemberAuthFromBearerToken,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured: () => mocks.control,
+}));
+
+type Routes = {
+  replies: typeof import("../app/api/game/v1/games/[id]/entries/[entryId]/replies/route");
+  reply: typeof import("../app/api/game/v1/games/[id]/replies/[replyId]/route");
+  replyAudio: typeof import("../app/api/game/v1/games/[id]/replies/[replyId]/audio/route");
+  challenges: typeof import("../app/api/game/v1/games/[id]/challenges/route");
+  block: typeof import("../app/api/game/v1/blocks/[memberId]/route");
+  inviteBlock: typeof import("../app/api/game/v1/invites/[token]/block/route");
+  inviteReports: typeof import("../app/api/game/v1/invites/[token]/reports/route");
+  reports: typeof import("../app/api/game/v1/games/[id]/reports/route");
+  cancelChange: typeof import("../app/api/game/v1/games/[id]/changes/[proposalId]/route");
+  changes: typeof import("../app/api/game/v1/games/[id]/changes/route");
+  accept: typeof import("../app/api/game/v1/invites/[token]/accept/route");
+  negotiate: typeof import("../app/api/game/v1/invites/[token]/negotiate/route");
+  advanceDay: typeof import("../app/api/game/v1/dev/games/[id]/advance-day/route");
+  create: typeof import("../app/api/game/v1/games/route");
+  entries: typeof import("../app/api/game/v1/games/[id]/entries/route");
+  entry: typeof import("../app/api/game/v1/games/[id]/entries/[entryId]/route");
+  game: typeof import("../app/api/game/v1/games/[id]/route");
+  history: typeof import("../app/api/game/v1/history/route");
+  home: typeof import("../app/api/game/v1/home/route");
+  invite: typeof import("../app/api/game/v1/invites/[token]/route");
+  media: typeof import("../app/api/game/v1/media/[...key]/route");
+  profile: typeof import("../app/api/game/v1/me/profile/route");
+  playerPhoto: typeof import("../app/api/game/v1/players/[memberId]/photo/route");
+  redeem: typeof import("../app/api/game/v1/tickets/[id]/redeem/route");
+  settle: typeof import("../app/api/game/v1/dev/games/[id]/settle/route");
+  startNow: typeof import("../app/api/game/v1/dev/games/[id]/start-now/route");
+  upload: typeof import("../app/api/game/v1/media/route");
+};
+
+let routes: Routes;
+let mediaDir: string;
+
+const LEO = "hbm_leo";
+const AVA = "hbm_ava";
+const GAME_ID = "game_1";
+const BASE = "http://localhost/api/game/v1";
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
+const VIEW: GameView = {
+  changeControls: { canStartNow: false, canEdit: false, canEditStartDate: false, canEditSchedule: false, editableFromDay: null },
+  pendingChange: null,
+  settlesAt: null,
+  days: [],
+  id: GAME_ID,
+  inviteExpiresAt: null,
+  inviteToken: null,
+  lengthDays: 7,
+  players: [],
+  result: null,
+  recap: null,
+  retakeAvailable: true,
+  round: 1,
+  previousGameId: null,
+  startedAt: null,
+  startsOn: null,
+  status: "live",
+  terms: { fromDay: 0, n: 1, schedule: { count: 5 }, stakes: [], tasks: [{ seat: 0, text: "100 pushups" }] },
+  tickets: [],
+};
+
+let signedInAs = LEO;
+
+describe("weekly game routes", () => {
+  beforeAll(async () => {
+    routes = {
+      replies: await import("../app/api/game/v1/games/[id]/entries/[entryId]/replies/route"),
+      reply: await import("../app/api/game/v1/games/[id]/replies/[replyId]/route"),
+      replyAudio: await import("../app/api/game/v1/games/[id]/replies/[replyId]/audio/route"),
+      challenges: await import("../app/api/game/v1/games/[id]/challenges/route"),
+      block: await import("../app/api/game/v1/blocks/[memberId]/route"),
+      inviteBlock: await import("../app/api/game/v1/invites/[token]/block/route"),
+      inviteReports: await import("../app/api/game/v1/invites/[token]/reports/route"),
+      reports: await import("../app/api/game/v1/games/[id]/reports/route"),
+      cancelChange: await import("../app/api/game/v1/games/[id]/changes/[proposalId]/route"),
+      changes: await import("../app/api/game/v1/games/[id]/changes/route"),
+      accept: await import("../app/api/game/v1/invites/[token]/accept/route"),
+      negotiate: await import("../app/api/game/v1/invites/[token]/negotiate/route"),
+      advanceDay: await import("../app/api/game/v1/dev/games/[id]/advance-day/route"),
+      create: await import("../app/api/game/v1/games/route"),
+      entries: await import("../app/api/game/v1/games/[id]/entries/route"),
+      entry: await import("../app/api/game/v1/games/[id]/entries/[entryId]/route"),
+      game: await import("../app/api/game/v1/games/[id]/route"),
+      history: await import("../app/api/game/v1/history/route"),
+      home: await import("../app/api/game/v1/home/route"),
+      invite: await import("../app/api/game/v1/invites/[token]/route"),
+      media: await import("../app/api/game/v1/media/[...key]/route"),
+      profile: await import("../app/api/game/v1/me/profile/route"),
+      playerPhoto: await import("../app/api/game/v1/players/[memberId]/photo/route"),
+      redeem: await import("../app/api/game/v1/tickets/[id]/redeem/route"),
+      settle: await import("../app/api/game/v1/dev/games/[id]/settle/route"),
+      startNow: await import("../app/api/game/v1/dev/games/[id]/start-now/route"),
+      upload: await import("../app/api/game/v1/media/route"),
+    };
+  });
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mediaDir = await mkdtemp(path.join(process.env.MURPH_VITEST_TEMP_ROOT ?? tmpdir(), "game-media-"));
+    vi.stubEnv("MURPH_GAME_MEDIA_DIR", mediaDir);
+    vi.stubEnv("VERCEL_ENV", "development");
+    signedInAs = LEO;
+    mocks.control = null;
+    mocks.getPrisma.mockReturnValue({});
+    mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(async () => ({ member: { id: signedInAs }, kind: "better-auth", sessionId: "synthetic-session", credential: "synthetic-token",
+      proof: { credentialDigest: Buffer.alloc(32), expiresAt: new Date("2030-01-01"), row: { model: "session", id: "synthetic-session", memberId: signedInAs } } }));
+    mocks.canEnterGame.mockResolvedValue(true);
+    mocks.mediaKeyPrefixFor.mockImplementation((memberId: string) => `game/${memberId}/`);
+    mocks.readGameReplyAudio.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    mocks.readGame.mockResolvedValue(VIEW);
+    mocks.readHistory.mockResolvedValue({ people: [] });
+    mocks.runGameCommand.mockResolvedValue({ game: VIEW, ok: true });
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  describe("installed iOS write outcomes", () => {
+    const paths = ["entries", "replies"] as const;
+    const send = (route: typeof paths[number], body = JSON.stringify({ entryId: "entry_1", kind: "words", text: "Post" })) => {
+      const request = new Request(`${BASE}/games/${GAME_ID}/${route}`, { method: "POST", headers: { "content-type": "application/json" }, body });
+      return route === "entries" ? routes.entries.POST(request, params({ id: GAME_ID }))
+        : routes.replies.POST(request, params({ id: GAME_ID, entryId: "entry_1" }));
+    };
+    async function outcome(response: Response, expected: "retained" | "deleted", status: number) {
+      const bytes = await response.text();
+      expect(response.status, bytes).toBe(status);
+      expect(iosOutcome(response.status, bytes)).toBe(expected);
+    }
+
+    it.each(paths.flatMap(route => [new Error("outage"), new TypeError("fetch failed"), new SyntaxError("bad JSON")].map(cause => ({ route, cause }))))("retains $route on $cause", async ({ route, cause }) => {
+      mocks.runGameCommand.mockRejectedValueOnce(cause);
+      await outcome(await send(route), "retained", 500);
+    });
+
+    it.each(paths)("retains %s after committed response serialization fails", async route => {
+      let committed = false;
+      mocks.runGameCommand.mockImplementationOnce(async () => {
+        committed = true;
+        return { ok: true, game: { ...VIEW, toJSON() {
+          expect(committed).toBe(true);
+          throw new TypeError("response failed after commit");
+        } } };
+      });
+      await outcome(await send(route), "retained", 500);
+    });
+
+    it.each(["media", ...paths] as const)("retains %s on failed auth, unauthenticated, and terms-required responses", async route => {
+      const request = () => route === "media" ? routes.upload.POST(uploadRequest()) : send(route);
+      for (const cause of [new Error("auth outage"), new TypeError("fetch failed"), new SyntaxError("bad JSON")]) {
+        mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValueOnce(cause);
+        await outcome(await request(), "retained", 500);
+      }
+      mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValueOnce(hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in." }));
+      const response = await request();
+      const bytes = await response.text();
+      expect(response.status).toBe(401);
+      expect(JSON.parse(bytes).error.code).toBe("UNAUTHENTICATED");
+      expect(iosOutcome(response.status, bytes)).toBe("retained");
+      if (route !== "media") {
+        mocks.runGameCommand.mockResolvedValueOnce({ ok: false, status: 403, error: { code: "TERMS_REQUIRED", message: "Agree to Terms." } });
+        await outcome(await request(), "retained", 403);
+      }
+    });
+
+    it.each(paths)("finally refuses invalid %s input and closed days", async route => {
+      for (const body of ["{", "[]", JSON.stringify("non-object")]) await outcome(await send(route, body), "deleted", 400);
+      await outcome(await send(route, JSON.stringify({ text: "a".repeat(601 * 1024) })), "deleted", 413);
+      for (const code of ["DAY_CLOSED", "SLOT_TAKEN"]) {
+        mocks.runGameCommand.mockResolvedValueOnce({ ok: false, status: 409, error: { code, message: "Refused." } });
+        await outcome(await send(route), "deleted", 409);
+      }
+    });
+
+    it("retains shot staging failures and storage-off responses but finally refuses invalid bytes", async () => {
+      vi.stubEnv("VERCEL_ENV", "production");
+      await outcome(await routes.upload.POST(uploadRequest()), "retained", 503);
+      for (const cause of [new Error("outage"), new TypeError("fetch failed"), new SyntaxError("bad JSON")]) {
+        mocks.control = { gameImageDelivery: vi.fn(), putGameImage: async () => { throw cause; } };
+        await outcome(await routes.upload.POST(uploadRequest()), "retained", 503);
+      }
+      const client = createCloudflareHostedControlClient({ baseUrl: "https://control.example.test", getBearerToken: async () => "synthetic-token",
+        fetchImpl: async () => Response.json({ error: "bad image" }, { status: 400 }) });
+      mocks.control = { gameImageDelivery: vi.fn(), putGameImage: client.putGameImage };
+      await outcome(await routes.upload.POST(uploadRequest()), "deleted", 400);
+      await outcome(await routes.upload.POST(uploadRequest({ body: Buffer.from("invalid JPEG") })), "deleted", 400);
+    });
+
+    it("preserves known errors and their details while marking server failures retryable with their cause", async () => {
+      for (const [httpStatus, retryable] of [[403, false], [503, true], [503, false]] as const) {
+        const cause = hostedOnboardingError({ code: "SYNTHETIC", message: "Synthetic failure.", httpStatus, retryable, details: { stage: "write" } });
+        const result = withRetryableServerFailures(async () => { throw cause; });
+        if (httpStatus < 500 || retryable) await expect(result).rejects.toBe(cause);
+        else await expect(result).rejects.toMatchObject({ code: cause.code, message: cause.message, httpStatus, details: cause.details, retryable: true, cause });
+      }
+    });
+  });
+
+  it("gives only the reply upload 600 KiB and uses the path identity", async () => {
+    const body = { gameId: "forged-game", entryId: "forged-entry", replyId: "reply_0001", kind: "voice", audio: Buffer.alloc(400_000).toString("base64"), levels: Array(32).fill(50) };
+    const response = await routes.replies.POST(writeRequest("POST", "/reply", body), params({ id: GAME_ID, entryId: "entry_reply" }));
+    expect(response.status).toBe(200);
+    expect(mocks.runGameCommand.mock.calls[0][0].command).toMatchObject({ gameId: GAME_ID, entryId: "entry_reply", type: "replyToPost" });
+    expect((await routes.entries.POST(writeRequest("POST", "/post", body), params({ id: GAME_ID }))).status).toBe(413);
+    expect((await routes.replies.POST(writeRequest("POST", "/reply", { ...body, audio: "x".repeat(600 * 1024) }), params({ id: GAME_ID, entryId: "entry_reply" }))).status).toBe(413);
+  });
+
+  it("authenticates audio reads, applies the service's object decision, and disables caching", async () => {
+    const request = new Request(`${BASE}/games/${GAME_ID}/replies/reply_0001/audio`);
+    const context = params({ id: GAME_ID, replyId: "reply_0001" });
+    const response = await routes.replyAudio.GET(request, context);
+    expect(response.status).toBe(200);
+    expect(mocks.readGameReplyAudio).toHaveBeenCalledWith(GAME_ID, "reply_0001", LEO);
+    expect(response.headers.get("Content-Type")).toBe("audio/mp4");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    mocks.readGameReplyAudio.mockResolvedValue(null);
+    expect((await routes.replyAudio.GET(request, context)).status).toBe(404);
+    mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(hostedOnboardingError({ code: "UNAUTHENTICATED", httpStatus: 401, message: "Sign in" }));
+    expect((await routes.replyAudio.GET(request, context)).status).toBe(401);
+  });
+
+  it("opens Prove it through the signed-in actor and returns the ordinary game envelope", async () => {
+    const response = await routes.challenges.POST(writeRequest("POST", `/games/${GAME_ID}/challenges`,
+      { entryId: "entry_prove_it", gameId: "another_game", memberId: AVA, type: "post" }), params({ id: GAME_ID }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, game: VIEW });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, beforeMutationTx: expect.any(Function),
+      command: { type: "challenge", gameId: GAME_ID, entryId: "entry_prove_it" } });
+  });
+
+  it("returns the real off-day rule as 409 DAY_CLOSED", async () => {
+    const state: RuleState = {
+      game: { id: GAME_ID, createdBy: LEO, status: "live", lengthDays: 14, seats: 2, startsOn: null, inviteExpiresAt: null,
+        terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] } },
+      players: [{ memberId: LEO, seat: 0, dayOne: "2030-03-04", timeZone: "America/New_York" }], entries: [],
+    };
+    mocks.runGameCommand.mockImplementationOnce(async () => {
+      try {
+        decidePost(state, { memberId: LEO, kind: "photo", mediaKeys: ["owned/photo"], mediaKeyPrefix: "owned/",
+          captureAgeMs: null, now: new Date("2030-03-09T17:00:00Z") });
+      } catch (error) {
+        if (error instanceof GameRuleError) return { ok: false, status: 409, error: error.error };
+        throw error;
+      }
+      throw new Error("Expected off-day refusal");
+    });
+    const response = await routes.entries.POST(writeRequest("POST", `/games/${GAME_ID}/entries`,
+      { entryId: "entry_off_day", kind: "photo", mediaKeys: ["owned/photo"] }), params({ id: GAME_ID }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "DAY_CLOSED", message: "Saturday's a day off. Back Monday.", retryable: false } });
+  });
+
+  describe("auth", () => {
+    it("returns the definitive profile for photo-only updates under the authenticated account", async () => {
+    const profile = { memberId: LEO, firstName: "Leo", timeZone: "UTC", avatarUrl: null };
+    mocks.runGameCommand.mockResolvedValue({ ok: true, game: null, profile });
+    const response = await routes.profile.PUT(writeRequest("PUT", "/me/profile", { photoKey: null, memberId: AVA }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, profile });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, beforeMutationTx: expect.any(Function), command: { type: "setProfile", photoKey: null, memberId: AVA } });
+  });
+
+  it("decodes the player photo target and returns the ordinary empty write envelope", async () => {
+    mocks.runGameCommand.mockResolvedValue({ ok: true, game: null });
+    const photoKey = `game/${LEO}/${"a".repeat(64)}.jpg`;
+    const response = await routes.playerPhoto.PUT(writeRequest("PUT", "/players/hbm%5Fava/photo", { photoKey }), params({ memberId: "hbm%5Fava" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, game: null });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, beforeMutationTx: expect.any(Function),
+      command: { type: "setPlayerPhoto", memberId: "hbm_ava", photoKey } });
+  });
+
+  it("requires a signed-in session and never reaches the game", async () => {
+      mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(
+        hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." }),
+      );
+
+      const responses = await Promise.all([
+        routes.home.GET(new Request(`${BASE}/home`)),
+        routes.history.GET(new Request(`${BASE}/history`)),
+        routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
+        routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+        routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["game", LEO, "x.jpg"] })),
+      ]);
+
+      for (const response of responses) {
+        expect(response.status).toBe(401);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(await response.json()).toEqual({
+          error: { code: "UNAUTHENTICATED", message: "Sign in to continue.", retryable: false },
+        });
+      }
+      expect(mocks.readHome).not.toHaveBeenCalled();
+      expect(mocks.readHistory).not.toHaveBeenCalled();
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+      expect(mocks.readGame).not.toHaveBeenCalled();
+      expect(mocks.authorizeMediaRead).not.toHaveBeenCalled();
+    });
+
+    it("uses the plain signed-in check, not the paid-member check", async () => {
+      mocks.readHome.mockResolvedValue({ games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+
+      const response = await routes.home.GET(new Request(`${BASE}/home`));
+
+      expect(response.status).toBe(200);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("flag", () => {
+    it("hides every signed-in route as 404 when the game is off for the member", async () => {
+      mocks.canEnterGame.mockResolvedValue(false);
+
+      const responses = await Promise.all([
+        routes.home.GET(new Request(`${BASE}/home`)),
+        routes.history.GET(new Request(`${BASE}/history`)),
+        routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
+        routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+        routes.upload.POST(uploadRequest()),
+        routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["x"] })),
+        routes.startNow.POST(new Request(`${BASE}/dev/games/${GAME_ID}/start-now`, { method: "POST" }), params({ id: GAME_ID })),
+      ]);
+
+      for (const response of responses) {
+        expect(response.status).toBe(404);
+        expect((await response.json()).error.code).toBe("GAME_DISABLED");
+      }
+      expect(mocks.canEnterGame).toHaveBeenCalledWith(LEO, null);
+      expect(mocks.readHome).not.toHaveBeenCalled();
+      expect(mocks.readHistory).not.toHaveBeenCalled();
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+      expect(mocks.devStartNow).not.toHaveBeenCalled();
+    });
+
+    it("lets an invite route vouch with its own token", async () => {
+      mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
+      const accepted = await routes.accept.POST(writeRequest("POST", "/invites/tok_open/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_open" }));
+      expect(accepted.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const negotiated = await routes.negotiate.POST(writeRequest("POST", "/invites/tok_open/negotiate", { termsVersion: 1 }), params({ token: "tok_open" }));
+      expect(negotiated.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const other = await routes.accept.POST(writeRequest("POST", "/invites/tok_other/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_other" }));
+      expect(other.status).toBe(404);
+      expect((await other.json()).error.code).toBe("GAME_DISABLED");
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(2);
+      // Before accepting, the invite's own token also lets its holder report it or block who sent it.
+      const reported = await routes.inviteReports.POST(writeRequest("POST", "/invites/tok_open/reports", { reportId: "report_1", reason: "money", about: "terms" }), params({ token: "tok_open" }));
+      expect(reported.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const blocked = await routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_open/block"), params({ token: "tok_open" }));
+      expect(blocked.status).toBe(200);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+    });
+
+    it("reads the invite an app is holding from its header on any other route", async () => {
+      mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
+      mocks.readHome.mockResolvedValue({ canStartGames: false, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+      const held = await routes.home.GET(new Request(`${BASE}/home`, { headers: { authorization: "Bearer token", "x-murph-game-invite": "tok_open" } }));
+      expect(held.status).toBe(200);
+      expect(await held.json()).toMatchObject({ ok: true, canStartGames: false });
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
+      const bare = await routes.home.GET(new Request(`${BASE}/home`));
+      expect(bare.status).toBe(404);
+      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, null);
+      expect(mocks.readHome).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("write routes", () => {
+    it.each([
+      ["DELETE /games/:id", () => routes.game.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
+        { gameId: GAME_ID, type: "cancelInvite" }],
+      ["DELETE /games/:id/changes/:proposalId", () => routes.cancelChange.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve" }), params({ id: GAME_ID, proposalId: "proposal_1" })),
+        { type: "respondChange", gameId: GAME_ID, proposalId: "proposal_1", decision: "cancel" }],
+      ["POST /games/:id/changes/:proposalId", () => routes.cancelChange.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve", actorMemberId: "intruder", gameId: "wrong", proposalId: "wrong", origin: "chat", votes: { intruder: "yes" } }), params({ id: GAME_ID, proposalId: "proposal_1" })),
+        { type: "respondChange", gameId: GAME_ID, proposalId: "proposal_1", decision: "approve" }],
+      ["POST /games/:id/changes", () => routes.changes.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes`, { gameId: "wrong_game", type: "respondChange", proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "start_now" } }), params({ id: GAME_ID })),
+        { type: "proposeChange", gameId: GAME_ID, proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "start_now" } }],
+      ["PUT /me/profile", () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
+        { firstName: "Leo", timeZone: "UTC", type: "setProfile" }],
+      ["POST /games", () => routes.create.POST(writeRequest("POST", "/games", { gameId: GAME_ID, inviteeFirstName: "Ava" })),
+        { gameId: GAME_ID, inviteeFirstName: "Ava", type: "createGame" }],
+      ["POST /invites/:token/accept", () => routes.accept.POST(
+        writeRequest("POST", "/invites/tok_1/accept", { termsVersion: 2, timeZone: "Australia/Sydney" }),
+        params({ token: "tok_1" }),
+      ), { termsVersion: 2, timeZone: "Australia/Sydney", token: "tok_1", type: "join" }],
+      ["POST /games/:id/entries", () => routes.entries.POST(
+        writeRequest("POST", `/games/${GAME_ID}/entries`, { entryId: "entry_1", kind: "photo", mediaKeys: [] }),
+        params({ id: GAME_ID }),
+      ), { entryId: "entry_1", gameId: GAME_ID, kind: "photo", mediaKeys: [], type: "post" }],
+      ["DELETE /games/:id/entries/:entryId", () => routes.entry.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/entries/entry_1`),
+        params({ entryId: "entry_1", id: GAME_ID }),
+      ), { entryId: "entry_1", gameId: GAME_ID, type: "withdraw" }],
+      ["POST /tickets/:id/redeem", () => routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
+        { ticketId: "t_1", type: "redeem" }],
+      ["POST /games/:id/reports", () => routes.reports.POST(
+        writeRequest("POST", `/games/${GAME_ID}/reports`, { gameId: "other_game", reportId: "report_1", entryId: "entry_1", reason: "harassment", block: true }),
+        params({ id: GAME_ID }),
+      ), { block: true, entryId: "entry_1", gameId: GAME_ID, reason: "harassment", reportId: "report_1", type: "report" }],
+      ["PUT /players/:memberId/photo", () => routes.playerPhoto.PUT(
+        writeRequest("PUT", `/players/${AVA}/photo`, { memberId: LEO, type: "setProfile", photoKey: null }), params({ memberId: AVA })),
+        { memberId: AVA, photoKey: null, type: "setPlayerPhoto" }],
+      ["PUT /blocks/:memberId", () => routes.block.PUT(writeRequest("PUT", `/blocks/${AVA}`, { memberId: LEO }), params({ memberId: AVA })),
+        { memberId: AVA, type: "block" }],
+      ["DELETE /blocks/:memberId", () => routes.block.DELETE(writeRequest("DELETE", `/blocks/${AVA}`), params({ memberId: AVA })),
+        { memberId: AVA, type: "unblock" }],
+      ["POST /invites/:token/reports", () => routes.inviteReports.POST(
+        writeRequest("POST", "/invites/tok_1/reports", { gameId: GAME_ID, reportId: "report_1", reason: "money", about: "terms" }),
+        params({ token: "tok_1" }),
+      ), { about: "terms", reason: "money", reportId: "report_1", token: "tok_1", type: "report" }],
+      ["PUT /invites/:token/block", () => routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_1/block", { memberId: AVA }), params({ token: "tok_1" })),
+        { token: "tok_1", type: "block" }],
+    ])("%s becomes one command for the signed-in member", async (_route, call, command) => {
+      const response = await call();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ game: VIEW, ok: true });
+      expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, beforeMutationTx: expect.any(Function), command });
+    });
+
+    it("lets the path's ids win over the body's", async () => {
+      await routes.accept.POST(
+        writeRequest("POST", "/invites/tok_1/accept", { termsVersion: 1, timeZone: "UTC", token: "tok_other", type: "redeem" }),
+        params({ token: "tok_1" }),
+      );
+
+      expect(mocks.runGameCommand.mock.calls[0][0].command).toMatchObject({ token: "tok_1", type: "join" });
+    });
+
+    it.each(["cancel", "yes", null])("rejects %s on the vote POST without issuing a command", async decision => {
+      const response = await routes.cancelChange.POST(writeRequest("POST", `/games/${GAME_ID}/changes/proposal_1`, { decision }), params({ id: GAME_ID, proposalId: "proposal_1" }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+    });
+
+    it("caps the body at 64 KB", async () => {
+      const response = await routes.profile.PUT(writeRequest("PUT", "/me/profile", {
+        firstName: "Leo",
+        padding: "x".repeat(70 * 1024),
+        timeZone: "America/New_York",
+      }));
+
+      expect(response.status).toBe(413);
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+    });
+
+    it("renders service rejections in the error envelope", async () => {
+      mocks.runGameCommand.mockResolvedValue({
+        error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going." },
+        ok: false,
+        status: 409,
+      });
+
+      const response = await routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { code: "ALREADY_IN_A_GAME", message: "You and Ava already have a game going.", retryable: false },
+      });
+    });
+  });
+
+  describe("Murph's Terms", () => {
+    const termsGrant = (versions: Record<string, string>, revokedAt: Date | null = null) => ({
+      createdAt: new Date(0), documentVersionsJson: versions, grantedAt: new Date(0), lastEventId: null,
+      memberId: LEO, revokedAt, scope: "launch.legal", source: "test", status: revokedAt ? "revoked" : "granted",
+      updatedAt: new Date(0),
+    });
+    const current = buildCurrentHostedConsentDocumentVersions("launch.legal");
+    const stale = Object.fromEntries(Object.keys(current).map((id) => [id, "2020-01-01"]));
+    let grants: ReturnType<typeof termsGrant>[];
+    const findMany = vi.fn(async () => grants);
+    const gated = {
+      "POST reply": () => routes.replies.POST(writeRequest("POST", `/games/${GAME_ID}/entries/entry_reply/replies`, { replyId: "reply_0001", kind: "text", text: "Good" }), params({ id: GAME_ID, entryId: "entry_reply" })),
+      "POST /games/:id/challenges": () => routes.challenges.POST(
+        writeRequest("POST", `/games/${GAME_ID}/challenges`, { entryId: "entry_prove_it" }), params({ id: GAME_ID })),
+      "POST /games": () => routes.create.POST(writeRequest("POST", "/games", { gameId: GAME_ID })),
+      "POST /invites/:token/accept": () => routes.accept.POST(
+        writeRequest("POST", "/invites/tok_1/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_1" })),
+      "POST /invites/:token/negotiate": () => routes.negotiate.POST(
+        writeRequest("POST", "/invites/tok_1/negotiate", { termsVersion: 1 }), params({ token: "tok_1" })),
+      "POST /games/:id/entries": () => routes.entries.POST(
+        writeRequest("POST", `/games/${GAME_ID}/entries`, { entryId: "entry_1", kind: "photo", mediaKeys: [] }), params({ id: GAME_ID })),
+      "POST /games/:id/changes": () => routes.changes.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes`, { proposalId: "proposal_1" }), params({ id: GAME_ID })),
+      "POST /tickets/:id/redeem": () => routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
+    };
+    const open = {
+      "DELETE reply": () => routes.reply.DELETE(writeRequest("DELETE", `/games/${GAME_ID}/replies/reply_0001`), params({ id: GAME_ID, replyId: "reply_0001" })),
+      "GET reply audio": () => routes.replyAudio.GET(new Request(`${BASE}/games/${GAME_ID}/replies/reply_0001/audio`), params({ id: GAME_ID, replyId: "reply_0001" })),
+      "GET /home": () => routes.home.GET(new Request(`${BASE}/home`)),
+      "GET /history": () => routes.history.GET(new Request(`${BASE}/history`)),
+      "GET /games/:id": () => routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+      "PUT /players/:memberId/photo": () => routes.playerPhoto.PUT(
+        writeRequest("PUT", `/players/${AVA}/photo`, { photoKey: null }), params({ memberId: AVA })),
+      "PUT /me/profile": () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
+      "DELETE /games/:id": () => routes.game.DELETE(writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
+      "POST /games/:id/changes/:proposalId": () => routes.cancelChange.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve" }), params({ id: GAME_ID, proposalId: "proposal_1" })),
+      "DELETE /games/:id/changes/:proposalId": () => routes.cancelChange.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`), params({ id: GAME_ID, proposalId: "proposal_1" })),
+      "DELETE /games/:id/entries/:entryId": () => routes.entry.DELETE(
+        writeRequest("DELETE", `/games/${GAME_ID}/entries/entry_1`), params({ entryId: "entry_1", id: GAME_ID })),
+      "POST /games/:id/reports": () => routes.reports.POST(
+        writeRequest("POST", `/games/${GAME_ID}/reports`, { reportId: "report_1", reason: "harassment" }), params({ id: GAME_ID })),
+      "PUT /blocks/:memberId": () => routes.block.PUT(writeRequest("PUT", `/blocks/${AVA}`), params({ memberId: AVA })),
+      "DELETE /blocks/:memberId": () => routes.block.DELETE(writeRequest("DELETE", `/blocks/${AVA}`), params({ memberId: AVA })),
+      "POST /invites/:token/reports": () => routes.inviteReports.POST(
+        writeRequest("POST", "/invites/tok_1/reports", { reportId: "report_1", reason: "money", about: "terms" }), params({ token: "tok_1" })),
+      "PUT /invites/:token/block": () => routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_1/block"), params({ token: "tok_1" })),
+    };
+
+    beforeEach(() => {
+      grants = [termsGrant(stale)];
+      mocks.getPrisma.mockReturnValue({ hostedConsentGrant: { findMany } });
+      mocks.readHome.mockResolvedValue({ games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+    });
+
+    it("changes nothing while MURPH_GAME_REQUIRE_CURRENT_TERMS is off", async () => {
+      for (const flag of [undefined, "", "1", "false", "TRUE"]) {
+        if (flag !== undefined) vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", flag);
+        for (const call of Object.values(gated)) expect((await call()).status).toBe(200);
+      }
+      expect(findMany).not.toHaveBeenCalled();
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(5 * Object.keys(gated).length);
+    });
+
+    it.each(Object.entries(gated))("on, %s waits for the current Terms and says which", async (_route, call) => {
+      vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+      for (const missing of [[termsGrant(stale)], [], [termsGrant(current, new Date(0))]]) {
+        grants = missing;
+        const response = await call();
+        expect(response.status).toBe(403);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        const { error } = await response.json();
+        expect(error).toMatchObject({ code: "TERMS_REQUIRED", retryable: false, details: { scope: "launch.legal" } });
+        expect(Object.fromEntries(error.details.documents.map((document: { id: string; version: string }) =>
+          [document.id, document.version]))).toEqual(current);
+      }
+      expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { memberId: LEO } }));
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+
+      grants = [termsGrant(current)];
+      expect((await call()).status).toBe(200);
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it("on, keeps reading, reporting, blocking, a profile and taking things back open", async () => {
+      vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+      grants = [];
+      for (const [route, call] of Object.entries(open)) expect((await call()).status, route).toBe(200);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("viewer scoping", () => {
+    it("reads views only for the signed-in member, whatever the request says", async () => {
+      mocks.readHome.mockResolvedValue({ games: [VIEW], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+
+      const home = await routes.home.GET(new Request(`${BASE}/home?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
+      const history = await routes.history.GET(new Request(`${BASE}/history?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
+      const game = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}?memberId=${AVA}`), params({ id: GAME_ID }));
+
+      expect(mocks.readHome).toHaveBeenCalledWith(LEO, false, expect.objectContaining({ member: { id: LEO } }));
+      expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
+      expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO, false);
+      expect(await home.json()).toEqual({ games: [VIEW], me: { memberId: LEO }, ok: true, wallet: { held: [], owed: [], redeemed: [] } });
+      expect(await history.json()).toEqual({ ok: true, people: [] });
+      expect(await game.json()).toEqual({ game: VIEW, ok: true });
+    });
+
+    it("keeps another player's entry out of the response until the viewer posts that day", async () => {
+      const leoKey = `game/${LEO}/${"c".repeat(32)}.jpg`;
+      const leoPhoto = entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO });
+      const avaPhoto = entry({ id: "entry_ava", kind: "photo", mediaKeys: [`game/${AVA}/${"d".repeat(32)}.jpg`], memberId: AVA });
+      signedInAs = AVA;
+
+      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto]));
+      const before = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }));
+      const beforeText = await before.text();
+      const beforeBody = JSON.parse(beforeText);
+
+      // Only today's picture is named, as a preview the media route still
+      // keeps locked; the entry itself (its id, words and numbers) stays out.
+      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null,
+        preview: { kind: "photo", mediaUrl: `/api/game/v1/media/${encodeURIComponent(leoKey)}` } }]);
+      expect(beforeText).not.toContain("entry_leo");
+      expect(beforeText.split(encodeURIComponent(leoKey)).length - 1).toBe(1);
+
+      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto, avaPhoto]));
+      const after = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).json();
+
+      expect(after.game.days[0].others[0]).toEqual({
+        postedAt: "2030-03-05T12:00:00.000Z",
+        entry: {
+          entryId: "entry_leo",
+          kind: "photo",
+          mediaUrls: [`/api/game/v1/media/${encodeURIComponent(leoKey)}`],
+          text: "caption of entry_leo",
+          data: null,
+        },
+        seat: 0,
+        status: "posted",
+      });
+    });
+
+    it.each(["prize", "dare", null] as const)("returns history tasks and %s stake for the authenticated viewer", async (kind) => {
+      const history = historyFixture(1, 1);
+      history.people[0].games[0].stake = kind ? { kind, item: "Lunch" } : null;
+      mocks.readHistory.mockResolvedValue(history);
+      const response = await routes.history.GET(new Request(`${BASE}/history?memberId=outsider`));
+      expect(response.status).toBe(200);
+      expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
+      expect(await response.json()).toEqual({ ok: true, ...history });
+    });
+
+    it("signs history card previews with the avatar variant after media authorization, preserving cache identities", async () => {
+      const history = historyFixture(1, 2);
+      const previews = history.people[0].games[0].previews;
+      // A repeated content key is authorized and signed only once.
+      previews[1].mediaUrls = previews[0].mediaUrls;
+      mocks.readHistory.mockResolvedValue(history);
+      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      const response = await routes.history.GET(new Request(`${BASE}/history`));
+      const result = await response.json();
+      expect(result.people[0].games[0].previews).toEqual(previews.map((preview) => ({ ...preview, delivery })));
+      expect(result.people[0].games[1]).toEqual(history.people[0].games[1]);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledTimes(1);
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledWith(LEO, expect.arrayContaining([`game/${LEO}/${"0".repeat(64)}.jpg`]), false);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "avatar" });
+
+      mocks.authorizeMediaReads.mockResolvedValue(new Set());
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      mocks.control.gameImageDelivery.mockRejectedValue(new Error("synthetic signing outage"));
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+      mocks.control = null;
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+      vi.stubEnv("VERCEL_ENV", "");
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+    });
+
+    it("keeps uploader deliveries when a mixed authorization batch fails", async () => {
+      const history = historyFixture(1, 1);
+      const other = history.people[0].games[0].previews[1];
+      other.mediaUrls = [`/api/game/v1/media/${encodeURIComponent(`game/${AVA}/${"a".repeat(64)}.jpg`)}`];
+      mocks.readHistory.mockResolvedValue(history);
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.authorizeMediaReads.mockRejectedValue(new Error("synthetic database failure"));
+      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
+      expect(result.people[0].games[0].previews).toEqual(history.people[0].games[0].previews
+        .map(preview => preview === other ? preview : { ...preview, delivery }));
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
+    });
+
+    it("caps history signing at 300 calls and six concurrent operations at maximum history size", async () => {
+      const history = historyFixture(50, 50);
+      mocks.readHistory.mockResolvedValue(history);
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      let active = 0;
+      let peak = 0;
+      mocks.control = { gameImageDelivery: vi.fn(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        active -= 1;
+        return { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      }) };
+      const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(300);
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledTimes(50);
+      expect(mocks.authorizeMediaReads.mock.calls.every(([, keys]) => keys.length <= 6)).toBe(true);
+      expect(peak).toBe(6);
+      expect(active).toBe(0);
+      expect(result.people.every((person: GameHistoryView["people"][number]) =>
+        person.games[0].previews.every((preview) => preview.delivery)
+        && person.games.slice(1).every((game) => game.previews.every((preview) => !preview.delivery)))).toBe(true);
+    });
+
+    it("signs the pictures a post unlocked into its answer, only when the app asks", async () => {
+      const leoKey = `game/${LEO}/${"c".repeat(64)}.jpg`;
+      const avaKey = `game/${AVA}/${"d".repeat(64)}.jpg`;
+      const posted = viewFor(AVA, [
+        entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO }),
+        entry({ id: "entry_ava", kind: "photo", mediaKeys: [avaKey], memberId: AVA }),
+      ]);
+      const delivery = { url: "https://imagedelivery.net/account/image/gamephoto?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      signedInAs = AVA;
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.runGameCommand.mockResolvedValue({ game: posted, ok: true });
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const body = { entryId: "entry_ava", kind: "photo", mediaKeys: [avaKey] };
+      const post = async (query: string) => (await routes.entries.POST(
+        writeRequest("POST", `/games/${GAME_ID}/entries${query}`, body), params({ id: GAME_ID }))).json();
+
+      // Released apps don't ask, and their post waits on no signing.
+      expect((await post("")).game).toEqual(posted);
+      expect(mocks.control.gameImageDelivery).not.toHaveBeenCalled();
+
+      const signed = (await post("?delivery=signed")).game as GameView;
+      expect(signed.days[0].others[0].entry).toEqual({ ...posted.days[0].others[0].entry, delivery });
+      expect(signed.days[0].mine).toEqual(posted.days[0].mine);
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledExactlyOnceWith(AVA, leoKey, false);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({
+        mediaId: leoKey.slice(leoKey.lastIndexOf("/") + 1), userId: LEO, variant: "photo",
+      });
+
+      // Not authorized, or not signable: the app asks for it as before.
+      mocks.authorizeMediaRead.mockResolvedValue(false);
+      expect((await post("?delivery=signed")).game).toEqual(posted);
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      mocks.control.gameImageDelivery.mockRejectedValueOnce(new Error("synthetic signing outage"));
+      expect((await post("?delivery=signed")).game).toEqual(posted);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(2);
+    });
+
+    it("signs today's locked pictures into Home only when the app asks, through the locked-preview check", async () => {
+      const leoKey = `game/${LEO}/${"c".repeat(64)}.jpg`;
+      const leoPhoto = entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO });
+      const game = viewFor(AVA, [leoPhoto]);
+      const home = { games: [game], me: { memberId: AVA }, wallet: { held: [], owed: [], redeemed: [] } };
+      const delivery = { url: "https://imagedelivery.net/account/image/gamephoto?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      signedInAs = AVA;
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.readHome.mockResolvedValue(home);
+      mocks.authorizeLockedPreviewReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      const read = async (query: string) => (await routes.home.GET(new Request(`${BASE}/home${query}`))).json();
+
+      // Released apps don't ask, and their Home waits on no signing.
+      expect((await read("")).games).toEqual([game]);
+      expect(mocks.control.gameImageDelivery).not.toHaveBeenCalled();
+
+      const signed = (await read("?delivery=signed")).games[0] as GameView;
+      expect(signed.days[0].others[0].preview).toEqual({ ...game.days[0].others[0].preview, delivery });
+      expect(signed.days[0].others[0].entry).toBeNull();
+      expect(mocks.authorizeLockedPreviewReads).toHaveBeenCalledExactlyOnceWith(AVA, [leoKey], false);
+      expect(mocks.authorizeMediaRead).not.toHaveBeenCalled();
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({
+        mediaId: leoKey.slice(leoKey.lastIndexOf("/") + 1), userId: LEO, variant: "photo",
+      });
+
+      // Not authorized, unsignable, or a failed check: the preview stays
+      // unsigned and the app waits for its post's answer, as before.
+      mocks.authorizeLockedPreviewReads.mockResolvedValueOnce(new Set());
+      expect((await read("?delivery=signed")).games).toEqual([game]);
+      mocks.authorizeLockedPreviewReads.mockRejectedValueOnce(new Error("synthetic database failure"));
+      expect((await read("?delivery=signed")).games).toEqual([game]);
+      mocks.control.gameImageDelivery.mockRejectedValueOnce(new Error("synthetic signing outage"));
+      expect((await read("?delivery=signed")).games).toEqual([game]);
+    });
+
+    it("never shows another player's excuse, even after the viewer posts", async () => {
+      const excuseKey = `game/${LEO}/${"e".repeat(32)}.m4a`;
+      const excuse = entry({ attempt: 0, id: "entry_leo_excuse", kind: "excuse", mediaKeys: [excuseKey], memberId: LEO });
+      const avaPhoto = entry({ id: "entry_ava", kind: "photo", mediaKeys: [`game/${AVA}/${"d".repeat(32)}.jpg`], memberId: AVA });
+      signedInAs = AVA;
+      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [excuse, avaPhoto]));
+
+      const text = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).text();
+
+      for (const secret of ["entry_leo_excuse", excuseKey, encodeURIComponent(excuseKey)]) {
+        expect(text).not.toContain(secret);
+      }
+    });
+
+    it("answers 404 for a game the member can't see", async () => {
+      mocks.readGame.mockResolvedValue(null);
+
+      const response = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error.code).toBe("GAME_NOT_FOUND");
+    });
+  });
+
+  describe("media", () => {
+    it("keys an upload by its bytes under the member's prefix, so a retry returns the same key", async () => {
+      const first = await routes.upload.POST(uploadRequest());
+      const retry = await routes.upload.POST(uploadRequest());
+      const other = await routes.upload.POST(uploadRequest({ body: Buffer.concat([JPEG, Buffer.from([0x00])]) }));
+      const { mediaKey } = await first.json();
+
+      expect(first.status).toBe(200);
+      expect(mediaKey).toMatch(new RegExp(`^game/${LEO}/[a-f0-9]{64}\\.jpg$`, "u"));
+      expect((await retry.json()).mediaKey).toBe(mediaKey);
+      expect((await other.json()).mediaKey).not.toBe(mediaKey);
+    });
+
+    it.each([
+      ["an unsupported type", { "content-type": "image/png" }],
+      ["bytes that aren't the declared type", { "content-type": "image/heic" }],
+      ["audio", { "content-type": "audio/m4a" }],
+      ["video", { "content-type": "video/mp4" }],
+    ])("rejects %s", async (_label, headers) => {
+      const response = await routes.upload.POST(uploadRequest({ headers }));
+
+      expect(response.status).toBe(400);
+    });
+
+    it("takes HEIC only with an image brand, so an M4A can't pass as a photo", async () => {
+      const iso = (brand: string) => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from(`ftyp${brand}`, "latin1"), Buffer.alloc(12)]);
+
+      const heic = await routes.upload.POST(uploadRequest({ body: iso("heic"), headers: { "content-type": "image/heic" } }));
+      const audioAsPhoto = await routes.upload.POST(uploadRequest({ body: iso("M4A "), headers: { "content-type": "image/heic" } }));
+      const photoAsAudio = await routes.upload.POST(uploadRequest({ body: iso("mif1"), headers: { "content-type": "audio/m4a" } }));
+
+      expect(heic.status).toBe(200);
+      expect((await heic.json()).mediaKey).toMatch(/\.heic$/u);
+      expect(audioAsPhoto.status).toBe(400);
+      expect(photoAsAudio.status).toBe(400);
+    });
+
+    it("caps uploads at 4 MiB", async () => {
+      const response = await routes.upload.POST(uploadRequest({ headers: { "content-length": String(4 * 1024 * 1024 + 1) } }));
+
+      expect(response.status).toBe(413);
+    });
+
+    it("serves bytes only when the service authorizes this viewer", async () => {
+      const key = await uploadAs(LEO);
+      signedInAs = AVA;
+      mocks.authorizeMediaRead.mockResolvedValue(false);
+
+      const locked = await routes.media.GET(mediaRequest(key), params({ key: key.split("/") }));
+
+      expect(locked.status).toBe(404);
+      expect((await locked.json()).error.code).toBe("MEDIA_MISSING");
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledWith(AVA, key, false);
+
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const unlocked = await routes.media.GET(mediaRequest(key), params({ key: [encodeURIComponent(key)] }));
+
+      expect(unlocked.status).toBe(200);
+      expect(unlocked.headers.get("content-type")).toBe("image/jpeg");
+      expect(unlocked.headers.get("cache-control")).toBe("private, no-store");
+      expect(Buffer.from(await unlocked.arrayBuffer())).toEqual(JPEG);
+    });
+
+    it("is unavailable on Vercel deployments until deployed storage exists", async () => {
+      vi.stubEnv("VERCEL_ENV", "preview");
+
+      const response = await routes.upload.POST(uploadRequest());
+
+      expect(response.status).toBe(503);
+      expect((await response.json()).error.code).toBe("GAME_MEDIA_UNAVAILABLE");
+    });
+  });
+
+  describe("dev routes", () => {
+    it("are 404 in production before auth or flags are consulted", async () => {
+      vi.stubEnv("VERCEL_ENV", "production");
+
+      const responses = await Promise.all([
+        routes.startNow.POST(devRequest("start-now"), params({ id: GAME_ID })),
+        routes.advanceDay.POST(devRequest("advance-day", { days: 1 }), params({ id: GAME_ID })),
+        routes.settle.POST(devRequest("settle"), params({ id: GAME_ID })),
+      ]);
+
+      for (const response of responses) expect(response.status).toBe(404);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
+      expect(mocks.devStartNow).not.toHaveBeenCalled();
+      expect(mocks.devAdvanceDays).not.toHaveBeenCalled();
+      expect(mocks.devSettleNow).not.toHaveBeenCalled();
+    });
+
+    it("move time for the signed-in member outside production", async () => {
+      mocks.devAdvanceDays.mockResolvedValue(VIEW);
+
+      const response = await routes.advanceDay.POST(devRequest("advance-day", { days: 3 }), params({ id: GAME_ID }));
+      const invalid = await routes.advanceDay.POST(devRequest("advance-day", { days: 0 }), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.devAdvanceDays).toHaveBeenCalledWith(GAME_ID, LEO, 3, false);
+      expect(invalid.status).toBe(400);
+    });
+  });
+
+  describe("invite preview", () => {
+    it("serves the invite preview without sign-in", async () => {
+      mocks.readInvitePreview.mockResolvedValueOnce(null);
+      const missing = await routes.invite.GET(new Request(`${BASE}/invites/tok_1`), params({ token: "tok_1" }));
+      expect(missing.status).toBe(404);
+      expect((await missing.json()).error.code).toBe("INVITE_NOT_FOUND");
+
+      mocks.readInvitePreview.mockResolvedValueOnce({ inviterFirstName: "Leo", status: "open" });
+      const found = await routes.invite.GET(new Request(`${BASE}/invites/tok_1`), params({ token: "tok_1" }));
+      expect(found.status).toBe(200);
+      expect((await found.json()).preview.inviterFirstName).toBe("Leo");
+      expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// Leo (New York) and Ava (Sydney) are both on day 0 at NOW.
+const NOW = new Date("2026-10-16T18:00:00.000Z");
+
+function entry(input: Partial<RuleEntry> & Pick<RuleEntry, "id" | "kind" | "mediaKeys" | "memberId">): RuleEntry {
+  return { attempt: 1, dayIndex: 0, receivedAt: new Date("2030-03-05T12:00:00Z"), blurHash: null, withdrawnAt: null, ...input };
+}
+
+// The real view builder; the caller hands it every entry's words, as a buggy
+// loader would, so the test proves the builder itself withholds them.
+function viewFor(viewerId: string, entries: RuleEntry[]): GameView {
+  const state: RuleState = {
+    entries,
+    game: {
+      createdBy: LEO,
+      id: GAME_ID,
+      inviteExpiresAt: null,
+      lengthDays: 7,
+      seats: 2,
+      startsOn: null,
+      status: "live",
+      terms: { v: 1, versions: [{ fromDay: 0, n: 1, schedule: { count: 7 }, stakes: [{ key: "s1", kind: "winner_gets" }] }] },
+    },
+    players: [
+      { dayOne: "2026-10-16", memberId: LEO, seat: 0, timeZone: "America/New_York" },
+      { dayOne: "2026-10-17", memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
+    ],
+  };
+  return buildGameView({
+    avatarKeys: new Map(),
+    entryWords: new Map(entries.map((item) => [item.id, { text: `caption of ${item.id}` }])),
+    inviteExpiresAt: null,
+    inviteToken: null,
+    invitee: null,
+    names: new Map([[LEO, "Leo"], [AVA, "Ava"]]),
+    now: NOW,
+    relationships: new Map(),
+    recap: null,
+    result: null,
+    round: 1,
+    previousGameId: null,
+    startedAt: new Date("2026-10-16T12:00:00.000Z"),
+    state,
+    tickets: [],
+    viewerId,
+    words: { v: 1, versions: [{ n: 1, stakes: [{ item: "Breakfast in bed", key: "s1" }], tasks: [{ seat: 0, text: "100 pushups" }] }] },
+  });
+}
+
+function params<T>(value: T) {
+  return { params: Promise.resolve(value) };
+}
+
+function writeRequest(method: string, path: string, body?: Record<string, unknown>, headers: Record<string, string> = {}) {
+  return new Request(`${BASE}${path}`, {
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    headers: { authorization: "Bearer token", "content-type": "application/json", ...headers },
+    method,
+  });
+}
+
+function uploadRequest(input: { body?: Buffer; headers?: Record<string, string> } = {}) {
+  return new Request(`${BASE}/media`, {
+    body: new Uint8Array(input.body ?? JPEG),
+    headers: { authorization: "Bearer token", "content-type": "image/jpeg", ...input.headers },
+    method: "POST",
+  });
+}
+
+async function uploadAs(memberId: string): Promise<string> {
+  const previous = signedInAs;
+  signedInAs = memberId;
+  const response = await routes.upload.POST(uploadRequest());
+  signedInAs = previous;
+  return (await response.json()).mediaKey;
+}
+
+function mediaRequest(key: string) {
+  return new Request(`${BASE}/media/${encodeURIComponent(key)}`, { headers: { authorization: "Bearer token" } });
+}
+
+function devRequest(action: string, body?: Record<string, unknown>) {
+  return new Request(`${BASE}/dev/games/${GAME_ID}/${action}`, {
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    headers: { authorization: "Bearer token", "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
+function historyFixture(people: number, games: number): GameHistoryView {
+  return { people: Array.from({ length: people }, (_, person) => ({
+    memberId: `member_${person}`, firstName: "Player", record: { won: 0, lost: 0, tied: games },
+    games: Array.from({ length: games }, (_, game) => ({
+      id: `game_${person}_${game}`, startedOn: "2030-01-01", endsOn: "2030-01-07", lengthDays: 7,
+      tasks: { mine: "30 lunges", theirs: "15 min walking" }, stake: { kind: "prize", item: "Lunch" },
+      schedule: { count: 5 }, score: { mine: 0, theirs: 0 }, result: "tied", perfect: false,
+      previews: Array.from({ length: 6 }, (_, preview) => ({
+        entryId: `entry_${person}_${game}_${preview}`, kind: "photo", text: null, mine: preview % 2 === 0,
+        mediaUrls: [`/api/game/v1/media/${encodeURIComponent(`game/${LEO}/${(person * games * 6 + game * 6 + preview).toString(16).padStart(64, "0")}.jpg`)}`],
+      })),
+    })),
+  })) };
+}
+
+// Port of GameAPIClient.error(status:body:) and the shot/reply journal decisions in
+// LiveGameService.swift, murph-ios 1bc51e46de9c347cf31f3169a9f77b9e24f05309.
+function iosOutcome(status: number, bytes: string): "retained" | "deleted" {
+  let failure = status === 401 ? "unauthenticated" : status === 404 ? "unavailable" : "server";
+  let retryable = false;
+  let body: unknown;
+  try { body = JSON.parse(bytes); } catch { body = null; }
+  if (isRecord(body) && isRecord(body.error)) {
+    const error = body.error;
+    if (typeof error.code === "string" && (error.message == null || typeof error.message === "string")
+      && (error.retryable == null || typeof error.retryable === "boolean")) {
+      failure = error.code === "UNAUTHENTICATED" ? "unauthenticated" : error.code === "GAME_DISABLED" ? "unavailable"
+        : error.code === "TERMS_REQUIRED" ? "termsRequired" : "rejected";
+      retryable = error.retryable === true;
+    }
+  }
+  return failure === "rejected" && !retryable ? "deleted" : "retained";
+}

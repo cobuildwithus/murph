@@ -35,7 +35,7 @@ Updated: 2026-05-29
 
 - Keep Codex installed globally in the base image, not in the app bundle or workspace package graph.
 - Do not assume unsupported Codex CLI flags beyond existing `--version`, `app-server --help`, and new `doctor --help`.
-- Preserve unrelated active hosted progress, Junction, and Murph Age work.
+- Preserve unrelated active hosted progress, Junction work.
 
 ## Tasks
 

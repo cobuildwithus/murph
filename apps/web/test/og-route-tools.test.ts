@@ -21,7 +21,7 @@ function fixture(): string {
   roots.push(root);
   for (const relative of [
     "opengraph-image.tsx",
-    "(dashboard)/biomarkers/[biomarkerId]/opengraph-image.tsx",
+    "(dashboard)/experiments/[experimentId]/opengraph-image.tsx",
   ]) {
     const file = path.join(root, relative);
     mkdirSync(path.dirname(file), { recursive: true });
@@ -34,8 +34,8 @@ describe("OG route verification", () => {
   it("derives public routes with route groups stripped", () => {
     expect(collectExpectedOgImageRoutes(fixture())).toEqual([
       {
-        route: "/biomarkers/[biomarkerId]/opengraph-image",
-        source: "(dashboard)/biomarkers/[biomarkerId]/opengraph-image.tsx",
+        route: "/experiments/[experimentId]/opengraph-image",
+        source: "(dashboard)/experiments/[experimentId]/opengraph-image.tsx",
       },
       { route: "/opengraph-image", source: "opengraph-image.tsx" },
     ]);
@@ -44,7 +44,7 @@ describe("OG route verification", () => {
   it("rejects a hash-suffixed emitted route in place of the advertised URL", () => {
     const root = fixture();
     expect(() => assertUnhashedOgImageRoutes(root, {
-      "/(dashboard)/biomarkers/[biomarkerId]/opengraph-image": "/biomarkers/[biomarkerId]/opengraph-image-1umbqe",
+      "/(dashboard)/experiments/[experimentId]/opengraph-image": "/experiments/[experimentId]/opengraph-image-1umbqe",
       "/opengraph-image": "/opengraph-image",
     })).toThrow(/missing their exact unhashed public paths/u);
   });
@@ -52,7 +52,7 @@ describe("OG route verification", () => {
   it("accepts exact unhashed emitted routes", () => {
     const root = fixture();
     expect(() => assertUnhashedOgImageRoutes(root, {
-      "/biomarkers/[biomarkerId]/opengraph-image": "/biomarkers/[biomarkerId]/opengraph-image",
+      "/experiments/[experimentId]/opengraph-image": "/experiments/[experimentId]/opengraph-image",
       "/opengraph-image": "/opengraph-image",
     })).not.toThrow();
   });

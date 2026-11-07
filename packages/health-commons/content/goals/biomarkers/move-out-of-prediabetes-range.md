@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:move-out-of-prediabetes-range
 slug: move-out-of-prediabetes-range
-title: Move Out of the Prediabetes Range
-summary: Improve glucose enough to move below the prediabetes range while building habits that keep lowering future diabetes risk.
+title: Understand My Prediabetes
+summary: Understand prediabetes results, factors that affect them, and options to discuss with your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:improve-blood-sugar-control
   outcomeKind: biomarker
-  goalPhrase: move out of the prediabetes range
+  goalPhrase: understand my prediabetes
   successSignals:
     - id: prediabetes_marker
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me move out of the prediabetes range.
+  startPrompt: Hey Murph, help me understand my prediabetes.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Check whether the original and follow-up tests are comparable. Iron deficiency, 
 
 ## Related goals
 
-[Prevent Type 2 Diabetes](/goals/prevent-type-2-diabetes) · [Lower My A1C](/goals/lower-a1c) · [Improve My Insulin Sensitivity](/goals/improve-insulin-sensitivity)
+[Understand Type 2 Diabetes Prevention](/goals/prevent-type-2-diabetes) · [Understand My A1C](/goals/lower-a1c) · [Understand Insulin Sensitivity](/goals/improve-insulin-sensitivity)

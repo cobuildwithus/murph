@@ -35,7 +35,7 @@ const transferPhoneCallId = `hpc_local_retell_transfer_${runId}`;
 const transferProviderCallId = `retell_transfer_local_${runId}`;
 const retellApiKey = "retell-local-test-key";
 const linqWebhookSecret = "linq-local-retell-result-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const resultSummary = "The pharmacy confirmed the prescription will be ready this afternoon.";
 const resultReply = "The pharmacy confirmed your prescription will be ready this afternoon. No follow-up is needed.";
 const transferPreHandoffSummary = "The office had a Tuesday morning appointment available before the handoff.";
@@ -209,7 +209,6 @@ describe("hosted local Retell result roundtrip e2e", () => {
       originSessionId,
       providerCallId,
       resultEncrypted: expect.any(String),
-      resultJson: null,
       status: "completed",
     });
 
@@ -260,7 +259,6 @@ describe("hosted local Retell result roundtrip e2e", () => {
     expect(storedCall?.analyzedAt).toBeInstanceOf(Date);
     expect(storedCall?.resultEncrypted).toEqual(expect.any(String));
     expect(storedCall?.resultEncrypted).not.toHaveLength(0);
-    expect(storedCall?.resultJson).toBeNull();
 
     // Idempotent replay after recovery: re-POSTing the same call_analyzed sends
     // no second message and runs no second turn (deliveryIdempotencyKey dedupe

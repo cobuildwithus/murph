@@ -1,4 +1,5 @@
 import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 import type {
   AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
@@ -7,6 +8,7 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-env";
 import {
+  HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   isMurphAndroidAppEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
@@ -115,10 +117,10 @@ const HOSTED_RUNTIME_PLATFORM_TRANSPORT_ENV_NAMES = [
   "NO_PROXY",
 ] as const;
 const HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES = [
+  HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV,
   "HOSTED_ASSISTANT_API_KEY_ENV",
   "HOSTED_ASSISTANT_BASE_URL",
   "HOSTED_ASSISTANT_CODEX_COMMAND",
-  "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
   "HOSTED_ASSISTANT_OSS",
   "HOSTED_ASSISTANT_PROFILE",
   "HOSTED_ASSISTANT_PROVIDER_NAME",
@@ -188,6 +190,7 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST_PREFIXES = [
 ] as const;
 const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   [
+    MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV,
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
     ...HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES,

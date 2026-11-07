@@ -1,0 +1,13 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 101,
+  "item": {
+    "id": "private-support-summaries",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More focused support summaries",
+    "summary": "Murph keeps support reports focused on the product problem while leaving out private health and family details.",
+    "relevanceTags": ["assistant", "privacy"],
+    "sourcePullRequests": [3691]
+  }
+}

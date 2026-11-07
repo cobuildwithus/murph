@@ -124,7 +124,7 @@ Updated: 2026-08-13
 - `/home` and the exact `/experiments` list now use bounded producer-owned run
   card summaries in `core`, preserving current status, cadence, results, and
   public-protocol decoration without raw metric history. `/training`,
-  `/environment`, `/overview`, `/patterns`, and `/history` are also core-only.
+  `/overview`, `/patterns`, and `/history` are also core-only.
   Experiment and biomarker detail surfaces request only the metric buckets
   declared by their public bindings or encrypted core run projection.
 - A client request that omits `requestedShards` is a legacy request and receives

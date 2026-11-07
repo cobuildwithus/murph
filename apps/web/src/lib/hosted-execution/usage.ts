@@ -11,6 +11,12 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { getPrisma } from "../prisma";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import {
+  requireHostedRuntimeCallbackTx,
+  revokeHostedRuntimeAiUsageTx,
+  type HostedRuntimeIdentity,
+} from "./runtime-owner";
 import {
   accountHostedAiUsageForAllowanceTx,
   settleHostedAiUsageForAllowanceTx,
@@ -51,10 +57,8 @@ interface RecordHostedAiUsageWithAllowanceResult extends RecordHostedAiUsageResu
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 
-const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
-  "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
-
 const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
+  allowanceBeneficiaryMemberId: true,
   operatorTaskId: true,
   apiKeyEnv: true,
   attemptCount: true,
@@ -82,7 +86,6 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   routeId: true,
   servedModel: true,
   sessionId: true,
-  stripeMeterSource: true,
   surface: true,
   tokenPricingBasis: true,
   totalTokens: true,
@@ -112,6 +115,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   accountAllowance?: boolean;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma?: PrismaClient;
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageWithAllowanceResult> {
@@ -159,6 +163,7 @@ export async function recordHostedRetellPhoneCallUsageTx(input: {
 async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
@@ -171,18 +176,48 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
     const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
-      await persistHostedAiUsageRecordTx({
+      let allowanceBeneficiaryMemberId: string | null = null;
+      if (input.runtimeIdentity !== undefined) {
+        if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
+          throw new TypeError("Hosted runtime usage member does not match its authority.");
+        }
+        if (input.runtimeIdentity) {
+          const [funding, recordedFunding] = await Promise.all([
+            tx.hostedRuntimeOwner.findUnique({
+              where: { userId: memberId }, select: { allowanceBeneficiaryMemberId: true },
+            }),
+            tx.hostedAiUsage.findUnique({
+              where: { id: record.usageId, memberId }, select: { allowanceBeneficiaryMemberId: true },
+            }),
+          ]);
+          // The exact callback check below still owns authority. This preliminary
+          // projection only establishes one lock order for source and funder.
+          for (const id of [...new Set([memberId, funding?.allowanceBeneficiaryMemberId ?? memberId,
+            recordedFunding?.allowanceBeneficiaryMemberId ?? memberId])].sort()) {
+            await lockHostedMemberRow(tx, id);
+          }
+        }
+        const owner = await requireHostedRuntimeCallbackTx(tx, memberId, input.runtimeIdentity);
+        allowanceBeneficiaryMemberId = owner?.allowanceBeneficiaryMemberId ?? null;
+      }
+      const recordedBeneficiary = await persistHostedAiUsageRecordTx({
+        allowanceBeneficiaryMemberId,
         memberId,
         record,
         tx,
       });
 
       if (input.accountAllowance === true) {
-        return settleHostedAiUsageForAllowanceTx({
+        const settlement = await settleHostedAiUsageForAllowanceTx({
+          ...(recordedBeneficiary ? { allowanceBeneficiaryMemberId: recordedBeneficiary } : {}),
           memberId,
           record,
           tx,
         });
+        if (input.runtimeIdentity && settlement.platformAiUsageAllowedAfter !== true) {
+          await revokeHostedRuntimeAiUsageTx(tx, input.runtimeIdentity);
+        }
+        return settlement;
       }
 
       return null;
@@ -386,15 +421,16 @@ function logHostedAiUsageLimitNoticeDelivery(
 }
 
 async function persistHostedAiUsageRecordTx(input: {
+  allowanceBeneficiaryMemberId?: string | null;
   memberId: string;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<string | null> {
   const storedRecord = await input.tx.hostedAiUsage.upsert({
     where: {
       id: input.record.usageId,
     },
-    create: buildHostedAiUsageCreateData(input.record, input.memberId),
+    create: { ...buildHostedAiUsageCreateData(input.record, input.memberId), allowanceBeneficiaryMemberId: input.allowanceBeneficiaryMemberId ?? null },
     // Keep this identity-only branch non-empty so Prisma delegates the upsert
     // to PostgreSQL. Exact concurrent replays then serialize on the usage id
     // without changing any immutable usage data.
@@ -409,10 +445,7 @@ async function persistHostedAiUsageRecordTx(input: {
     record: input.record,
     storedRecord,
   });
-  await markHostedAiUsageStripeExportSkippedTx({
-    id: storedRecord.id,
-    tx: input.tx,
-  });
+  return storedRecord.allowanceBeneficiaryMemberId;
 }
 
 async function runHostedAiUsageRecordTransaction<T>(
@@ -524,7 +557,6 @@ function buildHostedAiUsageCreateData(
     gatewayTagsJson: record.gatewayTags,
     reportingUserId: record.reportingUserId,
     surface: record.surface,
-    stripeMeterSource: record.stripeMeterSource,
     tokenPricingBasis: record.tokenPricingBasis,
     triggerKind: record.triggerKind,
     inputTokens: record.inputTokens,
@@ -533,29 +565,7 @@ function buildHostedAiUsageCreateData(
     cachedInputTokens: record.cachedInputTokens,
     cacheWriteTokens: record.cacheWriteTokens,
     totalTokens: record.totalTokens,
-    stripeMeterError: HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE,
-    stripeMeterStatus: "skipped",
   };
-}
-
-async function markHostedAiUsageStripeExportSkippedTx(input: {
-  id: string;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await input.tx.hostedAiUsage.updateMany({
-    where: {
-      id: input.id,
-      stripeMeterSource: "murph",
-      stripeMeterStatus: {
-        in: ["pending", "processing"],
-      },
-    },
-    data: {
-      stripeMeterError: HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE,
-      stripeMeterNextAttemptAt: null,
-      stripeMeterStatus: "skipped",
-    },
-  });
 }
 
 function assertStoredHostedAiUsageMatchesRecord(input: {
@@ -631,11 +641,6 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
       "tokenPricingBasis",
       input.storedRecord.tokenPricingBasis,
       expected.tokenPricingBasis,
-    ),
-    compareHostedAiUsageField(
-      "stripeMeterSource",
-      input.storedRecord.stripeMeterSource,
-      expected.stripeMeterSource,
     ),
     compareHostedAiUsageField("triggerKind", input.storedRecord.triggerKind, expected.triggerKind),
     compareHostedAiUsageField("inputTokens", input.storedRecord.inputTokens, expected.inputTokens),

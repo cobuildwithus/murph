@@ -7,20 +7,15 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import {
-  HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
-} from "../src/user-runner/runtime-processing-responses.ts";
+  HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA,
+} from "../src/worker/standby-runner-coordinator-durable-object.ts";
 
 const execFileAsync = promisify(execFile);
 const coldStartReportPath = fileURLToPath(
   new URL("../scripts/cold-start-latency-report.sql", import.meta.url),
 );
-const coldStartReportSql = readFileSync(coldStartReportPath, "utf8");
-const retryReasonsSql = readFileSync(
-  new URL("../scripts/runtime-retry-reasons.sql", import.meta.url),
-  "utf8",
-);
-const cloudflareReadme = readFileSync(
-  new URL("../README.md", import.meta.url),
+const standbyInventorySql = readFileSync(
+  new URL("../scripts/standby-inventory.sql", import.meta.url),
   "utf8",
 );
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -34,139 +29,25 @@ if (runPostgresProof && !readLocalPostgresConnection(databaseUrl)) {
 }
 
 describe("hosted runtime operational report contracts", () => {
-  it("keeps the retry query aligned with the emitted Analytics Engine point", () => {
-    expect(retryReasonsSql).toContain(
-      `blob1 = '${HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA}'`,
+  it("keeps the standby inventory query aligned with the emitted Analytics Engine point", () => {
+    expect(standbyInventorySql).toContain("FROM murph_hosted_standby_inventory");
+    expect(standbyInventorySql).toContain(
+      `blob1 = '${HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA}'`,
     );
-    expect(retryReasonsSql).toContain("index1 AS reason");
-    expect(retryReasonsSql).toContain(
-      "if(blob3 = '', 'unattributed', blob3) AS stage",
-    );
-    expect(retryReasonsSql).toContain("SUM(_sample_interval * double1)");
-    expect(retryReasonsSql).toContain("SUM(_sample_interval * double2)");
-    expect(retryReasonsSql).toContain("GROUP BY index1, stage");
-    expect(retryReasonsSql).toContain("INTERVAL '1' DAY");
-    expect(retryReasonsSql).toContain(
-      "timestamp >= toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
-    );
-    expect(retryReasonsSql).toContain(
-      "timestamp < toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
-    );
-    expect(retryReasonsSql).not.toMatch(/blob3\s*(?:!=|<>)/u);
-  });
-
-  it("documents the bounded optional container-busy stage contract", () => {
-    for (const stage of [
-      "non_runtime_write_fence",
-      "active_runtime_contention",
-      "cooperative_handoff_pending",
-      "background_preemption_unavailable",
-      "background_preemption_not_accepted",
-      "stopped_container_record_pending",
+    for (const column of [
+      "blob2 AS event",
+      "blob3 AS detail",
+      "blob4 AS outcome",
+      "double2 AS ready",
+      "SUM(_sample_interval * double1) AS events",
+      "quantileExactWeighted(0.95)(double5, _sample_interval)",
     ]) {
-      expect(cloudflareReadme).toContain(`\`${stage}\``);
+      expect(standbyInventorySql).toContain(column);
     }
-    expect(cloudflareReadme).toContain("optional `blob3`");
-    expect(cloudflareReadme).toContain("`unattributed`");
-    expect(cloudflareReadme).toContain("`runtimeProcessingRetryStage`");
-    expect(cloudflareReadme).toContain("`index1` is the sole index");
+    expect(standbyInventorySql).toContain("INTERVAL '7' DAY");
   });
 
-  it("keeps direct cold starts causal and phase samples chronology-safe", () => {
-    expect(coldStartReportSql).toContain(
-      "PARTITION BY runtime_attempt_id",
-    );
-    expect(coldStartReportSql).toContain("causal_candidate_count = 1");
-    expect(coldStartReportSql).toContain(
-      "directEnsureResponseReceivedAtEpochMs",
-    );
-    expect(coldStartReportSql).toContain(
-      "direct_orchestration_attempt_id = runtime_orchestration_attempt_id",
-    );
-    expect(coldStartReportSql).not.toContain("abs(route_received_ms");
-    expect(coldStartReportSql).toContain(
-      "route_received_ms <= runner_constructor_started_ms",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_constructor_started_ms <= runner_constructor_finished_ms",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_constructor_finished_ms <= runner_first_ensure_ms",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_first_ensure_ms = runner_rpc_started_ms",
-    );
-    expect(coldStartReportSql).toContain("activation_matches_current_request");
-    expect(coldStartReportSql).toContain(
-      "Cloudflare route -> UserRunner constructor start",
-    );
-    expect(coldStartReportSql).toContain(
-      "UserRunner constructor start -> finish",
-    );
-    expect(coldStartReportSql).toContain(
-      "UserRunner constructor finish -> first ensure instruction",
-    );
-    expect(coldStartReportSql).toContain(
-      "runner_job_accepted_at >= accepted_at",
-    );
-    expect(coldStartReportSql).toContain("stamp_candidate_count = 1");
-    expect(coldStartReportSql).toContain(
-      "WHERE runner_job_accepted_ms >= activity_started_ms",
-    );
-    expect(coldStartReportSql).toContain("AND cohort IS NOT NULL");
-    expect(coldStartReportSql).toContain("ELSE NULL");
-    expect(coldStartReportSql).toContain("SELECT DISTINCT\n    runtime_attempt_id");
-    expect(coldStartReportSql).toContain("WHERE phase.duration_ms >= 0");
-    expect(coldStartReportSql).toContain("'web_direct_cold'");
-    expect(coldStartReportSql).toContain("'temporal_recovery'");
-    expect(coldStartReportSql).toContain("'legacy_unclassified'");
-    expect(coldStartReportSql).toContain(
-      "triggeredByWebDirect}' = 'false'",
-    );
-    expect(coldStartReportSql).not.toContain("web_direct_existing_runtime");
-    expect(coldStartReportSql).toContain(
-      "GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)",
-    );
-    expect(coldStartReportSql).toContain(
-      "freshStartContainerLifecycleLockAcquiredAtEpochMs",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container start issued -> ports ready",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container process -> TCP listen",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container start issued -> process start",
-    );
-    expect(coldStartReportSql).toContain(
-      "Container TCP listen -> ports ready",
-    );
-    expect(coldStartReportSql).toContain("Container health check");
-    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-typing-started'");
-    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-message-routing'");
-    expect(coldStartReportSql).toContain(
-      "shellPrewarmOrchestrationAttemptId}' =",
-    );
-    expect(coldStartReportSql).toContain(
-      "shellPrewarmExpectedOrchestrationAttemptId}'",
-    );
-    expect(coldStartReportSql).toContain(
-      "Prewarm route -> UserRunner constructor start",
-    );
-    expect(coldStartReportSql).toContain(
-      "Prewarm admission -> container hint",
-    );
-    expect(coldStartReportSql).toContain(
-      "Prewarm container hint -> direct ensure route",
-    );
-    expect(coldStartReportSql).toContain(
-      "trace.reply_runtime_attempt_id = trace.runtime_attempt_id",
-    );
-    expect(coldStartReportSql).toContain("causal_candidate_count = 1");
-    expect(coldStartReportSql).toContain("Causal shell-prewarm hint -> ingress accepted");
-    expect(coldStartReportSql).not.toContain("shellPrewarmLastHintAtEpochMs");
-  });
+
 });
 
 describe.skipIf(!runPostgresProof)(

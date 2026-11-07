@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "game-history-challenges",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "See the challenge in past games",
+    "summary": "Past game cards with a friend now show what each of you took on and the prize or dare.",
+    "details": "The cards use the agreed wording from that game, with each task shown from your side.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4443
+    ]
+  }
+}

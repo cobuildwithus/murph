@@ -14,17 +14,45 @@ export const CLI_TIMING_BUCKET_UPPER_US = [
 export const CLI_TIMING_PHASES = [
   "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
   "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
+  "query-source-read", "query-wearable-dataset", "query-metric-projection",
+  "query-wearable-summary", "query-search-documents", "query-publication",
+  // Read compatibility for draining runtimes that still emit Patterns timings.
+  // Remove after every old runtime/CLI producer has been replaced.
+  "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
+  "service-runtime-load", "query-runtime-load", "query-projection-load",
+  // Nested inside query-metric-projection; never additive with it.
+  "query-metric-samples", "query-metric-evidence", "query-metric-extract",
+  "query-metric-precedence", "query-metric-targets",
+  // Canonical-write lock acquisition (not hold) and the importers module import.
+  // Append-only catalog: older readers reject the whole object; readers deploy first.
+  "canonical-write-wait", "importers-runtime-load",
+  // Exact-event core import and the two owner scans; awaited wall time only.
+  "event-core-load", "event-owner-candidates", "event-owner-revisions",
+  // Meal-owner scans emit six operation totals per reached pass, including zero.
+  // Append-only admission: deploy readers before these producers.
+  "event-owner-candidates-source", "event-owner-candidates-path", "event-owner-candidates-read",
+  "event-owner-candidates-decode", "event-owner-candidates-parse", "event-owner-candidates-select",
+  "event-owner-revisions-source", "event-owner-revisions-path", "event-owner-revisions-read",
+  "event-owner-revisions-decode", "event-owner-revisions-parse", "event-owner-revisions-select",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
+/** These existing phases enclose synchronous metric work, not awaited I/O. */
+export const CLI_TIMING_CPU_PHASES: readonly CliTimingPhase[] = [
+  "query-metric-projection", "query-metric-samples", "query-metric-evidence",
+  "query-metric-extract", "query-metric-precedence", "query-metric-targets",
+];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
 
 // Exact, source-owned vocabularies only. Never admit arbitrary provider codes,
 // names or stages by pattern; adding a value requires consumer-first rollout.
 export const CLI_TIMING_MAX_FAILURES = 8;
 export const CLI_TIMING_FAILURE_CODES = [
-  "unknown", "invalid_option", "invalid_payload", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
+  "unknown", "invalid_option", "invalid_payload", "invalid_operation", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
+  "exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid",
+  "memory_not_found", "memory_document_invalid",
   "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
   "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
+  "knowledge_source_unreadable", "knowledge_invalid_source_path", "knowledge_invalid_library_slug",
   "QUERY_SOURCE_INVALID", "query_source_invalid", "unsupported_format",
   "ENOENT", "EACCES", "EPERM", "EISDIR", "ENOTDIR", "ENOSPC", "EPIPE",
   "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ABORT_ERR",
@@ -38,24 +66,204 @@ export interface CliFailureTiming {
   code: typeof CLI_TIMING_FAILURE_CODES[number];
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
+  validation?: CliValidationDiagnostic;
+  rejection?: CliTimingParseRejection | CliTimingFilterRejection;
+  sourceCause?: CliTimingSourceCause;
 }
-export function cliTimingFailureCode(value: unknown): CliFailureTiming["code"] {
+export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
+  // Only the registered meal-photo removal owner is qualified for this code.
+  if (value === "invalid_operation" && command !== "meal remove-photo") return "unknown";
   return CLI_TIMING_FAILURE_CODES.find((code) => code === value) ?? "unknown";
 }
 export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"] {
   return CLI_TIMING_FAILURE_STAGES.find((stage) => stage === value) ?? "unknown";
 }
 
+// Only these command schemas (or Incur's fixed invocation field "arguments")
+// own these exact names. No path parsing, coercion, array-index admission or
+// prefix matching belongs in telemetry.
+const validationFields = [
+  ["automation list", ["limit", "status"]],
+  ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
+  ["event payload-schema", ["kind", "for"]],
+  ["exercise list", ["query", "kind", "environment", "category", "target", "level",
+    "equipment", "position", "modality", "commonness", "limit", "arguments"]],
+  ["knowledge show", ["slug", "arguments"]],
+  ["measurement entry list", ["metric", "from", "to", "limit"]],
+  ["meal add", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
+  ["meal edit", ["id", "nutritionCalories", "nutritionProteinGrams", "nutritionSource",
+    "nutritionConfidence", "occurredAt", "arguments"]],
+  ["food search-labels", ["query", "limit"]],
+  ["wearables day", ["date", "provider", "arguments"]],
+  ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
+    "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
+  ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
+] as const;
+const validationCodes = [
+  "invalid_type", "too_big", "too_small", "invalid_format", "not_multiple_of",
+  "unrecognized_keys", "invalid_union", "invalid_key", "invalid_element", "invalid_value", "custom",
+] as const;
+export const CLI_TIMING_MAX_VALIDATION_ISSUES = 8;
+export interface CliValidationDiagnostic {
+  field: typeof validationFields[number][1][number];
+  code: typeof validationCodes[number];
+  /** Absent means not supplied, never inferred from code/message/received. */
+  missing?: boolean;
+}
+
+/** Never invoke accessors, walk prototypes/causes or retain the source object. */
+export function readCliTimingOwnData(value: unknown, key: string): unknown {
+  try {
+    if (typeof value !== "object" || value === null) return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+  } catch { return undefined; }
+}
+
+function selectValidationDiagnostic(
+  fields: readonly CliValidationDiagnostic["field"][], value: unknown, fieldKey: "field" | "path",
+): CliValidationDiagnostic | undefined {
+  if (!record(value)) return undefined;
+  const rawField = readCliTimingOwnData(value, fieldKey);
+  const rawCode = readCliTimingOwnData(value, "code");
+  const missing = readCliTimingOwnData(value, "missing");
+  const field = fields.find((candidate) => candidate === rawField);
+  const code = validationCodes.find((candidate) => candidate === rawCode);
+  if (!field || !code || (missing !== undefined && typeof missing !== "boolean")) return undefined;
+  return { field, code, ...(typeof missing === "boolean" ? { missing } : {}) };
+}
+
+/** Optional failure properties shared by original-error, bounded-envelope and
+ * wire consumers. Unknown/malformed evidence is absent independently of accounting.
+ */
+export function cliTimingValidationFailure(
+  command: unknown, code: unknown, source: unknown, property: "publicIssues" | "fieldErrors" | "validation",
+): Pick<CliFailureTiming, "validation"> {
+  try {
+    if (code !== "VALIDATION_ERROR") return {};
+    const fields = validationFields.find(([name]) => name === command)?.[1];
+    if (!fields) return {};
+    const value = readCliTimingOwnData(source, property);
+    let validation: CliValidationDiagnostic | undefined;
+    if (property === "validation") {
+      validation = selectValidationDiagnostic(fields, value, "field");
+    } else {
+      if (!Array.isArray(value)) return {};
+      const length = readCliTimingOwnData(value, "length");
+      if (!integer(length)) return {};
+      for (let index = 0; index < Math.min(length, CLI_TIMING_MAX_VALIDATION_ISSUES); index += 1) {
+        validation = selectValidationDiagnostic(fields, readCliTimingOwnData(value, String(index)), "path");
+        if (validation) break;
+      }
+    }
+    return validation ? { validation } : {};
+  } catch { return {}; }
+}
+
+// Argv rejection class set by the pinned Incur parser.
+export const CLI_TIMING_PARSE_REJECTIONS = ["unknown_flag", "missing_value"] as const;
+export type CliTimingParseRejection = typeof CLI_TIMING_PARSE_REJECTIONS[number];
+
+// Set by the shared repeatable-flag normalizer at its comma-list and
+// unsupported-enum throw sites. Admitted only for `search query`; other callers'
+// metadata is dropped here. Never the option name, values or message.
+export const CLI_TIMING_FILTER_REJECTIONS = ["comma_delimited", "unsupported_value"] as const;
+export type CliTimingFilterRejection = typeof CLI_TIMING_FILTER_REJECTIONS[number];
+const rejectionOwners = [
+
+  ["exercise list", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["knowledge upsert", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["knowledge show", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["wearables day", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
+  ["search query", "invalid_option", CLI_TIMING_FILTER_REJECTIONS],
+] as const;
+
+/** Optional, independently dropped like validation detail; same own-data rules. */
+export function cliTimingRejectionFailure(
+  command: unknown, code: unknown, source: unknown, property: "cliTimingRejection" | "rejection",
+): Pick<CliFailureTiming, "rejection"> {
+  const allowed = rejectionOwners.find(([name, owned]) => name === command && owned === code)?.[2];
+  if (!allowed) return {};
+  const value = readCliTimingOwnData(source, property);
+  const rejection = allowed.find((candidate) => candidate === value);
+  return rejection ? { rejection } : {};
+}
+
+// Existing typed causes hidden by the legacy "unknown" code. Only the reached
+// meal mutation and food response owners belong here, not all provider
+// errors. Keep these optional so older readers preserve failures and timing.
+const sourceCauseOwners = [
+  ["meal edit", ["contract_invalid", "invalid_timestamp", "vault_error"]],
+  ["meal remove-photo", ["contract_invalid", "vault_error"]],
+  ["food search-labels-batch", [
+    "food_labels_api_auth_failed", "food_labels_api_rate_limited", "food_labels_api_request_timed_out",
+    "food_labels_api_service_unavailable", "food_labels_api_response_failed",
+    "food_labels_api_response_body_timed_out", "food_labels_api_response_body_failed", "food_labels_api_invalid_response",
+  ]],
+
+] as const;
+// Exact core codes preserved by the reached usecase mappings. Unknown names
+// stay absent; this is not a catalog of every vault error.
+const sourceCauseVaultCodes = [
+  ["meal edit", "contract_invalid", ["EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL"]],
+  ["meal edit", "vault_error", ["CANONICAL_WRITE_LOCKED", "EVENT_LEDGER_SHARD_AMBIGUOUS"]],
+  ["meal remove-photo", "contract_invalid", ["EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL"]],
+  ["meal remove-photo", "vault_error", [
+    "CANONICAL_WRITE_LOCKED", "EVENT_LEDGER_SHARD_AMBIGUOUS", "EVENT_CONTRACT_INVALID", "VAULT_INVALID_JSONL",
+    "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED", "MEAL_PHOTO_RETENTION_MANIFEST_INVALID",
+    "MEAL_PHOTO_RETENTION_REFERENCE_INVALID",
+  ]],
+] as const;
+// Observation states, never accepted as literal codes on an original error.
+const mealOriginalCodeStates = ["missing_code", "unrecognized_code"] as const;
+export interface CliTimingSourceCause {
+  code: typeof sourceCauseOwners[number][1][number] | typeof mealOriginalCodeStates[number];
+  vaultCode?: typeof sourceCauseVaultCodes[number][2][number];
+}
+
+/** Select fresh finite detail from an original error's context or a wire failure.
+ * Wire detail requires an own outer code of exactly "unknown", before fallback.
+ * Unknown/malformed optional data never invalidates the existing observation.
+ */
+export function cliTimingSourceCauseFailure(
+  command: unknown, code: unknown, source: unknown, property: "context" | "sourceCause",
+): Pick<CliFailureTiming, "sourceCause"> {
+  const allowed = sourceCauseOwners.find(([name]) => name === command)?.[1];
+  if (!allowed || (property === "sourceCause" && code !== "unknown")) return {};
+  try {
+    const detail = property === "sourceCause" ? readCliTimingOwnData(source, property) : undefined;
+    if (property === "sourceCause" && !record(detail)) return {};
+    const rawCode = property === "context" ? code : readCliTimingOwnData(detail, "code");
+    const selected = allowed.find((candidate) => candidate === rawCode) ??
+      (property === "sourceCause" && (command === "meal edit" || command === "meal remove-photo")
+        ? mealOriginalCodeStates.find((candidate) => candidate === rawCode) : undefined);
+    if (!selected) return {};
+    let vaultCode: CliTimingSourceCause["vaultCode"];
+    const vaultCodes = sourceCauseVaultCodes.find(([name, owned]) => name === command && owned === selected)?.[2];
+    if (vaultCodes) {
+      const context = property === "context" ? readCliTimingOwnData(source, "context") : detail;
+      const rawVaultCode = record(context) ? readCliTimingOwnData(context, "vaultCode") : undefined;
+      vaultCode = vaultCodes.find((candidate) => candidate === rawVaultCode);
+    }
+    return { sourceCause: { code: selected, ...(vaultCode ? { vaultCode } : {}) } };
+  } catch { return {}; }
+}
+
+function sameFailureVariant(left: CliFailureTiming, right: CliFailureTiming): boolean {
+  return left.code === right.code && left.stage === right.stage &&
+    left.validation?.field === right.validation?.field && left.validation?.code === right.validation?.code &&
+    left.validation?.missing === right.validation?.missing && left.rejection === right.rejection &&
+    left.sourceCause?.code === right.sourceCause?.code && left.sourceCause?.vaultCode === right.sourceCause?.vaultCode;
+}
 
 // Registered paths from the source-owned CLI catalog (incur.generated.ts).
 // New names require consumer-first admission here; until then they become other.
 // The CLI test compares this vocabulary to the real registered command tree.
 const commandGroups: Readonly<Record<string, string>> = {
-  "age": "calculate|calculate-bundle|evidence|inputs|model-cards|preview|preview-view|report|scaffold",
   "allergy": "import-json|list|save|scaffold|show",
   "assertion": "import-json|payload-schema|save|scaffold",
   "assistant": "ask|chat|deliver|doctor|onboarding complete|onboarding reopen|onboarding resume-context|onboarding status|run|self-target clear|self-target list|self-target set|self-target show|session list|session show|status|stop",
-  "audit": "list|show|tail",
+  "audit": "list|receipt|show|tail",
   "automation": "edit|import-json|list|reconcile-support-series|save|scaffold|set-status|show",
   "batch": "",
   "blood-test": "import-json|list|payload-schema|save|scaffold|show",
@@ -88,8 +296,9 @@ const commandGroups: Readonly<Record<string, string>> = {
   "meal": "add|closeout-work|delete|edit|import-json|list|manifest|nutrients|remove-photo|show|totals",
   "measurement": "add|entry list|import-json|list|manifest|show",
   "medication": "history add",
-  "memory": "forget|set-name|show|update|upsert",
+  "memory": "forget|set-demographics|set-name|show|update|upsert",
   "model": "",
+  "profile": "set|show",
   "protocol": "import-json|list|show",
   "provider": "delete|edit|import-json|list|save|scaffold|show",
   "query": "projection rebuild|projection status",
@@ -111,7 +320,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "vault": "compact-inbox-parser-attempts|repair|repair-experiment-media|repair-inbox-envelopes|repair-integration-ingests|repair-junction-hr-zones|repair-wearable-storage|show|stats|update",
   "vitals": "import-json|payload-schema|save|scaffold",
   "wearables": "activity list|body list|day|drift|latest|metric latest|metric trend|patterns|recovery list|sleep list|sleep pattern|sources list",
-  "workout": "add|defaults set|defaults show|delete|edit|exercise add|exercise set-reps|finish|format import-json|format list|format log|format save|format show|import csv|import inspect|import-json|list|manifest|payload-schema|set clear|set log|show|start|units set|units show",
+  "workout": "add|defaults set|defaults show|delete|edit|exercise add|exercise remove|exercise set-reps|finish|format import-json|format list|format log|format save|format show|import csv|import inspect|import-json|list|manifest|payload-schema|set clear|set log|show|start|units set|units show",
 };
 const commandNames = new Set([
   "other",
@@ -121,12 +330,19 @@ const commandNames = new Set([
 export function cliTimingCommand(value: unknown): string {
   return typeof value === "string" && commandNames.has(value) ? value : "other";
 }
+interface CliCpuTiming {
+  /** Measured samples only; missing CPU observations are not zero. */
+  count: number;
+  sumUs: number;
+  maxUs: number;
+}
 export interface CliPhaseTiming {
   phase: CliTimingPhase;
   count: number;
   sumUs: number;
   maxUs: number;
   buckets: number[];
+  cpu?: CliCpuTiming;
 }
 export interface CliCommandTiming {
   command: string;
@@ -178,6 +394,30 @@ function validPhaseHistogram(phase: CliPhaseTiming): boolean {
   return integer(minimum) && minimum <= phase.sumUs;
 }
 
+/** Optional CPU diagnostics cannot invalidate authoritative wall timing. */
+function normalizeCpuTiming(phase: CliTimingPhase, value: unknown, samples: number): CliCpuTiming | undefined {
+  if (!CLI_TIMING_CPU_PHASES.includes(phase)) return undefined;
+  try {
+    const cpu = readCliTimingOwnData(value, "cpu");
+    const count = readCliTimingOwnData(cpu, "count");
+    const sumUs = readCliTimingOwnData(cpu, "sumUs");
+    const maxUs = readCliTimingOwnData(cpu, "maxUs");
+    if (!integer(count) || count < 1 || count > samples || !integer(sumUs) ||
+        !integer(maxUs) || maxUs > sumUs || sumUs / count > maxUs) return undefined;
+    return { count, sumUs, maxUs };
+  } catch { return undefined; }
+}
+function mergeCpuTiming(left?: CliCpuTiming, right?: CliCpuTiming): CliCpuTiming | undefined {
+  if (!left) return right ? { ...right } : undefined;
+  if (!right) return { ...left };
+  const count = left.count + right.count;
+  const sumUs = left.sumUs + right.sumUs;
+  return integer(count) && integer(sumUs) ? { count, sumUs, maxUs: Math.max(left.maxUs, right.maxUs) } : undefined;
+}
+function copyPhaseTiming(phase: CliPhaseTiming): CliPhaseTiming {
+  return { ...phase, buckets: [...phase.buckets], ...(phase.cpu ? { cpu: { ...phase.cpu } } : {}) };
+}
+
 function normalizePhaseTiming(value: unknown): CliPhaseTiming | null {
   const phase = record(value);
   if (!phase || !phaseName(phase.phase) || !integer(phase.count) || phase.count < 1 ||
@@ -185,41 +425,49 @@ function normalizePhaseTiming(value: unknown): CliPhaseTiming | null {
       !Array.isArray(phase.buckets) || phase.buckets.length !== 8 || !phase.buckets.every(integer)) return null;
   const timing = { phase: phase.phase, count: phase.count, sumUs: phase.sumUs,
     maxUs: phase.maxUs, buckets: [...phase.buckets] };
-  return validPhaseHistogram(timing) ? timing : null;
+  if (!validPhaseHistogram(timing)) return null;
+  const cpu = normalizeCpuTiming(timing.phase, phase, timing.count);
+  return { ...timing, ...(cpu ? { cpu } : {}) };
 }
 
 type CommandFailures = Pick<CliCommandTiming, "failures" | "droppedFailures">;
 
 /** Optional diagnostics fail independently of otherwise-valid timing/accounting. */
 function normalizeCommandFailures(command: {
-  outcome?: unknown; calls?: unknown; failures?: unknown; droppedFailures?: unknown;
+  command?: unknown; outcome?: unknown; calls?: unknown; failures?: unknown; droppedFailures?: unknown;
 }): CommandFailures {
   try {
-    if (command.outcome === "ok") return {};
-    const input = command.failures;
-    const dropped = command.droppedFailures ?? 0;
-    const calls = command.calls;
+    if (readCliTimingOwnData(command, "outcome") === "ok") return {};
+    const input = readCliTimingOwnData(command, "failures");
+    const dropped = readCliTimingOwnData(command, "droppedFailures") ?? 0;
+    const calls = readCliTimingOwnData(command, "calls");
     const entries = input === undefined ? [] : input;
     if (!Array.isArray(entries) || !integer(dropped) || !integer(calls) || dropped > calls) return {};
-    const length = entries.length;
+    const length = readCliTimingOwnData(entries, "length");
     if (!integer(length) || length > CLI_TIMING_MAX_FAILURES) return {};
     const failures: CliFailureTiming[] = [];
+    const name = readCliTimingOwnData(command, "command");
     let observations = dropped;
     // Bound indexed reads; do not trust a supplied array iterator or reread a
     // property after validation (accessors could return a different value).
     for (let index = 0; index < length; index += 1) {
-      const entry = record(entries[index]);
+      const entry = record(readCliTimingOwnData(entries, String(index)));
       if (!entry) return {};
-      const count = entry.count;
+      const count = readCliTimingOwnData(entry, "count");
       if (!integer(count) || count < 1) return {};
       observations += count;
       // Nonnegative integer counts stay safe while bounded by the safe call count.
       if (observations > calls) return {};
-      const code = cliTimingFailureCode(entry.code);
-      const stage = cliTimingFailureStage(entry.stage);
-      const current = failures.find((item) => item.code === code && item.stage === stage);
+      const rawCode = readCliTimingOwnData(entry, "code");
+      const code = cliTimingFailureCode(rawCode, name);
+      const stage = cliTimingFailureStage(readCliTimingOwnData(entry, "stage"));
+      const failure: CliFailureTiming = { code, stage, count,
+        ...cliTimingValidationFailure(name, code, entry, "validation"),
+        ...cliTimingRejectionFailure(name, code, entry, "rejection"),
+        ...cliTimingSourceCauseFailure(name, rawCode, entry, "sourceCause") };
+      const current = failures.find((item) => sameFailureVariant(item, failure));
       if (current) current.count += count;
-      else failures.push({ code, stage, count });
+      else failures.push(failure);
     }
     return { ...(failures.length ? { failures } : {}), ...(dropped ? { droppedFailures: dropped } : {}) };
   } catch { return {}; }
@@ -273,7 +521,9 @@ function bucketIndex(us: number): number {
   const index = CLI_TIMING_BUCKET_UPPER_US.findIndex((upper) => us < upper);
   return index < 0 ? 7 : index;
 }
-export function addCliPhaseSample(phases: CliPhaseTiming[], phase: CliTimingPhase, us: number): boolean {
+export function addCliPhaseSample(
+  phases: CliPhaseTiming[], phase: CliTimingPhase, us: number, cpuUs?: number,
+): boolean {
   if (!phaseName(phase) || !integer(us)) return false;
   let target = phases.find((entry) => entry.phase === phase);
   if (!target) {
@@ -286,6 +536,11 @@ export function addCliPhaseSample(phases: CliPhaseTiming[], phase: CliTimingPhas
   target.sumUs += us;
   target.maxUs = Math.max(target.maxUs, us);
   target.buckets[bucketIndex(us)]! += 1;
+  if (CLI_TIMING_CPU_PHASES.includes(phase) && integer(cpuUs)) {
+    const cpu = mergeCpuTiming(target.cpu, { count: 1, sumUs: cpuUs, maxUs: cpuUs });
+    if (cpu) target.cpu = cpu;
+    else delete target.cpu;
+  }
   return true;
 }
 export function incrementCliTimingDrop(value: number, count = 1): number {
@@ -297,7 +552,7 @@ function mergeCommandFailures(current: CliCommandTiming | undefined, incoming: C
   const failures = left.failures ?? [];
   let dropped = (left.droppedFailures ?? 0) + (right.droppedFailures ?? 0);
   for (const entry of right.failures ?? []) {
-    const existing = failures.find((item) => item.code === entry.code && item.stage === entry.stage);
+    const existing = failures.find((item) => sameFailureVariant(item, entry));
     if (existing) existing.count += entry.count;
     else if (failures.length < CLI_TIMING_MAX_FAILURES) failures.push(entry);
     else dropped += entry.count;
@@ -321,22 +576,25 @@ export function mergeCliTiming(target: CliTiming, source: CliTiming): void {
         target.droppedCalls = incrementCliTimingDrop(target.droppedCalls, entry.calls);
       } else {
         target.commands.push({ command: entry.command, outcome: entry.outcome, calls: entry.calls,
-          phases: entry.phases.map((phase) => ({ ...phase, buckets: [...phase.buckets] })),
+          phases: entry.phases.map(copyPhaseTiming),
           ...mergeCommandFailures(undefined, entry) });
       }
       continue;
     }
     const merged: CliCommandTiming = { command: current.command, outcome: current.outcome,
       calls: current.calls + entry.calls,
-      phases: current.phases.map((phase) => ({ ...phase, buckets: [...phase.buckets] })) };
+      phases: current.phases.map(copyPhaseTiming) };
     let valid = integer(merged.calls);
     for (const phase of entry.phases) {
       const old = merged.phases.find((item) => item.phase === phase.phase);
-      if (!old) { merged.phases.push({ ...phase, buckets: [...phase.buckets] }); continue; }
+      if (!old) { merged.phases.push(copyPhaseTiming(phase)); continue; }
       old.count += phase.count;
       old.sumUs += phase.sumUs;
       old.maxUs = Math.max(old.maxUs, phase.maxUs);
       old.buckets = old.buckets.map((count, index) => count + phase.buckets[index]!);
+      const cpu = mergeCpuTiming(old.cpu, phase.cpu);
+      if (cpu) old.cpu = cpu;
+      else delete old.cpu;
       valid &&= integer(old.count) && integer(old.sumUs) && old.buckets.every(integer);
     }
     if (valid) target.commands[index] = { ...merged, ...mergeCommandFailures(current, entry) };

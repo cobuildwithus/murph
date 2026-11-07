@@ -32,7 +32,7 @@ Next:
 
 Open questions (UNCONFIRMED if needed):
 - Junction does not publicly document `stage_type = -1`; mapping is inferred from raw Apple HealthKit-via-Junction payloads and user-provided Health sample screenshots.
-- `pnpm --filter @murphai/query typecheck` remains blocked by unrelated Murph Age type/module errors outside this task.
+- `pnpm --filter @murphai/query typecheck` remains blocked by unrelated type/module errors outside this task.
 
 Working set (files/ids/commands):
 - packages/importers/src/device-providers/junction.ts

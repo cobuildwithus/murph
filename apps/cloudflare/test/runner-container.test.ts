@@ -1,3 +1,4 @@
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import {
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   type HostedWorkspaceInvocationResult,
@@ -27,7 +28,6 @@ import {
   HostedExecutionConfigurationError,
   DeploySmokeRunnerContainer,
   type HostedExecutionContainerStubLike,
-  invokeHostedExecutionContainerRunner,
   resolveHostedExecutionRunnerContainerName,
   RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   RunnerContainer,
@@ -46,6 +46,7 @@ import {
 } from "../src/runner-container-ca-env.ts";
 import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+  type RunnerContainerColdWaitDirectCause,
 } from "../src/runner-container-error-codes.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
@@ -54,11 +55,13 @@ import {
   buildHostedRunnerRedactedErrorJson,
 } from "../src/user-runner/diagnostics.ts";
 
-const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
-  "murph:hosted-container-cpu-watchdog-fingerprint:v1";
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
-  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
+const SDK_INSTANCE_START_ABORT_MESSAGE =
+  "Aborted waiting for container to start as we received a cancellation signal";
+const SDK_PORT_WAIT_ABORT_MESSAGE = "Container request aborted.";
+const NATIVE_NO_INSTANCE_MESSAGE =
+  "there is no container instance that can be provided to this durable object";
+const NATIVE_PORT_NOT_LISTENING_MESSAGE = "the container is not listening";
+
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   ...buildHostedRunnerContainerCaEnv(),
   PORT: "8080",
@@ -83,6 +86,9 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  expectedColdWaitDirectCause?: RunnerContainerColdWaitDirectCause;
+  expectedColdWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
+  expectedColdWaitNativeRunning?: boolean | "unavailable";
   expectedElapsedMs?: number;
   expectedOrchestrationAttemptId?: string;
   expectedTimeoutMs?: number;
@@ -106,6 +112,15 @@ function expectRunnerContainerStartupFailureObservation(input: {
       ...(input.expectedOrchestrationAttemptId === undefined
         ? {}
         : { orchestrationAttemptId: input.expectedOrchestrationAttemptId }),
+      ...(input.expectedColdWaitFailure === undefined
+        ? {}
+        : { runtimeStartupColdWaitFailure: input.expectedColdWaitFailure }),
+      ...(input.expectedColdWaitDirectCause === undefined
+        ? {}
+        : { runtimeStartupColdWaitDirectCause: input.expectedColdWaitDirectCause }),
+      ...(input.expectedColdWaitNativeRunning === undefined
+        ? {}
+        : { runtimeStartupColdWaitNativeRunning: input.expectedColdWaitNativeRunning }),
       runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
@@ -137,15 +152,42 @@ function expectRunnerContainerStartupFailureObservation(input: {
   if (input.expectedElapsedMs !== undefined) {
     expect(elapsedMs).toBe(input.expectedElapsedMs);
   }
+  const record = buildHostedExecutionStructuredLogRecord(observation);
+  expect(record.details).toEqual(observation.details);
   const serialized = JSON.stringify(observation);
   for (const forbiddenValue of input.forbiddenValues ?? []) {
     expect(serialized).not.toContain(forbiddenValue);
+    expect(JSON.stringify(record)).not.toContain(forbiddenValue);
   }
 }
 
 describe("RunnerContainer", () => {
+  it("forwards voice controls directly to an existing container without startup", async () => {
+    const fetchControl = vi.fn(async () => Response.json({ kind: "connected", sdp: "v=0\r\nanswer" }));
+    const h = createContainerDouble({ platformRunning: true, containerFetch: fetchControl });
+    const request = { action: "connect" as const, callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "1", userId: "member-synthetic", sdp: "v=0\r\noffer" };
+    expect(await h.container.controlVoice(request)).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+    expect(fetchControl).toHaveBeenCalledWith("http://container/internal/voice-control", expect.objectContaining({
+      method: "POST", body: JSON.stringify(request),
+    }));
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("never starts a stopped container for a voice command", async () => {
+    const h = createContainerDouble({ platformRunning: false });
+    expect(await h.container.controlVoice({
+      action: "close", callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "1", userId: "member-synthetic",
+    })).toEqual({ kind: "unavailable" });
+    expect(h.containerFetch).not.toHaveBeenCalled();
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
   });
 
   it("registers host-specific outbound interception through Cloudflare Containers accessors", () => {
@@ -381,7 +423,7 @@ describe("RunnerContainer", () => {
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -488,7 +530,7 @@ describe("RunnerContainer", () => {
       attemptId: activeRequest.attemptId,
       leaseGeneration: activeRequest.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -575,7 +617,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -634,7 +676,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -693,7 +735,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -778,7 +820,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(invocation).resolves.toEqual(createRunnerResult());
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -868,7 +910,7 @@ describe("RunnerContainer", () => {
     await lifecycleDestroyStarted.promise;
 
     await invocationFailure;
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -960,7 +1002,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(activeInvocation).resolves.toEqual(createRunnerResult());
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1030,7 +1072,7 @@ describe("RunnerContainer", () => {
     runnerResponse.reject(new Error("Network connection lost"));
 
     await invocationFailure;
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1063,7 +1105,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1128,7 +1170,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1145,6 +1187,106 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
+  it.each([false, true])("relays bounded transport metadata without conflating pending notification: %s", async (pending) => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running", platformRunning: true,
+      containerFetch: vi.fn(async () => new Response(null, {
+        status: 204,
+        headers: {
+          "x-runtime-wake-accepted": "1",
+          "x-runtime-wake-identity-checked": "1",
+          "x-runtime-wake-pending": pending ? "1" : "0",
+          "x-runtime-wake-received-at-ms": "1777010000000",
+          "x-runtime-wake-accepted-at-ms": "1777010000001",
+        },
+      })),
+    });
+    await expect(container.ensureProcessing({
+      activeRuntime: { attemptId: "attempt_diagnostic", leaseGeneration: "12", userId: "member_123" },
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      kind: "accepted", action: pending ? "already_running" : "woken",
+      wakeDiagnostics: {
+        wakeStage: "acknowledgement", wakeStatus: 204,
+        wakeAccepted: true, wakePending: pending, wakeIdentityChecked: true,
+        wakeEnteredAtEpochMs: expect.any(Number), wakeDispatchAtEpochMs: expect.any(Number),
+        wakeResponseAtEpochMs: expect.any(Number), wakeDrainFinishedAtEpochMs: expect.any(Number),
+        wakeHandlerReceivedAtEpochMs: 1777010000000, wakeHandlerAcceptedAtEpochMs: 1777010000001,
+        wakeActivePointerPresent: false, wakeSignalAborted: false,
+      },
+    });
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("wakes through the native port without consulting SDK startup state", async () => {
+    const nativeFetch = vi.fn(async () => new Response(null, {
+      status: 204,
+      headers: {
+        "x-runtime-wake-accepted": "1",
+        "x-runtime-wake-identity-checked": "1",
+      },
+    }));
+    const getTcpPort = vi.fn(() => ({ fetch: nativeFetch }));
+    const sdkFetch = vi.fn(async () => {
+      throw new Error("Synthetic unavailable SDK lifecycle state");
+    });
+    const { container, destroy, getState, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "stopped",
+      state: { container: { running: true, getTcpPort } },
+      containerFetch: sdkFetch,
+    });
+
+    await expect(container.ensureProcessing({
+      activeRuntime: {
+        attemptId: "attempt_native_wake",
+        leaseGeneration: "12",
+        userId: "member_123",
+      },
+      userId: "member_123",
+    })).resolves.toMatchObject({ kind: "accepted", action: "woken" });
+
+    expect(getTcpPort).toHaveBeenCalledWith(8080);
+    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith(
+      "http://container/internal/runtime-wake",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          attemptId: "attempt_native_wake",
+          leaseGeneration: "12",
+          userId: "member_123",
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it("does not turn accepted response headers into success when metadata drain fails", async () => {
+    const { container } = createContainerDouble({
+      initialStatus: "running", platformRunning: true,
+      containerFetch: vi.fn(async () => new Response(new ReadableStream({
+        start(controller) { controller.error(new Error("private drain failure fixture")); },
+      }), {
+        status: 200,
+        headers: { "x-runtime-wake-accepted": "1", "x-runtime-wake-identity-checked": "1",
+          "x-runtime-wake-received-at-ms": "not-an-epoch" },
+      })),
+    });
+    const result = await container.ensureProcessing({
+      activeRuntime: { attemptId: "attempt_diagnostic_drain", leaseGeneration: "12", userId: "member_123" },
+      userId: "member_123",
+    });
+    expect(result).toMatchObject({ kind: "wake-unconfirmed", reason: "container-rpc-error",
+      wakeDiagnostics: { wakeStage: "drain", wakeStatus: 200, wakeAccepted: true } });
+    expect(result.wakeDiagnostics?.wakeDrainFinishedAtEpochMs).toBeUndefined();
+    expect(result.wakeDiagnostics?.wakeHandlerReceivedAtEpochMs).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("private drain failure fixture");
+  });
+
   it("short-circuits a wake probe when platform truth says a pointerless shell is stopped", async () => {
     const { container, containerFetch, getState, startAndWaitForPorts } =
       createContainerDouble({
@@ -1159,7 +1301,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer_stopped_shell",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1193,7 +1335,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer_running_shell",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1201,6 +1343,46 @@ describe("RunnerContainer", () => {
     expect(containerFetch.mock.calls.some(([url]) =>
       String(url).endsWith("/internal/runtime-wake")
     )).toBe(true);
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("accepts overlapping wakes acknowledged by the same exact runtime after losing the local pointer", async () => {
+    const requestsStarted = createDeferred<void>();
+    const releaseResponses = createDeferred<void>();
+    let requestCount = 0;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toContain("/internal/runtime-wake");
+        requestCount += 1;
+        if (requestCount === 2) requestsStarted.resolve(undefined);
+        await releaseResponses.promise;
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "x-runtime-wake-accepted": "1",
+            "x-runtime-wake-identity-checked": "1",
+          },
+        });
+      }),
+    });
+    const input = {
+      activeRuntime: {
+        attemptId: "attempt_concurrent_foreground_wakes",
+        leaseGeneration: "12",
+        userId: "member_123",
+      },
+      userId: "member_123",
+    };
+    const wakes = [container.ensureProcessing(input), container.ensureProcessing(input)];
+    await requestsStarted.promise;
+    releaseResponses.resolve(undefined);
+    expect(await Promise.all(wakes)).toMatchObject([
+      { action: "woken", kind: "accepted" },
+      { action: "woken", kind: "accepted" },
+    ]);
+    expect(destroy).not.toHaveBeenCalled();
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
@@ -1242,7 +1424,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1278,7 +1460,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_pointerless_during_destroy",
       leaseGeneration: "1",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1337,7 +1519,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1377,7 +1559,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_stale",
       leaseGeneration: "10",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1395,7 +1577,7 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
-  it("does not trust an identity-blind accepted wake when the outer active-operation pointer is missing", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("does not trust an identity-blind accepted %s wake when the outer active-operation pointer is missing", async (processingMode) => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/internal/runtime-wake")) {
@@ -1414,8 +1596,9 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
+      processingMode,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "container-rpc-error",
     });
@@ -1452,7 +1635,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1488,7 +1671,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1527,7 +1710,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1556,7 +1739,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1575,7 +1758,7 @@ describe("RunnerContainer", () => {
         }
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
-            conversationWarmActivityCompletedAtEpochMs: null,
+            conversationActivityReceivedAtEpochMs: null,
             hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
             ok: true,
           }), {
@@ -1594,7 +1777,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1628,7 +1811,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1665,7 +1848,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1702,7 +1885,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1753,7 +1936,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1771,6 +1954,43 @@ describe("RunnerContainer", () => {
     );
     expect(executeCalls).toHaveLength(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes a running retention checkpoint without sending a runtime wake", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), { status: 200 });
+        }
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, { status: 204, headers: { "x-runtime-wake-accepted": "1" } });
+        }
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+    const request = { ...createRunnerRequest(), processingMode: "inbox_media_retention" as const };
+    const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+    await runnerRequestStarted.promise;
+    try {
+      for (const mismatch of [{ attemptId: "other-attempt" }, { leaseGeneration: "12" }, { processingMode: "default" as const }]) {
+        await expect(container.wakeRuntime({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+          processingMode: request.processingMode, userId: request.userId, ...mismatch }))
+          .resolves.toMatchObject({ kind: "unknown", reason: "active-child-rejected" });
+      }
+      await expect(container.ensureProcessing({ activeRuntime: {
+        attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+        processingMode: request.processingMode, userId: request.userId,
+      }, userId: request.userId })).resolves.toMatchObject({ kind: "accepted", action: "already_running" });
+      // Runtime retention treats a wake as foreground preemption and aborts
+      // its checkpoint. An ordinary same-mode recheck must leave it alone.
+      expect(containerFetch.mock.calls.some(([url]) => String(url).endsWith("/internal/runtime-wake"))).toBe(false);
+    } finally {
+      runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), { status: 200 }));
+      await expect(invocation).resolves.toEqual(createRunnerResult());
+    }
   });
 
   it("reports already_running when the active child records a pending wake", async () => {
@@ -1819,7 +2039,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "already_running",
       kind: "accepted",
     });
@@ -1944,6 +2164,7 @@ describe("RunnerContainer", () => {
     expect(result).toMatchObject({
       action: "started",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     if (result.kind !== "ready" || !result.coldStartTiming) {
       throw new Error("Expected cold readiness timing.");
@@ -1989,6 +2210,10 @@ describe("RunnerContainer", () => {
             === "Hosted execution container startup confirmation failed.",
       ),
     ).toHaveLength(0);
+    for (const [observation] of mocks.emitHostedExecutionStructuredLog.mock.calls) {
+      expect(observation.details).not.toHaveProperty("runtimeStartupColdWaitDirectCause");
+      expect(observation.details).not.toHaveProperty("runtimeStartupColdWaitNativeRunning");
+    }
   });
 
   it("reproduces the old deployment gap: new Worker fingerprints reject an available previous image", async () => {
@@ -2392,11 +2617,22 @@ describe("RunnerContainer", () => {
     })).rejects.toBe(stateReadFailure);
   });
 
-  it("classifies cold start and port-readiness failures", async () => {
+  it.each([
+    { label: "initial SDK wait", startFailure: new Error(SDK_INSTANCE_START_ABORT_MESSAGE), expected: "instance_start_aborted", expectedCause: "absent" },
+    { label: "separate SDK port wait", startFailure: new Error(SDK_PORT_WAIT_ABORT_MESSAGE), expected: "port_wait_aborted", expectedCause: "absent" },
+    { label: "unknown error", startFailure: new Error("port wait failed with token=private-start-token"), expected: "unclassified", expectedCause: "absent" },
+    { label: "changed initial message", startFailure: new Error(`${SDK_INSTANCE_START_ABORT_MESSAGE}.`), expected: "unclassified", expectedCause: "absent" },
+    { label: "changed port message", startFailure: new Error(`${SDK_PORT_WAIT_ABORT_MESSAGE} changed`), expected: "unclassified", expectedCause: "absent" },
+    { label: "non-Error string", startFailure: SDK_PORT_WAIT_ABORT_MESSAGE, expected: "unclassified", expectedCause: "other" },
+    { label: "non-Error object", startFailure: { message: SDK_INSTANCE_START_ABORT_MESSAGE }, expected: "unclassified", expectedCause: "other" },
+    { label: "null", startFailure: null, expected: "unclassified", expectedCause: "other" },
+    { label: "wrapped cancellation", startFailure: new Error("Synthetic wrapper", { cause: new Error(SDK_PORT_WAIT_ABORT_MESSAGE) }), expected: "unclassified", expectedCause: "other" },
+    { label: "unreadable message", startFailure: Object.defineProperty(new Error(), "message", {
+      get() { throw new Error("Synthetic unreadable message"); },
+    }), expected: "unclassified", expectedCause: "absent" },
+  ] as const)("classifies only the caught cold wait: $label", async ({ startFailure, expected, expectedCause }) => {
     const orchestrationAttemptId = "test-cold-start-timeout-correlation";
-    const privateErrorText = "port wait failed with token=private-start-token";
-    const startFailure = new Error(privateErrorText);
-    const { container } = createContainerDouble({
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       startAndWaitForPorts: vi.fn(async () => {
         throw startFailure;
       }),
@@ -2408,13 +2644,138 @@ describe("RunnerContainer", () => {
       userId: "member_private_cold_start",
     })).rejects.toBe(startFailure);
 
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingUntilMs: expect.any(Number),
+      readyObservedBy: null,
+    });
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedColdWaitDirectCause: expectedCause,
+      expectedColdWaitFailure: expected,
+      expectedColdWaitNativeRunning: "unavailable",
       expectedOrchestrationAttemptId: orchestrationAttemptId,
       expectedTimeoutMs: 15_000,
-      forbiddenValues: [privateErrorText, "member_private_cold_start"],
+      forbiddenValues: [
+        SDK_INSTANCE_START_ABORT_MESSAGE, SDK_PORT_WAIT_ABORT_MESSAGE,
+        "private-start-token", "member_private_cold_start", "Synthetic wrapper",
+      ],
       stage: "cold_start_or_ports",
     });
+  });
+
+  it.each([
+    { label: "instance abort retaining no instance", message: SDK_INSTANCE_START_ABORT_MESSAGE, cause: new Error(NATIVE_NO_INSTANCE_MESSAGE), running: true, expectedCause: "native_no_instance" },
+    { label: "port abort retaining no instance", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(NATIVE_NO_INSTANCE_MESSAGE), running: true, expectedCause: "native_no_instance" },
+    { label: "port refusal after lost no-instance cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(NATIVE_PORT_NOT_LISTENING_MESSAGE), running: false, expectedCause: "port_not_listening" },
+    { label: "missing direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: undefined, running: undefined, expectedCause: "absent" },
+    { label: "changed no-instance message", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(`${NATIVE_NO_INSTANCE_MESSAGE}.`), running: true, expectedCause: "other" },
+    { label: "changed port message", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error(`${NATIVE_PORT_NOT_LISTENING_MESSAGE} changed`), running: false, expectedCause: "other" },
+    { label: "deeper no-instance cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: new Error("synthetic-private-cause", { cause: new Error(NATIVE_NO_INSTANCE_MESSAGE) }), running: undefined, expectedCause: "other" },
+    { label: "non-Error direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: { message: NATIVE_NO_INSTANCE_MESSAGE }, running: undefined, expectedCause: "other" },
+    { label: "null direct cause", message: SDK_PORT_WAIT_ABORT_MESSAGE, cause: null, running: undefined, expectedCause: "other" },
+  ] as const)("observes bounded cold wait context: $label", async ({ message, cause, running, expectedCause }) => {
+    const startFailure = new Error(message, { cause });
+    const { container, containerFetch, destroy, getState, start, startAndWaitForPorts } = createContainerDouble({
+      platformRunning: running,
+      startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000, userId: "member_123",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      expectedColdWaitDirectCause: expectedCause,
+      expectedColdWaitFailure: message === SDK_INSTANCE_START_ABORT_MESSAGE
+        ? "instance_start_aborted" : "port_wait_aborted",
+      expectedColdWaitNativeRunning: running ?? "unavailable",
+      forbiddenValues: [NATIVE_NO_INSTANCE_MESSAGE, NATIVE_PORT_NOT_LISTENING_MESSAGE, "synthetic-private-cause"],
+      stage: "cold_start_or_ports",
+    });
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(getState).toHaveBeenCalledOnce();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingUntilMs: expect.any(Number), readyObservedBy: null,
+    });
+  });
+
+  it.each(["cause", "cause message", "native running", "native container"] as const)(
+    "keeps the original cold failure when the %s getter throws",
+    async (unreadable) => {
+      const privateSentinel = "synthetic-private-getter-value";
+      const unreadableGetter = vi.fn(() => { throw new Error(privateSentinel); });
+      const directCause = new Error(NATIVE_NO_INSTANCE_MESSAGE);
+      const startFailure = new Error(SDK_PORT_WAIT_ABORT_MESSAGE, { cause: directCause });
+      const nativeContainer = { running: true };
+      if (unreadable === "cause") Object.defineProperty(startFailure, "cause", { get: unreadableGetter });
+      if (unreadable === "cause message") Object.defineProperty(directCause, "message", { get: unreadableGetter });
+      const { container, containerFetch, destroy } = createContainerDouble({
+        state: { container: nativeContainer },
+        startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+      });
+      if (unreadable === "native running") Object.defineProperty(nativeContainer, "running", { get: unreadableGetter });
+      if (unreadable === "native container") {
+        Object.defineProperty(requireObject(Reflect.get(container, "ctx"), "container context"), "container", { get: unreadableGetter });
+      }
+
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000, userId: "member_123",
+      })).rejects.toBe(startFailure);
+
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: false,
+        expectedColdWaitDirectCause: unreadable === "cause" || unreadable === "cause message"
+          ? "unreadable" : "native_no_instance",
+        expectedColdWaitFailure: "port_wait_aborted",
+        expectedColdWaitNativeRunning: unreadable === "native running" || unreadable === "native container"
+          ? "unavailable" : true,
+        forbiddenValues: [privateSentinel, NATIVE_NO_INSTANCE_MESSAGE],
+        stage: "cold_start_or_ports",
+      });
+      expect(unreadableGetter).toHaveBeenCalledOnce();
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not traverse, serialize, enumerate, or coerce cold wait context", async () => {
+    const privateSentinel = "synthetic-private-nested-value";
+    const forbiddenRead = vi.fn(() => { throw new Error(privateSentinel); });
+    const opaqueValue = { [Symbol.toPrimitive]: forbiddenRead, toJSON: forbiddenRead, toString: forbiddenRead };
+    const directCause = new Proxy(Object.defineProperties(new Error(), {
+      message: { value: opaqueValue },
+      cause: { get: forbiddenRead },
+      stack: { get: forbiddenRead },
+      privatePayload: { enumerable: true, get: forbiddenRead },
+      toJSON: { get: forbiddenRead },
+    }), { ownKeys: forbiddenRead });
+    const startFailure = new Error(SDK_PORT_WAIT_ABORT_MESSAGE, { cause: directCause });
+    const { container, containerFetch, destroy } = createContainerDouble({
+      state: { container: { running: opaqueValue } },
+      startAndWaitForPorts: vi.fn(async () => { throw startFailure; }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000, userId: "member_123",
+    })).rejects.toBe(startFailure);
+
+    expectRunnerContainerStartupFailureObservation({
+      cleanupUnsettled: false,
+      expectedColdWaitDirectCause: "other",
+      expectedColdWaitFailure: "port_wait_aborted",
+      expectedColdWaitNativeRunning: "unavailable",
+      forbiddenValues: [privateSentinel, "privatePayload"],
+      stage: "cold_start_or_ports",
+    });
+    expect(forbiddenRead).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it("classifies cold health and readiness-finalization failures", async () => {
@@ -2446,6 +2807,167 @@ describe("RunnerContainer", () => {
       forbiddenValues: [privateHealthValue, "member_private_cold_health"],
       stage: "cold_health_or_finalization",
     });
+  });
+
+  it.each(["running", "stopped"] as const)("defers admission while a %s runner is still busy", async (initialStatus) => {
+    let activeJobCount = 1;
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), activeJobCount,
+    }), { headers: { "content-type": "application/json" } }));
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus, containerFetch,
+    });
+    const input = { timeoutMs: 15_000, userId: "member_123" };
+
+    await expect(container.ensureReadyForProcessing(input)).resolves.toEqual({ kind: "cleanup_unsettled" });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Hosted execution container is ready.",
+      details: expect.objectContaining({ runnerBusy: true }),
+    }));
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(initialStatus === "stopped" ? 1 : 0);
+    activeJobCount = 0;
+    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({ kind: "ready" });
+    // A busy health observation must not bypass the next real health read.
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "only a settling completion callback", health: { activeJobCount: 1, settlingCompletionCallbackCount: 1 }, ready: true },
+    { name: "an older child without the settling count", health: { activeJobCount: 1 }, ready: false },
+    { name: "running work beside a settling callback", health: { activeJobCount: 2, settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "a non-numeric settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: "1" }, ready: false },
+    { name: "a negative settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: -1 }, ready: false },
+    { name: "a fractional settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: 0.5 }, ready: false },
+    { name: "a settling count above the total", health: { activeJobCount: 1, settlingCompletionCallbackCount: 2 }, ready: false },
+    { name: "a null settling count", health: { activeJobCount: 1, settlingCompletionCallbackCount: null }, ready: false },
+    { name: "a null total beside a settling count", health: { activeJobCount: null, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "a string total beside a settling count", health: { activeJobCount: "1", settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "a negative total beside a settling count", health: { activeJobCount: -1, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "a fractional total beside a settling count", health: { activeJobCount: 1.5, settlingCompletionCallbackCount: 1 }, ready: false },
+    { name: "an unsafe total beside a settling count", health: { activeJobCount: 2 ** 53, settlingCompletionCallbackCount: 2 ** 53 }, ready: false },
+    { name: "a missing total beside a settling count", health: { activeJobCount: undefined, settlingCompletionCallbackCount: 0 }, ready: false },
+    { name: "an idle older child", health: { activeJobCount: 0 }, ready: true },
+  ])("admits a warm runner reporting $name only when nothing else is busy", async ({ health, ready }) => {
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), ...health,
+    }), { headers: { "content-type": "application/json" } }));
+    const { container, destroy } = createContainerDouble({ initialStatus: "running", containerFetch });
+
+    const readiness = await container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" });
+    if (ready) expect(readiness).toMatchObject({ kind: "ready" });
+    else expect(readiness).toEqual({ kind: "cleanup_unsettled" });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { phase: "instance", expired: true },
+    { phase: "ports", expired: true },
+    { phase: "health", expired: true },
+    { phase: "instance", expired: false },
+    { phase: "ports", expired: false },
+    { phase: "health", expired: false },
+  ] as const)(
+    "preserves transport failure identity for $phase (deadline expired: $expired)",
+    async ({ phase, expired }) => {
+      const deadline = new AbortController();
+      const deadlineReason = new DOMException("Synthetic readiness deadline", "TimeoutError");
+      const originalTimeout = AbortSignal.timeout;
+      const timeout = vi.spyOn(AbortSignal, "timeout")
+        .mockImplementationOnce(() => deadline.signal)
+        .mockImplementation((ms) => originalTimeout(ms));
+      const transportStarted = createDeferred<void>();
+      const transportFailure = createDeferred<never>();
+      const sdkFailure = new Error(phase === "instance"
+        ? SDK_INSTANCE_START_ABORT_MESSAGE : SDK_PORT_WAIT_ABORT_MESSAGE, {
+        cause: new Error(NATIVE_NO_INSTANCE_MESSAGE),
+      });
+      const rejectOnAbort = (signal: AbortSignal) => {
+        signal.addEventListener("abort", () => transportFailure.reject(sdkFailure), { once: true });
+        transportStarted.resolve(undefined);
+        return transportFailure.promise;
+      };
+      const startAndWaitForPorts = vi.fn(async (input: {
+        cancellationOptions: { abort: AbortSignal };
+      }) => {
+        if (phase !== "health") await rejectOnAbort(input.cancellationOptions.abort);
+      });
+      const containerFetch = vi.fn(async (_url: string, init: { signal: AbortSignal }) =>
+        rejectOnAbort(init.signal));
+      const { container, destroy } = createContainerDouble({
+        initialStatus: "stopped", platformRunning: true, startAndWaitForPorts, containerFetch,
+      });
+      try {
+        const readiness = container.ensureReadyForProcessing({
+          timeoutMs: 15_000, userId: "member_123",
+        });
+        const failure = expect(readiness).rejects.toBe(expired
+          ? deadlineReason : sdkFailure);
+        await transportStarted.promise;
+        if (expired) deadline.abort(deadlineReason);
+        else transportFailure.reject(sdkFailure);
+        await failure;
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(containerFetch).toHaveBeenCalledTimes(phase === "health" ? 1 : 0);
+        expect(destroy).not.toHaveBeenCalled();
+        expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+          pendingUntilMs: expect.any(Number),
+          readyObservedBy: null,
+        });
+        expectRunnerContainerStartupFailureObservation({
+          cleanupUnsettled: false,
+          expectedColdWaitDirectCause: phase === "health" ? undefined : "native_no_instance",
+          expectedColdWaitFailure: phase === "health" ? undefined
+            : phase === "instance" ? "instance_start_aborted" : "port_wait_aborted",
+          expectedColdWaitNativeRunning: phase === "health" ? undefined : true,
+          stage: phase === "health" ? "cold_health_or_finalization" : "cold_start_or_ports",
+          forbiddenValues: [sdkFailure.message, deadlineReason.message, NATIVE_NO_INSTANCE_MESSAGE],
+        });
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it("omits the cold-wait diagnostic when the SDK wait has not rejected", async () => {
+    vi.useFakeTimers();
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const waitStarted = createDeferred<void>();
+    const wait = createDeferred<void>();
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      startAndWaitForPorts: vi.fn(() => {
+        waitStarted.resolve(undefined);
+        return wait.promise;
+      }),
+    });
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000, userId: "member_123",
+      });
+      await waitStarted.promise;
+      deadline.abort(new DOMException("Synthetic readiness deadline", "TimeoutError"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
+      // A later rejection must not mutate the record or add another failure observation.
+      wait.reject(new Error(SDK_PORT_WAIT_ABORT_MESSAGE));
+      await vi.advanceTimersByTimeAsync(0);
+      expectRunnerContainerStartupFailureObservation({
+        cleanupUnsettled: true,
+        stage: "cold_start_or_ports",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      wait.resolve(undefined);
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
@@ -2669,6 +3191,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -2807,6 +3330,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -2916,6 +3440,7 @@ describe("RunnerContainer", () => {
         })).resolves.toEqual({
           action: "already_warm",
           kind: "ready",
+          preparesSupervisedLaunch: true,
         });
 
         expect(startAndWaitForPorts).not.toHaveBeenCalled();
@@ -3046,6 +3571,7 @@ describe("RunnerContainer", () => {
         })).resolves.toEqual({
           action: "already_warm",
           kind: "ready",
+          preparesSupervisedLaunch: true,
         });
 
         expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -3161,6 +3687,7 @@ describe("RunnerContainer", () => {
         })).resolves.toEqual({
           action: "already_warm",
           kind: "ready",
+          preparesSupervisedLaunch: true,
         });
 
         expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -3243,6 +3770,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(destroy).toHaveBeenCalledOnce();
@@ -3386,6 +3914,7 @@ describe("RunnerContainer", () => {
       .mockImplementationOnce(() => readinessDeadline.signal)
       .mockImplementation(() => queuedReadinessDeadline.signal);
     const startObserved = createDeferred<void>();
+    const cleanupStateReadStarted = createDeferred<void>();
     const queuedHealthStarted = createDeferred<number>();
     let queuedHealthStartedAt: number | null = null;
     const cleanupStatus = createDeferred<{
@@ -3410,6 +3939,7 @@ describe("RunnerContainer", () => {
         });
       }
       if (stateReads === 2) {
+        cleanupStateReadStarted.resolve(undefined);
         return cleanupStatus.promise;
       }
       return Promise.resolve({
@@ -3428,7 +3958,7 @@ describe("RunnerContainer", () => {
       startObserved.resolve(undefined);
       await new Promise<never>((_, reject) => {
         input.cancellationOptions.abort.addEventListener("abort", () => {
-          reject(input.cancellationOptions.abort.reason);
+          reject(new Error(SDK_PORT_WAIT_ABORT_MESSAGE));
         }, { once: true });
       });
     });
@@ -3472,8 +4002,7 @@ describe("RunnerContainer", () => {
         readyObservedBy: "cold-start-ready",
       });
       readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
-      await Promise.resolve();
-      await Promise.resolve();
+      await cleanupStateReadStarted.promise;
       expect(getState).toHaveBeenCalledTimes(2);
       const queuedReadiness = container.ensureReadyForProcessing({
         timeoutMs: 30_000,
@@ -3514,6 +4043,9 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
       expectRunnerContainerStartupFailureObservation({
         cleanupUnsettled: true,
+        expectedColdWaitDirectCause: "absent",
+        expectedColdWaitFailure: "port_wait_aborted",
+        expectedColdWaitNativeRunning: "unavailable",
         stage: "cold_start_or_ports",
       });
     } finally {
@@ -3583,6 +4115,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
 
     await expect(container.invoke({
@@ -3631,6 +4164,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
 
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -3661,6 +4195,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
 
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -3915,6 +4450,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(destroy).not.toHaveBeenCalled();
@@ -4066,7 +4602,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_stale",
       leaseGeneration: "10",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -4128,7 +4664,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -4187,7 +4723,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -4201,6 +4737,35 @@ describe("RunnerContainer", () => {
     }));
 
     await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("preserves the wake timeout when the SDK converts an aborted fetch into HTTP 500", async () => {
+    const wakeDeadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(wakeDeadline.signal);
+    const sdkResponse = new Response("Synthetic transport timeout", { status: 500 });
+    const { container } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toContain("/internal/runtime-wake");
+        // The actual SDK's exception-to-response behavior is covered by the
+        // Containers helper suite; exercise Murph's response drain here.
+        wakeDeadline.abort(new DOMException("Synthetic wake deadline", "TimeoutError"));
+        return sdkResponse;
+      }),
+    });
+    try {
+      await expect(container.wakeRuntime({
+        attemptId: "attempt_sdk_timeout",
+        leaseGeneration: "1",
+        userId: "member_123",
+      })).resolves.toMatchObject({ kind: "unknown", reason: "container-rpc-timeout",
+        wakeDiagnostics: { wakeSignalAborted: true, wakeStatus: 500, wakeStage: "drain" },
+      });
+      expect(sdkResponse.bodyUsed).toBe(true);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it("rejects runtime wakes when metadata response draining times out", async () => {
@@ -4256,7 +4821,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       });
       await vi.advanceTimersByTimeAsync(5_000);
-      await expect(wake).resolves.toEqual({
+      await expect(wake).resolves.toMatchObject({
         kind: "unknown",
         reason: "container-rpc-timeout",
       });
@@ -5145,10 +5710,10 @@ describe("RunnerContainer", () => {
             containerStartObservedBy: "cold-start-ready",
             containerUptimeMs: 421_000,
             destroyRequestPresent: false,
-            idleTtlDeltaMs: 121_000,
+            idleTtlDeltaMs: -179_000,
             lastActivityExpiryAgeMs: 0,
             lifecycleStage: "activity-expired-cleanup",
-            runnerIdleTtlMs: 300_000,
+            runnerIdleTtlMs: 600_000,
           }),
           message: "Hosted execution container activity expired; running cleanup.",
           phase: "container.ready",
@@ -5198,6 +5763,51 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("keeps activity expiry cycling while a real invocation holds the lifecycle lock", async () => {
+    const invocationStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return Response.json(createRunnerHealthResult());
+        }
+        invocationStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+    const invocation = container.invoke({
+      job: { kind: "workspace-invocation", request: createRunnerRequest() },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await invocationStarted.promise;
+    let invocationFinished = false;
+    void invocation.then(() => { invocationFinished = true; });
+    const expiries: Promise<void>[] = [];
+    vi.useFakeTimers();
+    try {
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        vi.setSystemTime(Date.now() + 60_000);
+        let expiryFinished = false;
+        const expiry = container.onActivityExpired();
+        expiries.push(expiry);
+        void expiry.then(() => { expiryFinished = true; });
+        await vi.advanceTimersByTimeAsync(1);
+        expect(expiryFinished).toBe(true);
+        expect(invocationFinished).toBe(false);
+        expect(destroy).not.toHaveBeenCalled();
+        const schedules = await container.listSchedules("onActivityExpired");
+        expect(schedules).toHaveLength(1);
+        expect((schedules[0]?.time ?? 0) * 1_000).toBeGreaterThan(Date.now());
+      }
+    } finally {
+      vi.useRealTimers();
+      runnerResponse.resolve(Response.json(createRunnerResult()));
+      await invocation;
+      await Promise.all(expiries);
+    }
+  });
+
   it("records activity-expiry diagnostics while yielding to active workspace work", async () => {
     vi.useFakeTimers();
 
@@ -5224,7 +5834,8 @@ describe("RunnerContainer", () => {
       await container.onActivityExpired();
 
       expect(destroy).not.toHaveBeenCalled();
-      expect(renewActivityTimeout).toHaveBeenCalledOnce();
+      expect(renewActivityTimeout).not.toHaveBeenCalled();
+      expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
@@ -5234,10 +5845,10 @@ describe("RunnerContainer", () => {
             containerStartObservedBy: "onStart",
             containerUptimeMs: 225_000,
             destroyRequestPresent: false,
-            idleTtlDeltaMs: -75_000,
+            idleTtlDeltaMs: -375_000,
             lastActivityExpiryAgeMs: 0,
             lifecycleStage: "activity-expired-active-operation",
-            runnerIdleTtlMs: 300_000,
+            runnerIdleTtlMs: 600_000,
             workspaceAttemptId: "attempt_evt_activity_expiry_active",
           }),
           message: "Hosted execution container activity expiry yielded to active runner operation.",
@@ -5250,193 +5861,282 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("renews and keeps the warm shell when activity expiry fires before idle TTL", async () => {
-    vi.useFakeTimers();
-
+  it("generic RPC activity and invocation completion do not earn conversation warmth", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const renewActivityTimeout = vi.fn();
-      const { container, containerFetch, destroy, startAndWaitForPorts } =
-        createContainerDouble();
-      Object.assign(container, {
-        renewActivityTimeout,
-      });
-
-      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
-      await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_recent_activity_first"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-      renewActivityTimeout.mockClear();
-
-      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
-      await container.onActivityExpired();
-      expect(destroy).not.toHaveBeenCalled();
-      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            activeWorkspaceInvocationPresent: false,
-            idleTtlDeltaMs: -298_000,
-            lifecycleStage: "activity-expired-early-renew",
-            runnerIdleTtlMs: 300_000,
-          }),
-          message:
-            "Hosted execution container activity expiry arrived before the idle TTL elapsed; renewing.",
-          phase: "container.ready",
-        }),
-      );
-
-      await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_recent_activity_second"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-        String(url).endsWith("/internal/workspace-invocation")
-      );
-      expect(executeCalls[0]?.[1]?.headers).toEqual({
-        "content-type": "application/json; charset=utf-8",
-        "x-dispatch-container-ensure-ready-started-at-ms": expect.stringMatching(/^\d+$/),
-        "x-dispatch-invoke-received-at-ms": expect.stringMatching(/^\d+$/),
-      });
-      expect(executeCalls[1]?.[1]?.headers).toEqual({
-        "content-type": "application/json; charset=utf-8",
-        "x-dispatch-container-ensure-ready-started-at-ms": expect.stringMatching(/^\d+$/),
-        "x-dispatch-invoke-received-at-ms": expect.stringMatching(/^\d+$/),
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+      const now = Date.parse("2026-08-01T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const { container, destroy, startAndWaitForPorts } = createContainerDouble();
+      const request = createRunnerRequest("evt_background_only");
+      await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+      await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+      const next = createRunnerRequest("evt_later_scheduled_work");
+      await container.invoke({ job: { kind: "workspace-invocation", request: next }, timeoutMs: 60_000, userId: next.userId });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
   });
 
-  it("cleans up when early activity-expiry renewal throws", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const renewActivityTimeout = vi.fn();
-      const { container, destroy } = createContainerDouble();
-      Object.assign(container, {
-        renewActivityTimeout,
-      });
-
-      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
-      await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_recent_activity_before_throw"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
-
-      renewActivityTimeout.mockImplementation(() => {
-        throw new Error("activity timeout renewal failed");
-      });
-      vi.clearAllMocks();
-
-      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
-      await container.onActivityExpired();
-
-      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
-      expect(destroy).toHaveBeenCalledTimes(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            activityStage: "activity-expired-early-renew",
-          }),
-          level: "warn",
-          message: "Hosted execution container failed to renew activity timeout.",
-          phase: "container.ready",
-        }),
-      );
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            idleTtlDeltaMs: -298_000,
-            lifecycleStage: "activity-expired-cleanup",
-            runnerIdleTtlMs: 300_000,
-          }),
-          message: "Hosted execution container activity expired; running cleanup.",
-          phase: "container.ready",
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
+  it.each(["before-result", "after-result"] as const)("concurrent exact completion notifications %s still stop a drained background invocation", async (arrival) => {
+    const started = createDeferred<void>();
+    const finished = createDeferred<void>();
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return Response.json(createRunnerHealthResult());
+        started.resolve();
+        await finished.promise;
+        return Response.json(createRunnerResult());
+      }),
+    });
+    const request = createRunnerRequest("evt_concurrent_completion_cleanup");
+    const invocation = container.invoke({
+      job: { kind: "workspace-invocation", request },
+      timeoutMs: 60_000,
+      userId: request.userId,
+    });
+    await started.promise;
+    if (arrival === "after-result") {
+      finished.resolve();
+      await invocation;
     }
+    const completion = {
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: request.userId,
+    };
+    const notifications = Promise.all([
+      container.onRuntimeCompletionRecorded(completion),
+      container.onRuntimeCompletionRecorded(completion),
+    ]);
+    expect(destroy).not.toHaveBeenCalled();
+    finished.resolve();
+    await Promise.all([invocation, notifications]);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
   });
 
-  it("renews the activity timeout during long runner invocations", async () => {
-    vi.useFakeTimers();
+  it("concurrent old completion notifications preserve a queued successor invocation", async () => {
+    const successorStarted = createDeferred<void>();
+    const successorFinished = createDeferred<void>();
+    let invocationCount = 0;
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return Response.json(createRunnerHealthResult());
+        if (++invocationCount === 2) {
+          successorStarted.resolve();
+          await successorFinished.promise;
+        }
+        return Response.json(createRunnerResult());
+      }),
+    });
+    const request = createRunnerRequest("evt_old_completion_cleanup");
+    await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+    const completion = { attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId };
+    const firstNotification = container.onRuntimeCompletionRecorded(completion);
+    const successorRequest = createRunnerRequest("evt_successor_completion_cleanup");
+    const successor = container.invoke({ job: { kind: "workspace-invocation", request: successorRequest }, timeoutMs: 60_000, userId: request.userId });
+    const secondNotification = container.onRuntimeCompletionRecorded(completion);
+    await successorStarted.promise;
+    expect(destroy).not.toHaveBeenCalled();
+    successorFinished.resolve();
+    await Promise.all([successor, firstNotification, secondNotification]);
+    expect(destroy).not.toHaveBeenCalled();
+    await container.onRuntimeCompletionRecorded({ attemptId: successorRequest.attemptId, leaseGeneration: successorRequest.leaseGeneration, userId: successorRequest.userId });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
 
+  it.each([
+    ["before-result", "drained"], ["after-result", "drained"],
+    ["before-result", "active-child"], ["after-result", "active-child"],
+    ["before-result", "conversation-warm"], ["after-result", "conversation-warm"],
+    ["before-result", "unknown-health"], ["after-result", "unknown-health"],
+  ] as const)("rechecks an accepted wake's completion %s with %s health", async (arrival, protection) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const response = createDeferred<Response>();
     try {
-      const renewActivityTimeout = vi.fn();
-      let resolveInvocation!: () => void;
-      let markRunnerRequestStarted!: () => void;
-      const invocationReady = new Promise<void>((resolve) => {
-        resolveInvocation = resolve;
-      });
-      const runnerRequestStarted = new Promise<void>((resolve) => {
-        markRunnerRequestStarted = resolve;
-      });
-      const { container } = createContainerDouble({
-        env: {
-          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
-          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "1000",
-        },
+      const completedAt = Date.parse("2026-08-01T12:00:00.125Z");
+      vi.setSystemTime(completedAt);
+      const started = createDeferred<void>();
+      let completed = false;
+      const { container, destroy } = createContainerDouble({
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
-            return new Response(JSON.stringify(createRunnerHealthResult()), {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
+            if (completed && protection === "unknown-health") return new Response(null, { status: 503 });
+            return Response.json({
+              ...createRunnerHealthResult(),
+              activeJobCount: completed && protection === "active-child" ? 1 : 0,
+              conversationActivityReceivedAtEpochMs: completed && protection === "conversation-warm" ? completedAt : null,
             });
           }
-
-          markRunnerRequestStarted();
-          await invocationReady;
-          return new Response(JSON.stringify(createRunnerResult()), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
+          if (url.endsWith("/internal/runtime-wake")) return new Response(null, {
+            status: 204,
+            headers: { "x-runtime-wake-accepted": "1", "x-runtime-wake-identity-checked": "1" },
           });
+          started.resolve();
+          return await response.promise;
         }),
       });
-      Object.assign(container, {
-        renewActivityTimeout,
-      });
-
-      const invokePromise = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_activity_renew"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
-      await runnerRequestStarted;
-      await vi.advanceTimersByTimeAsync(1_250);
-      resolveInvocation();
-
-      await expect(invokePromise).resolves.toEqual(createRunnerResult());
-      expect(renewActivityTimeout.mock.calls.length).toBeGreaterThanOrEqual(3);
+      const request = createRunnerRequest("evt_wake_drained_before_completion");
+      const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+      await started.promise;
+      const completion = { attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId };
+      await expect(container.wakeRuntime(completion)).resolves.toMatchObject({ action: "woken", kind: "accepted" });
+      if (arrival === "after-result") {
+        completed = true;
+        response.resolve(Response.json(createRunnerResult()));
+        await invocation;
+      }
+      const notification = container.onRuntimeCompletionRecorded(completion);
+      completed = true;
+      response.resolve(Response.json(createRunnerResult()));
+      await Promise.all([invocation, notification]);
+      // The old completion generation cannot stop even a drained child.
+      expect(destroy).not.toHaveBeenCalled();
+      const schedules = await container.listSchedules("onActivityExpired");
+      expect(schedules).toHaveLength(1);
+      const recheckAt = schedules[0]!.time * 1_000;
+      expect(recheckAt - completedAt).toBeGreaterThanOrEqual(1_000);
+      expect(recheckAt - completedAt).toBeLessThanOrEqual(2_000);
+      vi.setSystemTime(recheckAt);
+      await container.onActivityExpired();
+      if (protection === "drained") {
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+      } else {
+        expect(destroy).not.toHaveBeenCalled();
+        const expectedAt = protection === "conversation-warm"
+          ? Math.ceil((completedAt + 600_000) / 1_000)
+          : (recheckAt + 60_000) / 1_000;
+        expect(await container.listSchedules("onActivityExpired")).toMatchObject([{ time: expectedAt }]);
+      }
     } finally {
+      response.resolve(Response.json(createRunnerResult()));
       vi.useRealTimers();
     }
   });
+
+  it("native deadline cleanup does not depend on platform activity renewal", async () => {
+    const renewActivityTimeout = vi.fn(() => { throw new Error("synthetic renewal failure"); });
+    const { container, destroy } = createContainerDouble({ initialStatus: "running" });
+    Object.assign(container, { renewActivityTimeout });
+    await container.onActivityExpired();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it.each(["drained", "still-active", "conversation-warm"] as const)(
+    "rechecks a completed invocation's callback drain once, preserving %s evidence",
+    async (outcome) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const completedAt = Date.parse("2026-08-01T12:00:00.125Z");
+        vi.setSystemTime(completedAt);
+        let callbackPending = false;
+        let receipt: number | null = null;
+        const { container, destroy } = createContainerDouble({
+          containerFetch: vi.fn(async (url: string) => Response.json(
+            url.endsWith("/health") ? {
+              ...createRunnerHealthResult(),
+              activeJobCount: callbackPending ? 1 : 0,
+              conversationActivityReceivedAtEpochMs: receipt,
+            } : createRunnerResult(),
+          )),
+        });
+        const request = createRunnerRequest("evt_completion_callback_drain");
+        await container.invoke({
+          job: { kind: "workspace-invocation", request },
+          timeoutMs: 60_000, userId: request.userId,
+        });
+        // The HTTP response settled, but the entrypoint's finally block still
+        // owns the active count while its completion callback awaits this DO.
+        callbackPending = true;
+        const completion = {
+          attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+          userId: request.userId,
+        };
+        await Promise.all([
+          container.onRuntimeCompletionRecorded(completion),
+          container.onRuntimeCompletionRecorded(completion),
+        ]);
+        expect(destroy).not.toHaveBeenCalled();
+        const schedules = await container.listSchedules("onActivityExpired");
+        expect(schedules).toHaveLength(1);
+        const recheckAt = schedules[0]!.time * 1_000;
+        expect(recheckAt - completedAt).toBeGreaterThanOrEqual(1_000);
+        expect(recheckAt - completedAt).toBeLessThanOrEqual(2_000);
+
+        callbackPending = outcome === "still-active";
+        receipt = outcome === "conversation-warm" ? completedAt : null;
+        vi.setSystemTime(recheckAt);
+        await container.onActivityExpired();
+        if (outcome === "drained") {
+          expect(destroy).toHaveBeenCalledOnce();
+          expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+        } else {
+          expect(destroy).not.toHaveBeenCalled();
+          const nextAt = outcome === "conversation-warm"
+            ? Math.ceil((completedAt + 600_000) / 1_000)
+            : (recheckAt + 60_000) / 1_000;
+          expect(await container.listSchedules("onActivityExpired"))
+            .toMatchObject([{ time: nextAt }]);
+          if (outcome === "still-active") {
+            vi.setSystemTime(nextAt * 1_000);
+            await container.onActivityExpired();
+            expect(destroy).not.toHaveBeenCalled();
+            expect(await container.listSchedules("onActivityExpired"))
+              .toMatchObject([{ time: nextAt + 60 }]);
+          }
+        }
+      } finally { vi.useRealTimers(); }
+    },
+  );
+
+  it.each(["default", "system_mailbox"] as const)(
+    "lets active %s work cross expiry, then stops without a new grace period",
+    async (processingMode) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const work = createDeferred<void>();
+      try {
+        const receivedAt = Date.parse("2026-08-01T12:00:00.000Z");
+        vi.setSystemTime(receivedAt);
+        const started = createDeferred<void>();
+        let activeJobCount = 0;
+        const { container, destroy } = createContainerDouble({
+          containerFetch: vi.fn(async (url: string) => {
+            if (url.endsWith("/health")) return Response.json({
+              ...createRunnerHealthResult(), activeJobCount,
+              conversationActivityReceivedAtEpochMs: processingMode === "default" ? receivedAt : null,
+            });
+            activeJobCount = 1;
+            started.resolve();
+            await work.promise;
+            activeJobCount = 0;
+            return Response.json({ ...createRunnerResult(), nextWakeAt: "2026-08-02T12:00:00.000Z" });
+          }),
+        });
+        const renewActivityTimeout = vi.fn();
+        Object.assign(container, { renewActivityTimeout });
+        const request = { ...createRunnerRequest(`evt_cross_expiry_${processingMode}`), processingMode };
+        const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 1_200_000, userId: request.userId });
+        await started.promise;
+        expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
+        const activityCount = renewActivityTimeout.mock.calls.length;
+        vi.setSystemTime(receivedAt + 900_000);
+        const expiry = container.onActivityExpired();
+        await Promise.resolve();
+        expect(destroy).not.toHaveBeenCalled();
+        expect(renewActivityTimeout).toHaveBeenCalledTimes(activityCount);
+        work.resolve();
+        await invocation;
+        await expiry;
+        await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+      } finally { work.resolve(); vi.useRealTimers(); }
+    },
+  );
 
   it("logs container lifecycle stops without aborting active workspace invocations", async () => {
     let markRunnerRequestStarted!: () => void;
@@ -5503,7 +6203,7 @@ describe("RunnerContainer", () => {
     vi.useFakeTimers();
 
     try {
-      const { container } = createContainerDouble();
+      const { container } = createContainerDouble({ env: { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000" } });
       vi.setSystemTime(new Date("2026-06-04T03:51:50.000Z"));
       container.onStart();
       vi.clearAllMocks();
@@ -5522,7 +6222,7 @@ describe("RunnerContainer", () => {
             idleTtlDeltaMs: -8_000,
             lifecycleStage: "onStop",
             runnerIdleTtlMs: 300_000,
-            sleepAfter: "300s",
+            sleepAfter: "60s",
             stopClassification: "unrequested-near-idle-ttl-nonzero-stop",
             stopReason: "exit",
           }),
@@ -5571,7 +6271,7 @@ describe("RunnerContainer", () => {
           component: "container",
           details: expect.objectContaining({
             containerUptimeMs: 292_000,
-            idleTtlDeltaMs: -298_000,
+            idleTtlDeltaMs: -598_000,
             lastActivityObservedAgeMs: 2_000,
             lastActivityObservedStage: "invoke-finished",
             lifecycleStage: "onStop",
@@ -6420,7 +7120,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -6533,7 +7233,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6554,7 +7254,7 @@ describe("RunnerContainer", () => {
     proveFailClosedChildAbortFallback,
   );
 
-  it("retries failed invocation cleanup from the next exact wake", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("retries failed %s invocation cleanup from the next exact wake", async (processingMode) => {
     let destroyAttempts = 0;
     let status: "running" | "stopped" = "running";
     const destroy = vi.fn(async () => {
@@ -6594,7 +7294,7 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "running",
     });
-    const request = createRunnerRequest("evt_cleanup_retry_from_exact_wake");
+    const request = { ...createRunnerRequest("evt_cleanup_retry_from_exact_wake"), processingMode };
 
     const invokeError = await container.invoke({
       job: {
@@ -6616,8 +7316,9 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
+      processingMode,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6706,7 +7407,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("ignores health zero until an absent wake settles the exact stop", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("ignores %s health zero until an absent wake settles the exact stop", async (processingMode) => {
     let healthProbeFails = false;
     let status: "running" | "stopped" = "running";
     const containerFetch = vi.fn(async (url: string) => {
@@ -6758,7 +7459,7 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "running",
     });
-    const request = createRunnerRequest("evt_response_lost_after_accept");
+    const request = { ...createRunnerRequest("evt_response_lost_after_accept"), processingMode };
 
     await expect(container.invoke({
       job: {
@@ -6815,8 +7516,9 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
+      processingMode,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6962,7 +7664,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -7131,6 +7833,7 @@ describe("RunnerContainer", () => {
     await expect(readiness).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     await expect(abortResult).resolves.toBe("accepted");
     expect(destroy).toHaveBeenCalledOnce();
@@ -7405,7 +8108,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7464,7 +8167,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7598,7 +8301,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: request.leaseGeneration,
       processingMode: "system_mailbox",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7607,6 +8310,7 @@ describe("RunnerContainer", () => {
     await expect(lockHolder).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     await expect(abortResult).resolves.toBe("accepted");
     await expect(invokeResult).resolves.toMatchObject({
@@ -7821,7 +8525,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: replacementRequest.leaseGeneration,
       userId: "member_123",
     });
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7912,7 +8616,7 @@ describe("RunnerContainer", () => {
     await abortRequestStarted.promise;
     releasePreservedStatus.resolve(undefined);
 
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7967,7 +8671,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -8200,7 +8904,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -8382,6 +9086,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     await expect(container.invoke({
       job: {
@@ -8847,7 +9552,11 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(failureLogInput)).not.toContain("placeholder");
   });
 
-  it("preserves runtime phase detail through the thrown and persisted error shapes", async () => {
+  it.each([
+    "EACCES",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_UNTRACKED_COMPLETION",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_INTERACTED",
+  ])("preserves runtime phase and %s through thrown and persisted errors", async (code) => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -8862,7 +9571,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "EACCES",
+            errorCodeDetail: code,
             errorDetail: "Missing required file \"vault.json\".",
             runtimeFailurePhaseCode:
               "runtime_phase:workspace.checkpoint.idle_compact",
@@ -8890,13 +9599,13 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "EACCES",
+        errorCodeDetail: code,
         errorDetailPresent: true,
         payloadDetailsPresent: true,
         runtimeFailurePhaseCode:
           "runtime_phase:workspace.checkpoint.idle_compact",
       },
-      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+      message: `Hosted execution runtime failed. Code: ${code}. Status: 500.`,
       name: "Error",
       status: 500,
       statusCode: 500,
@@ -8906,7 +9615,7 @@ describe("RunnerContainer", () => {
       errorCode: "runtime_error",
       errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
       safeErrorDetail:
-        "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+        `Hosted execution runtime failed. Code: ${code}. Status: 500.`,
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });
@@ -9178,11 +9887,29 @@ describe("RunnerContainer", () => {
 
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
-    expect(containerFetch).toHaveBeenCalledOnce();
+    // Check local eligibility before Web, then recheck under the lifecycle lock.
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
     );
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not idle-stop a child while a finished job's completion callback is settling", async () => {
+    let health: Record<string, unknown> = { activeJobCount: 1, settlingCompletionCallbackCount: 1 };
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), ...health,
+    }), { headers: { "content-type": "application/json; charset=utf-8" }, status: 200 }));
+    const destroy = vi.fn(async () => {});
+    const { container } = createContainerDouble({ containerFetch, destroy, initialStatus: "running" });
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    // Lifetime work still includes the settling callback, so idle cleanup waits.
+    expect(destroy).not.toHaveBeenCalled();
+
+    health = { activeJobCount: 0, settlingCompletionCallbackCount: 0 };
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -9432,7 +10159,8 @@ describe("RunnerContainer", () => {
       vi.useRealTimers();
     }
     expect(destroy).toHaveBeenCalledTimes(1);
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("fails closed before reusing a warm shell after best-effort cleanup does not settle", async () => {
@@ -9489,7 +10217,7 @@ describe("RunnerContainer", () => {
     }
 
     expect(destroy).toHaveBeenCalledTimes(2);
-    expect(containerFetch).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/health",
       expect.objectContaining({ method: "GET" }),
@@ -9686,14 +10414,14 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("aligns the container sleepAfter with the configured idle lifecycle", () => {
+  it("keeps the safety reevaluation cadence separate from a configured receipt TTL", () => {
     const { container } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2500",
       },
     });
 
-    expect(container.sleepAfter).toBe("3s");
+    expect(container.sleepAfter).toBe("60s");
   });
 
   it("uses the short lifecycle cadence without shortening conversation warmth", () => {
@@ -9742,8 +10470,8 @@ describe("RunnerContainer", () => {
   });
 
   it.each([
-    ["primary", "overdue"], ["primary", "immediate"],
-    ["next", "overdue"], ["next", "immediate"],
+    ["primary", "overdue"], ["primary", "immediate"], ["primary", "future"],
+    ["next", "overdue"], ["next", "immediate"], ["next", "future"],
   ] as const)(
     "retires completed idle previous bank %s despite an %s wake",
     async (bank, wake) => {
@@ -9753,7 +10481,7 @@ describe("RunnerContainer", () => {
         ...createRunnerResult(),
         ...(wake === "immediate"
           ? { immediateRecheckRequested: true }
-          : { nextWakeAt: "2026-01-01T00:00:00.000Z" }),
+          : { nextWakeAt: wake === "future" ? "2030-01-01T00:00:00.000Z" : "2026-01-01T00:00:00.000Z" }),
       };
       const { container, destroy, startAndWaitForPorts } = createContainerDouble({
         containerClass: bank === "primary" ? RunnerContainer : NextRunnerContainer,
@@ -9779,7 +10507,7 @@ describe("RunnerContainer", () => {
   it.each([
     "active-release", "candidate-release", "legacy-release", "active-child",
     "conversation-warm", "missing-warmth", "unknown-health",
-  ] as const)("preserves %s after previous-release completion checks", async (protection) => {
+  ] as const)("uses work and receipt evidence, not %s release/wake retention", async (protection) => {
     const previous = { bank: "primary", id: "primary-old", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
     const active = { bank: "next", id: "next-current", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
     const currentBank = protection === "active-release" || protection === "candidate-release";
@@ -9802,8 +10530,8 @@ describe("RunnerContainer", () => {
           runnerBundle: { bundleFingerprint: release.bundleFingerprint, sourceFingerprint: release.sourceFingerprint },
         };
         if (completionRecorded && protection === "active-child") health.activeJobCount = 1;
-        if (completionRecorded && protection === "conversation-warm") health.conversationWarmActivityCompletedAtEpochMs = Date.now();
-        if (completionRecorded && protection === "missing-warmth") delete health.conversationWarmActivityCompletedAtEpochMs;
+        if (completionRecorded && protection === "conversation-warm") health.conversationActivityReceivedAtEpochMs = Date.now();
+        if (completionRecorded && protection === "missing-warmth") delete health.conversationActivityReceivedAtEpochMs;
         return Response.json(health);
       }),
     });
@@ -9811,7 +10539,13 @@ describe("RunnerContainer", () => {
     await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 30_000, userId: request.userId });
     completionRecorded = true;
     await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
-    expect(destroy).not.toHaveBeenCalled();
+    if (["active-child", "conversation-warm", "unknown-health"].includes(protection)) {
+      expect(destroy).not.toHaveBeenCalled();
+      expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
+    } else {
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+    }
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
@@ -9850,56 +10584,44 @@ describe("RunnerContainer", () => {
     })).rejects.toThrow("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
   });
 
-  it("defaults the warm container idle lifecycle to five minutes", () => {
+  it("defaults lifecycle reevaluation to one minute independently of receipt warmth", () => {
     const { container } = createContainerDouble();
-
-    expect(container.sleepAfter).toBe("300s");
+    expect(container.sleepAfter).toBe("60s");
   });
 
-  it("re-arms each conversation-warm expiry and destroys at the first check after the lease", async () => {
+  it("schedules the ten-minute receipt deadline despite generic activity, and only a newer receipt extends it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const activityAtMs = Date.parse("2026-07-22T12:00:00.000Z");
-      let expiryArmed = true;
-      const renewActivityTimeout = vi.fn(() => {
-        expiryArmed = true;
-      });
+      const firstReceipt = Date.parse("2026-08-01T12:00:00.125Z");
+      let receipt = firstReceipt;
+      vi.setSystemTime(firstReceipt);
       const { container, destroy } = createContainerDouble({
-        env: {
-          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
-          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
-        },
         initialStatus: "running",
-        containerFetch: vi.fn(async () => new Response(JSON.stringify({
-          ...createRunnerHealthResult(),
-          conversationWarmActivityCompletedAtEpochMs: activityAtMs,
-        }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
+        containerFetch: vi.fn(async () => Response.json({
+          ...createRunnerHealthResult(), conversationActivityReceivedAtEpochMs: receipt,
         })),
       });
-      Object.assign(container, { renewActivityTimeout });
-      const deliverExpiryAt = async (nowMs: number) => {
-        expect(expiryArmed).toBe(true);
-        expiryArmed = false;
-        vi.setSystemTime(nowMs);
+      for (const elapsed of [0, 300_000, 599_000]) {
+        vi.setSystemTime(firstReceipt + elapsed);
+        container.renewActivityTimeout();
         await container.onActivityExpired();
-      };
-
-      for (let minute = 1; minute < 20; minute += 1) {
-        await deliverExpiryAt(activityAtMs + (minute * 60_000));
         expect(destroy).not.toHaveBeenCalled();
-        expect(renewActivityTimeout).toHaveBeenCalledTimes(minute);
+        expect(await container.listSchedules("onActivityExpired")).toMatchObject([
+          { time: Math.ceil((firstReceipt + 600_000) / 1_000) },
+        ]);
       }
-
-      await deliverExpiryAt(activityAtMs + 1_200_000);
-
+      receipt = firstReceipt + 599_999;
+      vi.setSystemTime(firstReceipt + 600_000);
+      await container.onActivityExpired();
+      expect(destroy).not.toHaveBeenCalled();
+      expect(await container.listSchedules("onActivityExpired")).toMatchObject([
+        { time: Math.ceil((receipt + 600_000) / 1_000) },
+      ]);
+      vi.setSystemTime(receipt + 600_000);
+      await container.onActivityExpired();
       expect(destroy).toHaveBeenCalledOnce();
-      expect(renewActivityTimeout).toHaveBeenCalledTimes(19);
-      expect(expiryArmed).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
+      expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+    } finally { vi.useRealTimers(); }
   });
 
   it("destroys maintenance-only work at the first short-cadence expiry", async () => {
@@ -9919,12 +10641,13 @@ describe("RunnerContainer", () => {
     expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
-  it("re-arms an idle legacy child that omits the optional warmth watermark", async () => {
+  it("drains an idle legacy child without trusting its completion timestamp", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       initialStatus: "running",
       containerFetch: vi.fn(async () => new Response(JSON.stringify({
         activeJobCount: 0,
+        conversationWarmActivityCompletedAtEpochMs: Date.now(),
         hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
         ok: true,
       }), {
@@ -9936,8 +10659,57 @@ describe("RunnerContainer", () => {
 
     await container.onActivityExpired();
 
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("does not restart a natively stopped container during lifecycle health cleanup", async () => {
+    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: false,
+    });
+
+    await container.onActivityExpired();
+
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("does not restart a container that stops between lifecycle status and health reads", async () => {
+    let platformRunning = true;
+    const startContainer = vi.fn();
+    const health = vi.fn(async () => {
+      // The native request observes stoppedness after the cleanup status read.
+      platformRunning = false;
+      throw new Error("Container is not running");
+    });
+    const sdkFetch = vi.fn(async () => {
+      platformRunning = false;
+      // Model the SDK's automatic restart when its cached status is stale.
+      startContainer();
+      return Response.json(createRunnerHealthResult());
+    });
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: sdkFetch,
+      state: {
+        container: {
+          get running() { return platformRunning; },
+          getTcpPort: () => ({ fetch: health }),
+        },
+      },
+    });
+
+    await container.onActivityExpired();
+
+    expect(startContainer).not.toHaveBeenCalled();
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(health).toHaveBeenCalledOnce();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("re-arms cleanup when child health is unavailable", async () => {
@@ -9953,7 +10725,8 @@ describe("RunnerContainer", () => {
     await container.onActivityExpired();
 
     expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("re-arms cleanup when container status is unavailable", async () => {
@@ -9970,7 +10743,50 @@ describe("RunnerContainer", () => {
 
     expect(containerFetch).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
+  });
+
+  it("leaves lifecycle scheduling to readiness when a warm controller is reconstructed", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+    });
+    // Flush constructor continuations before observing persisted schedules.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).resolves.toMatchObject({ kind: "ready" });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
+  });
+
+  it("retains the native receipt deadline across DO reactivation of the same child", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const receipt = Date.parse("2026-08-01T12:00:00.000Z");
+      vi.setSystemTime(receipt);
+      const storage = createContainerStorageDouble();
+      const health = vi.fn(async () => Response.json({ ...createRunnerHealthResult(), conversationActivityReceivedAtEpochMs: receipt }));
+      const original = createContainerDouble({ storage, initialStatus: "running", containerFetch: health });
+      await original.container.onActivityExpired();
+      const schedules = await original.container.listSchedules("onActivityExpired");
+      vi.setSystemTime(receipt + 420_000);
+      const reactivated = createContainerDouble({ storage, initialStatus: "running", platformRunning: true, containerFetch: health });
+      await Promise.resolve();
+      expect(await reactivated.container.listSchedules("onActivityExpired")).toEqual(schedules);
+      await reactivated.container.onActivityExpired();
+      expect(reactivated.destroy).not.toHaveBeenCalled();
+      expect(await reactivated.container.listSchedules("onActivityExpired")).toMatchObject([{ time: (receipt + 600_000) / 1_000 }]);
+      vi.setSystemTime(receipt + 600_000);
+      await reactivated.container.onActivityExpired();
+      expect(reactivated.destroy).toHaveBeenCalledOnce();
+      await expect(storage.list()).resolves.toEqual(new Map());
+    } finally { vi.useRealTimers(); }
   });
 
   it("does not transfer conversation warmth to a replacement child", async () => {
@@ -9981,7 +10797,7 @@ describe("RunnerContainer", () => {
       storage,
       containerFetch: vi.fn(async () => new Response(JSON.stringify({
         ...createRunnerHealthResult(),
-        conversationWarmActivityCompletedAtEpochMs: activityAtMs,
+        conversationActivityReceivedAtEpochMs: activityAtMs,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -9993,7 +10809,9 @@ describe("RunnerContainer", () => {
     await warmChild.container.onActivityExpired();
 
     expect(warmChild.destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(await warmChild.container.listSchedules("onActivityExpired")).toMatchObject([
+      { time: Math.ceil((activityAtMs + 600_000) / 1_000) },
+    ]);
 
     const replacement = createContainerDouble({
       initialStatus: "running",
@@ -10002,6 +10820,7 @@ describe("RunnerContainer", () => {
     await replacement.container.onActivityExpired();
 
     expect(replacement.destroy).toHaveBeenCalledOnce();
+    expect(await replacement.container.listSchedules("onActivityExpired")).toEqual([]);
     await expect(storage.list()).resolves.toEqual(new Map());
   });
 
@@ -10023,7 +10842,8 @@ describe("RunnerContainer", () => {
     await container.onActivityExpired();
 
     expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("does not destroy when a runtime wake races the expiry health check", async () => {
@@ -10068,7 +10888,8 @@ describe("RunnerContainer", () => {
     await expect(wake).resolves.toMatchObject({ kind: "accepted" });
     await expect(expiry).resolves.toBeUndefined();
     expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledTimes(2);
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("does not destroy when a runtime wake races the final status check", async () => {
@@ -10077,7 +10898,7 @@ describe("RunnerContainer", () => {
     let statusReadCount = 0;
     const getState = vi.fn(async () => {
       statusReadCount += 1;
-      if (statusReadCount === 2) {
+      if (statusReadCount === 3) {
         finalStatusStarted.resolve();
         await releaseFinalStatus.promise;
       }
@@ -10123,7 +10944,8 @@ describe("RunnerContainer", () => {
 
     await expect(expiry).resolves.toBeUndefined();
     expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledTimes(2);
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("does not destroy when a pointerless wake completes during the final status check", async () => {
@@ -10134,7 +10956,7 @@ describe("RunnerContainer", () => {
     let statusReadCount = 0;
     const getState = vi.fn(async () => {
       statusReadCount += 1;
-      if (statusReadCount === 2) {
+      if (statusReadCount === 3) {
         finalStatusStarted.resolve(undefined);
         await releaseFinalStatus.promise;
       }
@@ -10298,48 +11120,22 @@ describe("RunnerContainer", () => {
     expect(stopped.destroy).not.toHaveBeenCalled();
   });
 
-  it("posts the invoke envelope with the member routing key to the named runner container instance", async () => {
-    const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
 
-    await invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
+  it("ensureProcessing returns the bounded failed response to an old Worker invoke arm", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => url.endsWith("/health")
+        ? Response.json(createRunnerHealthResult())
+        : Response.json({ code: "runtime_error", error: "Hosted execution runtime failed.",
+          details: { runtimeFailurePhaseCode: "runtime_phase:workspace.checkpoint.idle_compact" } }, { status: 500 })),
     });
-
-    expect(getByName).toHaveBeenCalledWith("member_123");
-    const firstCall = invoke.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the runner container stub to be invoked.");
-    }
-    const body = requireObject(firstCall.at(0), "Runner container invoke payload");
-    expect(body).toMatchObject({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace"),
-      },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    });
+    await expect(container.ensureProcessing({ userId: "member_123", invoke: {
+      userId: "member_123", job: { kind: "workspace-invocation", request: createRunnerRequest("evt_failed_compatibility") },
+    } })).resolves.toEqual({ kind: "failed", failure: {
+      errorCodeDetail: null, runtimeFailurePhaseCode: "runtime_phase:workspace.checkpoint.idle_compact", status: 500,
+    } });
   });
 
-  it("retries a prepared invocation once when the warm runner is shutting down", async () => {
+  it("ensureProcessing exposes shutdown start-required and accepts replacement", async () => {
     let workspaceInvocationCount = 0;
     const { container, containerFetch, destroy, startAndWaitForPorts } =
       createContainerDouble({
@@ -10374,19 +11170,13 @@ describe("RunnerContainer", () => {
           });
         }),
       });
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
+    const input = { invoke: {
+      job: { kind: "workspace-invocation" as const, request: createRunnerRequest("evt_shutdown_retry") },
+      timeoutMs: 45_000, userId: "member_123",
+    }, userId: "member_123" };
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "start-required", reason: "no-active-child" });
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "accepted", action: "started", result: createRunnerResult() });
 
-    await expect(invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_shutdown_retry"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(getByName).toHaveBeenCalledOnce();
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     );
@@ -10395,7 +11185,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the shutdown replacement retry when warm cleanup rejects", async () => {
+  it("ensureProcessing exposes shutdown start-required and accepts replacement after rejected cleanup", async () => {
     let workspaceInvocationCount = 0;
     let stateReadCount = 0;
     const { container, containerFetch, destroy, startAndWaitForPorts } =
@@ -10442,17 +11232,12 @@ describe("RunnerContainer", () => {
           });
         }),
       });
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
-
-    await expect(invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_shutdown_retry_cleanup_rejects"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
+    const input = { invoke: {
+      job: { kind: "workspace-invocation" as const, request: createRunnerRequest("evt_shutdown_retry_cleanup_rejects") },
+      timeoutMs: 45_000, userId: "member_123",
+    }, userId: "member_123" };
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "start-required", reason: "no-active-child" });
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "accepted", action: "started", result: createRunnerResult() });
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
@@ -10462,43 +11247,6 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
-  it("uses an explicit runner container name without changing the job user identity", async () => {
-    const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace"),
-      },
-      runnerContainerName: "member_123--v-version-123",
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    });
-
-    expect(getByName).toHaveBeenCalledWith("member_123--v-version-123");
-    const firstCall = invoke.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the runner container stub to be invoked.");
-    }
-    const body = requireObject(firstCall.at(0), "Runner container invoke payload");
-    expect(body).toMatchObject({
-      timeoutMs: 45_000,
-      userId: "member_123",
-    });
-  });
 
   it("resolves runner container names from worker version metadata", () => {
     expect(resolveHostedExecutionRunnerContainerName({
@@ -10526,34 +11274,6 @@ describe("RunnerContainer", () => {
     })).toBe("member_123");
   });
 
-  it("rejects mismatched route and job identities before selecting a container", async () => {
-    const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await expect(invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace_mismatch"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_other",
-    })).rejects.toThrow("route userId must match workspace job userId");
-
-    expect(getByName).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
-  });
 
   it("rejects durable-object invoke payloads with mismatched route and job identities", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
@@ -10570,34 +11290,6 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("rejects workspace-invocation route mismatches against the workspace job userId", async () => {
-    const invoke = vi.fn(async () => ({
-      nextWakeAt: null,
-      status: "idle" as const,
-    }));
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await expect(invokeHostedExecutionContainerRunner({
-      job: createWorkspaceRunnerJob("member_workspace_job"),
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_other",
-    })).rejects.toThrow("route userId must match workspace job userId");
-
-    expect(getByName).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
-  });
 
   it("forwards workspace-invocation jobs without run-drain fields to the container shell", async () => {
     const { container, containerFetch } = createContainerDouble({
@@ -10666,90 +11358,7 @@ describe("RunnerContainer", () => {
     expect(forwardedJob).not.toHaveProperty("runToken");
   });
 
-  it("aborts foreground workspace helpers without destroying the warm shell", async () => {
-    const abortController = new AbortController();
-    const abortWorkspaceInvocation = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "accepted");
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
-      async () => new Promise<never>(() => {}),
-    );
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      abortWorkspaceInvocation,
-      destroyInstance,
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
 
-    const job = createWorkspaceRunnerJob("member_foreground_abort");
-    const invocation = invokeHostedExecutionContainerRunner({
-      job,
-      runnerContainerNamespace: { getByName },
-      signal: abortController.signal,
-      timeoutMs: 45_000,
-      userId: "member_foreground_abort",
-    });
-
-    abortController.abort(new Error("stale local active invocation"));
-
-    await expect(invocation).rejects.toThrow("stale local active invocation");
-    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
-      attemptId: job.request.attemptId,
-      leaseGeneration: job.request.leaseGeneration,
-      userId: "member_foreground_abort",
-    });
-    expect(destroyInstance).not.toHaveBeenCalled();
-  });
-
-  it("does not wait for timed-out container destroy cleanup before rejecting", async () => {
-    const abortController = new AbortController();
-    const abortWorkspaceInvocation = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "accepted");
-    const destroyInstance = vi.fn(async () => {
-      await new Promise<void>(() => undefined);
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
-      async () => new Promise<never>(() => {}),
-    );
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      abortWorkspaceInvocation,
-      destroyInstance,
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    const invocation = invokeHostedExecutionContainerRunner({
-      job: createWorkspaceRunnerJob("member_hard_timeout"),
-      runnerContainerNamespace: { getByName },
-      signal: abortController.signal,
-      timeoutMs: 45_000,
-      userId: "member_hard_timeout",
-    });
-
-    abortController.abort(new DOMException("The operation timed out.", "TimeoutError"));
-
-    await expect(invocation).rejects.toMatchObject({
-      name: "TimeoutError",
-    });
-    expect(destroyInstance).toHaveBeenCalledTimes(1);
-    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
-  });
 
   it("rejects explicit run-drain runner jobs at the container boundary", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
@@ -10897,17 +11506,14 @@ interface CreateContainerDoubleInput {
 function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
   let currentLastChange = Date.now();
-  const platformContainer = input.platformRunning === undefined
-    ? undefined
-    : {
-        get running(): boolean {
-          return input.platformRunning === true;
-        },
-      };
+  const platformContainer = {
+    get running(): boolean | undefined { return input.platformRunning; },
+    getTcpPort: () => ({ fetch: containerFetch }),
+  };
   const ContainerClass = input.containerClass ?? RunnerContainer;
   const storage = input.storage ?? createContainerStorageDouble();
   const container = new ContainerClass({
-    ...(platformContainer ? { container: platformContainer } : {}),
+    container: platformContainer,
     storage,
     ...(input.state ?? {}),
   } as never, {
@@ -11063,7 +11669,6 @@ function createCodexShellSmokeResult() {
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
     healthCommonsCliGoalProofCount: 6,
-    murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,
     vaultCliLlmsBytes: 4096,
@@ -11190,7 +11795,7 @@ function createRunnerHealthResult(): Record<string, unknown> {
   const now = Date.now();
   return {
     activeJobCount: 0,
-    conversationWarmActivityCompletedAtEpochMs: null,
+    conversationActivityReceivedAtEpochMs: null,
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
     processStartedAtEpochMs: Math.max(0, now - 20),

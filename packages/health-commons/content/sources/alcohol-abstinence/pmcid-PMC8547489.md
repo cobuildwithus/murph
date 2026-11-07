@@ -14,14 +14,8 @@ aliases:
   - 'candidate:alcohol-reduction-comparators:047'
 categories:
   - 'alcohol-abstinence'
-relations:
+relations: []
 
-  -
-    type: 'related_protocol'
-    target: 'protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence'
-  -
-    type: 'parent_family'
-    target: 'experiment_family:alcohol-abstinence'
 source:
   kind: 'journal_article'
   title: 'Change in Alcohol Use and Association with Positive and Negative Emotions in Chronic Hepatitis C Patients'

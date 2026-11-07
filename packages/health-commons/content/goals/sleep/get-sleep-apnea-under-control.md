@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:get-sleep-apnea-under-control
 slug: get-sleep-apnea-under-control
-title: Get Sleep Apnea Under Control
-summary: Confirm the diagnosis, choose an effective treatment, and follow symptoms and treatment data until breathing is reliably controlled.
+title: Follow My Sleep Apnea Plan
+summary: Organize prescribed sleep apnea care, track use and comfort, and prepare questions for your treating team.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ categories:
 goal:
   category: sleep
   outcomeKind: symptom
-  goalPhrase: get my sleep apnea under control
+  goalPhrase: follow my sleep apnea plan
   successSignals:
     - id: effective_apnea_treatment
       kind: behavior
@@ -37,7 +37,7 @@ goal:
     ownerSkillIds:
       - sleep-improvement
       - sleep-recovery-readiness
-  startPrompt: Hey Murph, help me get my sleep apnea under control.
+  startPrompt: Hey Murph, help me follow my sleep apnea plan.
   indexable: true
 safety:
   cautionLevel: high

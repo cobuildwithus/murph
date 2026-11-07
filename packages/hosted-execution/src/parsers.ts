@@ -1,3 +1,4 @@
+import { gameGroupMissedCheckInPolicySchema } from "./game-group-missed.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
   parseHostedVaultShareRevokePayload,
@@ -8,7 +9,6 @@ import {
 } from "./builders.ts";
 import {
   assistantPersonalitySettingIds,
-  getEnvironmentInterviewTopicGroup,
   isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
   isAssistantTonePreference,
@@ -16,15 +16,13 @@ import {
   normalizeStoredAssistantPersonaId,
   normalizeIanaTimeZone,
   parseMemberActionRequestV1,
+  companionMealUploadIdSchema,
   parseMemberActionOutcomeV1,
-  validateEnvironmentInterviewAnswer,
 } from "@murphai/contracts";
 
 import {
   HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
-  HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -65,8 +63,6 @@ import type {
   HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
-  HostedExecutionEnvironmentVoiceCapturedPayload,
-  HostedExecutionEnvironmentInterviewCompletedPayload,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionMemberActionRequestedEvent,
   HostedExecutionMemberActionCompletedEvent,
@@ -83,7 +79,6 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
   HostedExecutionPlainRuntimeControlWakeKind,
-  HostedCodexAuthAction,
 } from "./contracts.ts";
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
@@ -109,15 +104,12 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
-  buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionGroupJournalFactRecordedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActionCompletedWake,
   buildHostedExecutionConversationMessageWake,
-  buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -199,8 +191,8 @@ export {
   parseHostedIngressLatencySource,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
-  parseHostedCodexAuthUpdate,
-  parseHostedCodexAuthUpdateResponse,
+  parseHostedRuntimeLatencyTraceBatchRequest,
+  parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceEvent,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
@@ -231,6 +223,10 @@ export {
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
 export {
+  assertHostedRuntimeWebProtocolAdmission,
+  parseHostedExternalThreadRouteAuthorityResponse,
+} from "./parsers/runtime-protocol.ts";
+export {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeRedactedJson,
   parseHostedRuntimeLogRequest,
@@ -246,13 +242,34 @@ export {
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
-function parseHostedExecutionJournalDataWake(input: {
+function parseHostedClinicalEnrichmentWakeJobId(record: Record<string, unknown>): string {
+  assertExactHostedClinicalRecordsKeys(
+    record,
+    ["eventId", "jobId", "kind", "occurredAt", "userId"],
+    "Hosted execution wake clinical-records.enrichment-requested",
+  );
+  if (typeof record.jobId !== "string" || !/^[a-f0-9]{64}$/u.test(record.jobId)) {
+    throw new TypeError("Hosted clinical enrichment job identity is invalid.");
+  }
+  return record.jobId;
+}
+
+function parseHostedExecutionVaultDataWake(input: {
   eventId: string;
   kind: string;
   occurredAt: string;
   record: Record<string, unknown>;
   wireUserId: string;
 }): HostedExecutionWake | null {
+  if (input.kind === "clinical-records.enrichment-requested") {
+    return {
+      eventId: input.eventId,
+      jobId: parseHostedClinicalEnrichmentWakeJobId(input.record),
+      occurredAt: input.occurredAt,
+      kind: input.kind,
+      userId: input.wireUserId,
+    };
+  }
   if (input.kind === "health.daily-metric.reported") {
     assertExactHostedExecutionKeys(
       input.record,
@@ -293,14 +310,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
   const wireUserId = requireString(record.userId, "Hosted execution wake userId");
-  const journalDataWake = parseHostedExecutionJournalDataWake({
+  const vaultDataWake = parseHostedExecutionVaultDataWake({
     eventId,
     kind,
     occurredAt,
     record,
     wireUserId,
   });
-  if (journalDataWake) return journalDataWake;
+  if (vaultDataWake) return vaultDataWake;
 
   switch (kind) {
     case "conversation.message":
@@ -548,74 +565,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         );
       }
       return buildHostedExecutionMealPhotoCapturedWake({
-        byteLength: mealPhoto.byteLength,
-        captureId: mealPhoto.captureId,
-        capturedAt: mealPhoto.capturedAt,
+        ...mealPhoto,
         directRoute: parseHostedExecutionDirectRoute(
           record.directRoute,
           "Hosted execution wake meal-photo.captured directRoute",
         ),
         eventId,
-        mealPhotoKey: mealPhoto.mealPhotoKey,
         memberId: wireUserId,
         occurredAt,
-        sha256: mealPhoto.sha256,
-      });
-    }
-    case "environment-voice.captured": {
-      assertExactHostedExecutionKeys(record, [
-        "environmentVoice",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution environment-voice.captured wake");
-      const environmentVoice =
-        parseHostedExecutionEnvironmentVoiceCapturedPayload(
-          record.environmentVoice,
-        );
-      if (environmentVoice.capturedAt !== occurredAt) {
-        throw new TypeError(
-          "Hosted execution wake environment-voice.captured occurredAt must match capturedAt.",
-        );
-      }
-      return buildHostedExecutionEnvironmentVoiceCapturedWake({
-        audioKey: environmentVoice.audioKey,
-        byteLength: environmentVoice.byteLength,
-        captureId: environmentVoice.captureId,
-        capturedAt: environmentVoice.capturedAt,
-        contentType: environmentVoice.contentType,
-        durationMs: environmentVoice.durationMs,
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-        sha256: environmentVoice.sha256,
-      });
-    }
-    case "environment-interview.completed": {
-      assertExactHostedExecutionKeys(record, [
-        "environmentInterview",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution environment-interview.completed wake");
-      const environmentInterview =
-        parseHostedExecutionEnvironmentInterviewCompletedPayload(
-          record.environmentInterview,
-        );
-      if (environmentInterview.completedAt !== occurredAt) {
-        throw new TypeError(
-          "Hosted execution wake environment-interview.completed occurredAt must match completedAt.",
-        );
-      }
-      return buildHostedExecutionEnvironmentInterviewCompletedWake({
-        completedAt: environmentInterview.completedAt,
-        completionId: environmentInterview.completionId,
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-        topics: environmentInterview.topics,
       });
     }
     case "runtime.manual-requested":
@@ -626,22 +583,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       return buildHostedExecutionRuntimeControlWake({
         eventId,
         kind,
-        occurredAt,
-        userId: wireUserId,
-      });
-    case "runtime.codex-auth-requested":
-      assertExactHostedExecutionKeys(record, [
-        "action",
-        "attemptId",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution runtime.codex-auth-requested wake");
-      return buildHostedExecutionCodexAuthRequestedWake({
-        action: parseHostedCodexAuthAction(record.action),
-        attemptId: parseHostedCodexAuthAttemptId(record.attemptId),
-        eventId,
         occurredAt,
         userId: wireUserId,
       });
@@ -713,245 +654,15 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
   }
 
   return {
+    ...(record.uploadId === undefined ? {} : {
+      uploadId: companionMealUploadIdSchema.parse(record.uploadId),
+    }),
     byteLength,
     captureId,
     capturedAt,
     mealPhotoKey,
     sha256,
   };
-}
-
-export function parseHostedExecutionEnvironmentVoiceCapturedPayload(
-  value: unknown,
-): HostedExecutionEnvironmentVoiceCapturedPayload {
-  const record = requireObject(
-    value,
-    "Hosted execution environment-voice.captured payload",
-  );
-  assertExactHostedEnvironmentVoiceKeys(record);
-
-  const audioKey = requireString(
-    record.audioKey,
-    "Hosted execution environment-voice.captured audioKey",
-  );
-  if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured audioKey is invalid.",
-    );
-  }
-
-  const captureId = requireString(
-    record.captureId,
-    "Hosted execution environment-voice.captured captureId",
-  );
-  if (!/^[a-f0-9]{64}$/u.test(captureId)) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured captureId must be a lowercase SHA-256 digest.",
-    );
-  }
-
-  const capturedAt = requireString(
-    record.capturedAt,
-    "Hosted execution environment-voice.captured capturedAt",
-  );
-  if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(capturedAt)
-    || !Number.isFinite(Date.parse(capturedAt))
-  ) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured capturedAt must be an ISO timestamp.",
-    );
-  }
-
-  const byteLength = record.byteLength;
-  if (
-    typeof byteLength !== "number"
-    || !Number.isSafeInteger(byteLength)
-    || byteLength <= 0
-    || byteLength > HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES
-  ) {
-    throw new TypeError(
-      `Hosted execution environment-voice.captured byteLength must be between 1 and ${HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES}.`,
-    );
-  }
-
-  const durationMs = record.durationMs;
-  if (
-    typeof durationMs !== "number"
-    || !Number.isSafeInteger(durationMs)
-    || durationMs <= 0
-    || durationMs > 3 * 60 * 1_000
-  ) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured durationMs must be between 1 and 180000.",
-    );
-  }
-
-  const contentType = requireString(
-    record.contentType,
-    "Hosted execution environment-voice.captured contentType",
-  );
-  const normalizedContentType =
-    HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES.find(
-      (candidate) => candidate === contentType,
-    );
-  if (!normalizedContentType) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured contentType is invalid.",
-    );
-  }
-
-  const sha256 = requireString(
-    record.sha256,
-    "Hosted execution environment-voice.captured sha256",
-  );
-  if (!/^[a-f0-9]{64}$/u.test(sha256)) {
-    throw new TypeError(
-      "Hosted execution environment-voice.captured sha256 must be a lowercase SHA-256 digest.",
-    );
-  }
-
-  return {
-    audioKey,
-    byteLength,
-    captureId,
-    capturedAt,
-    contentType: normalizedContentType,
-    durationMs,
-    sha256,
-  };
-}
-
-export function parseHostedExecutionEnvironmentInterviewCompletedPayload(
-  value: unknown,
-): HostedExecutionEnvironmentInterviewCompletedPayload {
-  const record = requireObject(
-    value,
-    "Hosted execution environment-interview.completed payload",
-  );
-  assertExactHostedExecutionKeys(record, [
-    "completedAt",
-    "completionId",
-    "topics",
-  ], "Hosted execution environment-interview.completed payload");
-  const completedAt = requireString(
-    record.completedAt,
-    "Hosted execution environment-interview.completed completedAt",
-  );
-  if (!isIsoTimestamp(completedAt)) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed completedAt must be an ISO timestamp.",
-    );
-  }
-  const completionId = requireString(
-    record.completionId,
-    "Hosted execution environment-interview.completed completionId",
-  );
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(completionId)) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed completionId must be a UUID v4.",
-    );
-  }
-  const topics = requireArray(
-    record.topics,
-    "Hosted execution environment-interview.completed topics",
-  );
-  if (topics.length < 1 || topics.length > 5) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed must contain one to five topics.",
-    );
-  }
-  let answerCount = 0;
-  const parsedTopics = topics.map((topicValue, topicIndex) => {
-    const topic = requireObject(
-      topicValue,
-      `Hosted execution environment-interview.completed topic ${topicIndex}`,
-    );
-    assertExactHostedExecutionKeys(topic, [
-      "answers",
-      "topicId",
-    ], `Hosted execution environment-interview.completed topic ${topicIndex}`);
-    const topicId = requireString(
-      topic.topicId,
-      `Hosted execution environment-interview.completed topic ${topicIndex} id`,
-    );
-    if (!/^[a-z]+(?::[0-9]+)?$/u.test(topicId) || !getEnvironmentInterviewTopicGroup(topicId)) {
-      throw new TypeError(
-        "Hosted execution environment-interview.completed topic id is invalid.",
-      );
-    }
-    const answers = requireArray(
-      topic.answers,
-      `Hosted execution environment-interview.completed topic ${topicIndex} answers`,
-    );
-    if (answers.length < 1 || answers.length > 16) {
-      throw new TypeError(
-        "Hosted execution environment-interview.completed topic must contain one to sixteen answers.",
-      );
-    }
-    answerCount += answers.length;
-    return {
-      answers: answers.map((answerValue, answerIndex) => {
-        const answer = requireObject(
-          answerValue,
-          `Hosted execution environment-interview.completed answer ${answerIndex}`,
-        );
-        assertExactHostedExecutionKeys(answer, [
-          "aspectId",
-          "indicatorId",
-          "note",
-          "value",
-        ], `Hosted execution environment-interview.completed answer ${answerIndex}`);
-        const parsed = {
-          aspectId: requireString(answer.aspectId, "Environment interview answer aspectId"),
-          indicatorId: requireString(answer.indicatorId, "Environment interview answer indicatorId"),
-          ...(answer.note === undefined
-            ? {}
-            : {
-                note: answer.note === null
-                  ? null
-                  : requireString(
-                      answer.note,
-                      "Environment interview answer note",
-                    ).trim(),
-              }),
-          value: parseEnvironmentInterviewAnswerValue(answer.value),
-        };
-        const issue = validateEnvironmentInterviewAnswer(topicId, parsed);
-        if (issue) {
-          throw new TypeError(issue);
-        }
-        return parsed;
-      }),
-      topicId,
-    };
-  });
-  if (answerCount > 32) {
-    throw new TypeError(
-      "Hosted execution environment-interview.completed contains too many answers.",
-    );
-  }
-  return { completedAt, completionId, topics: parsedTopics };
-}
-
-function parseEnvironmentInterviewAnswerValue(
-  value: unknown,
-): string | number | boolean {
-  if (
-    typeof value === "string"
-    || typeof value === "boolean"
-    || (typeof value === "number" && Number.isFinite(value))
-  ) {
-    return value;
-  }
-  throw new TypeError(
-    "Hosted execution environment interview answer value is invalid.",
-  );
-}
-
-function isIsoTimestamp(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(value)
-    && Number.isFinite(Date.parse(value));
 }
 
 export function parseHostedExecutionConversationMessagePayload(
@@ -964,6 +675,13 @@ export function parseHostedExecutionConversationMessagePayload(
   );
 
   switch (channel) {
+    case "voice":
+      return {
+        channel,
+        callId: requireString(record.callId, "Voice call id"),
+        inputId: requireString(record.inputId, "Voice input id"),
+        text: requireString(record.text, "Voice input text"),
+      };
     case "linq":
       return parseHostedExecutionLinqConversationMessagePayload(record, channel);
     case "telegram": {
@@ -1770,19 +1488,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind: kind as HostedExecutionPlainRuntimeControlWakeKind,
         userId,
       };
-    case "runtime.codex-auth-requested":
-      assertExactHostedExecutionKeys(record, [
-        "action",
-        "attemptId",
-        "kind",
-        "userId",
-      ], "Hosted execution runtime.codex-auth-requested event");
-      return {
-        action: parseHostedCodexAuthAction(record.action),
-        attemptId: parseHostedCodexAuthAttemptId(record.attemptId),
-        kind,
-        userId,
-      };
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
@@ -1793,8 +1498,14 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
   label: string,
 ): HostedExecutionAssistantNotificationRequestedPayload {
   const record = requireObject(value, label);
+  const gameChatBootstrap = record.gameChatBootstrap === undefined ? undefined
+    : requireObject(record.gameChatBootstrap, `${label}.gameChatBootstrap`);
 
   return {
+    ...(gameChatBootstrap ? { gameChatBootstrap: {
+      gameId: requireString(gameChatBootstrap.gameId, `${label}.gameChatBootstrap.gameId`),
+      eventId: requireString(gameChatBootstrap.eventId, `${label}.gameChatBootstrap.eventId`),
+    } } : {}),
     ...(record.deliveryDedupeToken === undefined
       ? {}
       : {
@@ -2034,6 +1745,15 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
   const kind = requireString(record.kind, `${label}.kind`);
 
   switch (kind) {
+    case "require_game_rematch": {
+      assertExactHostedExecutionKeys(record, ["kind", "gameId", "eventId", "termsVersion"], label);
+      const gameId = requireString(record.gameId, `${label}.gameId`);
+      const eventId = requireString(record.eventId, `${label}.eventId`);
+      if (eventId !== `game-rematch:${gameId}` || !Number.isSafeInteger(record.termsVersion) || Number(record.termsVersion) < 1) {
+        throw new TypeError(`${label} has invalid rematch revision authority.`);
+      }
+      return { kind, gameId, eventId, termsVersion: Number(record.termsVersion) };
+    }
     case "allow_send_or_skip":
     case "require_send":
       return { kind };
@@ -2041,6 +1761,54 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
       return {
         kind,
         text: requireString(record.text, `${label}.text`),
+      };
+    case "require_game_recap":
+      assertExactHostedExecutionKeys(
+        record,
+        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess"],
+        label,
+      );
+      if (record.loreAccess !== undefined && record.loreAccess !== "read") {
+        throw new TypeError(`${label}.loreAccess must be read.`);
+      }
+      return {
+        kind,
+        ...(record.loreAccess === "read" ? { loreAccess: "read" as const } : {}),
+        eventId: requireString(record.eventId, `${label}.eventId`),
+        gameId: requireString(record.gameId, `${label}.gameId`),
+        pairFingerprint: requireString(
+          record.pairFingerprint,
+          `${label}.pairFingerprint`,
+        ),
+      };
+    case "game_group_missed_check_in":
+      return gameGroupMissedCheckInPolicySchema.parse(record);
+    case "game_missed_check_in":
+      assertExactHostedExecutionKeys(
+        record,
+        [
+          "eventId",
+          "firstMissedDate",
+          "gameId",
+          "kind",
+          "memberId",
+          "pairFingerprint",
+        ],
+        label,
+      );
+      return {
+        kind,
+        eventId: requireString(record.eventId, `${label}.eventId`),
+        firstMissedDate: requireString(
+          record.firstMissedDate,
+          `${label}.firstMissedDate`,
+        ),
+        gameId: requireString(record.gameId, `${label}.gameId`),
+        memberId: requireString(record.memberId, `${label}.memberId`),
+        pairFingerprint: requireString(
+          record.pairFingerprint,
+          `${label}.pairFingerprint`,
+        ),
       };
     default:
       throw new TypeError(`${label}.kind is invalid.`);
@@ -2181,7 +1949,7 @@ function parseHostedExecutionAssistantNotificationDelivery(
   const record = requireObject(value, label);
   const kind = requireString(record.kind, `${label}.kind`);
 
-  if (kind !== "explicit" && kind !== "participant" && kind !== "thread") {
+  if (kind !== "explicit" && kind !== "participant" && kind !== "thread" && kind !== "bootstrap") {
     throw new TypeError(`${label}.kind is invalid.`);
   }
 
@@ -2414,22 +2182,6 @@ function assertExactHostedClinicalRecordsKeys(
   }
 }
 
-function parseHostedCodexAuthAction(value: unknown): HostedCodexAuthAction {
-  const action = requireString(value, "Hosted Codex auth action");
-  if (action === "connect" || action === "disconnect") {
-    return action;
-  }
-  throw new TypeError("Hosted Codex auth action is invalid.");
-}
-
-function parseHostedCodexAuthAttemptId(value: unknown): string {
-  const attemptId = requireString(value, "Hosted Codex auth attemptId");
-  if (!/^hca_[A-Za-z0-9_-]{16,64}$/u.test(attemptId)) {
-    throw new TypeError("Hosted Codex auth attemptId is invalid.");
-  }
-  return attemptId;
-}
-
 function assertExactHostedExecutionKeys(
   record: Record<string, unknown>,
   keys: readonly string[],
@@ -2445,6 +2197,7 @@ function assertExactHostedExecutionKeys(
 
 function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
   const allowed = new Set([
+    "uploadId",
     "byteLength",
     "captureId",
     "capturedAt",
@@ -2455,27 +2208,6 @@ function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
     if (!allowed.has(key)) {
       throw new TypeError(
         `Hosted execution meal-photo.captured payload contains unsupported field ${JSON.stringify(key)}.`,
-      );
-    }
-  }
-}
-
-function assertExactHostedEnvironmentVoiceKeys(
-  record: Record<string, unknown>,
-): void {
-  const allowed = new Set([
-    "audioKey",
-    "byteLength",
-    "captureId",
-    "capturedAt",
-    "contentType",
-    "durationMs",
-    "sha256",
-  ]);
-  for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) {
-      throw new TypeError(
-        `Hosted execution environment-voice.captured payload contains unsupported field ${JSON.stringify(key)}.`,
       );
     }
   }

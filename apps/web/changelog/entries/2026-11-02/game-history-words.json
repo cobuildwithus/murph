@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "game-history-words",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Words belong in game history too",
+    "summary": "Game history now includes words posts alongside photos in its previews.",
+    "details": "Supported app versions show words in their day-order slot. Hidden, withdrawn and reported posts stay out of your previews.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4463]
+  }
+}

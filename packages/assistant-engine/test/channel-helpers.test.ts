@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -523,7 +524,7 @@ describe('channel helper seams', () => {
     const telegramVoiceFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
-        return new Response(new Uint8Array([1, 2, 3]), {
+        return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), {
           headers: {
             'content-type': 'audio/mpeg',
           },
@@ -742,7 +743,7 @@ describe('channel helper seams', () => {
     const telegramFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
-        return new Response(new Uint8Array([1, 2, 3]), {
+        return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), {
           headers: { 'content-type': 'audio/mpeg' },
           status: 200,
         })
@@ -1100,7 +1101,7 @@ describe('channel helper seams', () => {
     const telegramFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
-        return new Response(new Uint8Array([1, 2, 3]), {
+        return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), {
           headers: { 'content-type': 'audio/mpeg' },
           status: 200,
         })
@@ -1355,6 +1356,40 @@ describe('channel helper seams', () => {
     expect(sendLinq).not.toHaveBeenCalled()
     expect(sendLinqVoiceMemo).not.toHaveBeenCalled()
   })
+
+  it.each(['unknown', 'rejected', 'companion'] as const)(
+    'preserves Telegram fallback uncertainty after a voice rate limit (%s)', async (fallback) => {
+      vi.useRealTimers()
+      vi.useFakeTimers({ toFake: ['Date'] })
+      const fallbackError = Object.assign(new VaultCliError(
+        fallback === 'rejected' ? 'ASSISTANT_TELEGRAM_DELIVERY_FAILED' : 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        'Synthetic fallback outcome',
+      ), { deliveryMayHaveSucceeded: fallback !== 'rejected', retryable: fallback === 'rejected' })
+      const sendTelegram = vi.fn()
+      if (fallback === 'companion') sendTelegram.mockResolvedValueOnce({ providerMessageId: 'companion-id', target: '123' })
+      sendTelegram.mockRejectedValueOnce(fallbackError)
+      const telegramFetch = vi.fn<typeof fetch>(async (input) => {
+        if (String(input).startsWith('https://api.elevenlabs.io/')) {
+          return new Response(new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url))), { headers: { 'content-type': 'audio/mpeg' } })
+        }
+        return Response.json({ ok: false, error_code: 429, description: 'Too Many Requests', parameters: { retry_after: 0.001 } }, { status: 429 })
+      })
+      const delivery = ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
+        actorId: null, bindingDelivery: createAssistantBindingDelivery('thread', '123'), explicitTarget: null,
+        identityId: null, message: fallback === 'companion' ? 'Companion text.' : '', replyToMessageId: null,
+        media: [createVoiceMemoMedia({ transcript: 'Requested transcript.', transport: {
+          kind: 'telegram_generation', generation: { kind: 'elevenlabs_speech', modelId: 'eleven_multilingual_v2',
+            outputFormat: 'mp3_44100_128', text: 'Requested transcript.', voiceId: 'voice_murph' },
+        } })],
+      }, { sendTelegram, telegramVoiceMemoRuntime: {
+        env: { TELEGRAM_BOT_TOKEN: 'bot-token', TELEGRAM_API_BASE_URL: 'https://telegram.test', ELEVENLABS_API_KEY: 'synthetic-key' },
+        fetchImplementation: telegramFetch,
+      } })
+      if (fallback === 'unknown') await expect(delivery).rejects.toBe(fallbackError)
+      else if (fallback === 'rejected') await expect(delivery).rejects.toMatchObject({ code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED' })
+      else await expect(delivery).rejects.toMatchObject({ deliveryMayHaveSucceeded: true, providerMessageIds: ['companion-id'] })
+    },
+  )
 
   it('sends Linq voice memos to the concrete target returned by accepted text', async () => {
     const sendLinq = vi.fn().mockResolvedValue({

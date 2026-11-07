@@ -21,6 +21,10 @@ import {
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
+import { holdPositiveDeviceSyncPassCheckpoint } from "./helpers/hosted-local-device-pass-checkpoint.js";
+import {
+  countHostedLocalRuntimeAdmissionWindow,
+} from "./helpers/hosted-local-runtime-admission-window.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -38,7 +42,7 @@ const userId = `member_local_linq_sync_fairness_${runId}`;
 const chatId = `chat_local_linq_sync_fairness_${runId}`;
 const linqApiToken = "linq-local-sync-fairness-token";
 const linqWebhookSecret = "linq-local-sync-fairness-secret";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-sync";
 const junctionWebhookSecret = "whsec_c3luYy1mYWlybmVzcy10ZXN0";
 const setupRequestText =
@@ -48,12 +52,17 @@ const reminderInstructions =
   "Send the user the hosted-local recurring break reminder.";
 const reminderText = "Time for your short break.";
 const dirtyResourceCount = 113;
-const systemMailboxFirstAdmissionWindowMs = 30_000;
-const deviceSyncReminderOverlapLeadMs = 60_000;
-const scheduledReminderLeadMs = 180_000;
+const firstRuntimeAdmissionWindowMs = 30_000;
+// Budget two 30-second log flushes, up to 120 seconds of progress backoff,
+// and useful processing before holding a positive pass across the due reminder.
+const deviceSyncReminderOverlapLeadMs = 240_000;
+const scheduledReminderLeadMs = 360_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const barrierTimeoutMs = 180_000;
 const observationTimeoutMs = 240_000;
+// Drain can cross the scheduler's 30-second, two-minute, and ten-minute
+// no-progress retries plus a bounded two-minute device pass.
+const backlogDrainTimeoutMs = 15 * 60_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -77,8 +86,8 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         DEVICE_SYNC_SECRET: "synthetic-device-sync-runtime-secret",
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-          process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? "1" : "10000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+          process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? "1000" : "10000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         JUNCTION_API_KEY: "sk_us_synthetic_junction_api_key",
@@ -161,7 +170,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       buildRecurringReminderSaveResponses(schedule),
       { matchInputContains: setupRequestText },
     );
-    const setupSendBaseline = activeLinqStub.countObservedSends(reminderPath);
+    const setupSendBaseline = activeLinqStub.countAcceptedSends(reminderPath);
     const setupResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       chatId,
@@ -177,7 +186,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       reason: "wake-appended-active-member",
     });
     await activeScenario.waitForLatestPendingWake(userId);
-    const setupSend = await activeLinqStub.waitForAdditionalSend({
+    const setupSend = await activeLinqStub.waitForAdditionalAcceptedSend({
       baselineCount: setupSendBaseline,
       expectedPath: reminderPath,
       scenario: activeScenario,
@@ -223,12 +232,10 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       matchInputContains: reminderInstructions,
     });
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
-    const matchingReminderSendBaseline = activeLinqStub.countObservedSends(
+    const matchingReminderSendBaseline = activeLinqStub.countAcceptedSends(
       reminderPath,
       (request) => activeLinqStub.readObservedMessageText(request) === reminderText,
     );
-    let devicePassStagingObservationArmed = false;
-    let checkpointBarrierArmed = false;
 
     try {
       await sleepUntil(new Date(
@@ -242,12 +249,12 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
           userId,
           "canonical_post_commit",
         );
-      devicePassStagingObservationArmed = true;
       const wakeResult = await activeScenario.runWake(
         buildJunctionFixtureWake(seed.connectionId, seededAt),
         userId,
         { timeoutMs: 420_000 },
       );
+      const wakeAcceptedAt = new Date();
       const acceptedWake = wakeResult.wakeResult;
       expect(acceptedWake.kind).toBe("runtime_processing_accepted");
       if (acceptedWake.kind !== "runtime_processing_accepted") {
@@ -255,32 +262,33 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       }
       expect(["started", "woken"]).toContain(acceptedWake.action);
 
-      await waitForDevicePassPreDrainCheckpointBarrier(
-        schedule.dueAtIso,
-      );
-      await activeScenario.harness
-        .armShutdownCheckpointPublicationBarrierForTest(userId);
-      checkpointBarrierArmed = true;
-      await expect(
-        activeScenario.harness
-          .releaseForegroundPriorityOrderingBarrierForTest(userId),
-      ).resolves.toEqual({ ok: true, released: true });
-      await expect(
-        activeScenario.harness
-          .clearForegroundPriorityOrderingObservationForTest(userId),
-      ).resolves.toEqual({ cleared: true, ok: true });
-      devicePassStagingObservationArmed = false;
-
-      const [firstWindowAdmissionCount] = await Promise.all([
-        countFirstSystemMailboxAdmissionWindow({
+      const [admissionObservation, checkpointObservation] = await Promise.allSettled([
+        countHostedLocalRuntimeAdmissionWindow({
+          acceptedWake,
           beforeAt: schedule.dueAtIso,
+          buildFailureMessage: async (lines) =>
+            await activeScenario.buildFailureMessage(userId, lines),
           notBefore: runtimeLogsFrom,
+          readStdout: () => activeScenario.harness.cloudflareStdoutTail(),
+          timeoutMs: observationTimeoutMs,
+          wakeAcceptedAt,
+          windowMs: firstRuntimeAdmissionWindowMs,
         }),
-        waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
+        holdPositiveDeviceSyncPassCheckpoint({
+          fromAt: runtimeLogsFrom,
+          harness: activeScenario.harness,
+          userId,
+          waitForPreDrain: () => waitForDevicePassPreDrainCheckpointBarrier(schedule.dueAtIso),
+          waitForPublication: () => waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
+          waitForPass: (fromAt) => waitForDeviceSyncPassFinished({ fromAt }),
+        }),
       ]);
-      const firstPass = await waitForPositiveDeviceSyncPassFinished({
-        fromAt: runtimeLogsFrom,
-      });
+      // Both observers must settle before cleanup can release the final barrier;
+      // the checkpoint observer may still be rearming it after a zero-job yield.
+      if (admissionObservation.status === "rejected") throw admissionObservation.reason;
+      if (checkpointObservation.status === "rejected") throw checkpointObservation.reason;
+      const firstWindowAdmissionCount = admissionObservation.value;
+      const firstPass = checkpointObservation.value;
       expect(firstPass.redactedJson).toMatchObject({
         outcome: "yielded",
         workerJobLimitReached: false,
@@ -304,12 +312,14 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         dirtyResourceCount,
       );
 
+      // The reminder must still be waiting while the positive pass has backlog,
+      // even when slow staging or telemetry has crossed its scheduled due time.
+      expect(countReminderProviderRequestsSince(providerRequestBaseline)).toBe(0);
       await sleepUntil(schedule.dueAtIso);
       await expect(
         activeScenario.harness
           .releaseShutdownCheckpointPublicationBarrierForTest(userId),
       ).resolves.toEqual({ ok: true, released: true });
-      checkpointBarrierArmed = false;
 
       await withTimeout(
         heldReminder.started,
@@ -324,7 +334,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
 
       heldReminder.release();
       releaseHeldReminder = null;
-      const reminderSend = await activeLinqStub.waitForAdditionalSend({
+      const reminderSend = await activeLinqStub.waitForAdditionalAcceptedSend({
         baselineCount: matchingReminderSendBaseline,
         expectedPath: reminderPath,
         matchRequest: (request) =>
@@ -334,7 +344,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       });
       expect(activeLinqStub.readObservedMessageText(reminderSend)).toBe(reminderText);
 
-      await expectPendingDirtyResourceCount(seed.connectionId, 0);
+      await expectPendingDirtyResourceCount(seed.connectionId, 0, backlogDrainTimeoutMs);
       const finalStatus = await activeScenario.waitForHostedIdle(userId, {
         timeoutMs: observationTimeoutMs,
       });
@@ -361,24 +371,20 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         deviceSyncLogs.filter((row) => row.eventCode === "device-sync.job_failed"),
       ).toEqual([]);
     } finally {
-      if (devicePassStagingObservationArmed) {
-        await activeScenario.harness
-          .releaseForegroundPriorityOrderingBarrierForTest(userId)
-          .catch(() => undefined);
-        await activeScenario.harness
-          .clearForegroundPriorityOrderingObservationForTest(userId)
-          .catch(() => undefined);
-      }
-      if (checkpointBarrierArmed) {
-        await activeScenario.harness
-          .releaseShutdownCheckpointPublicationBarrierForTest(userId)
-          .catch(() => undefined);
-      }
+      await activeScenario.harness
+        .releaseForegroundPriorityOrderingBarrierForTest(userId)
+        .catch(() => undefined);
+      await activeScenario.harness
+        .clearForegroundPriorityOrderingObservationForTest(userId)
+        .catch(() => undefined);
+      await activeScenario.harness
+        .releaseShutdownCheckpointPublicationBarrierForTest(userId)
+        .catch(() => undefined);
       releaseHeldReminder?.();
       releaseHeldReminder = null;
     }
 
-  }, 900_000);
+  }, 900_000 + backlogDrainTimeoutMs);
 });
 
 function buildActivationWake() {
@@ -551,10 +557,7 @@ async function waitForDefaultProcessingWake(expectedAt: string): Promise<void> {
 async function waitForShutdownCheckpointPublicationBarrier(
   dueAtIso: string,
 ): Promise<void> {
-  const deadline = Math.min(
-    Date.now() + barrierTimeoutMs,
-    Date.parse(dueAtIso),
-  );
+  const deadline = Date.now() + barrierTimeoutMs;
   let lastState: string | null = null;
   while (Date.now() < deadline) {
     const barrier = await requireScenario().harness
@@ -566,7 +569,7 @@ async function waitForShutdownCheckpointPublicationBarrier(
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "The first capped device-sync pass did not reach its checkpoint barrier before the reminder deadline.",
+    "The first capped device-sync pass did not reach its checkpoint barrier.",
     `last barrier state: ${lastState ?? "unread"}`,
     `reminder due: ${dueAtIso}`,
   ]));
@@ -575,10 +578,7 @@ async function waitForShutdownCheckpointPublicationBarrier(
 async function waitForDevicePassPreDrainCheckpointBarrier(
   dueAtIso: string,
 ): Promise<void> {
-  const deadline = Math.min(
-    Date.now() + barrierTimeoutMs,
-    Date.parse(dueAtIso),
-  );
+  const deadline = Date.now() + barrierTimeoutMs;
   let lastState: string | null = null;
   let lastTarget: string | null = null;
   let lastEventKinds: string[] = [];
@@ -600,7 +600,7 @@ async function waitForDevicePassPreDrainCheckpointBarrier(
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "The device pass did not reach its pre-drain checkpoint barrier before the reminder deadline.",
+    "The device pass did not reach its pre-drain checkpoint barrier.",
     `last barrier state: ${lastState ?? "unread"}`,
     `last barrier target: ${lastTarget ?? "unread"}`,
     `observed ordering events: ${JSON.stringify(lastEventKinds)}`,
@@ -608,16 +608,17 @@ async function waitForDevicePassPreDrainCheckpointBarrier(
   ]));
 }
 
-async function waitForPositiveDeviceSyncPassFinished(input: {
+async function waitForDeviceSyncPassFinished(input: {
   fromAt: Date;
 }): Promise<HostedRuntimeLogForTestRow> {
+  // Publication is already held. The due time is an overlap boundary, not a
+  // telemetry deadline: a slow log flush may legitimately cross it.
   const deadline = Date.now() + observationTimeoutMs;
   let lastLogs: HostedRuntimeLogForTestRow[] = [];
   while (Date.now() < deadline) {
     lastLogs = await listDeviceSyncLogs(input.fromAt);
     const matching = lastLogs.find((row) =>
       row.eventCode === "device-sync.pass_finished"
-      && (readFiniteNumber(row.redactedJson, "processedJobs") ?? 0) > 0
     );
     if (matching) {
       return matching;
@@ -629,103 +630,19 @@ async function waitForPositiveDeviceSyncPassFinished(input: {
     `observed device-sync events: ${JSON.stringify(lastLogs.map((row) => ({
       eventCode: row.eventCode,
       processedJobs: readFiniteNumber(row.redactedJson, "processedJobs"),
+      passStage: row.redactedJson?.passStage,
+      outcome: row.redactedJson?.outcome,
+      yieldReason: row.redactedJson?.yieldReason,
     })))}`,
   ]));
-}
-
-interface RuntimeAdmissionObservation {
-  acceptedAt: string;
-  orchestrationAttemptId: string;
-  workspaceAttemptId: string;
-}
-
-async function countFirstSystemMailboxAdmissionWindow(input: {
-  beforeAt: string;
-  notBefore: Date;
-}): Promise<number> {
-  const deadline = Date.now() + observationTimeoutMs;
-  let firstAdmissionAtMs: number | null = null;
-  const observedAdmissions = new Map<string, RuntimeAdmissionObservation>();
-  let admissions: RuntimeAdmissionObservation[] = [];
-
-  while (Date.now() < deadline) {
-    for (const admission of listRuntimeAdmissionsSince(input.notBefore)) {
-      observedAdmissions.set(admission.workspaceAttemptId, admission);
-    }
-    admissions = [...observedAdmissions.values()].sort((left, right) =>
-      Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
-    );
-    const firstAdmission = admissions[0] ?? null;
-    if (firstAdmissionAtMs === null && firstAdmission !== null) {
-      firstAdmissionAtMs = Date.parse(firstAdmission.acceptedAt);
-      const reminderDueAtMs = Date.parse(input.beforeAt);
-      if (
-        !Number.isFinite(reminderDueAtMs)
-        || reminderDueAtMs
-          < firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs
-      ) {
-        throw new Error(
-          "The reminder deadline does not leave one full system-mailbox admission window.",
-        );
-      }
-    }
-    if (
-      firstAdmissionAtMs !== null
-      && Date.now()
-        >= firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs
-    ) {
-      const admissionWindowEndMs =
-        firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs;
-      return admissions.filter((admission) =>
-        Date.parse(admission.acceptedAt) < admissionWindowEndMs
-      ).length;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out observing the first system-mailbox runtime admission window.",
-    `observed accepted attempts: ${JSON.stringify(admissions)}`,
-  ]));
-}
-
-function listRuntimeAdmissionsSince(
-  notBefore: Date,
-): RuntimeAdmissionObservation[] {
-  const admissions = new Map<string, RuntimeAdmissionObservation>();
-  for (const line of requireScenario().harness.cloudflareStdoutTail().split(/\r?\n/u)) {
-    const parsed = parseJson(line.trim());
-    if (
-      !isRecord(parsed)
-      || parsed.component !== "hosted.runner"
-      || parsed.phase !== "runtime.starting"
-      || typeof parsed.time !== "string"
-      || !Number.isFinite(Date.parse(parsed.time))
-      || Date.parse(parsed.time) < notBefore.getTime()
-      || !isRecord(parsed.details)
-      || typeof parsed.details.orchestrationAttemptId !== "string"
-      || parsed.details.orchestrationAttemptId.startsWith("hosted-local-wake:")
-      || typeof parsed.details.runtimeProcessingAction !== "string"
-      || typeof parsed.details.workspaceAttemptId !== "string"
-    ) {
-      continue;
-    }
-    admissions.set(parsed.details.workspaceAttemptId, {
-      acceptedAt: parsed.time,
-      orchestrationAttemptId: parsed.details.orchestrationAttemptId,
-      workspaceAttemptId: parsed.details.workspaceAttemptId,
-    });
-  }
-  return [...admissions.values()].sort((left, right) =>
-    Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
-  );
 }
 
 async function expectPendingDirtyResourceCount(
   connectionId: string,
   expectedCount: number,
+  timeoutMs = observationTimeoutMs,
 ): Promise<void> {
-  const deadline = Date.now() + observationTimeoutMs;
+  const deadline = Date.now() + timeoutMs;
   const expectedPending = expectedCount > 0;
   let lastCount: number | null = null;
   let lastConnectionPending: boolean | null = null;

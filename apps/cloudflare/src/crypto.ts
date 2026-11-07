@@ -10,6 +10,8 @@ export interface EncryptedR2ObjectBodyLike {
   arrayBuffer(): Promise<ArrayBuffer>;
   body?: ReadableStream<Uint8Array>;
   customMetadata?: Record<string, string>;
+  etag?: string;
+  httpEtag?: string;
   key?: string;
   size?: number;
   uploaded?: Date;
@@ -32,7 +34,8 @@ export interface R2PutOptionsLike {
 
 export interface EncryptedR2BucketLike {
   get(key: string): Promise<EncryptedR2ObjectBodyLike | null>;
-  put(key: string, value: R2PutValueLike, options?: R2PutOptionsLike): Promise<void>;
+  /** R2 answers the stored object, or null when an `onlyIf` condition failed. */
+  put(key: string, value: R2PutValueLike, options?: R2PutOptionsLike): Promise<unknown>;
 }
 
 const utf8Decoder = new TextDecoder();
@@ -55,8 +58,6 @@ function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
       return "Hosted bundle envelope";
     case "email-raw":
       return "Hosted email raw message envelope";
-    case "environment-voice":
-      return "Hosted environment voice envelope";
     case "meal-photo":
       return "Hosted meal photo envelope";
     case "media":

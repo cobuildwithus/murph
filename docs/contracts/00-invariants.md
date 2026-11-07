@@ -6,6 +6,21 @@ tunable numeric settings, incident history, and rollout case law belong in
 owner docs and executable tests. A fixed numeric floor appears here only when
 it has been explicitly elevated to a cross-cutting invariant.
 
+## Hosted runtime authority cutover
+
+- Exactly one durable owner admits a member's runtime effects. After Postgres
+  activation, runtime attempt/generation validation and canonical Web mutations
+  share one transaction; workspace CAS version is a separate freshness check.
+- An uncertain native launch or stop retains its exact allocation and target.
+  Elapsed time can request reconciliation, never prove stoppedness.
+  Once destruction of an attempt is authorized it can never become reusable,
+  and completion never vetoes destruction.
+- Upload and cleanup obligations survive member deletion. A pending multipart
+  write requires exact completion/abort proof before cleanup can pass it.
+- The migration gate is monotonic: legacy, draining, Postgres. Frozen legacy
+  state exports resources and generation high-water, never active authority.
+  See `agent-docs/references/hosted-postgres-runtime.md` for the finite cutover.
+
 ## Admission Test
 
 - A baseline invariant must protect a recurring cross-cutting failure class or
@@ -109,11 +124,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   terminal lifecycle receipt is advisory, and canonical readback confirms the
   write before Murph says it finished.
 - A detached Codex MultiAgent V2 child admitted before a root reply may continue
-  after that reply only as a one-shot leaf. Hosted configuration admits the
+  after that reply as a bounded leaf. Hosted configuration admits the
   root plus at most three concurrent children per session. Each child owns one
-  independent bounded family and may not interact with the root or another
-  child, be reused for another turn, spawn a nested child, or leave a background
-  terminal. It never inherits the root turn's
+  independent bounded family and may not spawn a nested child or leave a
+  background terminal. Messages and follow-up tasks are ordinary native
+  communication; they do not invalidate the workspace boundary. A child never
+  inherits the root turn's
   invocation-scoped automation or device capability. Root completion or a
   later ordinary turn does not terminate valid detached work merely to rotate
   request authority. If the root replies while its child is still generating,
@@ -125,13 +141,23 @@ it has been explicitly elevated to a cross-cutting invariant.
   system-notification, and output-only turns never perform this recheck.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A
-  root's lifecycle set retains every admitted child until that boundary clears;
-  completion of one sibling must not evict another. An ordinary checkpoint wake
+  child-turn map retains every observed child until that boundary clears;
+  completion of one sibling must not evict another. Each native child turn start
+  clears prior completion and becomes that child's current turn. Only a matching
+  native completion can finish it; parent activity acknowledgements cannot finish
+  a newer turn. A child admitted or restarted during boundary RPCs causes another
+  quiescence check within the same bounded wait. An ordinary checkpoint wake
   interrupts only the boundary wait and preserves the warm App Server plus all
-  resident evidence. A timeout or unsupported lifecycle stops the exact process
-  and fails closed. Explicit workspace invocation abort/preemption interrupts
+  resident evidence, including pending usage reports. Parent activity metadata
+  can reserve a not-yet-started child but cannot mark work finished or reject a
+  checkpoint based on ancestry. A timeout or uncorrelatable native turn identity
+  stops the exact process and fails closed. Explicit workspace invocation abort/preemption interrupts
   the wait and synchronously tears down that exact process before workspace or
-  invocation ownership is released.
+  invocation ownership is released. Native follow-up acknowledgement proves
+  submission, not execution: the current App Server exposes no ordered queue-drain
+  barrier for accepted-but-unstarted work. This boundary tracks observed native
+  work; it does not claim a stronger native queue guarantee or synthesize one with
+  sleeps or policy rejections.
 - Before checkpoint construction, the runtime closes and joins asynchronous
   preparation admission. Unreserved process initialization that is still
   pending is then cancelled and its exact process is awaited through teardown.
@@ -205,8 +231,16 @@ it has been explicitly elevated to a cross-cutting invariant.
 - A detached assistant read may overlap foreground work only in a separate
   one-shot process with OS-enforced read-only roots and no write, tool-network,
   route, delivery, or recursion authority. The resident foreground assistant
-  remains the sole model-authored canonical-content writer and sender. The
-  runtime must abort, await, and prove exit of the exact owned child before
+  remains the sole model with direct canonical-write and sender authority.
+  The host's deterministic clinical enrichment apply may persist schema-validated,
+  frozen read-only proposals through the canonical writer with host-derived
+  source identity and provenance, bounded overlap checks, and readback before
+  progress. Derived clinical facts retain their attested source parent revision:
+  authoritative parent changes retire older owned extraction facets, and stale
+  queued proposals cannot recreate them. These checks share the canonical
+  writer index and run before writes. This grants no mutation or effect
+  authority to the read-only child.
+  The runtime must abort, await, and prove exit of the exact owned child before
   checkpoint release, workspace replacement, fence loss, shutdown, or
   invocation return.
 - A foreground prerequisite is a named current fact, not a generic lane or
@@ -220,15 +254,21 @@ it has been explicitly elevated to a cross-cutting invariant.
   fabricate or force conflicting canonical state to make recovery appear clean.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
   After the latest durably accepted conversation message, routine checkpoint
-  construction has a hard 180-second minimum quiet window. Internal assistant,
-  maintenance, retention, cleanup, projection, and scheduled wakes must not
-  shorten it. Only the exact assistant retry or follow-up wake projected
-  directly by the current foreground assistant phase may run as foreground
-  work inside that window without publishing a snapshot. The only other
-  exception is a server-identified, fixed-destination exact completion: a
-  generation-scoped phone-call-result or transport-idempotent
-  usage-referral-reward notification,
-  or a private Assistant Ask completion whose `aask_done_*` identity binds its
+  construction normally waits for the shared runner idle duration (ten minutes
+  by default). An observed consented-member Ask deferred by its admission gate
+  advances the existing checkpoint deadline after foreground work, so waiting
+  does not consume the request's ten-minute validity. An exact foreground reply
+  prerequisite may also advance it; no later pass may rearm the deadline while
+  that reply waits. Internal assistant, maintenance, retention, cleanup,
+  projection, and scheduled wakes must not shorten it. A background delivery
+  claim waiting for publication keeps that window within eight minutes of the
+  claim, so stale-send recovery cannot judge a live, unsent claim. Only the exact
+  assistant retry or follow-up wake projected directly by the current foreground
+  assistant phase may run as foreground work inside that window without
+  publishing a snapshot. The only other exception is a server-identified,
+  fixed-destination exact completion: a generation-scoped phone-call-result or
+  transport-idempotent usage-referral-reward notification, or a private Assistant
+  Ask completion whose `aask_done_*` identity binds its
   exact text, personal member, current direct route, and expiry. After fresh
   conversation work has priority, the runtime may select only those durable
   mailbox families, compose them queue-only, and persist their causal outbox
@@ -238,8 +278,15 @@ it has been explicitly elevated to a cross-cutting invariant.
   barrier; generic non-idempotent provider work remains excluded until routine
   checkpointing. Generic notifications and unrelated pending outbox work remain
   excluded. Inherited, committed, durability-gated, and shutdown-time wakes do
-  not otherwise use this exception. If the hot pass dirties state, the full
-  quiet window starts again. An actual host termination may use the separate
+  not otherwise use this exception. Newly accepted foreground-priority work
+  starts the full quiet window again; generic progress, cleanup-only work and
+  empty internal probes do not. After publication, dirty post-checkpoint effects
+  use the spent window while preserving all required save-before-effect and
+  follow-up-save barriers. Conversation warmth is independently bounded by ten
+  minutes from the latest accepted inbound user's original server receipt, not
+  by checkpoint or invocation completion. Expiry cannot interrupt accepted work
+  or bypass the exact owner, durable recovery, and stop fences. An actual host
+  termination may use the separate
   last-chance durability path, but durably staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
@@ -279,17 +326,40 @@ it has been explicitly elevated to a cross-cutting invariant.
   or provider facts. Attempt identities are unique to one attempt. These roles
   remain distinct across retry, replay, overlapping ingestion, restart, reorder,
   resend, and migration re-entry.
+- A redelivered provider event or member gesture repeats the operation first
+  accepted, under the identity first accepted. It never takes its owner from the
+  current account binding, and once accepted it cannot re-apply after leave,
+  revocation, or relink. The durable row or receipt that records that acceptance
+  must outlive those changes.
 - Validate target, configuration, and authority before claiming an irreversible
   effect. Persist the minimum effect identity and intent before the provider
-  call.
+  call. A due non-idempotent retry or durable pending send dispatches only after
+  its exact prepared claim is published; a missing claim means no dispatch.
+  Fresh Telegram and email first sends stay outside this rule.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
-  proof that the effect did not begin. Acknowledge, clean up, or advance
-  progress only after terminal or durable pending evidence.
+  proof that the effect did not begin. A definite provider rejection proves
+  only the attempt that received it: only the winning first dispatch may
+  release an obligation, atomically and naming its exact attempt. A rejected
+  retry keeps earlier ambiguity. It holds back only its exact send; a later
+  member message still commits, and a reply aimed at it still goes out.
+  Acknowledge, clean up, or advance progress
+  only after terminal or durable pending evidence. Accepted delivery
+  needing confirmation settles through its existing delivery retry deadline;
+  optional accounting may update its own marker but never moves that deadline.
+  A hosted Telegram send checks liveness before provider entry. Once a sender
+  returns an accepted response, losing liveness cannot discard it: the outbox
+  persists the receipt before any post-dispatch liveness check.
+  A retry under a provider idempotency key sends the bytes accepted for that
+  key, so freeze those inputs on the accepted receipt and never rebuild them
+  from current source state.
+- Failure to observe an outcome does not prove rejection. Once a native game
+  write or an account deletion has read its request, a server failure is
+  reported as retryable, never as a final refusal of that request.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
-  fails.
+  fails. A retired recap generation carries a durable terminal disposition its runner consumes without sending, while temporary unavailability and claimed provider work stay uncertain. A moderated removal clears any stored recap story that may hold the content in the transaction that removes it, reads hide a story that predates that rule, and generated work may publish only from sources still permitted at commit.
 - A canonical group-join reaction accepted for reply-gated proactive outreach
   is Web-owned durable work. The eligible phone participant either has no member
   identity or is a verified, unsuspended member without active hosted access who
@@ -312,6 +382,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
+- A native game command, board sharing save or Messages member action admitted
+  before request reading or preparation rechecks its exact session inside the
+  transaction that commits its effect. A failed recheck writes nothing.
 - Participant-target phone egress is denied unless its exact send kind has a
   narrow durable authority binding the idempotency key, participant identity,
   and source line. Adding one allowed first-contact kind must not widen another
@@ -323,6 +396,9 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Canonical vault writes go through the owning canonical API with provenance.
   Importers prepare data; CLIs, assistants, and runtimes call the owner.
   Transcripts, projections, and runtime state are never promoted implicitly.
+  Failure to observe publication does not prove rejection: once a submission may
+  have committed, its evidence stays and the invocation stops until exact
+  reconciliation or cold restore follows Web.
 - Workspace packages use declared public entrypoints and keep dependencies
   one-way and acyclic. Shared behavior moves to the lower owning package instead
   of reaching into sibling internals or creating circular re-exports.
@@ -344,6 +420,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   malformed, or unauthentic ciphertext fails closed. Plaintext cleanup proves
   the replacement value, uses bounded compare-and-set work, and emits no private
   content or storage identifiers.
+
+- Explicit game-image exception: weekly game avatars, photos and rendered graph
+  artifacts use private Cloudflare Images so the provider can resize them.
+  `ARCHITECTURE.md` § Weekly Game owns the signed-delivery, deletion and opaque
+  index contract. This does not exempt raw health samples, meal captures,
+  assistant media, game text or other private records from encryption.
 
 ## Conversation-First Product Control
 
@@ -371,7 +453,11 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 - Cursors, watermarks, sequences, pending-input indexes, and pagination use one
   total, transitive, owner-shared ordering primitive. Import progress is not
-  handling progress.
+  handling progress. A continuation may mutate only the identity and revision it
+  observed, using current owner state at commit. A scan may only advance the
+  cursor of the entry it read; only enable and disable writers change channel
+  membership. A scheduled completion archives a one-shot only while the registry
+  still holds the revision and occurrence that ran.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
   with distinct ordering anchors must not be merged into one turn. A
@@ -447,6 +533,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   transaction, or returning control to a caller that may do either. Preserve the
   first observed failure while awaiting siblings; fail-fast observation must not
   leave detached work mutating scoped state after finalization.
+- A Linq roster observation carries its pre-read time and completeness. Partial
+  evidence establishes presence, never absence; removal and the complete-roster
+  watermark require a complete, nonempty, within-cap roster. Equal-time conflicts
+  resolve to removal. Required roster proof that is unavailable produces a
+  retryable response, never an acknowledgement.
 - Public Linq unbound-group pending-setup admission is bounded by the
   provider-proven 32-member roster. Before `BEGIN`, its owner performs one
   candidate projection, canonical batch runtime-access read, active-managed-line
@@ -471,6 +562,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent
   transactions against the request's concurrency bound.
+- The hosted Web Prisma and runtime log pools reuse a connection only after
+  PostgreSQL confirms it is outside a transaction. Any other release closes the
+  connection, so a later write cannot join an unfinished transaction.
 - The fanout bound composes across the whole request, render, or job: parallel
   helpers that each fan out internally multiply, so evaluate peak concurrent
   datastore work for the composed path and keep one request's peak well below
@@ -490,11 +584,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   the irreversible-effect boundary. Later authority loss takes a typed durable
   disposition rather than retroactively erasing accepted work or spawning
   repair machinery. Invocation configuration remains a separate lifecycle
-  responsibility: a warm provider-specific invocation checks the saved provider
-  at provider entry to recover missed settings-change wakes. A mismatch hands
-  accepted work to a fresh invocation without consuming or rejecting it; an
-  unavailable settings read retains the work for retry. This check does not
-  reauthorize the accepted inputs.
+  responsibility: saved OpenAI model and reasoning changes apply at the next
+  accepted turn; a running turn retains its admitted target. This configuration
+  does not reauthorize the accepted inputs.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never
@@ -532,7 +624,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
-  untrusted data, and the platform alone owns final delivery.
+  untrusted data, and the platform alone owns final delivery. The canonical
+  direct channel-connection greeting is a narrow context exception: exact
+  hosted-member/channel/destination validation permits bounded committed
+  direct-private transcript excerpts, with all output-only capability and
+  delivery restrictions preserved. Group and unknown audiences are excluded.
   Its restrictive configuration belongs to a fresh ephemeral thread on the
   resident App Server. It must not change provider process launch identity,
   replace the resident process, or persist a resumable notification thread.
@@ -583,16 +679,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   admission occurs only inside the existing beneficiary serialization boundary,
   provider work is post-commit, Stripe reconciliation alone grants credit, and
   the assistant/room sponsorship projection reveals only sponsored versus
-  unsponsored. For a signed-in active group participant, the funding page may
-  separately recognize the current activation and at most 20 recent fulfilled
-  one-time moments only by an alias with exact funding-page consent metadata
-  that was marked publishable by the existing participant-authority check at
-  its first verified settlement, or as Anonymous, plus the coarse monthly
-  versus one-time kind. A later replay cannot acquire publication authority.
-  Historical aliases, pending or incompletely materialized moments, and moments
-  settled after the creator lost authority remain Anonymous. That alias is not payer identity;
-  the page projection contains no payer record, amount, monthly cap, balance,
-  payment status, charge timing, or automatic-refill event. A separate
+  unsponsored. Group funding collects no public alias or creative request and
+  exposes no supporters list. Public group context reveals no payer identity,
+  amount, cap, balance, payment status, charge timing, or automatic-refill event. A separate
   room-public usage projection may reveal only the bounded percentage
   of current-period included usage already used. That aggregate is independent
   of purchased, referral, carryover, and refill credit; it never reveals or
@@ -643,11 +732,18 @@ direct-Starter gate is fully exhausted again.
   state. The withdrawal response waits for the per-user Cloudflare execution
   barrier to serialize behind earlier ensures, re-read the Web-owned grant,
   clear the write fence, and stop the runner; every later ensure re-reads that
-  grant before work. Renewal waits behind the earlier stop before committing a
-  new grant. Cleanup failure cannot restore authority, while an absent legacy
-  grant is not reinterpreted as withdrawal. Settings, latest-available export,
-  and account deletion remain available; renewed consent is the only processing
-  restore path.
+  grant before work. The existing external retention tick redrives stops
+  interrupted before that barrier for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility, through the
+  same reconciliation. Every member renewal surface waits behind the earlier stop
+  before committing a new grant. The tick redrives clinical, device and
+  meal-photo cleanup last, selecting up to 8 members with revocation at least
+  an hour old and remaining cleanup state; device residue must also be an hour
+  old. Each cleanup step rereads consent, and repeated clinical cleanup
+  preserves the original disconnect fence. Cleanup failure cannot restore
+  authority, while an absent legacy grant is not reinterpreted as withdrawal.
+  Settings, latest-available export, and account deletion remain available;
+  renewed consent is the only processing restore path.
 - The Cloudflare Worker that can retain an exact user-control stop target after
   clearing write authority is a hard rollback floor after the first such row is
   written. Withdrawal and account deletion must consume that same persisted

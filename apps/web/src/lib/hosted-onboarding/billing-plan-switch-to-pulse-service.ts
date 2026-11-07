@@ -952,7 +952,9 @@ function buildHostedStripeSubscriptionStateUnsupportedError(reason: string) {
       code: reason,
     },
     httpStatus: 409,
-    message: "Your subscription state is not ready for this plan change.",
+    message: reason === "cancellation"
+      ? "Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again."
+      : "Your subscription state is not ready for this plan change.",
   });
 }
 

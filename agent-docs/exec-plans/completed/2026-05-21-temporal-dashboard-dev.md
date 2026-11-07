@@ -17,7 +17,7 @@ same managed Temporal server.
 
 - Preserve the existing managed/external/disabled Temporal modes.
 - Preserve `TEMPORAL_DEV_HEADLESS=1` as an explicit local escape hatch.
-- Do not touch unrelated dirty Murph Age, MinIO, or hosted-local config work.
+- Do not touch unrelated dirty MinIO, or hosted-local config work.
 - Do not expose local paths, account identifiers, or secrets in docs or output.
 
 ## Plan

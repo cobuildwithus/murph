@@ -1,3 +1,4 @@
+import { activeHostedMemberAccessWhere } from "@/src/lib/hosted-onboarding/member-access";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 vi.mock("server-only", () => ({}));
@@ -87,7 +88,11 @@ describe("hosted runtime maintenance ops", () => {
   });
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T12:00:00.000Z"));
     vi.clearAllMocks();
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     process.env.HOSTED_OPS_MEMBER_IDS = "member_ops";
     process.env.HOSTED_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 7).toString("base64url");
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
@@ -120,6 +125,8 @@ describe("hosted runtime maintenance ops", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
     if (originalHostedOpsMemberIds === undefined) {
       delete process.env.HOSTED_OPS_MEMBER_IDS;
     } else {
@@ -868,44 +875,7 @@ describe("hosted runtime maintenance ops", () => {
 });
 
 function activeCheckpointedWorkspaceWhere() {
-  const personAccess = [
-    { billingStatus: HostedBillingStatus.active },
-    {
-      accountGroupMemberships: {
-        some: {
-          group: {
-            billingStatus: HostedBillingStatus.active,
-            suspendedAt: null,
-          },
-          status: "active",
-        },
-      },
-    },
-  ];
-  return {
-    member: {
-      OR: [
-        {
-          OR: personAccess,
-          threadContainer: null,
-        },
-        {
-          threadContainer: {
-            is: {
-              owner: {
-                OR: personAccess,
-                suspendedAt: null,
-              },
-            },
-          },
-        },
-      ],
-      suspendedAt: null,
-    },
-    snapshotRef: {
-      not: Prisma.DbNull,
-    },
-  };
+  return { member: activeHostedMemberAccessWhere(), snapshotRef: { not: Prisma.DbNull } };
 }
 
 function workspaceRow(userId: string, version: string) {

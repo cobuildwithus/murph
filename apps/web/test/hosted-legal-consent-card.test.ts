@@ -2,6 +2,7 @@ import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
@@ -561,6 +562,58 @@ test("launch consent keeps the prompt visible when the accepted handoff fails", 
     expect(mocks.onAccepted).toHaveBeenCalledTimes(2);
   });
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+});
+
+test("a stale Agree that another tab already accepted hands off once and keeps the prompt", async () => {
+  const onRequirementChange = vi.fn();
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CONSENT_DOCUMENT_VERSIONS_STALE",
+      message: "Refresh the current Murph legal documents before accepting consent.",
+    }))
+    .mockResolvedValueOnce(createConsentStatus({
+      connectedHealthGranted: false,
+      launchGranted: true,
+    }));
+  mocks.onAccepted
+    .mockRejectedValueOnce(new Error("Could not finish sign in."))
+    .mockResolvedValueOnce(undefined);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      initialStatus: createConsentStatus({
+        connectedHealthGranted: false,
+        launchHealthDataGranted: true,
+        launchLegalGranted: false,
+      }),
+      mode: "compact",
+      onAccepted: mocks.onAccepted,
+      onRequirementChange,
+      source: "homepage-auth-dialog",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    findButtonByText(container, /^Agree$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Could not finish sign in.");
+  });
+  expect(mocks.onAccepted).toHaveBeenCalledTimes(1);
+  expect(onRequirementChange).not.toHaveBeenCalledWith(false);
+
+  await act(async () => {
+    findButtonByText(container, /^Agree$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.onAccepted).toHaveBeenCalledTimes(2);
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(onRequirementChange).not.toHaveBeenCalledWith(false);
 });
 
 test("launch consent offers support after three failed attempts", async () => {

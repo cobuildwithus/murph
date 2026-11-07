@@ -17,25 +17,17 @@ categories:
   - "manual-metric"
   - "recovery"
 relations:
+  - type: cites
+    target: source_artifact:pmid-37275378
+  - type: cites
+    target: source_artifact:pmid-39597979
+  - type: cites
+    target: source_artifact:pmid-41429031
+  - type: cites
+    target: source_artifact:pmid-30690920
+  - type: cites
+    target: source_artifact:pmid-26152103
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-37275378"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39597979"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-41429031"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-30690920"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-26152103"
 measurementContexts:
   - "session_manual_log"
   - "post_session_checkin"

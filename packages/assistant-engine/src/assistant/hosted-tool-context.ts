@@ -1,4 +1,7 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import type {
   HostedReturnContactKind,
@@ -8,10 +11,6 @@ import type {
   HostedRuntimeGroupEmailScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
-import {
-  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
-} from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
@@ -27,6 +26,7 @@ import type { CodexThreadIdentity } from './codex-thread-route.js'
 import type { AssistantProviderUsageDraft } from './providers/types.js'
 import { recordAssistantUsageEvent } from './service-usage.js'
 import type {
+  AssistantDeviceActivityOccurrence,
   AssistantMessageInput,
 } from './service-contracts.js'
 import type {
@@ -49,6 +49,7 @@ import type {
   AssistantHostedGroupEmailEffect,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantHostedUsageDiagnostics,
   AssistantPhysicalNotePort,
   AssistantHostedPrivateImageUrlPublisher,
   AssistantHostedSubscriptionTool,
@@ -84,6 +85,8 @@ export interface AssistantHostedUserActionScope
 
 export interface AssistantHostedScheduledPhoneCallScope
   extends HostedRuntimeScheduledAutomationAuthority {
+  /** Present for a private device-activity run: the wearable event key. */
+  occurrenceKey?: string
   resultNotificationChannel?: HostedPhoneCallResultNotificationChannel
   originSessionId: string
 }
@@ -145,6 +148,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly pollTool?: ConversationPollTool | null
   readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
@@ -152,6 +156,7 @@ export interface AssistantHostedToolContext {
   readonly groupEmailEffect?: AssistantHostedGroupEmailEffect | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly usageDiagnostics?: AssistantHostedUsageDiagnostics | null
   readonly physicalNotes?: AssistantPhysicalNotePort | null
   readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -160,7 +165,6 @@ export interface AssistantHostedToolContext {
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
-    provider: string | null
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
@@ -179,6 +183,12 @@ export interface AssistantHostedToolContext {
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
+  /** The turn's authenticated audience, whatever woke the turn. */
+  currentConversationScope?(): AssistantConversationScope
+  currentConversationPollRoute?(): {
+    channel: 'linq' | 'telegram'
+    target: string
+  } | null
   closeGroupEmailCapability?(): void
   recordGroupEmailSendResult?(
     result: Extract<
@@ -193,7 +203,16 @@ export interface AssistantHostedToolContext {
     usageDraft: AssistantProviderUsageDraft
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
+  /** The wearable event behind a private device-activity run, if any. */
+  currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
+  currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
+  currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
+  prepareGameLore?(): Promise<string | null>
+  readGameLore?(): Promise<string>
+  replaceGameLore?(content: string): Promise<void>
+  appendGameRecapChatLine?(chatLine: string): Promise<void>
+  recordSavedGameRecapChatLine?(chatLine: string): void
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly pendingVaultFilesAvailable?: boolean
@@ -234,6 +253,7 @@ export function createAssistantHostedToolContext(input: {
     >,
   ) => void
   recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
+  recordSavedGameRecapChatLine?: (chatLine: string) => void
   verifyGeneratedImageDelivery?: (input: {
     contentType: AssistantVaultImageResponseMedia['contentType']
     imageRef: string
@@ -248,6 +268,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
+  let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
@@ -348,6 +369,49 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     }
   }
+  const prepareGameLore = async (): Promise<{ fingerprint: string; guidance: string } | null> => {
+    const explicit = executionContext?.gameRecapScope ?? executionContext?.gameMissedCheckInScope ?? null
+    if (explicit) return { fingerprint: explicit.pairFingerprint, guidance: '' }
+    if (ordinaryGameLore) return ordinaryGameLore
+    ordinaryGameLore = (async () => {
+      const scope = readCurrentUserActionScope()
+      const assistantInputId = scope?.conversationScope === 'group'
+        ? scope.acceptedInputIds[scope.acceptedInputIds.length - 1]
+        : null
+      // Lore is optional: only Linq rooms host games, and a failed probe never blocks the turn.
+      if (!assistantInputId || !executionContext?.groupTool || normalizeHostedDeliveryChannel(input.messageInput.channel) !== 'linq') return null
+      try {
+        const response = await executionContext.groupTool.request({ action: 'read_game', origin: { kind: 'accepted_input', assistantInputId } })
+        const result = response.result
+        return result.status === 'ok' && 'loreFingerprint' in result && typeof result.loreFingerprint === 'string'
+          && 'loreGuidance' in result && typeof result.loreGuidance === 'string'
+          ? { fingerprint: result.loreFingerprint, guidance: result.loreGuidance }
+          : null
+      } catch {
+        return null
+      }
+    })()
+    return ordinaryGameLore
+  }
+  const gameLorePath = async (): Promise<string> => {
+    const scope = await prepareGameLore()
+    if (!scope || !/^[a-f0-9]{32}$/u.test(scope.fingerprint)) throw new TypeError('Game lore authority is unavailable.')
+    return path.join(input.messageInput.vault, 'games', `lore-${scope.fingerprint}.md`)
+  }
+  const readGameLore = async (): Promise<string> => {
+    try {
+      return (await readFile(await gameLorePath(), 'utf8')).slice(-64 * 1024)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    }
+  }
+  const writeGameLore = async (content: string): Promise<void> => {
+    if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Game lore is too large.')
+    const target = await gameLorePath()
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, content, { encoding: 'utf8', mode: 0o600 })
+  }
   const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
     if (readCurrentHostedImageCompletionEffectScope() !== null) {
       return null
@@ -388,6 +452,12 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
+  const readCurrentDeviceActivityOccurrence = () =>
+    resolveAssistantHostedDeviceActivityOccurrence({
+      conversationScope:
+        input.getConversationScope?.() ?? 'unverified-external',
+      messageInput: readDeliveryContext().messageInput,
+    })
   const phoneCalls: AssistantPhoneCallPort | null =
     executionContext?.phoneCalls ?? null
   let subscriptionActionClaimed = false
@@ -425,6 +495,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    pollTool: readPollTool(executionContext),
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: imageGenerationLauncher
@@ -438,7 +509,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.persistGeneratedImageCapture ?? null,
     groupEmailEffect,
     personalizationTool: executionContext?.personalizationTool ?? null,
-    planUsageTool: executionContext?.planUsageTool ?? null,
+    ...readUsageTools(executionContext),
     physicalNotes: executionContext?.physicalNotes ?? null,
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
@@ -508,10 +579,6 @@ export function createAssistantHostedToolContext(input: {
       const session = readDeliveryContext().session
       return {
         model: session.providerOptions.model ?? null,
-        provider:
-          session.providerOptions.modelProvider === HOSTED_ASSISTANT_VENICE_PROVIDER
-            ? HOSTED_ASSISTANT_VENICE_PROVIDER
-            : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
         reasoningEffort: session.providerOptions.reasoningEffort ?? null,
       }
     },
@@ -562,10 +629,44 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     currentInvocationScope: readCurrentInvocationScope,
+    currentConversationScope: () =>
+      input.getConversationScope?.() ?? 'unverified-external',
+    currentConversationPollRoute: () => {
+      const { messageInput } = readDeliveryContext()
+      const channel = messageInput.channel
+      const target = messageInput.bindingDeliveryTarget ?? messageInput.deliveryTarget
+      return (channel === 'linq' || channel === 'telegram') && target
+        ? { channel, target }
+        : null
+    },
     closeGroupEmailCapability: groupEmailOutboxTool?.closeCapability,
     recordGroupEmailSendResult: input.recordGroupEmailSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
+    currentDeviceActivityOccurrence: readCurrentDeviceActivityOccurrence,
     currentUserActionScope: readCurrentUserActionScope,
+    currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
+    currentGameMissedCheckInScope: () => executionContext?.gameMissedCheckInScope ?? null,
+    prepareGameLore: async () => (await prepareGameLore())?.guidance || null,
+    readGameLore,
+    replaceGameLore: async (content) => {
+      if (executionContext?.gameRecapScope?.loreAccess === 'read') throw new TypeError('Game lore is read-only for this recap.')
+      await writeGameLore(content)
+    },
+    appendGameRecapChatLine: async (chatLine) => {
+      if (executionContext?.gameRecapScope?.loreAccess !== 'read') return
+      const marker = `Chat line used: ${chatLine.replace(/\s+/gu, ' ').trim()}`
+      const lines = (await readGameLore()).split(/\r?\n/u)
+      if (lines.includes(marker)) return
+      if (lines.at(-1) === '') lines.pop()
+      lines.push(marker)
+      let bytes = Buffer.byteLength(lines.join('\n') + '\n', 'utf8')
+      let start = 0
+      while (bytes > 64 * 1024 && start < lines.length - 1) {
+        bytes -= Buffer.byteLength(lines[start++]!, 'utf8') + 1
+      }
+      await writeGameLore(lines.slice(start).join('\n') + '\n')
+    },
+    recordSavedGameRecapChatLine: input.recordSavedGameRecapChatLine,
     currentProductFeedbackAcceptedInputIds: () =>
       readCurrentHostedImageCompletionEffectScope() === null
         ? input.getProductFeedbackAcceptedInputIds?.() ?? []
@@ -622,6 +723,34 @@ export function createAssistantHostedScheduledRequestKey(input: {
   return `scheduled_${digest}`
 }
 
+/** Keys a private device-activity run's effect on its wearable event, so a retry repeats nothing. */
+export function createAssistantHostedDeviceActivityRequestKey(input: {
+  occurrence: AssistantDeviceActivityOccurrence
+  operation: 'clinical-records-connect-link'
+}): `scheduled_${string}` {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      occurrenceKey: input.occurrence.occurrenceKey,
+      operation: input.operation,
+      parentAutomationId: input.occurrence.parentAutomationId,
+      schema: 'murph.assistant-device-activity-request-key.v1',
+    }))
+    .digest('hex')
+  return `scheduled_${digest}`
+}
+
+export function resolveAssistantHostedDeviceActivityOccurrence(input: {
+  conversationScope: AssistantConversationScope
+  messageInput: Pick<AssistantMessageInput, 'deviceActivityOccurrence' | 'turnTrigger'>
+}): AssistantDeviceActivityOccurrence | null {
+  const occurrence = input.messageInput.deviceActivityOccurrence ?? null
+  return occurrence !== null
+    && input.conversationScope === 'direct'
+    && input.messageInput.turnTrigger === 'automation-cron'
+    ? occurrence
+    : null
+}
+
 // The host, not the model or tool arguments, owns which durable session an
 // asynchronous image completion resumes. Binding it here keeps the caller's
 // `scopeId` (pending/queued coordination) and `readStatus` untouched.
@@ -645,16 +774,32 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   conversationScope: AssistantConversationScope
   messageInput: Pick<
     AssistantMessageInput,
-    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
+    | 'deviceActivityOccurrence'
+    | 'scheduledInvocationAuthority'
+    | 'scheduledOccurrenceAt'
+    | 'turnTrigger'
   >
   originSessionId: string
 }): AssistantHostedScheduledPhoneCallScope | null {
-  const scope = resolveAssistantHostedScheduledInvocationScope(input)
   const channel = input.channel?.trim().toLowerCase()
-  if (
-    (channel !== 'linq' && channel !== 'telegram')
-    || scope?.conversationScope !== 'direct'
-  ) {
+  if (channel !== 'linq' && channel !== 'telegram') {
+    return null
+  }
+  const scope = resolveAssistantHostedScheduledInvocationScope(input)
+  if (scope === null) {
+    const deviceOccurrence = resolveAssistantHostedDeviceActivityOccurrence(input)
+    const occurrenceAt = input.messageInput.scheduledOccurrenceAt ?? null
+    return deviceOccurrence === null || occurrenceAt === null
+      ? null
+      : {
+          automationId: deviceOccurrence.parentAutomationId,
+          occurrenceAt,
+          occurrenceKey: deviceOccurrence.occurrenceKey,
+          resultNotificationChannel: channel,
+          originSessionId: input.originSessionId,
+        }
+  }
+  if (scope.conversationScope !== 'direct') {
     return null
   }
 
@@ -713,4 +858,15 @@ function normalizeHostedDeliveryContextValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null
+}
+
+function readUsageTools(context: AssistantHostedExecutionContext | null) {
+  return {
+    planUsageTool: context?.planUsageTool ?? null,
+    usageDiagnostics: context?.usageDiagnostics ?? null,
+  }
+}
+
+function readPollTool(context: AssistantHostedExecutionContext | null): ConversationPollTool | null {
+  return context?.pollTool ?? null
 }

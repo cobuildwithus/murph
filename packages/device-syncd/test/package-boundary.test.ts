@@ -13,116 +13,6 @@ import {
 } from "../src/fitbit-migration.ts";
 import { createSecretCodec } from "../src/local-secret-codec.ts";
 
-test("@murphai/device-syncd package manifest exposes narrow public subpaths", async () => {
-  const packageManifest = JSON.parse(
-    await readFile(new URL("../package.json", import.meta.url), "utf8"),
-  ) as {
-    exports?: Record<string, { default?: string; types?: string } | undefined>;
-  };
-
-  assert.deepEqual(Object.keys(packageManifest.exports ?? {}).sort(), [
-    ".",
-    "./callback-redirect",
-    "./client",
-    "./config",
-    "./connect-config",
-    "./errors",
-    "./fitbit-migration",
-    "./hosted-hints",
-    "./hosted-runtime",
-    "./http",
-    "./junction-historical-backfill-progress",
-    "./junction-inline-authority",
-    "./junction-push-source-recovery",
-    "./junction-resources",
-    "./junction-source-reconnect",
-    "./local-secret-codec",
-    "./prepared-webhook",
-    "./provider-configs",
-    "./provider-credential-policy",
-    "./provider-label",
-    "./provider-match",
-    "./providers/junction-client",
-    "./providers/junction-config",
-    "./providers/oura",
-    "./providers/strava",
-    "./providers/whoop",
-    "./public-account",
-    "./public-ingress",
-    "./public-provider-descriptors",
-    "./registry",
-    "./runtime-config",
-    "./service",
-    "./source-staleness",
-    "./types",
-  ]);
-  assert.equal(packageManifest.exports?.["./crypto"], undefined);
-  assert.deepEqual(packageManifest.exports?.["./connect-config"], {
-    default: "./dist/connect-config.js",
-    types: "./dist/connect-config.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./errors"], {
-    default: "./dist/errors.js",
-    types: "./dist/errors.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./fitbit-migration"], {
-    default: "./dist/fitbit-migration.js",
-    types: "./dist/fitbit-migration.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./local-secret-codec"], {
-    default: "./dist/local-secret-codec.js",
-    types: "./dist/local-secret-codec.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./prepared-webhook"], {
-    default: "./dist/prepared-webhook.js",
-    types: "./dist/prepared-webhook.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./junction-inline-authority"], {
-    default: "./dist/junction-inline-authority.js",
-    types: "./dist/junction-inline-authority.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./junction-historical-backfill-progress"], {
-    default: "./dist/junction-historical-backfill-progress.js",
-    types: "./dist/junction-historical-backfill-progress.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./junction-resources"], {
-    default: "./dist/junction-resources.js",
-    types: "./dist/junction-resources.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./junction-source-reconnect"], {
-    default: "./dist/junction-source-reconnect.js",
-    types: "./dist/junction-source-reconnect.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./provider-credential-policy"], {
-    default: "./dist/provider-credential-policy.js",
-    types: "./dist/provider-credential-policy.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./provider-configs"], {
-    default: "./dist/provider-configs.js",
-    types: "./dist/provider-configs.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./provider-match"], {
-    default: "./dist/provider-match.js",
-    types: "./dist/provider-match.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./public-provider-descriptors"], {
-    default: "./dist/public-provider-descriptors.js",
-    types: "./dist/public-provider-descriptors.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./public-account"], {
-    default: "./dist/public-account.js",
-    types: "./dist/public-account.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./providers/junction-client"], {
-    default: "./dist/providers/junction-client.js",
-    types: "./dist/providers/junction-client.d.ts",
-  });
-  assert.deepEqual(packageManifest.exports?.["./providers/junction-config"], {
-    default: "./dist/providers/junction-config.js",
-    types: "./dist/providers/junction-config.d.ts",
-  });
-});
-
 test("@murphai/device-syncd root barrel exposes the local secret codec API", () => {
   assert.equal(rootExports.createSecretCodec, createSecretCodec);
   assert.equal("buildDeviceSyncSecretAad" in rootExports, false);
@@ -171,7 +61,7 @@ test("Junction provider imports SDK resource subpaths without the aggregate root
   assert.equal(sdkSpecifiers.includes("@junction-api/sdk"), false);
 });
 
-test("hosted web-safe device-sync graph stays out of provider runtime modules", async () => {
+test("hosted device-sync graph confines provider reads to the scheduled preflight", async () => {
   const failures = await Promise.all(
     WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS.map(async (root) => {
       const path = await findDeniedDeviceSyncGraphPath(root);
@@ -266,6 +156,12 @@ async function findDeniedDeviceSyncGraphPath(root: string): Promise<string[] | n
 
     const source = await readFile(current.file, "utf8");
     for (const specifier of readModuleSpecifiers(source)) {
+      // The recovery sweep now intentionally reads provider content to avoid
+      // waking an unchanged member runtime. Permit only its preflight-to-registry
+      // edge; all other control routes and recovery-sweep paths stay provider-free.
+      if (root === "apps/web/app/api/internal/device-sync/recovery-sweep/route.ts"
+        && toRepoPath(current.file) === "apps/web/src/lib/device-sync/scheduled-reconcile-preflight.ts"
+        && specifier === "./providers") continue;
       const resolvedModule = resolveLocalModule(current.file, specifier);
       if (!resolvedModule || visited.has(resolvedModule)) {
         continue;

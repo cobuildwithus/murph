@@ -1,5 +1,4 @@
 import assistantEngineProject from "./packages/assistant-engine/vitest.config.ts";
-import assistantCliProject from "./packages/assistant-cli/vitest.config.ts";
 import assistantRuntimeProject from "./packages/assistant-runtime/vitest.config.ts";
 import cloudflareHostedControlProject from "./packages/cloudflare-hosted-control/vitest.config.ts";
 import clinicalRecordsProject from "./packages/clinical-records/vitest.config.ts";
@@ -14,7 +13,6 @@ import importersProject from "./packages/importers/vitest.config.ts";
 import inboxServicesProject from "./packages/inbox-services/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
 import messagingIngressProject from "./packages/messaging-ingress/vitest.config.ts";
-import openclawPluginProject from "./packages/openclaw-plugin/vitest.config.ts";
 import operatorConfigProject from "./packages/operator-config/vitest.config.ts";
 import {
   cliVitestProjectSpecs,
@@ -23,7 +21,6 @@ import {
 import parsersProject from "./packages/parsers/vitest.config.ts";
 import queryProject from "./packages/query/vitest.config.ts";
 import runtimeStateProject from "./packages/runtime-state/vitest.config.ts";
-import setupCliProject from "./packages/setup-cli/vitest.config.ts";
 import vaultUsecasesProject from "./packages/vault-usecases/vitest.config.ts";
 import {
   defineConfig,
@@ -53,11 +50,6 @@ type RootRepoProject = {
 };
 
 const ROOT_REPO_PROJECTS: RootRepoProject[] = [
-  {
-    config: assistantCliProject,
-    root: "packages/assistant-cli",
-    include: ["test/**/*.test.ts"],
-  },
   {
     config: assistantEngineProject,
     root: "packages/assistant-engine",
@@ -124,11 +116,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
     include: ["test/**/*.test.ts"],
   },
   {
-    config: openclawPluginProject,
-    root: "packages/openclaw-plugin",
-    include: ["test/**/*.test.ts"],
-  },
-  {
     config: operatorConfigProject,
     root: "packages/operator-config",
     include: ["test/**/*.test.ts"],
@@ -156,11 +143,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: runtimeStateProject,
     root: "packages/runtime-state",
-    include: ["test/**/*.test.ts"],
-  },
-  {
-    config: setupCliProject,
-    root: "packages/setup-cli",
     include: ["test/**/*.test.ts"],
   },
   {

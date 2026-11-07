@@ -629,6 +629,7 @@ function createIntegratedCoreServices(
       }
     },
     async addMeal(input: CommandContext & {
+      name?: string
       photo?: string
       audio?: string
       note?: string
@@ -637,12 +638,13 @@ function createIntegratedCoreServices(
       ingredients?: string[]
       nutrition?: import('@murphai/contracts').MealNutrition
     }) {
-      const { vault, photo, audio, note, occurredAt, source, ingredients, nutrition } = input
+      const { vault, photo, audio, name, note, occurredAt, source, ingredients, nutrition } = input
       const core = await loadCoreRuntime()
       const result = await core.addMeal({
         vaultRoot: vault,
         photoPath: photo,
         audioPath: audio,
+        name,
         note,
         occurredAt,
         source,
@@ -659,6 +661,7 @@ function createIntegratedCoreServices(
         photoPath: result.photo?.relativePath ?? null,
         audioPath: result.audio?.relativePath ?? null,
         manifestFile: result.manifestPath,
+        name: result.event.title === "Meal" ? null : result.event.title ?? null,
         note: result.event.note ?? note ?? null,
         source: result.event.source ?? null,
         ingredients: result.event.ingredients ?? null,
@@ -1438,25 +1441,6 @@ function createIntegratedQueryServices(): QueryServices {
       return {
         filters: normalized.filters,
         summary,
-      }
-    },
-    async showPersonalPatterns(input: CommandContext & {
-      date?: string
-      windowDays?: number
-    }) {
-      const windowDays = input.windowDays ?? 120
-      const query = await loadQueryRuntime()
-      const report = await query.buildPersonalPatternReportRuntime(input.vault, {
-        asOf: input.date,
-        windowDays,
-      })
-
-      return {
-        filters: {
-          date: input.date ?? null,
-          windowDays,
-        },
-        report,
       }
     },
     async listWearableSleep(input: CommandContext & {

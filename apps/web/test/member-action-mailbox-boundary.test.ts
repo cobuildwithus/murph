@@ -8,6 +8,9 @@ const preparedCrypto = {
 };
 
 const mocks = vi.hoisted(() => ({
+  auth: vi.fn(),
+  current: vi.fn(),
+  authority: vi.fn(),
   appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
@@ -44,6 +47,13 @@ vi.mock("../src/lib/hosted-onboarding/shared", () => ({
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
+
+vi.mock("../src/lib/prisma", () => ({ getPrisma: () => prisma }));
+vi.mock("../src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
+vi.mock("../src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
+vi.mock("../src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
+import { POST } from "../app/api/device-sync/companion/measurements/route";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 import { recordMemberActionOutcome } from "../src/lib/member-actions/outcome";
 import { submitMemberAction } from "../src/lib/member-actions/submit";
@@ -91,6 +101,62 @@ describe("member-action mailbox crypto boundary", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member-1",
     });
+  });
+
+  it.each(["session", "consent"])("rechecks companion %s after initial read and before the locked append", async authority => {
+    let revoked = false;
+    mocks.auth.mockResolvedValue({ member: { id: "member-1" } });
+    const deny = () => { throw hostedOnboardingError({ code: "AUTH_REVOKED", httpStatus: 403, message: "Access changed." }); };
+    mocks.current.mockImplementation(async () => {
+      mocks.events.push("session-current");
+      if (revoked && authority === "session") deny();
+    });
+    mocks.authority.mockImplementation(async () => {
+      mocks.events.push("browser-authority");
+      if (revoked && authority === "consent") deny();
+    });
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementationOnce(async input => {
+      revoked = true;
+      return input.append(preparedCrypto);
+    });
+    mocks.lockHostedMemberRow.mockImplementationOnce(async () => { mocks.events.push("member-locked"); });
+    mocks.lockHostedMemberSponsoredAccessRows.mockImplementationOnce(async () => { mocks.events.push("access-locked"); });
+    const response = await POST(new Request("https://app.example.test/api/device-sync/companion/measurements", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ actionId: ACTION_ID, requestedAt: "2026-11-01T12:00:00Z", metric: "estimated-vo2-max", value: 42.5 }),
+    }));
+    expect(response.status).toBe(403);
+    expect(mocks.events).toEqual([
+      "browser-authority", "transaction-start", "member-locked", "access-locked", "session-current",
+      ...authority === "consent" ? ["browser-authority"] : [],
+    ]);
+    expect(mocks.current).toHaveBeenCalledWith({ member: { id: "member-1" } }, transactionClient);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    mocks.current.mockReset();
+    mocks.authority.mockReset();
+  });
+
+  it("keeps durable acceptance when post-commit signaling fails", async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+    const current = vi.fn(async () => { mocks.events.push("session-current"); });
+    await expect(submitMemberAction({
+      memberId: "member-1", prisma: prisma as never, assertCurrentAuthorityTx: current,
+      request: { schemaVersion: 1, actionId: ACTION_ID, requestedAt: "2026-11-01T12:00:00Z", action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } },
+    })).resolves.toMatchObject({ accepted: true });
+    expect(current).toHaveBeenCalledWith(transactionClient);
+    expect(mocks.events.indexOf("session-current")).toBeLessThan(mocks.events.indexOf("mailbox-appended"));
+    expect(mocks.events).toContain("transaction-commit");
+  });
+
+  it("does not append after admission authority is revoked", async () => {
+    await expect(submitMemberAction({
+      memberId: "member-1", prisma: prisma as never,
+      assertCurrentAuthorityTx: async () => { throw new Error("synthetic revoked session"); },
+      request: { schemaVersion: 1, actionId: ACTION_ID, requestedAt: "2026-11-01T12:00:00Z", action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } },
+    })).rejects.toThrow("revoked session");
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("prepares request crypto before the access-fenced admission transaction", async () => {

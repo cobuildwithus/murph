@@ -18,7 +18,7 @@ export async function sendPendingHostedLinqAlertsBestEffort(input: {
   alertIds: readonly string[];
   env?: HostedLinqAlertEmailEnv;
   fetchImpl?: typeof fetch;
-  prisma?: PrismaClient;
+  prisma?: Pick<PrismaClient, "hostedLinqAlert">;
 }): Promise<void> {
   if (input.alertIds.length === 0) {
     return;
@@ -37,7 +37,7 @@ export async function sendRecoverableHostedLinqAlertsBestEffort(input: {
   env?: HostedLinqAlertEmailEnv;
   fetchImpl?: typeof fetch;
   now?: Date;
-  prisma?: PrismaClient;
+  prisma?: Pick<PrismaClient, "hostedLinqAlert">;
 } = {}): Promise<void> {
   try {
     await sendPendingHostedLinqAlerts({
@@ -58,7 +58,7 @@ async function sendPendingHostedLinqAlerts(input: {
   fetchImpl?: typeof fetch;
   includeRecoverableSending?: boolean;
   now?: Date;
-  prisma?: PrismaClient;
+  prisma?: Pick<PrismaClient, "hostedLinqAlert">;
 }): Promise<void> {
   const config = readHostedOperationalAlertEmailConfig(
     input.env ?? process.env,
@@ -95,7 +95,7 @@ async function sendHostedLinqAlertEmail(input: {
   alert: HostedLinqAlert;
   config: HostedOperationalAlertEmailConfig;
   fetchImpl?: typeof fetch;
-  prisma: PrismaClient;
+  prisma: Pick<PrismaClient, "hostedLinqAlert">;
 }): Promise<void> {
   const claim = await input.prisma.hostedLinqAlert.updateMany({
     where: {
@@ -184,6 +184,12 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
   const details = alert.detailsJson && typeof alert.detailsJson === "object"
     ? alert.detailsJson as Record<string, unknown>
     : {};
+  if (alert.kind === "runtime_warm_typing_slow" || alert.kind === "runtime_cold_typing_slow") {
+    return buildHostedTypingAlertEmailText(alert.id, details);
+  }
+  if (alert.kind === "runtime_final_reply_delivery_slow") {
+    return buildHostedFinalReplyDeliveryAlertEmailText(alert.id, details);
+  }
   const independentProviderStatusPresent =
     typeof details.providerServiceStatus === "string"
     || typeof details.providerReputationStatus === "string";
@@ -216,4 +222,89 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
 
 function buildHostedLinqAlertEmailIdempotencyKey(alertId: string): string {
   return `hosted-linq-alert/${alertId}`.slice(0, 256);
+}
+
+function buildHostedFinalReplyDeliveryAlertEmailText(
+  alertId: string,
+  details: Record<string, unknown>,
+): string {
+  const describe = (label: string, value: unknown): string => {
+    const measurement = value && typeof value === "object"
+      ? value as Record<string, unknown>
+      : {};
+    return measurement.status === "observed"
+      ? `${label}: ${measurement.elapsedMs} ms`
+      : `${label}: not measured (${String(measurement.status ?? "missing")})`;
+  };
+  const components = details.components && typeof details.components === "object"
+    ? details.components as Record<string, unknown>
+    : {};
+  const dispatch = details.dispatchAttribution && typeof details.dispatchAttribution === "object"
+    ? details.dispatchAttribution as Record<string, unknown>
+    : {};
+  const formatOptionalMs = (value: unknown) => typeof value === "number" ? `${value} ms` : "unknown";
+  const intentionalPacingMs = typeof details.intentionalPacingMs === "number"
+    ? details.intentionalPacingMs
+    : null;
+  return [
+    "Murph final reply delivery latency alert.",
+    "",
+    `Alert ID: ${alertId}`,
+    `Scope: ${details.scope}`,
+    `Triggered by: ${Array.isArray(details.triggerOrigins) ? details.triggerOrigins.join(", ") : "unknown"}`,
+    `Threshold: strictly greater than ${details.thresholdMs} ms`,
+    intentionalPacingMs === null
+      ? "Intentional reply-bubble pacing: unknown; no time excluded from threshold evaluation."
+      : `Intentional reply-bubble pacing excluded from threshold evaluation: ${intentionalPacingMs} ms`,
+    "Durations below include intentional pacing and earlier reply bubbles.",
+    `Whole-delivery Linq acceptance observed at: ${details.acceptedAt}`,
+    describe("Final response completion observed to Linq acceptance", details.finalResponseCompletedToAccepted),
+    describe("Provider result to Linq acceptance", details.providerResultToAccepted),
+    `Provider result to queued reply intent: ${formatOptionalMs(components.providerResultToIntentMs)}`,
+    `Provider result to Linq send attempt: ${formatOptionalMs(components.providerResultToAttemptMs)}`,
+    `Linq send attempt to acceptance: ${formatOptionalMs(components.attemptToAcceptedMs)}`,
+    `Dispatch attribution (nested, not additive): ${String(dispatch.status ?? "missing")}`,
+    ...(dispatch.status === "observed"
+      ? [
+        `  Since foreground delivery phase start: ${formatOptionalMs(dispatch.sinceForegroundPhaseStartedMs)}`,
+        `  Configured reply-bubble pauses completed: ${formatOptionalMs(dispatch.replyBubblePacingMs)}`,
+        `  Member-channel barrier (shared by the batch): ${formatOptionalMs(dispatch.memberChannelBarrierMs)}`,
+        `  Send preparation: ${formatOptionalMs(dispatch.sendPreparationMs)}`,
+        `  Route authority check: ${formatOptionalMs(dispatch.routeAuthorityCheckMs)}`,
+        `  Provider entry fence: ${formatOptionalMs(dispatch.providerEntryFenceMs)}`,
+      ]
+      : []),
+    `Delivery runtime attempt: ${details.deliveryAttemptRelation}`,
+    "",
+    "Acceptance means Linq accepted the send; it is not member receipt.",
+  ].join("\n");
+}
+
+function buildHostedTypingAlertEmailText(alertId: string, details: Record<string, unknown>): string {
+  return [
+    "Murph message typing latency alert.",
+    "",
+    `Alert ID: ${alertId}`,
+    `Channel: ${details.source}`,
+    `Workspace: ${details.workspaceState}`,
+    ...(typeof details.providerEventCreatedAt === "string"
+      ? [`Provider event created: ${details.providerEventCreatedAt}`] : []),
+    `Webhook received: ${details.webhookReceivedAt}`,
+    details.typingAcceptedAt === null
+      ? "Typing acceptance: not observed when checked"
+      : `First typing accepted: ${details.typingAcceptedAt}`,
+    ...(typeof details.silenceStartedAt === "string"
+      ? [
+        `Silence measured from: ${details.silenceStartedAt}`,
+        `Wait without typing or a reply: ${details.elapsedMs} ms`,
+      ]
+      : [details.typingAcceptedAt === null
+        ? `Time since webhook without recorded typing acceptance: ${details.elapsedMs} ms`
+        : `Webhook-to-typing wait: ${details.elapsedMs} ms`]),
+    `Threshold: strictly greater than ${details.thresholdMs} ms`,
+    ...(details.workspaceState === "unconfirmed"
+      ? [`Workspace warmth was not confirmed; the ${details.thresholdMs} ms cold-start cutoff applies.`] : []),
+    "",
+    "This is one inbound message. Rollouts and other slow messages do not suppress this alert.",
+  ].join("\n");
 }

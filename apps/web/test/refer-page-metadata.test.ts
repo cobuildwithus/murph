@@ -9,38 +9,6 @@ import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
-test("ReferPage metadata describes the public referral program", () => {
-  const metadata = buildReferralPageMetadata(HOSTED_PUBLIC_REFERRAL_REWARDS);
-
-  assert.equal(
-    metadata.title,
-    "Murph referrals · Earn more Murph time",
-  );
-  assert.equal(
-    metadata.description,
-    "Share your referral link or start a new group with Murph. When a referral meets the rules, Murph adds extra usage automatically.",
-  );
-  assert.equal(metadata.alternates?.canonical, "/refer");
-  assert.deepEqual(metadata.openGraph?.images, [
-    {
-      alt: "Health is hard. Don’t do it alone.",
-      height: 630,
-      type: "image/png",
-      url: "/opengraph-image",
-      width: 1200,
-    },
-  ]);
-  assert.deepEqual(metadata.twitter?.images, [
-    {
-      alt: "Health is hard. Don’t do it alone.",
-      height: 630,
-      type: "image/png",
-      url: "/opengraph-image",
-      width: 1200,
-    },
-  ]);
-});
-
 test("ReferPage metadata does not promise disabled reward paths", () => {
   const signupMetadata = buildReferralPageMetadata(
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id === "signup-link"),

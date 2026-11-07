@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-11",
+  "order": 100,
+  "item": {
+    "id": "typing-through-reply-handoff",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Steadier typing while Murph prepares a reply",
+    "summary": "An iMessage typing indicator no longer stops early when Murph moves from receiving your message to preparing its reply.",
+    "details": "This improves typing continuity in private conversations and supported group chats. It does not change whether a message needs a reply.",
+    "relevanceTags": ["conversation", "reliability"],
+    "sourcePullRequests": [4124]
+  }
+}

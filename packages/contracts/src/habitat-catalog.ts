@@ -27,19 +27,10 @@ export interface HabitatIndicatorDefinition {
   valueType: HabitatIndicatorValueType;
   /** Example conversational opener; catalog questions are starters, not form fields. */
   question?: string;
-  /** Evidence anchor shown in UI/audit, e.g. "co2 < 1000 ppm". */
+  /** Evidence anchor for conversational guidance, e.g. "co2 < 1000 ppm". */
   target?: string;
   /** Informational indicators ground advice but never become target conditions. */
   informational?: boolean;
-  /**
-   * Optional positive capability credit. Missing, declined, and zero-point
-   * values stay neutral. Related indicators share a group so one device cannot
-   * count twice.
-   */
-  capabilityBonus?: {
-    group?: string;
-    pointsByValue: Readonly<Record<string, number>>;
-  };
 }
 
 export interface HabitatAspectDefinition {
@@ -147,9 +138,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("ac", "adjustable_heating", "none"),
           question: "Can you control it — AC, heating?",
-          capabilityBonus: {
-            pointsByValue: { ac: 1, adjustable_heating: 1 },
-          },
         },
         {
           id: "window_at_night",
@@ -166,10 +154,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("aranet", "other", "none"),
           question: "Ever measured CO2 in your bedroom?",
-          capabilityBonus: {
-            group: "indoor_air_measurement",
-            pointsByValue: { aranet: 1, other: 1 },
-          },
         },
         {
           id: "co2_typical_ppm",
@@ -200,9 +184,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           priority: "medium",
           informational: true,
           valueType: enumType("earplugs", "white_noise", "none"),
-          capabilityBonus: {
-            pointsByValue: { earplugs: 1, white_noise: 1 },
-          },
         },
         {
           id: "humidity_known",
@@ -212,9 +193,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           valueType: enumType("measured", "humidifier", "dehumidifier", "unmanaged"),
           question: "Does the air get dry in winter? Do you run a humidifier?",
           target: "40-60% RH",
-          capabilityBonus: {
-            pointsByValue: { measured: 1, humidifier: 1, dehumidifier: 1 },
-          },
         },
         {
           id: "mattress_satisfaction",
@@ -289,9 +267,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("hepa", "other", "none"),
           question: "Do you run an air purifier?",
-          capabilityBonus: {
-            pointsByValue: { hepa: 3, other: 1 },
-          },
         },
         {
           id: "air_quality_meter",
@@ -300,10 +275,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("pm25", "co2", "combined", "none"),
           question: "Do you measure air quality at home with anything?",
-          capabilityBonus: {
-            group: "indoor_air_measurement",
-            pointsByValue: { pm25: 1, co2: 1, combined: 2 },
-          },
         },
         {
           id: "stove",
@@ -327,9 +298,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("tested_ok", "tested_high", "not_tested"),
           target: "only relevant in risk regions on ground floor/basement",
-          capabilityBonus: {
-            pointsByValue: { tested_ok: 2 },
-          },
         },
       ],
     },
@@ -376,9 +344,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           priority: "low",
           valueType: BOOL,
           informational: true,
-          capabilityBonus: {
-            pointsByValue: { true: 1 },
-          },
         },
       ],
     },
@@ -412,9 +377,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("home", "gym", "nearby", "none"),
           question: "Do you have access to a sauna anywhere — at home, at the gym?",
-          capabilityBonus: {
-            pointsByValue: { home: 3, gym: 2, nearby: 2 },
-          },
         },
         {
           id: "sauna_type",
@@ -430,13 +392,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           valueType: enumType("cold_showers", "plunge", "winter_swimming", "none"),
           question: "Do you do anything with cold — cold showers, winter swims?",
           informational: true,
-          capabilityBonus: {
-            pointsByValue: {
-              cold_showers: 1,
-              plunge: 2,
-              winter_swimming: 1,
-            },
-          },
         },
         {
           id: "red_light",
@@ -445,9 +400,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           valueType: enumType("panel_owned", "access", "none"),
           question: "Do you have a red light panel?",
           informational: true,
-          capabilityBonus: {
-            pointsByValue: { panel_owned: 1, access: 1 },
-          },
         },
         {
           id: "red_light_model",
@@ -472,9 +424,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           priority: "medium",
           valueType: enumType("smart", "basic", "none"),
           informational: true,
-          capabilityBonus: {
-            pointsByValue: { smart: 1, basic: 1 },
-          },
         },
         {
           id: "bp_cuff",
@@ -483,9 +432,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           valueType: BOOL,
           question: "Do you have a blood-pressure cuff at home?",
           informational: true,
-          capabilityBonus: {
-            pointsByValue: { true: 2 },
-          },
         },
         {
           id: "thermometer",
@@ -493,9 +439,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           priority: "low",
           valueType: BOOL,
           informational: true,
-          capabilityBonus: {
-            pointsByValue: { true: 1 },
-          },
         },
         {
           id: "pulse_oximeter",
@@ -503,9 +446,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           priority: "low",
           valueType: BOOL,
           informational: true,
-          capabilityBonus: {
-            pointsByValue: { true: 1 },
-          },
         },
       ],
     },
@@ -563,9 +503,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           valueType: enumType("adjustable_used", "adjustable_unused", "fixed"),
           question: "Do you have a height-adjustable desk? Do you use it standing?",
           target: "20-8-2 pattern",
-          capabilityBonus: {
-            pointsByValue: { adjustable_used: 2, adjustable_unused: 2 },
-          },
         },
         {
           id: "screen_setup",
@@ -574,9 +511,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("external_monitor", "laptop_only", "mixed"),
           question: "Do you work on just the laptop, or an external monitor?",
-          capabilityBonus: {
-            pointsByValue: { external_monitor: 1, mixed: 1 },
-          },
         },
         {
           id: "screen_at_eye_level",
@@ -592,9 +526,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           informational: true,
           valueType: enumType("ergonomic", "ordinary", "varies"),
           question: "What do you sit on — a proper chair, or whatever's around?",
-          capabilityBonus: {
-            pointsByValue: { ergonomic: 1 },
-          },
         },
         {
           id: "external_keyboard",
@@ -602,9 +533,6 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           priority: "medium",
           informational: true,
           valueType: BOOL,
-          capabilityBonus: {
-            pointsByValue: { true: 1 },
-          },
         },
         {
           id: "wrist_complaints",

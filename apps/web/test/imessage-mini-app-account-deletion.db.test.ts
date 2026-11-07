@@ -14,9 +14,18 @@ import {
   recordHostedLaunchRequiredConsent,
 } from "../src/lib/legal/consent";
 import { lockHostedMemberRow } from "../src/lib/hosted-onboarding/shared";
+import { POST as memberAction } from "../app/api/device-sync/companion/imessage-mini-app/member-actions/route";
+import nativeWorkoutRequest from "./fixtures/imessage-workout-native-request.json";
 import { createPrismaClient } from "../src/lib/prisma";
 
 vi.mock("server-only", () => ({}));
+// Keep the provider boundary local; credential checks and mailbox transactions use PostgreSQL.
+vi.mock("../src/lib/hosted-crypto/domain-root-store", async original => ({
+  ...await original<typeof import("../src/lib/hosted-crypto/domain-root-store")>(),
+  prepareHostedDomainRootForWeb: async ({ userId }: { userId: string }) => ({ domain: "ingress", userId, rootKeyId: "synthetic-root" }),
+  revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({ rootKey: Buffer.alloc(32, 7) }) }),
+}));
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn(async () => {}) }));
 
 const TEST_DATABASE_ENV = "MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL";
 const APPLICATION_NAME_RUN_ID = randomUUID().replaceAll("-", "").slice(0, 8);
@@ -72,6 +81,27 @@ function defineEnrollmentDeletionSerializationSuite(): void {
       clients.length = 0;
       observer = null;
     }
+  });
+
+  it.each(["revoke", "rotate", "active"] as const)("checks the exact Messages credential at mailbox append: %s", async action => {
+    const prisma = requireObserver();
+    const enrollment = await issueIMessageMiniAppEnrollment({ memberId, prisma });
+    const token = enrollment.credential.token;
+    const body = { ...nativeWorkoutRequest, actionId: randomUUID(), requestedAt: new Date().toISOString() };
+    const init: RequestInit & { duplex: "half" } = {
+      method: "POST", duplex: "half",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: new ReadableStream({ async pull(controller) {
+        if (action === "revoke") await revokeIMessageMiniAppCredential({ prisma, request: lifecycleCredentialRequest(token) });
+        if (action === "rotate") await issueIMessageMiniAppEnrollment({ memberId, prisma });
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+        controller.close();
+      } }, { highWaterMark: 0 }),
+    };
+    const response = await memberAction(new Request("http://localhost/api/device-sync/companion/imessage-mini-app/member-actions", init));
+    expect(response.status).toBe(action === "active" ? 202 : 401);
+    if (action !== "active") expect(await response.json()).toMatchObject({ error: { code: "IMESSAGE_MINI_APP_AUTH_INVALID" } });
+    expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId, dedupeKey: `member.action.requested:${body.actionId}` } })).toBe(action === "active" ? 1 : 0);
   });
 
   it("lets deletion win without allowing enrollment to recreate a session", async () => {

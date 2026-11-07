@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "talk-with-murph",
+    "kind": "feature",
+    "priority": 5,
+    "title": "Talk with Murph on the website",
+    "summary": "Open Voice to speak with your Murph assistant and hear its answers, with readable captions, mute, and end-call controls.",
+    "details": "Your microphone starts only when you choose Start call. Calls count toward your AI usage. Leaving the page ends the call; work Murph has already accepted can finish afterward. Requested reminders arrive through your connected messaging channel, which Murph names when confirming them.",
+    "relevanceTags": ["voice", "conversation"],
+    "sourcePullRequests": [3612],
+    "tryIt": {
+      "label": "Open Voice",
+      "href": "/voice"
+    }
+  }
+}

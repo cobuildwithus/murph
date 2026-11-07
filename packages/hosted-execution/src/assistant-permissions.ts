@@ -7,6 +7,24 @@ export const MURPH_MEMBER_READ_PERMISSION_PROFILE =
   "murph-member-read" as const;
 export const MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE =
   "murph-member-workspace" as const;
+export const MURPH_GAME_HOST_PERMISSION_PROFILE =
+  "murph-game-host" as const;
+
+export function buildMurphGameHostPermissionProfileTomlLines(): readonly string[] {
+  return [
+    "# Isolated game-host turns use only host-owned dynamic tools.",
+    `[permissions.${MURPH_GAME_HOST_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"',
+    "glob_scan_max_depth = 1",
+    "",
+    `[permissions.${MURPH_GAME_HOST_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+    '"." = "deny"',
+    "",
+    `[permissions.${MURPH_GAME_HOST_PERMISSION_PROFILE}.network]`,
+    "enabled = false",
+    "",
+  ];
+}
 
 export function buildMurphGroupReadPermissionProfileTomlLines(): readonly string[] {
   return [
@@ -115,6 +133,7 @@ export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly 
 
 export function buildMurphHostedPermissionProfileTomlLines(): readonly string[] {
   return [
+    ...buildMurphGameHostPermissionProfileTomlLines(),
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),

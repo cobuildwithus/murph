@@ -13,7 +13,6 @@ const allowedFullVaultReaders = new Map<string, number>([
   ["packages/vault-usecases/src/usecases/experiment-journal-vault.ts", 1],
   ["packages/vault-usecases/src/usecases/integrated-services.ts", 1],
   ["packages/vault-usecases/src/usecases/measurement-read.ts", 2],
-  ["packages/vault-usecases/src/usecases/workout-live-state.ts", 1],
 ]);
 
 const narrowReaderContracts = new Map<string, readonly string[]>([

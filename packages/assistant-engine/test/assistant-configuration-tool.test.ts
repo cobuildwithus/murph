@@ -4,10 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 import {
   executeMurphDynamicToolRequest,
@@ -29,10 +28,39 @@ describe("assistant configuration tool", () => {
     );
   });
 
-  it("describes Astra as available on paid Edge or Max with OpenAI", () => {
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Sol and Astra require an active paid Edge or Max plan");
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Astra requires OpenAI");
+  it("describes scope-specific defaults and personal model entitlements", () => {
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("GPT-6.1 Terra is the default");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Sol models require an active paid subscription, and Astra requires an active paid Edge or Max plan");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("OpenAI model");
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain("Astra requires an active paid Max");
+  });
+
+  it("offers only OpenAI model and reasoning controls and rejects provider changes", () => {
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.inputSchema.properties)
+      .toHaveProperty("model");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.inputSchema.properties)
+      .toHaveProperty("reasoningEffort");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.inputSchema.properties)
+      .not.toHaveProperty("provider");
+    for (const provider of ["openai", "venice", "hosted-custom-inference"]) {
+      expect(readTestMurphDynamicToolRequest({
+        method: "item/tool/call",
+        params: {
+          arguments: { action: "update", model: "gpt-6-sol", provider },
+          namespace: "murph",
+          tool: "assistant_configuration",
+        },
+      })?.kind).toBe("invalid-assistant-configuration-arguments");
+    }
+    for (const arguments_ of [
+      { action: "update", model: "gpt-6-luna", reasoningEffort: "high" },
+      { action: "update", reasoningEffort: "high" },
+    ]) {
+      expect(readTestMurphDynamicToolRequest({
+        method: "item/tool/call",
+        params: { arguments: arguments_, namespace: "murph", tool: "assistant_configuration" },
+      })?.kind).toBe("assistant-configuration");
+    }
   });
 
   it("exposes the scope-specific dynamic tool only when configuration is available", () => {
@@ -55,6 +83,11 @@ describe("assistant configuration tool", () => {
     expect(groupSchema).toContain('"model"');
     expect(groupSchema).not.toContain('"provider"');
     expect(groupSchema).not.toContain('"reasoningEffort"');
+    expect(MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL.description).toContain("defaults to GPT-6.1 Sol without a subscription requirement");
+    for (const tool of [MURPH_ASSISTANT_CONFIGURATION_TOOL, MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL]) {
+      expect(tool.description).toContain("restore the default authorizes that model change");
+      expect(tool.description).toContain("without another confirmation");
+    }
   });
 
   it("saves an explicit group room model for the next turn", async () => {
@@ -63,7 +96,7 @@ describe("assistant configuration tool", () => {
       params: {
         arguments: {
           action: "update",
-          model: HOSTED_ASSISTANT_TERRA_MODEL,
+          model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         },
         namespace: "murph",
         tool: "assistant_configuration",
@@ -73,7 +106,7 @@ describe("assistant configuration tool", () => {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
     const updatedSaved = {
-      ...createGroupSavedConfiguration(HOSTED_ASSISTANT_TERRA_MODEL),
+      ...createGroupSavedConfiguration(HOSTED_ASSISTANT_DEFAULT_MODEL),
       appliesAt: "next_turn" as const,
       requiredPlan: null,
       status: "updated" as const,
@@ -92,7 +125,7 @@ describe("assistant configuration tool", () => {
         assistantConfigurationTool,
         assistantInputId: `ain_${"g".repeat(32)}`,
         conversationScope: "group",
-        currentModel: HOSTED_ASSISTANT_SOL_MODEL,
+        currentModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
         currentReasoningEffort: "low",
       }),
       nextUsageOrdinal: () => 0,
@@ -104,24 +137,23 @@ describe("assistant configuration tool", () => {
     expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"g".repeat(32)}`,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_SOL_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
         reasoningEffort: "low",
       },
       savedForNextTurn: updatedSaved,
     });
   });
 
-  it("rejects provider and reasoning mutations from a group room", async () => {
+
+  it("rejects reasoning mutations from a group room", async () => {
     const assistantConfigurationTool = {
       request: vi.fn(),
     };
     for (const change of [
-      { provider: "venice" as const },
       { reasoningEffort: "high" as const },
     ]) {
       const request = readTestMurphDynamicToolRequest({
@@ -143,7 +175,7 @@ describe("assistant configuration tool", () => {
           assistantConfigurationTool,
           assistantInputId: `ain_${"h".repeat(32)}`,
           conversationScope: "group",
-          currentModel: HOSTED_ASSISTANT_SOL_MODEL,
+          currentModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
           currentReasoningEffort: "low",
         }),
         nextUsageOrdinal: () => 0,
@@ -177,7 +209,7 @@ describe("assistant configuration tool", () => {
       request: vi.fn(async () => ({
         action: "read" as const,
         result: createSavedConfiguration({
-          model: HOSTED_ASSISTANT_TERRA_MODEL,
+          model: HOSTED_ASSISTANT_DEFAULT_MODEL,
           reasoningEffort: "low",
         }),
       })),
@@ -187,7 +219,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_SOL_MODEL,
+        currentModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
         currentReasoningEffort: "high",
       }),
       nextUsageOrdinal: () => 0,
@@ -201,12 +233,11 @@ describe("assistant configuration tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_SOL_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
         reasoningEffort: "high",
       },
       savedForNextTurn: createSavedConfiguration({
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       }),
     });
@@ -233,7 +264,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
         currentReasoningEffort: "low",
       }),
       nextUsageOrdinal: () => 0,
@@ -290,7 +321,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
         currentReasoningEffort: "low",
         assistantInputId: `ain_${"a".repeat(32)}`,
       }),
@@ -308,8 +339,7 @@ describe("assistant configuration tool", () => {
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       },
       savedForNextTurn: updatedSaved,
@@ -332,7 +362,7 @@ describe("assistant configuration tool", () => {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
     const savedForNextTurn = createSavedConfiguration({
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
       reasoningEffort: "low",
     });
     const unchangedSaved = {
@@ -353,7 +383,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
         currentReasoningEffort: "low",
         assistantInputId: `ain_${"d".repeat(32)}`,
       }),
@@ -370,85 +400,15 @@ describe("assistant configuration tool", () => {
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       },
       savedForNextTurn: unchangedSaved,
     });
   });
 
-  it("saves an explicit core-reply provider from normal conversation", async () => {
-    const request = readTestMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          action: "update",
-          provider: "venice",
-        },
-        namespace: "murph",
-        tool: "assistant_configuration",
-      },
-    });
-    expect(request).toEqual({
-      kind: "assistant-configuration",
-      request: {
-        action: "update",
-        provider: "venice",
-      },
-    });
-    if (!request) {
-      throw new Error("Expected an assistant configuration dynamic tool request.");
-    }
 
-    const updatedSaved = {
-      ...createSavedConfiguration({
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "venice",
-        reasoningEffort: "low",
-      }),
-      appliesAt: "next_turn" as const,
-      requiredPlan: null,
-      status: "updated" as const,
-    };
-    const assistantConfigurationTool = {
-      request: vi.fn().mockResolvedValue({
-        action: "update",
-        result: updatedSaved,
-      }),
-    };
-
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({
-        assistantConfigurationTool,
-        assistantInputId: `ain_${"f".repeat(32)}`,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
-        currentReasoningEffort: "low",
-      }),
-      nextUsageOrdinal: () => 0,
-      progressDelivery: null,
-      request,
-    });
-
-    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
-    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
-      action: "update",
-      assistantInputId: `ain_${"f".repeat(32)}`,
-      provider: "venice",
-    });
-    expect(readToolPayload(result)).toEqual({
-      currentTurn: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "openai",
-        reasoningEffort: "low",
-      },
-      savedForNextTurn: updatedSaved,
-    });
-  });
-
-  it.each([[HOSTED_ASSISTANT_SOL_MODEL, "edge"], ["gpt-6-astra", "edge"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
+  it.each([[HOSTED_ASSISTANT_GPT_61_SOL_MODEL, "edge"], ["gpt-6-astra", "edge"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -465,7 +425,7 @@ describe("assistant configuration tool", () => {
     }
     const upgradeRequired = {
       ...createSavedConfiguration({
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       }),
       appliesAt: "next_turn" as const,
@@ -485,7 +445,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
         currentReasoningEffort: "low",
         assistantInputId: `ain_${"e".repeat(32)}`,
       }),
@@ -502,8 +462,7 @@ describe("assistant configuration tool", () => {
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       },
       savedForNextTurn: upgradeRequired,
@@ -545,7 +504,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
         currentReasoningEffort: "high",
         assistantInputId: `ain_${"b".repeat(32)}`,
       }),
@@ -562,21 +521,20 @@ describe("assistant configuration tool", () => {
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "high",
       },
       savedForNextTurn: updatedSaved,
     });
   });
 
-  it("clears dormant Sol intent when the member explicitly chooses Terra", async () => {
+  it("clears dormant Sol intent when the member explicitly chooses the default model", async () => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
           action: "update",
-          model: HOSTED_ASSISTANT_TERRA_MODEL,
+          model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         },
         namespace: "murph",
         tool: "assistant_configuration",
@@ -587,7 +545,7 @@ describe("assistant configuration tool", () => {
     }
     const updatedSaved = {
       ...createSavedConfiguration({
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       }),
       appliesAt: "next_turn" as const,
@@ -607,7 +565,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
         currentReasoningEffort: "low",
         assistantInputId: `ain_${"c".repeat(32)}`,
       }),
@@ -621,12 +579,11 @@ describe("assistant configuration tool", () => {
     expect(assistantConfigurationTool.request).toHaveBeenCalledWith(expect.objectContaining({
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
     }));
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        provider: "openai",
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "low",
       },
       savedForNextTurn: updatedSaved,
@@ -658,19 +615,16 @@ describe("assistant configuration tool", () => {
 
 function createSavedConfiguration(input: {
   model: typeof HOSTED_ASSISTANT_LUNA_MODEL
-    | typeof HOSTED_ASSISTANT_TERRA_MODEL
-    | typeof HOSTED_ASSISTANT_SOL_MODEL;
-  provider?: "openai" | "venice";
+    | typeof HOSTED_ASSISTANT_DEFAULT_MODEL
+    | typeof HOSTED_ASSISTANT_GPT_61_SOL_MODEL;
   reasoningEffort: "low" | "medium" | "high" | "xhigh";
 }) {
   return {
     availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-    availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
     availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
     configurationAvailable: true,
     dormantSolPreference: false,
     model: input.model,
-    provider: input.provider ?? "openai",
     reasoningEffort: input.reasoningEffort,
     solAvailable: true,
   };
@@ -678,17 +632,15 @@ function createSavedConfiguration(input: {
 
 function createGroupSavedConfiguration(
   model: typeof HOSTED_ASSISTANT_LUNA_MODEL
-    | typeof HOSTED_ASSISTANT_TERRA_MODEL
-    | typeof HOSTED_ASSISTANT_SOL_MODEL,
+    | typeof HOSTED_ASSISTANT_DEFAULT_MODEL
+    | typeof HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
 ) {
   return {
     availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-    availableProviders: ["openai"] as const,
     availableReasoningEfforts: ["low"] as const,
     configurationAvailable: true,
     dormantSolPreference: false,
     model,
-    provider: "openai" as const,
     reasoningEffort: "low" as const,
     solAvailable: true,
   };
@@ -710,7 +662,6 @@ function createHostedToolContext(input: {
     currentAssistantInputId: () => input.assistantInputId ?? null,
     currentAssistantTarget: () => ({
       model: input.currentModel,
-      provider: "openai",
       reasoningEffort: input.currentReasoningEffort,
     }),
     currentHostedDeliveryContext: () => null,

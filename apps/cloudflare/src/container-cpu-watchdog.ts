@@ -9,7 +9,6 @@ const HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES = new Set([
   "codex",
   "dash",
   "grep",
-  "murph",
   "node",
   "pnpm",
   "python",

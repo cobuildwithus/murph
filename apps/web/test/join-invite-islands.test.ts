@@ -29,21 +29,23 @@ import { buildJoinInviteStatusRefreshSnapshot } from "@/src/components/hosted-on
 import { armHostedGroupStartHandoff } from "@/src/lib/hosted-groups/group-start-handoff";
 
 const mocks = vi.hoisted(() => ({
-  privyLogout: vi.fn(),
   refresh: vi.fn(),
   replace: vi.fn(),
   requestHostedStarterUsageEnrollment: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
-  hostedEmailAuthProps: null as Record<string, unknown> | null,
-  hostedPhoneAuthProps: null as Record<string, unknown> | null,
-  hostedPhoneSettingsProps: null as Record<string, unknown> | null,
-  connectTelegramProps: null as Record<string, unknown> | null,
-  reportPhoneDiagnostic: vi.fn(),
-  useHostedPhoneLinkDiagnostics: vi.fn(),
-  usePrivy: vi.fn(),
-  useUser: vi.fn(),
+  loginMethodProps: null as Record<string, unknown> | null,
+  phoneEditorProps: null as Record<string, unknown> | null,
+  hostedAuthProps: null as Record<string, unknown> | null,
   useHostedInviteStatusRefresh: vi.fn(),
+}));
+
+vi.mock("@/src/components/settings/hosted-login-method-dialog", () => ({
+  HostedLoginMethodEditor: function HostedLoginMethodEditor(props: Record<string, unknown>) {
+    mocks.loginMethodProps = props;
+    if (props.method === "phone") mocks.phoneEditorProps = props;
+    return createElement("div", { "data-login-method-editor": props.method, "data-presentation": props.presentation }, "Connect account");
+  },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -53,67 +55,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: mocks.usePrivy,
-  useUser: mocks.useUser,
-}));
-
-vi.mock("@/src/components/settings/hosted-phone-link-diagnostics", () => ({
-  useHostedPhoneLinkDiagnostics: mocks.useHostedPhoneLinkDiagnostics,
-}));
-
-vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
-  HostedPhoneSettings(props: Record<string, unknown>) {
-    mocks.hostedPhoneSettingsProps = props;
-    return createElement(
-      "div",
-      {
-        "data-hosted-phone-settings": "true",
-      },
-      "Hosted phone settings",
-    );
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
-  HostedPhoneAuth(props: Record<string, unknown>) {
-    mocks.hostedPhoneAuthProps = props;
-    return createElement(
-      "div",
-      {
-        "data-hosted-phone-auth": "true",
-      },
-      "Hosted phone auth",
-    );
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-email-auth-button", () => ({
-  HostedEmailAuthButton(props: Record<string, unknown>) {
-    mocks.hostedEmailAuthProps = props;
-    return createElement(
-      "div",
-      {
-        "data-hosted-email-auth": "true",
-      },
-      "Hosted email auth",
-    );
-  },
-}));
-
-vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
-  ConnectTelegram(props: {
-    authenticated: boolean;
-    initialTelegramAccount: { username: string | null } | null;
-  }) {
-    mocks.connectTelegramProps = props;
-    return createElement(
-      "div",
-      {
-        "data-connect-telegram": "true",
-      },
-      props.initialTelegramAccount?.username ?? "Connect Telegram",
-    );
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel(props: Record<string, unknown>) {
+    mocks.hostedAuthProps = props;
+    return createElement("div", { "data-first-party-auth": "true" }, "Sign in");
   },
 }));
 
@@ -163,22 +108,9 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.connectTelegramProps = null;
-  mocks.hostedEmailAuthProps = null;
-  mocks.hostedPhoneAuthProps = null;
-  mocks.hostedPhoneSettingsProps = null;
-  mocks.useHostedPhoneLinkDiagnostics.mockReturnValue(mocks.reportPhoneDiagnostic);
-  mocks.usePrivy.mockReturnValue({
-    authenticated: true,
-    logout: mocks.privyLogout,
-    ready: true,
-  });
-  mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
-    user: {
-      id: "privy-user-a",
-    },
-  });
+  mocks.hostedAuthProps = null;
+  mocks.loginMethodProps = null;
+  mocks.phoneEditorProps = null;
 });
 
 test("JoinInviteSignOutButtonIsland preserves the invite URL while switching accounts", async () => {
@@ -203,7 +135,6 @@ test("JoinInviteSignOutButtonIsland preserves the invite URL while switching acc
       url: "/api/hosted-onboarding/session/logout",
     }),
   );
-  expect(mocks.privyLogout).toHaveBeenCalledTimes(1);
   expect(mocks.replace).not.toHaveBeenCalled();
   await cleanup();
 });
@@ -511,7 +442,7 @@ test("JoinInviteStarterUsageIsland shows support for non-checkout account errors
   });
 
   expect(container.textContent).toContain("Murph setup needs support");
-  expect(container.textContent).toContain("Email support");
+  expect(container.textContent).toContain("Contact support");
   expect(container.textContent).not.toContain("Try again");
   expect(container.textContent).not.toContain("Continue with Pulse");
   expect(container.querySelector("a[href^='mailto:']")).toBeTruthy();
@@ -671,187 +602,78 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   await cleanup();
 });
 
-test("JoinInviteMessagingSetupIsland shows Privy phone linking and Telegram connect together", async () => {
-  const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInviteMessagingSetupIsland, {
-      authenticated: true,
-      expectedPrivyUserId: "privy-user-a",
-      initialTelegramAccount: null,
-      privySessionMatchesAppSession: true,
-    }),
-    { requireButton: false },
-  );
-
-  expect(container.querySelector('[data-hosted-phone-settings="true"]')).toBeTruthy();
-  expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
-  expect(container.textContent).toContain("OR");
-  expect(mocks.hostedPhoneSettingsProps).toMatchObject({
-    diagnosticReporterFactory: mocks.reportPhoneDiagnostic,
-    onLinked: expect.any(Function),
-  });
-  expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
-    expect.objectContaining({
-      operation: "link",
-      showLinkForm: true,
-      surface: "join_invite",
-    }),
-  );
-  expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty("authenticated");
-  expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty("expectedPrivyUserId");
-  expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty(
-    "privySessionMatchesAppSession",
-  );
+test("messaging setup mounts both editors inline without an extra dialog or Settings detour", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
+  expect(container.querySelector('a[href="/settings/accounts"]')).toBeNull();
+  expect(container.querySelector('[data-login-method-editor="phone"]')?.getAttribute("data-presentation")).toBe("inline");
+  expect(container.querySelector('[data-login-method-editor="telegram"]')?.getAttribute("data-presentation")).toBe("inline");
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await cleanup();
 });
 
-test("JoinInviteMessagingSetupIsland surfaces an existing Telegram seed", async () => {
-  const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInviteMessagingSetupIsland, {
-      authenticated: true,
-      expectedPrivyUserId: "privy-user-a",
-      initialTelegramAccount: {
-        telegramUserId: "telegram-test-user",
-        username: "murph_test",
-      },
-      privySessionMatchesAppSession: true,
-    }),
-    { requireButton: false },
-  );
-
-  expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
-  expect(container.textContent).toContain("murph_test");
-  await cleanup();
-});
-
-test("JoinInviteMessagingSetupIsland blocks both provider link surfaces on a stale Privy session", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
-  const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInviteMessagingSetupIsland, {
-      authenticated: true,
-      expectedPrivyUserId: "privy-user-a",
-      initialTelegramAccount: null,
-      privySessionMatchesAppSession: false,
-    }),
-    { requireButton: false },
-  );
-
-  expect(container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
-  expect(container.querySelector('[data-connect-telegram="true"]')).toBeNull();
-  expect(container.textContent).toContain("Your sign-in changed.");
-
-  const signInAgainButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent?.includes("Sign in again"),
-  );
-  expect(signInAgainButton).toBeTruthy();
+test("messaging setup opens on a choice, then shows only the chosen editor", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
+  const editorIsHidden = (method: string) => container
+    .querySelector(`[data-login-method-editor="${method}"]`)
+    ?.parentElement?.hasAttribute("hidden");
+  expect(editorIsHidden("phone")).toBe(true);
+  expect(editorIsHidden("telegram")).toBe(true);
 
   await act(async () => {
-    signInAgainButton?.dispatchEvent(new Event("click", { bubbles: true }));
-    await Promise.resolve();
+    findButtonByText(container, /^Text message$/).dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  expect(editorIsHidden("phone")).toBe(false);
+  expect(editorIsHidden("telegram")).toBe(true);
+  expect(container.textContent).not.toContain("Text message");
 
-  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
-    expect.objectContaining({
-      method: "POST",
-      url: "/api/hosted-onboarding/session/logout",
-    }),
-  );
-  expect(mocks.privyLogout).toHaveBeenCalledTimes(1);
-  expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    findButtonByText(container, /^Use Telegram instead$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(editorIsHidden("phone")).toBe(true);
+  expect(editorIsHidden("telegram")).toBe(false);
+
+  await act(async () => {
+    findButtonByText(container, /^Use a phone number instead$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(editorIsHidden("phone")).toBe(false);
   await cleanup();
 });
 
-test("JoinInviteMessagingSetupIsland waits for the Privy client before mounting link actions", async () => {
-  mocks.usePrivy.mockReturnValue({
-    authenticated: false,
-    logout: mocks.privyLogout,
-    ready: false,
+test("messaging setup holds the phone step until it ends", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
+  await act(async () => {
+    findButtonByText(container, /^Text message$/).dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInviteMessagingSetupIsland, {
-      authenticated: true,
-      expectedPrivyUserId: "privy-user-a",
-      initialTelegramAccount: null,
-      privySessionMatchesAppSession: true,
-    }),
-    { requireButton: false },
-  );
+  const setActive = mocks.phoneEditorProps?.onActiveChange;
+  if (typeof setActive !== "function") {
+    throw new Error("Expected the phone editor to report its active step.");
+  }
 
-  expect(container.textContent).toContain("Preparing secure account linking");
-  expect(container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
-  expect(container.querySelector('[data-connect-telegram="true"]')).toBeNull();
+  await act(async () => {
+    setActive(true);
+  });
+  expect(container.querySelector('[data-login-method-editor="telegram"]')).toBeNull();
+  expect(container.textContent).not.toContain("Use Telegram instead");
+
+  await act(async () => {
+    setActive(false);
+  });
+  expect(container.querySelector('[data-login-method-editor="telegram"]')).not.toBeNull();
+  expect(container.textContent).toContain("Use Telegram instead");
   await cleanup();
 });
 
-test("JoinInviteMessagingSetupIsland keeps warm-session hydration pending until the concrete client identity resolves", async () => {
-  mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
-    user: null,
+test("email invites use first-party verification with their saved target and invite binding", async () => {
+  const { cleanup } = await renderClientComponent(createElement(JoinInvitePhoneVerificationIsland, {
+    detail: "Use the iMessage email address that received this join link.",
+    emailAuthTarget: { emailAddress: "synthetic@example.com", kind: "saved" },
+    inviteCode: "invite-code", title: "Verify your email.", verificationMode: "invite_email",
+  }), { requireButton: false });
+  expect(mocks.hostedAuthProps).toMatchObject({
+    initialEmailAddress: "synthetic@example.com", methods: ["email"], inviteCode: "invite-code",
+    requireLaunchConsentOnCompletion: true, onCompleted: expect.any(Function),
   });
-  const renderIsland = () => createElement(JoinInviteMessagingSetupIsland, {
-    authenticated: true,
-    expectedPrivyUserId: "privy-user-a",
-    initialTelegramAccount: null,
-    privySessionMatchesAppSession: true,
-  });
-  const rendered = await renderClientComponent(renderIsland(), { requireButton: false });
-
-  expect(rendered.container.textContent).toContain("Preparing secure account linking");
-  expect(rendered.container.textContent).not.toContain("Sign in again");
-  expect(rendered.container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
-  expect(rendered.container.querySelector('[data-connect-telegram="true"]')).toBeNull();
-
-  mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
-    user: {
-      id: "privy-user-a",
-    },
-  });
-  await rendered.rerender(renderIsland());
-
-  expect(rendered.container.querySelector('[data-hosted-phone-settings="true"]')).toBeTruthy();
-  expect(rendered.container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
-
-  mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
-    user: {
-      id: "privy-user-b",
-    },
-  });
-  await rendered.rerender(renderIsland());
-
-  expect(rendered.container.textContent).toContain("Your sign-in changed.");
-  expect(rendered.container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
-  expect(rendered.container.querySelector('[data-connect-telegram="true"]')).toBeNull();
-  await rendered.cleanup();
-});
-
-test("JoinInvitePhoneVerificationIsland uses email auth for invite email verification", async () => {
-  const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInvitePhoneVerificationIsland, {
-      emailAuthTarget: {
-        emailAddress: "buddy@example.com",
-        kind: "saved",
-      },
-      inviteCode: "invite-code",
-      phoneAuthTarget: {
-        kind: "manual",
-      },
-      phoneHint: null,
-      verificationMode: "invite_email",
-    }),
-    { requireButton: false },
-  );
-
-  expect(container.querySelector('[data-hosted-email-auth="true"]')).toBeTruthy();
-  expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
-  expect(mocks.hostedEmailAuthProps).toMatchObject({
-    active: true,
-    inline: true,
-    lockedEmailAddress: "buddy@example.com",
-    onAuthenticated: expect.any(Function),
-  });
-  expect(mocks.hostedPhoneAuthProps).toBeNull();
   await cleanup();
 });
 
@@ -1016,7 +838,6 @@ function createStatus(
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
       ...overrides.capabilities,
     },
     invite: {
@@ -1125,3 +946,16 @@ function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElemen
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
 }
+
+
+test("messaging configuration failures show product guidance instead of internal setup instructions", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockRejectedValue(new HostedOnboardingApiError({
+    code: "LINQ_CONVERSATION_PHONE_REQUIRED", message: "Internal routing configuration details.",
+  }));
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteStarterUsageIsland, { inviteCode: "invite-code" }), { requireButton: false });
+  await act(async () => { await Promise.resolve(); });
+  expect(container.textContent).toContain("Murph’s messaging connection is not ready yet");
+  expect(container.textContent).not.toContain("Internal routing configuration details");
+  expect(container.querySelector("a[href^='mailto:']")).toBeTruthy();
+  await cleanup();
+});

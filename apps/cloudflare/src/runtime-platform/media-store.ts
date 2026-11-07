@@ -61,8 +61,10 @@ export function createCloudflareMediaStore(input: {
     },
     options: {
       requireWriteFence?: boolean;
+      signal?: AbortSignal | null;
     } = {},
   ): Promise<void> => {
+    options.signal?.throwIfAborted();
     const ordinal = ++mediaUploadOrdinal;
     const startedAt = Date.now();
     const logDetails = {
@@ -110,6 +112,7 @@ export function createCloudflareMediaStore(input: {
       throw error;
     }
 
+    options.signal?.throwIfAborted();
     writeMediaDescriptorHeaders(headers, descriptor);
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.media-store",
@@ -127,6 +130,7 @@ export function createCloudflareMediaStore(input: {
     let response: Response;
     try {
       response = await fetchHostedResponse({
+        signal: options.signal,
         description: "Hosted media upload",
         fetchImpl,
         init: {
@@ -160,6 +164,7 @@ export function createCloudflareMediaStore(input: {
       });
     }
 
+    options.signal?.throwIfAborted();
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.media-store",
       details: {
@@ -201,33 +206,39 @@ export function createCloudflareMediaStore(input: {
     descriptor: CloudflareMediaWriteDescriptor & {
       bytes: Uint8Array;
     },
+    context: { signal?: AbortSignal | null } = {},
   ): Promise<void> => {
+    context.signal?.throwIfAborted();
     if (uploadedMediaIds.has(descriptor.mediaId)) {
-      await recordMediaLifetime(descriptor);
+      await recordMediaLifetime(descriptor, context);
       return;
     }
 
     const existing = inFlightMediaUploads.get(descriptor.mediaId);
     if (existing) {
-      await existing;
-      await recordMediaLifetime(descriptor);
+      await waitForMediaWrite(existing, context.signal);
+      context.signal?.throwIfAborted();
+      await recordMediaLifetime(descriptor, context);
       return;
     }
 
-    const upload = putMediaUncached(descriptor)
+    const upload = waitForMediaWrite(putMediaUncached(descriptor, context), context.signal)
       .then(() => {
+        context.signal?.throwIfAborted();
         uploadedMediaIds.add(descriptor.mediaId);
       })
       .finally(() => {
         inFlightMediaUploads.delete(descriptor.mediaId);
       });
     inFlightMediaUploads.set(descriptor.mediaId, upload);
-    await upload;
+    await waitForMediaWrite(upload, context.signal);
   };
 
   const recordMediaLifetime = async (
     descriptor: CloudflareMediaWriteDescriptor,
+    context: { signal?: AbortSignal | null } = {},
   ): Promise<void> => {
+    context.signal?.throwIfAborted();
     const startedAt = Date.now();
     const logDetails = {
       mediaKind: descriptor.mediaKind,
@@ -243,10 +254,12 @@ export function createCloudflareMediaStore(input: {
           "Hosted media lifetime registration",
         )
       : new Headers();
+    context.signal?.throwIfAborted();
     writeMediaDescriptorHeaders(headers, descriptor);
     let response: Response;
     try {
       response = await fetchHostedResponse({
+        signal: context.signal,
         description: "Hosted media lifetime registration",
         fetchImpl,
         init: {
@@ -266,6 +279,7 @@ export function createCloudflareMediaStore(input: {
         retryable: true,
       });
     }
+    context.signal?.throwIfAborted();
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.media-store",
       details: {
@@ -292,9 +306,8 @@ export function createCloudflareMediaStore(input: {
     }
   };
 
-  let mediaFetchOrdinal = 0;
-  return {
-    async delete({ mediaId }) {
+  const deleteMedia = async (mediaId: string, context: { signal?: AbortSignal | null }): Promise<void> => {
+      context.signal?.throwIfAborted();
       const startedAt = Date.now();
       const logDetails = {
         method: "DELETE",
@@ -309,9 +322,11 @@ export function createCloudflareMediaStore(input: {
             "Hosted media delete",
           )
         : new Headers();
+      context.signal?.throwIfAborted();
       let response: Response;
       try {
         response = await fetchHostedResponse({
+          signal: context.signal,
           description: "Hosted media delete",
           fetchImpl,
           init: {
@@ -331,6 +346,7 @@ export function createCloudflareMediaStore(input: {
           retryable: true,
         });
       }
+      context.signal?.throwIfAborted();
       emitHostedExecutionStructuredLog({
         component: "hosted.runtime.media-store",
         details: {
@@ -350,12 +366,19 @@ export function createCloudflareMediaStore(input: {
       try {
         assertHostedOk(response, "Hosted media delete");
       } catch (error) {
+        if (shouldPreserveHostedRuntimeFetchError(error)) throw error;
         throw new HostedRuntimeMediaWriteError({
           cause: error,
           retryable: isRetryableHostedMediaWriteStatus(response.status),
         });
       }
       uploadedMediaIds.delete(mediaId);
+  };
+
+  let mediaFetchOrdinal = 0;
+  return {
+    async delete(descriptor, context = {}) {
+      await waitForMediaWrite(deleteMedia(descriptor.mediaId, context), context.signal);
     },
     async get(descriptor, context) {
       assertHostedMediaFetchLive(context.signal);
@@ -413,6 +436,9 @@ export function createCloudflareMediaStore(input: {
           });
         } catch (error) {
           assertHostedMediaFetchLive(context.signal);
+          if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+            throw error;
+          }
           const retrying = shouldRetryHostedRuntimeReplaySafeRead({
             attempt,
             error,
@@ -465,6 +491,9 @@ export function createCloudflareMediaStore(input: {
         try {
           assertHostedOk(response, "Hosted media fetch");
         } catch (error) {
+          if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+            throw error;
+          }
           throw new HostedRuntimeMediaReadError({
             cause: error,
             retryable: isRetryableHostedMediaReadStatus(response.status),
@@ -511,12 +540,14 @@ export function createCloudflareMediaStore(input: {
         retryable: true,
       });
     },
-    async record(input) {
-      await recordMediaLifetime(input);
+    async record(input, context = {}) {
+      await waitForMediaWrite(recordMediaLifetime(input, context), context.signal);
     },
-    async put(input) {
+    async put(input, context = {}) {
+      context.signal?.throwIfAborted();
       await assertHostedMediaDescriptorBytes(input, input.bytes);
-      await putMediaOnce(input);
+      context.signal?.throwIfAborted();
+      await waitForMediaWrite(putMediaOnce(input, context), context.signal);
     },
   };
 }
@@ -616,4 +647,18 @@ function assertHostedMediaFetchLive(
   throw signal.reason instanceof Error
     ? signal.reason
     : new Error("Hosted media fetch was interrupted.");
+}
+
+// The transport or a shared upload may ignore cancellation. Its owner retains
+// remote cleanup responsibility; this waiter must still release foreground work.
+async function waitForMediaWrite<T>(work: Promise<T>, signal?: AbortSignal | null): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) { void work.catch(() => {}); signal.throwIfAborted(); }
+  let abort: () => void = () => {};
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { const value = await Promise.race([work, interrupted]); signal.throwIfAborted(); return value; }
+  finally { signal.removeEventListener("abort", abort); }
 }

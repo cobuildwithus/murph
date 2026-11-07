@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   type HostedCryptoDomain,
@@ -182,7 +183,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => {
   >();
   return {
     ...actual,
-    getHostedLinqChatSummary: vi.fn(async () => ({
+    getHostedLinqChatSummary: vi.fn(async () => linqRoster({
       handles: [],
       isGroup: false,
     })),
@@ -1186,6 +1187,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan-conflict");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              unchangedHomeRoute: null,
               identityRecord: null,
               identityState: null,
               memberId: "member_direct_a",
@@ -1219,6 +1221,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              unchangedHomeRoute: null,
               identityRecord: null,
               identityState: null,
               memberId: "member_direct_b",

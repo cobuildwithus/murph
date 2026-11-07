@@ -35,7 +35,7 @@ Primary files:
 
 ## Constraints
 
-- Preserve unrelated dirty Murph Age work.
+- Preserve unrelated dirty work.
 - Keep direct R2 presigned PUT as the only production upload strategy.
 - Do not add multipart, artifact sidecars, hosted-bundle production writes, or Worker snapshot body fallback.
 - Keep legacy restore and materialization as compatibility only; do not delete legacy readers during this migration window.
@@ -48,7 +48,7 @@ Primary files:
 - `pnpm --dir apps/cloudflare typecheck`
 - `pnpm --dir packages/assistant-runtime typecheck`
 - Hosted-local direct-R2 e2e if runtime changes warrant it and time permits.
-- `pnpm verify:repo` unless still blocked by unrelated dirty Murph Age work.
+- `pnpm verify:repo` unless still blocked by unrelated dirty work.
 Status: completed
 Updated: 2026-05-20
 Completed: 2026-05-20

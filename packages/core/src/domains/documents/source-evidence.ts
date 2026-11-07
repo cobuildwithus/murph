@@ -1,3 +1,4 @@
+import { listAuditShardPaths } from "../../audit-storage.ts";
 import type {
   AuditRecord,
   DocumentEventRecord,
@@ -114,9 +115,7 @@ interface ExactDocumentEventLedgerEntry {
 
 async function loadExactDocumentAuditRecords(vaultRoot: string): Promise<AuditRecord[]> {
   const records: AuditRecord[] = [];
-  const auditPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.auditDirectory, {
-    extension: ".jsonl",
-  });
+  const auditPaths = await listAuditShardPaths(vaultRoot);
   for (const relativePath of auditPaths) {
     for (const rawRecord of await readJsonlRecords({ vaultRoot, relativePath })) {
       const parsed = safeParseContract(auditRecordSchema, rawRecord);

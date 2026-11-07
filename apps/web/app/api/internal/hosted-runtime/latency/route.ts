@@ -1,9 +1,14 @@
+import { after } from "next/server";
+
 import {
+  parseHostedRuntimeLatencyTraceBatchRequest,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
+  type HostedRuntimeLatencyTraceEvent,
+  type HostedRuntimeLatencyTraceResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -15,14 +20,17 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   recordHostedIngressAssistantMilestone,
+  recordHostedIngressDeliveryCommitted,
   recordHostedIngressAssistantInputStaged,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { reportHostedRuntimeTypingAlerts } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
 import { isRecord } from "@/src/lib/primitives";
 
 const LATENCY_EVENT_METADATA = {
+  delivery_committed: "hosted_ingress_delivery_committed",
   assistant_input_staged: "hosted_ingress_assistant_input_staged",
   assistant_milestone: "hosted_ingress_assistant_milestone_set_based",
   provider_started: "hosted_ingress_provider_started_set_based",
@@ -34,60 +42,87 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: authenticatedUserId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
   });
-  const traceRequest = parseHostedRuntimeLatencyTraceRequest(payload);
-  const writeFence = requireMatchingRuntimeWriteFence(
-    request,
-    traceRequest.event.runtimeAttemptId,
-  );
-  const runtimeAttemptId = writeFence.attemptId;
+  if (isRecord(payload) && "events" in payload) {
+    const batch = parseHostedRuntimeLatencyTraceBatchRequest(payload);
+    // Reject the whole envelope before any write if even one event has the wrong fence.
+    const fences = batch.events.map(event => requireMatchingRuntimeWriteFence(request, event.runtimeAttemptId));
+    const results: Array<HostedRuntimeLatencyTraceResponse | null> = [];
+    for (const [index, event] of batch.events.entries()) {
+      try {
+        results.push(await recordLatencyEvent(event, authenticatedUserId, fences[index]!));
+      } catch {
+        // The existing event owner reports bounded diagnostics; only this event retries.
+        results.push(null);
+      }
+    }
+    return jsonOk({ results });
+  }
+  const { event } = parseHostedRuntimeLatencyTraceRequest(payload);
+  return jsonOk(await recordLatencyEvent(
+    event, authenticatedUserId, requireMatchingRuntimeWriteFence(request, event.runtimeAttemptId),
+  ));
+});
 
+async function recordLatencyEvent(
+  event: HostedRuntimeLatencyTraceEvent,
+  authenticatedUserId: string,
+  writeFence: NonNullable<ReturnType<typeof readHostedRuntimeWriteFence>>,
+): Promise<HostedRuntimeLatencyTraceResponse> {
+  const runtimeAttemptId = writeFence.attemptId;
   try {
-    const result = traceRequest.event.type === "assistant_input_staged"
-      ? await recordHostedIngressAssistantInputStaged({
-        assistantInputId: traceRequest.event.assistantInputId,
-        at: traceRequest.event.at,
-        authenticatedUserId,
-        mailboxItemId: traceRequest.event.mailboxItemId,
-        phaseBreakdown: traceRequest.event.phaseBreakdown,
-        runnerJobAcceptedAt: traceRequest.event.runnerJobAcceptedAt,
-        runtimeAttemptId,
-        runtimePhaseStartedAt: traceRequest.event.runtimePhaseStartedAt,
-        source: traceRequest.event.source,
-        workspaceRestoreDoneAt: traceRequest.event.workspaceRestoreDoneAt,
-      })
-    : traceRequest.event.type === "assistant_milestone"
-      ? await recordHostedIngressAssistantMilestone({
-          assistantInputIds: traceRequest.event.assistantInputIds,
-          at: traceRequest.event.at,
+    const result = event.type === "delivery_committed"
+      ? await recordHostedIngressDeliveryCommitted({
+          ...event,
           authenticatedUserId,
-          ...(traceRequest.event.checkpointPublicationExpectedBy === undefined
+          runtimeAttemptId,
+          runtimeLeaseGeneration: writeFence.leaseGeneration,
+        })
+      : event.type === "assistant_input_staged"
+      ? await recordHostedIngressAssistantInputStaged({
+        assistantInputId: event.assistantInputId,
+        at: event.at,
+        authenticatedUserId,
+        mailboxItemId: event.mailboxItemId,
+        phaseBreakdown: event.phaseBreakdown,
+        runnerJobAcceptedAt: event.runnerJobAcceptedAt,
+        runtimeAttemptId,
+        runtimePhaseStartedAt: event.runtimePhaseStartedAt,
+        source: event.source,
+        workspaceRestoreDoneAt: event.workspaceRestoreDoneAt,
+      })
+    : event.type === "assistant_milestone"
+      ? await recordHostedIngressAssistantMilestone({
+          assistantInputIds: event.assistantInputIds,
+          at: event.at,
+          authenticatedUserId,
+          ...(event.checkpointPublicationExpectedBy === undefined
             ? {}
             : {
                 checkpointPublicationExpectedBy:
-                  traceRequest.event.checkpointPublicationExpectedBy,
+                  event.checkpointPublicationExpectedBy,
               }),
-          milestone: traceRequest.event.milestone,
+          milestone: event.milestone,
           runtimeAttemptId,
           runtimeLeaseGeneration: writeFence.leaseGeneration,
-          source: traceRequest.event.source,
+          source: event.source,
         })
-      : traceRequest.event.type === "provider_started"
+      : event.type === "provider_started"
       ? await recordHostedIngressProviderStarted({
-          assistantInputIds: traceRequest.event.assistantInputIds,
-          at: traceRequest.event.at,
+          assistantInputIds: event.assistantInputIds,
+          at: event.at,
           authenticatedUserId,
-          phaseBreakdown: traceRequest.event.phaseBreakdown,
-          providerRequestOrdinal: traceRequest.event.providerRequestOrdinal,
+          phaseBreakdown: event.phaseBreakdown,
+          providerRequestOrdinal: event.providerRequestOrdinal,
           runtimeAttemptId,
-          source: traceRequest.event.source,
+          source: event.source,
         })
         : await recordHostedIngressRuntimeMilestone({
-          at: traceRequest.event.at,
+          at: event.at,
           authenticatedUserId,
-          milestone: traceRequest.event.milestone,
+          milestone: event.milestone,
           runtimeAttemptId,
           runtimeLeaseGeneration: writeFence.leaseGeneration,
-          source: traceRequest.event.source,
+          source: event.source,
           });
 
     // Assistant inputs the runtime created without an inbound messaging wake never
@@ -99,8 +134,8 @@ export const POST = withJsonError(async (request: Request) => {
     const untracedCount = result.untracedCount ?? 0;
     const rejectedCount = result.unmatchedCount - untracedCount - contendedCount;
     if (rejectedCount > 0) {
-      const eventType = traceRequest.event.type;
-      const source = traceRequest.event.source;
+      const eventType = event.type;
+      const source = event.source;
       console.warn("Hosted runtime latency trace callback had rejected rows.", {
         contendedCount,
         eventType,
@@ -112,26 +147,39 @@ export const POST = withJsonError(async (request: Request) => {
     }
     if (result.truncated === true) {
       console.warn("Hosted runtime latency collection milestone reached its write bound.", {
-        eventType: traceRequest.event.type,
+        eventType: event.type,
         matchedCount: result.matchedCount,
-        source: traceRequest.event.source,
+        source: event.source,
       });
     }
 
-    return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
+    if (result.recorded && event.source !== "email" && (
+      event.type === "assistant_input_staged"
+      || (event.type === "assistant_milestone" && (
+        event.milestone === "linq_typing_accepted"
+        || event.milestone === "telegram_typing_accepted"
+      ))
+    )) {
+      after(() => reportHostedRuntimeTypingAlerts({
+        userId: authenticatedUserId,
+        assistantInputIds: event.type === "assistant_input_staged"
+          ? [event.assistantInputId] : event.assistantInputIds,
+      }));
+    }
+    return parseHostedRuntimeLatencyTraceResponse(result);
   } catch (error) {
     const codes = readLatencyPersistenceErrorCodes(error);
-    const eventMetadataKey = traceRequest.event.type === "runtime_milestone"
-      && traceRequest.event.milestone === "checkpoint_publication_expected_by"
+    const eventMetadataKey = event.type === "runtime_milestone"
+      && event.milestone === "checkpoint_publication_expected_by"
       ? "checkpoint_publication_expected_by"
-      : traceRequest.event.type;
+      : event.type;
     console.error("Hosted runtime latency trace persistence failed.", {
-      eventType: traceRequest.event.type,
-      inputCardinality: "assistantInputIds" in traceRequest.event
-        ? traceRequest.event.assistantInputIds.length : 1,
+      eventType: event.type,
+      inputCardinality: "assistantInputIds" in event
+        ? event.assistantInputIds.length : 1,
       prismaCode: codes.prismaCode,
       queryTag: LATENCY_EVENT_METADATA[eventMetadataKey],
-      source: traceRequest.event.source,
+      source: event.source,
       sqlState: codes.sqlState,
     });
     throw hostedOnboardingError({
@@ -140,7 +188,7 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Hosted runtime latency trace persistence failed.",
     });
   }
-});
+}
 
 function readLatencyPersistenceErrorCodes(error: unknown) {
   if (!isRecord(error)) return { prismaCode: null, sqlState: null };

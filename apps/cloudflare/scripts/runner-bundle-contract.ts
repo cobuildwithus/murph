@@ -12,7 +12,6 @@ export interface HostedRunnerBundleContractOptions {
 }
 
 interface RunnerBundlePackageManifest {
-  bundleDependencies?: unknown;
   dependencies?: Record<string, string>;
   engines?: Record<string, string>;
   exports?: Record<string, unknown> | string;
@@ -31,23 +30,12 @@ const workspacePackageManifestByName = readWorkspacePackageManifestByName(repoRo
 const hostedRunnerRuntimePackageManifest = readRequiredWorkspacePackageManifest(
   hostedRunnerRuntimePackageName,
 );
-const publishedMurphBundleDependencyNames = readBundleDependencyNames("@murphai/murph");
-export const publishedMurphBundledWorkspacePackageNames =
-  publishedMurphBundleDependencyNames.filter((dependencyName) =>
-    workspacePackageManifestByName.has(dependencyName),
-  );
-export const publishedMurphBundledExternalPackageNames =
-  publishedMurphBundleDependencyNames.filter(
-    (dependencyName) => !workspacePackageManifestByName.has(dependencyName),
-  );
 export const hostedRunnerBundleOnlyDependencyNames = [
   "@murphai/murph",
-  ...publishedMurphBundledWorkspacePackageNames,
+  ...listWorkspaceDependencyNames(
+    readRequiredWorkspacePackageManifest("@murphai/murph"),
+  ),
 ] as const;
-const murphNonBundledWorkspaceDependencyNames = listNonBundledWorkspaceDependencyNames(
-  "@murphai/murph",
-  publishedMurphBundledWorkspacePackageNames,
-);
 
 export const hostedRunnerWorkspacePackageNames =
   resolveHostedRunnerWorkspacePackageNames();
@@ -59,15 +47,8 @@ export function resolveHostedRunnerWorkspacePackageNames(
 ): readonly string[] {
   const includeBundleOnlyDependencies =
     input.includeBundleOnlyDependencies ?? true;
-  const runtimeSeedPackageNames = [
+  return resolveWorkspaceDependencyClosure([
     ...listWorkspaceDependencyNames(hostedRunnerRuntimePackageManifest),
-    ...(includeBundleOnlyDependencies
-      ? murphNonBundledWorkspaceDependencyNames
-      : []),
-  ];
-
-  return sortPackageNames([
-    ...resolveWorkspaceDependencyClosure(runtimeSeedPackageNames),
     ...(includeBundleOnlyDependencies
       ? hostedRunnerBundleOnlyDependencyNames
       : []),
@@ -168,41 +149,6 @@ function readRequiredWorkspacePackageManifest(
   }
 
   return packageJson;
-}
-
-function readBundleDependencyNames(
-  packageName: string,
-): readonly string[] {
-  const packageJson = readRequiredWorkspacePackageManifest(packageName);
-
-  if (
-    !Array.isArray(packageJson.bundleDependencies) ||
-    packageJson.bundleDependencies.some(
-      (dependencyName) =>
-        typeof dependencyName !== "string" || dependencyName.length === 0,
-    )
-  ) {
-    throw new Error(
-      `${packageName} must declare a string-only bundleDependencies array.`,
-    );
-  }
-
-  return sortPackageNames(packageJson.bundleDependencies);
-}
-
-function listNonBundledWorkspaceDependencyNames(
-  packageName: string,
-  bundledWorkspaceDependencyNames: readonly string[],
-): readonly string[] {
-  const bundledWorkspaceDependencyNameSet = new Set(
-    bundledWorkspaceDependencyNames,
-  );
-
-  return listWorkspaceDependencyNames(
-    readRequiredWorkspacePackageManifest(packageName),
-  ).filter(
-    (dependencyName) => !bundledWorkspaceDependencyNameSet.has(dependencyName),
-  );
 }
 
 function listWorkspaceDependencyNames(

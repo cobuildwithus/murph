@@ -44,7 +44,7 @@ const scheduledReminderInstructions =
 const scheduledReminderLeadMs = 360_000;
 const scheduledReminderMinimumRunwayMs = 30_000;
 const scheduledReminderSendWaitMs = 240_000;
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
@@ -317,7 +317,14 @@ function buildHostedAssistantAutomationSaveResponses(input: {
       action: "save",
       continuityPolicy: "fresh",
       instructions: scheduledReminderInstructions,
-      schedule: { at: input.dueAtIso, kind: "at" },
+      schedule: {
+        kind: "at",
+        localAt: {
+          date: input.dueAtIso.slice(0, 10),
+          time: input.dueAtIso.slice(11, 16),
+          timeZone: "UTC",
+        },
+      },
       summary: "One-shot sleep reminder.",
       tags: ["assistant", "scheduled"],
       title: "Sleep reminder",
@@ -573,7 +580,7 @@ function summarizeObservedTelegramRequests(): Array<{
 function resolveScheduledReminderTimes(now = new Date()): {
   dueAtIso: string;
 } {
-  const dueAtMs = now.getTime() + scheduledReminderLeadMs;
+  const dueAtMs = Math.ceil((now.getTime() + scheduledReminderLeadMs) / 60_000) * 60_000;
   return {
     dueAtIso: new Date(dueAtMs).toISOString(),
   };

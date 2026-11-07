@@ -72,6 +72,63 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     expect(text).toContain("Line: ***0000");
   });
 
+  it.each([null, "2026-09-01T12:00:04.000Z"])("renders frozen legacy typing alerts with endpoint %s", async (typingAcceptedAt) => {
+    const fixture = createAlertEmailPrismaFixture();
+    fixture.hostedLinqAlertFindMany.mockResolvedValue([{
+      id: "synthetic-legacy-typing-alert", kind: "runtime_warm_typing_slow", subject: "Typing delay",
+      detailsJson: { source: "linq", workspaceState: "warm", webhookReceivedAt: "2026-09-01T12:00:00.000Z",
+        typingAcceptedAt, elapsedMs: 4000, thresholdMs: 3000 },
+    }]);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }),
+    );
+    await sendPendingHostedLinqAlertsBestEffort({
+      alertIds: ["synthetic-legacy-typing-alert"], env: buildAlertEmailEnv(), fetchImpl,
+      prisma: fixture.prisma as never,
+    });
+    const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+    expect(body).toContain(typingAcceptedAt === null
+      ? "Time since webhook without recorded typing acceptance: 4000 ms"
+      : "Webhook-to-typing wait: 4000 ms");
+    expect(body).not.toContain("Silence measured from");
+  });
+
+  it.each([undefined, 3_000])("renders final reply delivery alerts with pacing %s", async (intentionalPacingMs) => {
+    const fixture = createAlertEmailPrismaFixture();
+    fixture.hostedLinqAlertFindMany.mockResolvedValue([{
+      id: "synthetic-final-reply-alert", kind: "runtime_final_reply_delivery_slow",
+      subject: "Final reply delay",
+      detailsJson: {
+        schemaVersion: 1, acceptedAt: "2026-01-10T11:50:00.000Z", scope: "direct", thresholdMs: 5000,
+        triggerOrigins: ["provider_result"],
+        providerResultToAccepted: { elapsedMs: 5001, status: "observed" },
+        finalResponseCompletedToAccepted: { status: "unavailable" },
+        components: { attemptToAcceptedMs: 100, providerResultToAttemptMs: 4901, providerResultToIntentMs: 4501 },
+        deliveryAttemptRelation: "same",
+        intentionalPacingMs,
+        dispatchAttribution: { routeAuthorityCheckMs: 20, replyBubblePacingMs: intentionalPacingMs, status: "observed" },
+      },
+    }]);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }),
+    );
+    await sendPendingHostedLinqAlertsBestEffort({
+      alertIds: ["synthetic-final-reply-alert"], env: buildAlertEmailEnv(), fetchImpl,
+      prisma: fixture.prisma as never,
+    });
+    const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+    expect(body).toContain("Provider result to Linq acceptance: 5001 ms");
+    expect(body).toContain("Final response completion observed to Linq acceptance: not measured (unavailable)");
+    expect(body).toContain("Route authority check: 20 ms");
+    expect(body).toContain("Provider result to Linq send attempt: 4901 ms");
+    expect(body).toContain("strictly greater than 5000 ms");
+    expect(body).not.toContain("Linq operational alert");
+    expect(body).toContain("Durations below include intentional pacing and earlier reply bubbles.");
+    expect(body).toContain(intentionalPacingMs === undefined
+      ? "Intentional reply-bubble pacing: unknown; no time excluded"
+      : "Intentional reply-bubble pacing excluded from threshold evaluation: 3000 ms");
+  });
+
   it("marks alerts failed without throwing when Resend rejects the send", async () => {
     const fixture = createAlertEmailPrismaFixture();
     const fetchImpl = vi.fn(async () => new Response("nope", {

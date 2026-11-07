@@ -1,5 +1,6 @@
 import {
   nutritionCardGoalStatusLabels,
+  isTotalsOnlyDailyNutritionResponseCard,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
@@ -8,7 +9,6 @@ import {
 
 import {
   IMESSAGE_CARD_BADGE_CONTENT_TOP,
-  IMessageCardBadge,
   IMESSAGE_CARD_COLOR,
 } from "./card-image-chrome";
 
@@ -46,17 +46,16 @@ const EMPTY_METRIC: NutritionCardMetric = {
 
 /**
  * Static counterpart to the shipping SwiftUI nutrition balloon's default
- * state. The provider owns the outer corner mask; the bitmap owns Murph's mark
- * because extension-absent Linq cards do not receive provider artwork.
+ * state. The provider owns the outer corner mask, and Messages draws Murph's
+ * app badge over the empty upper-left footprint above the calorie total.
  */
 export function NutritionCardImage({
   card,
-  logoSrc = "/icons/murph-mark.svg",
 }: {
   card: DailyNutritionResponseCard;
-  logoSrc?: string;
 }) {
   const v2 = isNutritionCardV2(card) ? card : null;
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card);
   const metrics: NutritionMetricPresentation[] = [
     {
       goal: v2?.goals.proteinGrams,
@@ -96,8 +95,6 @@ export function NutritionCardImage({
         fontFamily: "DM Sans",
       }}
     >
-      <IMessageCardBadge logoSrc={logoSrc} />
-
       <div
         aria-label={formatMetricAccessibilityLabel(
           "Calories",
@@ -150,11 +147,13 @@ export function NutritionCardImage({
         </div>
       </div>
 
-      <CalorieRing
-        cardMealCount={card.mealCount}
-        metric={calorieMetric}
-        goal={calorieGoal}
-      />
+      {!totalsOnly && (
+        <CalorieRing
+          cardMealCount={card.mealCount}
+          metric={calorieMetric}
+          goal={calorieGoal}
+        />
+      )}
 
       <div
         style={{

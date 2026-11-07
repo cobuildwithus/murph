@@ -34,7 +34,7 @@ const userId = `member_local_idle_handoff_${runId}`;
 const chatId = `chat_local_idle_handoff_${runId}`;
 const inboundText = "process this single message after the idle checkpoint";
 const replyText = "The checkpoint handoff processed the waiting message.";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const linqWebhookSecret = "linq-local-idle-handoff-secret";
 const providerStartDeadlineMs = 20_000;
 const modelFreeFrontierItemCount = 4;
@@ -66,8 +66,7 @@ describe("hosted local idle-checkpoint runtime handoff e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

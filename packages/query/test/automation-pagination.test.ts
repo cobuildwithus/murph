@@ -18,6 +18,43 @@ afterEach(async () => {
 });
 
 describe("automation exact-tag pagination", () => {
+  it("pages the full instruction inventory by immutable id without a support series", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-inventory-page-"));
+    createdVaultRoots.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, "bank/automations"), { recursive: true });
+    await Promise.all(Array.from({ length: 25 }, (_, index) => writeAutomation(vaultRoot, index, "inventory")));
+    const first = await listAutomationPage(vaultRoot, { orderById: true, limit: 20 });
+    expect(first.items.map(record => record.automationId)).toEqual(
+      Array.from({ length: 20 }, (_, index) => `automation_page_${String(index).padStart(3, "0")}`),
+    );
+    expect(first.nextCursor).toBe("automation_page_019");
+    const second = await listAutomationPage(vaultRoot, { orderById: true, limit: 20, cursor: first.nextCursor! });
+    expect(second.items.map(record => record.automationId)).toEqual([
+      "automation_page_020", "automation_page_021", "automation_page_022", "automation_page_023", "automation_page_024",
+    ]);
+    expect(second.totalCount).toBe(25);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("excludes exact identities before limits, counts and cursors without changing default listings", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-excluded-page-"));
+    createdVaultRoots.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, "bank/automations"), { recursive: true });
+    await Promise.all(Array.from({ length: 5 }, (_, index) => writeAutomation(vaultRoot, index, "same-tag")));
+    const excluded = ["automation_page_000", "automation_page_002", "automation_page_004"];
+    const first = await listAutomationPage(vaultRoot, { excludeAutomationIds: excluded, orderById: true, limit: 1 });
+    expect(first.items.map(record => record.automationId)).toEqual(["automation_page_001"]);
+    expect(first.totalCount).toBe(2);
+    expect(first.nextCursor).toBe("automation_page_001");
+    const second = await listAutomationPage(vaultRoot, { excludeAutomationIds: excluded, orderById: true, limit: 1, cursor: first.nextCursor! });
+    expect(second.items.map(record => record.automationId)).toEqual(["automation_page_003"]);
+    expect(second.totalCount).toBe(2);
+    expect(second.nextCursor).toBeNull();
+    expect(await listAutomations(vaultRoot, { excludeAutomationIds: excluded, limit: 1 })).toHaveLength(1);
+    expect((await listAutomationPage(vaultRoot)).totalCount).toBe(5);
+    expect((await listAutomationPage(vaultRoot, { excludeAutomationIds: excluded, cursor: "automation_page_004", orderById: true })).items).toEqual([]);
+  });
+
   it("pages every exact support-series match beyond 200 by immutable id", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-automation-page-"));
     createdVaultRoots.push(vaultRoot);

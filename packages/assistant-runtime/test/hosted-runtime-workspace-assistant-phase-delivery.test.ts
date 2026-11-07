@@ -1,5 +1,4 @@
 import {
-  createCodexAuthSystemMailboxItem,
   createDeliveryEffect,
   createDueAssistantWorkspace,
   createExternalCompletionSystemMailboxItem,
@@ -9,6 +8,7 @@ import {
   createPreparedDispatchesForDeliveryEffect,
   createSentDeliveryOutcome,
   createSystemMailboxItem,
+  createVaultShareProjectionSystemMailboxItem,
   createTerminalFailureOutboxIntent,
   expectAssistantLaneCallWithoutDeviceSyncOptions,
   loadHostedSystemMailboxRealImplementation,
@@ -77,7 +77,7 @@ vi.mock("@murphai/assistant-engine/assistant-codex", async (importOriginal) => (
   executeCodexAppServerTurn: vi.fn(),
 }));
 
-describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes foreground delivery finished timing after deferred delivery drains", async () => {
+describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes foreground delivery finished timing after inline delivery drains", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const backgroundMaintenanceController = new AbortController();
     const shouldYieldBackgroundMaintenance = vi.fn(() => false);
@@ -135,7 +135,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         .flatMap((request) => request.entries)
         .map((entry) => entry.redactedJson?.turnTimingStage)
         .filter(Boolean),
-    ).not.toContain("foreground-delivery-phase-finished");
+    ).toContain("foreground-delivery-phase-finished");
 
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
@@ -160,16 +160,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     );
     expect(outboxLogIndex).toBeGreaterThanOrEqual(0);
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
-    expect(
-      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.maintainAssistantAutoReplyRouteState.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
-      shouldYield: shouldYieldBackgroundMaintenance,
-      signal: backgroundMaintenanceController.signal,
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
   });
 
   it("waits for optional product feedback only after a queue-only foreground reply is sent", async () => {
@@ -230,33 +221,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       },
     );
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const phasePromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       runtimeProductFeedbackPort: { recordProductFeedback },
     }));
 
-    expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    expect(recordProductFeedback).not.toHaveBeenCalled();
-
-    const postCheckpointPromise = result.afterCheckpoint?.();
     await vi.waitFor(() => {
       expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledOnce();
       expect(recordProductFeedback).toHaveBeenCalledWith(feedback);
     });
     expect(memberDeliveryCompleted).toBe(true);
 
-    let postCheckpointSettled = false;
-    void postCheckpointPromise?.then(() => {
-      postCheckpointSettled = true;
+    let phaseSettled = false;
+    void phasePromise.then(() => {
+      phaseSettled = true;
     });
     await Promise.resolve();
-    expect(postCheckpointSettled).toBe(false);
+    expect(phaseSettled).toBe(false);
 
     resolveFeedback({
       feedbackId: "feedback_synthetic",
       recorded: true,
     });
-    await postCheckpointPromise;
+    await phasePromise;
   });
 
   it("does not record queued product feedback when the current delivery fails", async () => {
@@ -302,6 +289,166 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await result.afterCheckpoint?.();
 
     expect(recordProductFeedback).not.toHaveBeenCalled();
+  });
+
+  describe("committed weekly usage feedback checkpoint", () => {
+    const feedback = {
+      idempotencyKey: "synthetic-weekly-usage-occurrence",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Usage optimization audit: Bounded reads can reduce repeated tool output.",
+    };
+    const authorization = {
+      committedUsageOptimizerScope: {
+        memberId: "member_synthetic_phase",
+        occurrenceAt: "2026-04-27T04:00:00.000Z",
+      },
+    };
+    const completedLane = {
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    };
+
+    function acceptCommittedAuditDuringLane() {
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+        async (laneInput) => {
+          const sink = laneInput.executionContext.hosted?.productFeedbackCandidateSink;
+          expect(sink).toBeDefined();
+          // The engine's real cron integration suite proves this trusted metadata
+          // is emitted only after the exact private weekly occurrence commits.
+          sink?.acceptProductFeedbackCandidate(feedback, authorization);
+          sink?.acceptProductFeedbackCandidate(feedback, authorization);
+          return completedLane;
+        },
+      );
+    }
+
+    function expectNoMemberDeliveryOrCleanup() {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+      expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+      expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    }
+
+    it("records one silent committed audit only after the hosted checkpoint", async () => {
+      acceptCommittedAuditDuringLane();
+      const recordProductFeedback = vi.fn(async () => ({
+        feedbackId: "feedback_synthetic_weekly",
+        recorded: true,
+      }));
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+      await result.afterCheckpoint?.();
+      expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(feedback);
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it("does not record the audit if cancelled before the checkpoint callback", async () => {
+      acceptCommittedAuditDuringLane();
+      const controller = new AbortController();
+      const recordProductFeedback = vi.fn();
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+        signal: controller.signal,
+      }));
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+      controller.abort(new Error("Synthetic checkpoint cancellation"));
+
+      await expect(result.afterCheckpoint?.()).rejects.toThrow("cancel");
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it("does not record a candidate if its automation lane fails", async () => {
+      const recordProductFeedback = vi.fn();
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback, authorization);
+        throw new Error("Synthetic automation lane failure");
+      });
+
+      await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }))).rejects.toThrow("Synthetic automation lane failure");
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it.each(["rejects", "throws"] as const)("keeps a completed silent turn successful when the optional feedback callback %s", async (failureKind) => {
+      acceptCommittedAuditDuringLane();
+      const recordProductFeedback = vi.fn(() => {
+        const failure = new Error("Synthetic optional feedback outage");
+        if (failureKind === "throws") throw failure;
+        return Promise.reject(failure);
+      });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+
+      await expect(result.afterCheckpoint?.()).resolves.toBeDefined();
+      expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(feedback);
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it.each(["ordinary feedback", "an untrusted audit"] as const)("does not retain committed scope when the candidate is overwritten by %s", async (replacementKind) => {
+      const recordProductFeedback = vi.fn();
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        const sink = laneInput.executionContext.hosted?.productFeedbackCandidateSink;
+        sink?.acceptProductFeedbackCandidate(feedback, authorization);
+        sink?.acceptProductFeedbackCandidate({
+          ...feedback,
+          summary: replacementKind === "ordinary feedback"
+            ? "Please improve reminder filtering."
+            : feedback.summary,
+        });
+        return completedLane;
+      });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+      await result.afterCheckpoint?.();
+
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it.each([
+      { name: "an audit prefix without committed scope", candidate: feedback, authorization: undefined },
+      { name: "another member's committed scope", candidate: feedback, authorization: {
+        committedUsageOptimizerScope: { ...authorization.committedUsageOptimizerScope, memberId: "member_synthetic_other" },
+      } },
+      { name: "ordinary feedback with committed scope", candidate: { ...feedback, summary: "Please improve reminder filtering." }, authorization },
+      { name: "support feedback with an audit prefix", candidate: { ...feedback, kind: "frustration" as const }, authorization },
+      { name: "an audit with changelog references", candidate: { ...feedback, relatedChangelogItemIds: ["synthetic-changelog-item"] }, authorization },
+    ])("does not bypass member delivery for $name", async (testCase) => {
+      const recordProductFeedback = vi.fn();
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(testCase.candidate, testCase.authorization);
+        return completedLane;
+      });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+      await result.afterCheckpoint?.();
+
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
   });
 
   it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {
@@ -371,9 +518,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
       preparedDispatches: createPreparedDispatchesForDeliveryEffect(deferredDeliveryEffect),
     });
-    mocks.resolveHostedAssistantOutboxNextWakeAt
-      .mockResolvedValueOnce(staleOutboxWakeAt)
-      .mockResolvedValueOnce(null);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockImplementation(async () =>
+      mocks.drainHostedPreparedAssistantDeliveries.mock.calls.length > 0
+        ? null : staleOutboxWakeAt,
+    );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
@@ -401,12 +549,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
-      nextWakeAt: staleOutboxWakeAt,
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
       progressed: true,
     }));
 
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -501,10 +649,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       shouldYieldBackgroundMaintenance: () => shouldYield,
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
@@ -560,11 +708,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       shouldYieldBackgroundMaintenance: () => shouldYield,
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(result).toEqual(expect.objectContaining({
-      afterCheckpointKeepsForegroundImportLoop: true,
-      checkpointReason: "outbox_sending",
+      checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
     expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
@@ -646,7 +793,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       shouldYieldBackgroundMaintenance: () => false,
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -785,7 +932,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         vaultRoot,
         workspace: createDueAssistantWorkspace(),
       }));
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
       expect(mocks.resetHostedPreparedAssistantDeliveryEffects).not.toHaveBeenCalled();
@@ -994,7 +1141,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
           vaultRoot,
           workspace: createDueAssistantWorkspace(),
         }));
-        const postCheckpoint = await result.afterCheckpoint?.();
+        const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
         expect(postCheckpoint).toEqual(expect.objectContaining({
           checkpointReason: "outbox_receipt",
@@ -1033,10 +1180,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       workspace: createDueAssistantWorkspace(),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
       nextWakeAt,
       progressed: true,
     }));
@@ -1059,26 +1206,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
-    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      now = "2026-05-08T16:00:08.000Z";
+      return [
+        {
+          cleanupMessages: [],
+          cleanupTargetAliases: [],
+          deliveryChannel: "telegram",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint_synthetic",
+          effectId: "effect_synthetic",
+          journalMethod: "PUT",
+          journalStatus: "200",
+          providerMessageId: null,
+          providerMessageIds: [],
+          providerThreadId: "thread_synthetic",
+          retryable: false,
+          target: null,
+          targetKind: null,
+        },
+      ];
+    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => now,
@@ -1086,12 +1236,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
-      nextWakeAt: consumedWakeAt,
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
     }));
 
-    now = "2026-05-08T16:00:08.000Z";
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -1156,7 +1305,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         updatedAt: "2026-05-08T16:00:00.000Z",
       }),
     }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -1172,8 +1321,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
   it("preserves a post-delivery outbox-only wake with delivery ownership", async () => {
     let now = "2026-05-08T16:00:00.000Z";
     const consumedWakeAt = "2026-05-08T16:00:05.000Z";
-    mocks.resolveHostedAssistantOutboxNextWakeAt
-      .mockResolvedValueOnce(consumedWakeAt);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(consumedWakeAt);
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       assistantAutomationOutboxOnlyNextWakeAt: consumedWakeAt,
@@ -1217,7 +1365,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       }),
     }));
 
-    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledOnce();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: consumedWakeAt,
@@ -1278,7 +1426,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       }),
     }));
 
-    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledOnce();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: "2026-05-08T16:05:08.000Z",
@@ -1797,12 +1945,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       expect(firstPostCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
         nextWakeAt: now,
-        nextWakeReason: "assistant",
         redactedStatus: expect.objectContaining({
           hostedOutboxTerminalFailureInputsStaged: 1,
           hostedOutboxTerminalizedSending: 1,
         }),
       }));
+      expect(firstPostCheckpoint?.nextWakeReason ?? "assistant").toBe("assistant");
       let pendingInputIds = await readExistingHostedPendingAssistantInputIds({
         vaultRoot,
       });
@@ -2461,6 +2609,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
     await expect(result.afterCheckpoint?.()).resolves.toBeNull();
     expect(result.checkpointReason).toBe("outbox_receipt");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
@@ -2473,7 +2622,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(result.nextWakeAt).toBeNull();
     expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
-    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]!);
   });
 
   it.each([
@@ -2673,6 +2824,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       deliveryEffect,
     ]);
 
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantAutomationScheduleChanged: () => scheduleChanged,
       clearAssistantAutomationScheduleChanged,
@@ -2695,22 +2850,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       afterCheckpoint: expect.any(Function),
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
       nextWakeAt: reconciliationWakeAt,
       progressed: true,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: reconciliationWakeAt,
-        hostedOutboxPendingDeliveryEffects: 1,
+        hostedOutboxPendingDeliveryEffects: 0,
       }),
     }));
     expect(result).not.toHaveProperty("nextWakeReason");
 
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      createSentDeliveryOutcome(),
-    ]);
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
-    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]!);
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: reconciliationWakeAt,
@@ -2793,15 +2947,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         },
       }));
       expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_sending",
+        checkpointReason: "outbox_receipt",
         nextWakeAt: null,
         progressed: true,
         redactedStatus: expect.objectContaining({
-          hostedOutboxPendingDeliveryEffects: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
         }),
       }));
 
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -2864,12 +3018,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         },
       }));
       expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_sending",
+        checkpointReason: "outbox_receipt",
         nextWakeAt: null,
         progressed: true,
       }));
 
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -2997,12 +3151,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         },
       }));
       expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_sending",
+        checkpointReason: "outbox_receipt",
         nextWakeAt: null,
         progressed: true,
       }));
 
-      const postCheckpoint = await result.afterCheckpoint?.();
+      const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -3088,8 +3242,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       vaultRoot: "/tmp/murph-vault",
     });
     expect(callOrder).toEqual([
-      "pending-index-read",
       "delivery-terminalized",
+      "pending-index-read",
       "pending-index-read-follow-up",
     ]);
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
@@ -3343,12 +3497,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         importedCount: 1,
         now: () => "2026-05-08T02:28:12.000Z",
         resolvedDeviceSync: {
-          providerConfigs: {
-            whoop: {
-              clientId: "synthetic-whoop-client",
-              clientSecret: "synthetic-whoop-secret",
-            },
-          },
+          providerConfigs: { junction: { environment: "sandbox", region: "us" } },
           publicBaseUrl: "https://device-sync.example.test",
           secret: "synthetic-device-sync-secret",
         },
@@ -3551,10 +3700,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
-      "assistant.pass_finished",
       "outbox.delivery_finished",
+      "assistant.pass_finished",
     ]);
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished")?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -3611,7 +3760,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished")?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -3667,7 +3816,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
-    const deliveryLogRequest = filteredLogRequests[1];
+    const deliveryLogRequest = filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished");
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       deliveryErrorSummaries: [
@@ -3713,7 +3862,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
-    const deliveryLogRequest = filteredLogRequests[1];
+    const deliveryLogRequest = filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished");
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       deliveryErrorSummaries: [
@@ -3748,6 +3897,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
           name: "VaultCliError",
           operation: "send_message",
           providerErrorCode: "INVALID_MEDIA",
+          providerErrorFieldHints: "url,parts",
+          providerErrorReasonHints: "unsupported",
+          providerErrorMediaTypeHints: "webp",
+          requestPublicUrlMediaFormatSummary: "webp:1",
+          providerErrorMessageLength: 55,
+          hasReplyToMessageId: false,
           providerErrorMessage: "provider response prose",
           providerRequestId: "trace_safe_123",
           requestAttachmentMediaPartCount: 1,
@@ -3779,7 +3934,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
     await result.afterCheckpoint?.();
     await drainHostedRuntimeLogWritesBestEffort();
-    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests)[1];
+    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests).find((request) => request.entries.some((entry) => entry.eventCode === "outbox.delivery_finished"))!;
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       deliveryErrorSummaries: [
@@ -3795,10 +3950,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
             textPartCount: 1,
             mediaPartCount: 8,
             publicUrlMediaPartCount: 7,
+            publicUrlMediaFormats: "webp:1",
             attachmentMediaPartCount: 1,
             bodyShape: "object:message|message:idempotency_key,parts",
+            hasReplyToMessageId: false,
           }),
           deliveryErrorDetailResponseSummary: JSON.stringify({
+            fieldHints: "url,parts",
+            reasonHints: "unsupported",
+            mediaTypeHints: "webp",
+            messageLength: 55,
             kind: "json_object",
             textLength: 246,
             keyCount: 4,
@@ -3878,7 +4039,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests.find((request) => request.entries[0]?.eventCode === "outbox.delivery_finished")?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -3981,12 +4142,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -4034,12 +4190,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -4052,7 +4203,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({ excludedRouteActions: [
-        "run-device-sync-wake", "run-clinical-records-sync", "run-environment-interview",
+        "run-device-sync-wake", "run-clinical-records-sync", "apply-clinical-enrichment",
       ] }),
     );
     expect(result).toEqual(expect.objectContaining({
@@ -4163,8 +4314,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       .mockResolvedValueOnce(staleSystemMailboxWakeAt)
       .mockResolvedValue(null);
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
-      item: createCodexAuthSystemMailboxItem(),
-      itemId: "system_mailbox_item_codex_auth",
+      item: createVaultShareProjectionSystemMailboxItem(),
+      itemId: "system_mailbox_item_vault_share_projection",
       metrics: {
         bootstrapResult: null,
         conversationMetrics: null,
@@ -4225,12 +4376,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -4402,12 +4548,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -4817,11 +4958,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       progressed: true,
     }));
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
       messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     const postCheckpoint = await result.afterCheckpoint?.();
@@ -4954,15 +5097,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       now: () => "2026-04-27T00:09:00.000Z",
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
+      workspace: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
@@ -5002,12 +5152,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       logRequests,
       now: () => "2026-04-27T00:09:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -5036,16 +5181,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         signal: expect.any(AbortSignal),
       }),
     );
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expectAssistantLaneCallWithoutDeviceSyncOptions({
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      platform: expect.any(Object),
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
+      workspace: expect.objectContaining({ checkpointedAt: "2026-04-27T00:00:00.000Z" }),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(

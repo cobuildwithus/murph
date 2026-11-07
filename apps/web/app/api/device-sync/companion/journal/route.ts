@@ -12,7 +12,7 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { getPrisma } from "@/src/lib/prisma";
 
-// Read the same saved query result as /journal. No runtime wake, calculation,
+// Read the saved Journal projection from the core shard. No runtime wake, calculation,
 // persistence, or other vault data in the native response.
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();

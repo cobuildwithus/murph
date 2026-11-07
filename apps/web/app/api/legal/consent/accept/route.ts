@@ -6,7 +6,7 @@ import {
   readHostedHealthDataConsentState,
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
-import { readHostedRuntimeAiAccessDecision } from "@/src/lib/hosted-onboarding/member-access";
+import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { signalHostedRuntimeRecheckRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { reconcileHostedHealthDataRuntimeConsent } from "@/src/lib/hosted-privacy/health-data-consent-withdrawal";
 import {
@@ -77,10 +77,10 @@ export const POST = withJsonError(async (request: Request) => {
   if (
     consent.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE
     && priorHealthDataConsentState !== "missing"
-    && (await readHostedRuntimeAiAccessDecision({
+    && (await readActiveHostedMemberAccess({
       memberId: auth.member.id,
       prisma,
-    })).allowed
+    }))
   ) {
     await signalHostedRuntimeRecheckRuntime({
       prisma,

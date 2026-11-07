@@ -10,10 +10,8 @@ quality: usable
 categories:
 - health-marker
 - protein-floor
-relations:
--
-  type: related_protocol
-  target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
+relations: []
+
 unit: clinical lab
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.

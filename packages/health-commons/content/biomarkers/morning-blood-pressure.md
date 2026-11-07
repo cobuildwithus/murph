@@ -15,22 +15,15 @@ categories:
   - recovery
   - home-measurement
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-29269746
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-31126559
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-28633297
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-38410962
+
 measurementContexts:
   - morning_home_cuff
   - validated_home_bp_monitor

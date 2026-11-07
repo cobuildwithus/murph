@@ -1,10 +1,23 @@
 import { createHash } from "node:crypto";
 
+import { APIConnectionTimeoutError, APIUserAbortError } from "@composio/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
 }));
+
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: prismaMocks.getPrisma,
@@ -15,8 +28,10 @@ import {
   executeHostedConnectedAppsRequest,
   startHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
+import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
 
 interface MemberRow {
   accountGroupMemberships?: Array<{
@@ -275,6 +290,252 @@ describe("connected-app service", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+  });
+
+  describe("private Composio transport diagnostics", () => {
+    beforeEach(() => {
+      vi.stubEnv("NODE_ENV", "production");
+      installPrismaHarness();
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      {
+        label: "socket",
+        diagnostic: "socket",
+        cause: () => new TypeError("private-fetch-message", {
+          cause: Object.assign(new Error("private-socket-message"), { code: "ECONNRESET" }),
+        }),
+      },
+      {
+        label: "DNS",
+        diagnostic: "dns",
+        cause: () => new TypeError("private-fetch-message", {
+          cause: { code: "ENOTFOUND", name: "private-name", message: "private-message" },
+        }),
+      },
+      {
+        label: "connect",
+        diagnostic: "connect",
+        cause: () => Object.assign(new Error("private-connect-message"), { code: "ECONNREFUSED" }),
+      },
+      {
+        label: "SDK timeout",
+        diagnostic: "sdk_timeout",
+        cause: () => Object.assign(
+          new APIConnectionTimeoutError({ message: "private-timeout-message" }),
+          { cause: Object.assign(new Error("private-socket-message"), { code: "ECONNRESET" }) },
+        ),
+      },
+      {
+        label: "SDK abort",
+        diagnostic: "abort",
+        cause: () => new APIUserAbortError({ message: "private-abort-message" }),
+      },
+      {
+        label: "nested abort",
+        diagnostic: "abort",
+        cause: () => new TypeError("private-fetch-message", {
+          cause: new DOMException("private-abort-message", "AbortError"),
+        }),
+      },
+      {
+        label: "unknown private metadata",
+        diagnostic: "unknown",
+        cause: () => Object.assign(new Error("private-message ENOTFOUND"), {
+          name: "private-custom-class",
+          code: "ECONNRESET-private-code",
+          stack: "private-stack https://private.example.test/?token=private-secret",
+        }),
+      },
+      {
+        label: "cyclic unknown",
+        diagnostic: "unknown",
+        cause: () => {
+          const error = new Error("private-cycle");
+          error.cause = error;
+          return error;
+        },
+      },
+      {
+        label: "depth-limited unknown",
+        diagnostic: "unknown",
+        cause: () => {
+          let error: Error = Object.assign(new Error("private-root"), { code: "ENOTFOUND" });
+          for (let depth = 0; depth < 8; depth += 1) {
+            error = new Error("private-wrapper", { cause: error });
+          }
+          return error;
+        },
+      },
+      {
+        label: "ambiguous direct write",
+        diagnostic: "socket",
+        directWrite: true,
+        cause: () => Object.assign(new Error("private-write-message"), { code: "ECONNRESET" }),
+      },
+    ])("keeps $label observable only in the existing route log", async (scenario) => {
+      const directWrite = "directWrite" in scenario && scenario.directWrite === true;
+      const failure = scenario.cause();
+      const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+        const pathname = new URL(String(url)).pathname;
+        if (directWrite && pathname === "/api/v3.1/connected_accounts") {
+          return jsonResponse({
+            items: [{
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { slug: "googlecalendar" },
+            }],
+          });
+        }
+        expect(pathname).toBe(directWrite
+          ? "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT"
+          : "/api/v3.1/connected_accounts");
+        throw failure;
+      });
+      const error = await executeHostedConnectedAppsRequest({
+        fetchImpl,
+        memberId: "hbm_member",
+        request: directWrite
+          ? {
+              operation: "execute",
+              input: {
+                account: "ca_calendar",
+                agentApproved: true,
+                arguments: {
+                  event_duration_hour: 0,
+                  event_duration_minutes: 30,
+                  start_datetime: "2026-07-01T10:00:00-04:00",
+                  summary: "private-summary",
+                  timezone: "America/New_York",
+                },
+                toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+              },
+            }
+          : { operation: "manage", input: { action: "list" } },
+      }).catch((value: unknown) => value);
+      if (!isHostedOnboardingError(error)
+        || !(error.cause instanceof ComposioConnectedAppsRequestError)) {
+        throw new Error("Expected the original mapped Composio failure.");
+      }
+      const cause = error.cause;
+      const transport = directWrite ? cause.cause : cause;
+      if (!(transport instanceof ComposioConnectedAppsRequestError)) {
+        throw new Error("Expected the transport cause inside the write wrapper.");
+      }
+      const transportMessage =
+        `Composio is temporarily unavailable. Transport diagnostic: ${scenario.diagnostic}.`;
+      const causeMessage = directWrite
+        ? `Composio calendar event creation returned an ambiguous result. ${transportMessage}`
+        : transportMessage;
+      expect(transport).toMatchObject({
+        message: transportMessage,
+        retryable: null,
+        status: null,
+        type: "composio_transport_error",
+      });
+      expect(cause.retryable).toBe(directWrite ? false : null);
+      const transportCause = transport.cause;
+      if (scenario.diagnostic === "sdk_timeout") {
+        // The SDK replaces timeout-looking fetch failures before our wrapper.
+        expect(transportCause).toBeInstanceOf(APIConnectionTimeoutError);
+        expect(transportCause).toHaveProperty("message", "Request timed out.");
+        expect(transportCause).not.toHaveProperty("cause");
+        expect(transportCause).not.toBe(failure);
+      } else {
+        expect(transportCause).toBe(failure);
+      }
+      const expectedError = {
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: {
+          ...(directWrite ? { operationName: "GOOGLECALENDAR_CREATE_EVENT" } : {}),
+          type: "composio_transport_error",
+        },
+        message: directWrite
+          ? "The connected-app request could not be completed."
+          : "Connected apps are temporarily unavailable.",
+        retryable: !directWrite,
+      };
+      const status = directWrite ? 400 : 503;
+      expect(error).toMatchObject({ ...expectedError, httpStatus: status });
+      expect(console.error).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalled();
+      const response = jsonError(error);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ error: expectedError });
+      expect(error.cause).toBe(cause);
+      expect(transport.cause).toBe(transportCause);
+      const log = vi.mocked(directWrite ? console.warn : console.error);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(directWrite ? console.error : console.warn).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorCauseType: "ComposioConnectedAppsRequestError",
+        errorCauseMessage: causeMessage,
+        errorResponseRetryable: !directWrite,
+        errorResponseStatus: status,
+      }));
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-|secret-test-key|hbm_member|ca_calendar/);
+      expect(fetchImpl).toHaveBeenCalledTimes(directWrite ? 2 : 1);
+    });
+
+    it.each([200, 400, 502])("preserves provider HTTP %i without transport diagnostics", async (status) => {
+      const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse(
+        status === 200
+          ? { items: [] }
+          : { error: { code: 2502, slug: "UPSTREAM_UNAVAILABLE", message: "private-provider-message" } },
+        status,
+      ));
+      let failure: unknown;
+      const response = await executeHostedConnectedAppsRequest({
+        fetchImpl,
+        memberId: "hbm_member",
+        request: { operation: "manage", input: { action: "list" } },
+      }).then(
+        (result) => jsonOk(result),
+        (error: unknown) => {
+          failure = error;
+          return jsonError(error);
+        },
+      );
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      if (status === 200) {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ accounts: [] });
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).not.toHaveBeenCalled();
+        return;
+      }
+      if (!isHostedOnboardingError(failure)
+        || !(failure.cause instanceof ComposioConnectedAppsRequestError)) {
+        throw new Error("Expected the unchanged provider HTTP error.");
+      }
+      const retryable = status >= 500;
+      const expectedError = {
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: { statusCode: status, type: "composio_http_error" },
+        message: retryable
+          ? "Connected apps are temporarily unavailable."
+          : "The connected-app request could not be completed.",
+        retryable,
+      };
+      expect(response.status).toBe(retryable ? 503 : 400);
+      expect(await response.json()).toEqual({ error: expectedError });
+      expect(failure.cause.status).toBe(status);
+      expect(failure.cause.cause).toBeUndefined();
+      const log = vi.mocked(retryable ? console.error : console.warn);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(retryable ? console.warn : console.error).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorCauseMessage: `Composio request failed with status ${status}. Provider error: code=2502, slug=UPSTREAM_UNAVAILABLE.`,
+      }));
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/Transport diagnostic|private-/);
+    });
   });
 
   it("binds connect intents to the member and keeps provider-link attempts visible", async () => {
@@ -884,54 +1145,314 @@ describe("connected-app service", () => {
     expect(result.messages[0]!.messageText).not.toMatch(/<\/?(html|body|table|style|p|a)\b/iu);
   });
 
-  it("asks for a narrower request when a result stays oversized after compaction", async () => {
-    installPrismaHarness();
-    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
-      const parsed = new URL(String(url));
-      if (parsed.pathname === "/api/v3.1/tool_router/session") {
-        return jsonResponse({ session_id: "trs_member" });
-      }
-      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
-        return jsonResponse({ note: "x".repeat(200_000) });
-      }
-      throw new Error(`Unexpected Composio request ${String(url)}`);
-    });
-
-    await expect(executeHostedConnectedAppsRequest({
-      fetchImpl,
-      memberId: "hbm_member",
-      request: { input: { query: "everything" }, operation: "search" },
-    })).rejects.toMatchObject({
+  describe("oversized connected-app result telemetry", () => {
+    const publicError = {
       code: "CONNECTED_APPS_RESULT_TOO_LARGE",
-      httpStatus: 413,
-    });
-  });
+      message: "That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.",
+      retryable: false,
+    };
+    const writes = [
+      {
+        argumentsValue: {
+          event_duration_hour: 0,
+          event_duration_minutes: 30,
+          start_datetime: "2026-11-01T10:00:00-05:00",
+          summary: "private-synthetic-summary",
+          timezone: "America/New_York",
+        },
+        operationName: "calendar_write_attempt",
+        toolkit: "googlecalendar",
+        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      },
+      {
+        argumentsValue: {
+          end_datetime: "2026-11-01T10:30:00-05:00",
+          start_datetime: "2026-11-01T10:00:00-05:00",
+          subject: "private-synthetic-subject",
+          time_zone: "Eastern Standard Time",
+        },
+        operationName: "calendar_write_attempt",
+        toolkit: "outlook",
+        toolSlug: "OUTLOOK_CALENDAR_CREATE_EVENT",
+      },
+      {
+        argumentsValue: {
+          body: "private-synthetic-body",
+          recipient_email: "private-recipient@example.test",
+          subject: "private-synthetic-subject",
+        },
+        operationName: "email_write_attempt",
+        toolkit: "gmail",
+        toolSlug: "GMAIL_SEND_EMAIL",
+      },
+      {
+        argumentsValue: {
+          body: "private-synthetic-body",
+          subject: "private-synthetic-subject",
+          to_email: "private-recipient@example.test",
+        },
+        operationName: "email_write_attempt",
+        toolkit: "outlook",
+        toolSlug: "OUTLOOK_SEND_EMAIL",
+      },
+    ] as const;
+    const limits = ["provider-body", "compacted-result"] as const;
 
-  it("classifies a provider body too large to read as a narrowable request", async () => {
-    // The provider answers 200 and the body is simply beyond what the tier can
-    // buffer. Reporting that as an outage is what produced the false diagnosis.
-    installPrismaHarness();
-    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
-      const parsed = new URL(String(url));
-      if (parsed.pathname === "/api/v3.1/tool_router/session") {
-        return jsonResponse({ session_id: "trs_member" });
-      }
-      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
-        return new Response(`{"data":"${"x".repeat(5 * 1024 * 1024)}"}`, {
-          headers: { "content-type": "application/json" },
-          status: 200,
+    beforeEach(() => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "gmail,googlecalendar,outlook");
+      installPrismaHarness();
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each(writes.flatMap((write) => limits.map((limit) => ({ ...write, limit }))))(
+      "attributes $toolSlug after the $limit is oversized without changing its error contract",
+      async ({ argumentsValue, limit, operationName, toolkit, toolSlug }) => {
+        const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+          const pathname = new URL(String(url)).pathname;
+          if (pathname === "/api/v3.1/connected_accounts") {
+            return jsonResponse({ items: [{
+              alias: "private-synthetic-account", id: "ca_private_synthetic", is_disabled: false,
+              status: "ACTIVE", toolkit: { slug: toolkit },
+            }] });
+          }
+          expect(pathname).toBe(`/api/v3.1/tools/execute/${toolSlug}`);
+          return jsonResponse({
+            data: {
+              id: "private-synthetic-result",
+              note: "private-synthetic-provider-data".repeat(limit === "provider-body" ? 200_000 : 10_000),
+            },
+            successful: true,
+          });
         });
-      }
-      throw new Error(`Unexpected Composio request ${String(url)}`);
-    });
+        const error: unknown = await executeHostedConnectedAppsRequest({
+          fetchImpl, memberId: "hbm_member",
+          request: { operation: "execute", input: {
+            account: "private-synthetic-account", agentApproved: true,
+            arguments: argumentsValue,
+            toolSlug,
+          } },
+        }).catch((value: unknown) => value);
+        // The first call verifies account ownership; the sole remaining call
+        // is the authorized write, even though its provider response was 200.
+        expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          "/api/v3.1/connected_accounts",
+          `/api/v3.1/tools/execute/${toolSlug}`,
+        ]);
+        if (!isHostedOnboardingError(error)) throw new Error("Expected bounded result failure.");
+        const details = {
+          operationName,
+          type: limit === "provider-body"
+            ? "composio_response_too_large"
+            : "connected_apps_compacted_result_too_large",
+        };
+        expect(error).toMatchObject({ ...publicError, httpStatus: 413 });
+        expect(error.details).toEqual(details);
+        const cause = error.cause;
+        if (limit === "provider-body") {
+          if (!(cause instanceof ComposioConnectedAppsRequestError)
+            || !(cause.cause instanceof ComposioConnectedAppsRequestError)) {
+            throw new Error("Expected the original direct-write wrapper and provider failure.");
+          }
+          expect(cause).toMatchObject({
+            message: `${operationName === "email_write_attempt"
+              ? "Composio email sending returned an ambiguous result."
+              : "Composio calendar event creation returned an ambiguous result."} Composio response was too large.`,
+            operationName: toolSlug, retryable: false, status: 200, type: "composio_response_too_large",
+          });
+          expect(cause.cause).toMatchObject({
+            message: "Composio response was too large.", operationName: null,
+            retryable: null, status: 200, type: "composio_response_too_large",
+          });
+          expect(cause.cause.cause).toBeUndefined();
+        } else {
+          expect(cause).toBeUndefined();
+        }
+        const response = jsonError(error);
+        expect(response.status).toBe(413);
+        const payload = await response.text();
+        expect(payload).toBe(JSON.stringify({ error: publicError }));
+        expect(error.cause).toBe(cause);
+        expect(console.warn).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+          errorDetails: details, errorResponseRetryable: false, errorResponseStatus: 413,
+        }));
+        const serialized = JSON.stringify([payload, vi.mocked(console.warn).mock.calls]);
+        expect(serialized).not.toContain(toolSlug);
+        expect(serialized).not.toMatch(/private-|ca_private|secret-test-key|hbm_member|toolSlug|arguments|successful/iu);
+      },
+    );
 
-    await expect(executeHostedConnectedAppsRequest({
-      fetchImpl,
-      memberId: "hbm_member",
-      request: { input: { query: "everything" }, operation: "search" },
-    })).rejects.toMatchObject({
-      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
-      httpStatus: 413,
+    it.each(limits.flatMap((limit) => ["search", "execute"].map((operation) => ({ limit, operation }))))(
+      "keeps $operation recovery narrowable when the $limit is oversized",
+      async ({ limit, operation }) => {
+        const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+          const pathname = new URL(String(url)).pathname;
+          if (pathname === "/api/v3.1/connected_accounts") {
+            return jsonResponse({ items: [{
+              id: "ca_private_synthetic", is_disabled: false, status: "ACTIVE", toolkit: { slug: "gmail" },
+            }] });
+          }
+          if (pathname === "/api/v3.1/tool_router/session") return jsonResponse({ session_id: "trs_member" });
+          expect(pathname).toBe(`/api/v3.1/tool_router/session/trs_member/${operation}`);
+          return jsonResponse({ data: {
+            note: "private-synthetic-provider-data".repeat(limit === "provider-body" ? 200_000 : 10_000),
+          }, successful: true });
+        });
+        const error: unknown = await executeHostedConnectedAppsRequest({
+          fetchImpl, memberId: "hbm_member",
+          request: operation === "search"
+            ? { operation, input: { query: "private-synthetic-query" } }
+            : { operation: "execute", input: {
+                account: "ca_private_synthetic", arguments: { q: "private-synthetic-query" },
+                toolSlug: "GMAIL_PRIVATE_SYNTHETIC_READ",
+              } },
+        }).catch((value: unknown) => value);
+        expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          ...(operation === "execute" ? ["/api/v3.1/connected_accounts"] : []),
+          "/api/v3.1/tool_router/session",
+          `/api/v3.1/tool_router/session/trs_member/${operation}`,
+        ]);
+        if (!isHostedOnboardingError(error)) throw new Error("Expected bounded result failure.");
+        const details = {
+          operationName: "non_write",
+          type: limit === "provider-body"
+            ? "composio_response_too_large"
+            : "connected_apps_compacted_result_too_large",
+        };
+        expect(error).toMatchObject({ ...publicError, httpStatus: 413 });
+        expect(error.details).toEqual(details);
+        const cause = error.cause;
+        if (limit === "provider-body") {
+          expect(cause).toBeInstanceOf(ComposioConnectedAppsRequestError);
+          expect(cause).toMatchObject({
+            message: "Composio response was too large.", operationName: null,
+            retryable: null, status: 200, type: "composio_response_too_large",
+          });
+        } else {
+          expect(cause).toBeUndefined();
+        }
+        const response = jsonError(error);
+        expect(response.status).toBe(413);
+        const payload = await response.text();
+        expect(payload).toBe(JSON.stringify({ error: publicError }));
+        expect(error.cause).toBe(cause);
+        expect(console.warn).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+          errorDetails: details, errorResponseRetryable: false, errorResponseStatus: 413,
+        }));
+        expect(JSON.stringify([payload, vi.mocked(console.warn).mock.calls]))
+          .not.toMatch(/private-|ca_private|secret-test-key|hbm_member|GMAIL_PRIVATE|toolSlug|arguments|successful/iu);
+      },
+    );
+
+    it.each(["account rename", "read account verification"] as const)(
+      "attributes oversized %s as non-write without implying a read attempt",
+      async (operation) => {
+        const rename = operation === "account rename";
+        const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+          const pathname = new URL(String(url)).pathname;
+          if (rename && pathname === "/api/v3.1/connected_accounts") {
+            return jsonResponse({ items: [{
+              id: "ca_private_synthetic", is_disabled: false, status: "ACTIVE", toolkit: { slug: "gmail" },
+            }] });
+          }
+          expect(pathname).toBe(rename
+            ? "/api/v3.1/connected_accounts/ca_private_synthetic"
+            : "/api/v3.1/connected_accounts");
+          return jsonResponse({ note: "private-synthetic-account-data".repeat(200_000) });
+        });
+        const error: unknown = await executeHostedConnectedAppsRequest({
+          fetchImpl, memberId: "hbm_member",
+          request: rename
+            ? { operation: "manage", input: {
+                action: "rename", account: "ca_private_synthetic", alias: "private-synthetic-alias",
+              } }
+            : { operation: "execute", input: {
+                account: "ca_private_synthetic", arguments: { q: "private-synthetic-query" },
+                toolSlug: "GMAIL_PRIVATE_SYNTHETIC_READ",
+              } },
+        }).catch((value: unknown) => value);
+        expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          "/api/v3.1/connected_accounts",
+          ...(rename ? ["/api/v3.1/connected_accounts/ca_private_synthetic"] : []),
+        ]);
+        if (!isHostedOnboardingError(error)) throw new Error("Expected bounded result failure.");
+        const details = { operationName: "non_write", type: "composio_response_too_large" };
+        expect(error).toMatchObject({ ...publicError, httpStatus: 413 });
+        expect(error.details).toEqual(details);
+        const cause = error.cause;
+        expect(cause).toBeInstanceOf(ComposioConnectedAppsRequestError);
+        expect(cause).toMatchObject({
+          message: "Composio response was too large.", operationName: null,
+          retryable: null, status: 200, type: "composio_response_too_large",
+        });
+        const response = jsonError(error);
+        expect(response.status).toBe(413);
+        const payload = await response.text();
+        expect(payload).toBe(JSON.stringify({ error: publicError }));
+        expect(error.cause).toBe(cause);
+        expect(console.warn).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+          errorDetails: details, errorResponseRetryable: false, errorResponseStatus: 413,
+        }));
+        expect(JSON.stringify([payload, vi.mocked(console.warn).mock.calls]))
+          .not.toMatch(/private-|ca_private|secret-test-key|hbm_member|GMAIL_PRIVATE|toolSlug|arguments/iu);
+      },
+    );
+
+    it.each(writes)("keeps an oversized account verification before $toolSlug dispatch", async ({
+      argumentsValue, toolSlug,
+    }) => {
+      const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+        expect(new URL(String(url)).pathname).toBe("/api/v3.1/connected_accounts");
+        return jsonResponse({ note: "private-synthetic-account-data".repeat(200_000) });
+      });
+      const error: unknown = await executeHostedConnectedAppsRequest({
+        fetchImpl, memberId: "hbm_member",
+        request: { operation: "execute", input: {
+          account: "ca_private_synthetic", agentApproved: true, arguments: argumentsValue, toolSlug,
+        } },
+      }).catch((value: unknown) => value);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      if (!isHostedOnboardingError(error)) throw new Error("Expected account verification failure.");
+      const expected = {
+        code: "CONNECTED_APPS_WRITE_PREFLIGHT_UNAVAILABLE",
+        details: { statusCode: 200, type: "composio_response_too_large" },
+        message: "The connected account could not be verified.",
+        retryable: false,
+      };
+      expect(error).toMatchObject({ ...expected, httpStatus: 400 });
+      expect(error.details).toEqual(expected.details);
+      expect(error.message).not.toMatch(/may (?:have|already)|unknown|could not confirm|repeat/iu);
+      const cause = error.cause;
+      expect(cause).toBeInstanceOf(ComposioConnectedAppsRequestError);
+      expect(cause).toMatchObject({
+        message: "Composio response was too large.", operationName: null,
+        retryable: null, status: 200, type: "composio_response_too_large",
+      });
+      const response = jsonError(error);
+      expect(response.status).toBe(400);
+      const payload = await response.text();
+      expect(payload).toBe(JSON.stringify({ error: {
+        code: expected.code, message: expected.message, retryable: expected.retryable, details: expected.details,
+      } }));
+      expect(error.cause).toBe(cause);
+      expect(console.warn).toHaveBeenCalledTimes(1);
+      expect(console.error).not.toHaveBeenCalled();
+      expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorDetails: expected.details, errorResponseRetryable: false, errorResponseStatus: 400,
+      }));
+      expect(JSON.stringify([payload, vi.mocked(console.warn).mock.calls]))
+        .not.toMatch(/private-|ca_private|secret-test-key|hbm_member|operationName|toolSlug|arguments/iu);
     });
   });
 

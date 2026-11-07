@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-13",
+  "order": 100,
+  "item": {
+    "id": "clearer-scheduled-check-ins",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Check-ins that say what they are about",
+    "summary": "Scheduled check-ins and plan reviews now name the plan and describe earlier reminders in plain words, so they make sense even after days of other conversation.",
+    "details": "A plan review asks one question about whether the support helped and what you want next. Reminder wording you asked for word for word stays the same.",
+    "relevanceTags": ["reminders", "assistant"],
+    "sourcePullRequests": [4132]
+  }
+}

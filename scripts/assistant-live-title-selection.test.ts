@@ -67,6 +67,8 @@ it('selects complete live titles while preserving ordinary display and ambiguous
     requests.length = 0
     expect(executeAssistantRealCodexRun(parseAssistantRealCodexRunArgs(['selects one synthetic']), dependencies)).toBe(2)
     expect(errors.join('')).toContain('matched 2 live journeys')
+    expect(errors.join('')).toContain(selected)
+    expect(errors.join('')).toContain(`${prefix} beta`)
     expect(requests.map((request) => request.stdio)).toEqual(['capture'])
     expect(await readFile(receiptPath, 'utf8')).toBe(`${selected}\n`)
   } finally {

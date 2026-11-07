@@ -13,12 +13,9 @@ aliases:
 categories:
 - daily-step-floor
 relations:
-- type: duplicate_source_identity
-  target: source_artifact:health.gov-physical-activity-guidelines-2018-11-12
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: parent_family
-  target: experiment_family:daily-step-floor
+  - type: duplicate_source_identity
+    target: source_artifact:health.gov-physical-activity-guidelines-2018-11-12
+
 source:
   kind: guideline
   title: Physical Activity Guidelines for Americans, 2nd edition

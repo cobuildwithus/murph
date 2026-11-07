@@ -18,7 +18,6 @@ import {
   type HostedRuntimeSystemMailboxFrontierClass,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
-  isHostedRuntimeFutureMailboxContinuation,
   type HostedMailboxLaneConsumed,
   type HostedMailboxLaneLag,
 } from "@murphai/hosted-execution/runtime-control";
@@ -34,33 +33,19 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 import {
   decodeHostedMailboxStoredPayload,
-  hasHostedMailboxAutomationEngagementSince,
-  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
   tryMarkHostedMailboxConversationAiUsageDenied,
 } from "../hosted-mailbox/store";
+import { readHostedMailboxProgress } from "../hosted-mailbox/projection";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 } from "../hosted-execution/usage-limit-notice";
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import {
-  hasHostedMemberEstablishedLinqHomeRoute,
-} from "../hosted-onboarding/hosted-member-routing-store";
-import {
-  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
-  hasHostedLinqInboundWithinDays,
-} from "../hosted-onboarding/linq-daily-state";
-import type {
-  HostedOnboardingReadClient,
-} from "../hosted-onboarding/shared";
-import {
-  hasHostedMemberEstablishedLinqThreadRoute,
-} from "../hosted-routing/thread-route-store";
+import { hostedRuntimeMemberEligibleWhere, readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
@@ -73,9 +58,6 @@ import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
-import {
-  readSelectedHostedInferenceConnectionOverride,
-} from "../hosted-inference/connection-store";
 
 type HostedRuntimeReconciliationUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
@@ -95,52 +77,6 @@ export type HostedRuntimeReconciliationFactsStage =
 
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
-const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
-  24 * 60 * 60 * 1000;
-
-export async function readHostedRuntimeOwnerReleaseActionable(input: {
-  now?: Date | string;
-  userId: string;
-}): Promise<boolean> {
-  const prisma = getPrisma();
-  const now = normalizeHostedRuntimeReconciliationDate(input.now);
-  const [workspace, maxSeqByLane] = await Promise.all([
-    readHostedWorkspace({ prisma, userId: input.userId }),
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-  ]);
-  if (!workspace) {
-    return false;
-  }
-
-  const redactedStatus = readHostedMailboxRedactedStatusRecord(
-    workspace.redactedStatusJson,
-  );
-  const mailboxLag = maxSeqByLane.map((highWater) =>
-    computeHostedMailboxLaneLag({
-      highWater,
-      redactedStatusJson: redactedStatus,
-    })
-  );
-  const deferredMailboxContinuation =
-    isHostedRuntimeFutureMailboxContinuation({
-      nextWakeAt: workspace.nextWakeAt,
-      nextWakeReason: workspace.nextWakeReason,
-      redactedStatus,
-    }, now.getTime());
-  if (hasHostedMailboxLag(mailboxLag) && !deferredMailboxContinuation) {
-    return true;
-  }
-
-  return await readHostedRuntimeSystemMailboxFrontier({
-    at: now,
-    handledThroughSeq:
-      readHostedRuntimeSystemHandledThroughSeq(workspace.redactedStatusJson)
-        ?? "0",
-    maxSeqByLane,
-    prisma,
-    userId: input.userId,
-  }) !== null;
-}
 
 export async function readHostedRuntimeReconciliationFacts(
   input: HostedRuntimeReconciliationFactsRequest & {
@@ -164,18 +100,8 @@ export async function readHostedRuntimeReconciliationFacts(
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
   if (!hasActiveAccess) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag: [],
-      reason: "user_not_active",
-      retryAt: projectedWorkspace
-        ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)
-        : null,
-      workspace: projectedWorkspace
-        ? {
-            ...projectedWorkspace,
-            systemMailboxFrontier: null,
-          }
-        : null,
+    const facts = await buildHostedRuntimeInactiveFacts({
+      now, prisma, userId: input.userId, workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
       now,
@@ -194,12 +120,7 @@ export async function readHostedRuntimeReconciliationFacts(
   });
   reportStage?.("canonical_projection");
   if (healthDataConsentState === "revoked") {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag: [],
-      reason: "health_data_consent_withdrawn",
-      retryAt: null,
-      workspace: projectedWorkspace,
-    });
+    const facts = buildHostedRuntimeConsentWithdrawnFacts(projectedWorkspace);
     emitHostedRuntimeReconciliationFacts({
       now,
       facts,
@@ -211,17 +132,9 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   reportStage?.("canonical_mailbox");
-  const [
-    maxSeqByLane,
-    consumedSeqByLane,
-  ] = await Promise.all([
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: ["conversation"],
-      prisma,
-      userId: input.userId,
-    }),
-  ]);
+  const { maxSeqByLane, consumedSeqByLane } = await readHostedMailboxProgress({
+    now, prisma, userId: input.userId,
+  });
   reportStage?.("canonical_projection");
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -251,16 +164,18 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   reportStage?.("canonical_mailbox");
+  const modelFreeWakeAt = readHostedRuntimeSystemModelFreeWakeAt(workspace);
+  const systemMailboxFrontierInput = {
+    at: now,
+    handledThroughSeq: projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
+    mailboxLag,
+    modelFreeWakeAt,
+    prisma,
+    userId: input.userId,
+  };
   const workspaceWithSystemMailboxFrontier = {
     ...projectedWorkspace,
-    systemMailboxFrontier: await readHostedRuntimeSystemMailboxFrontier({
-      at: now,
-      handledThroughSeq:
-        projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
-      maxSeqByLane,
-      prisma,
-      userId: input.userId,
-    }),
+    systemMailboxFrontier: await readHostedRuntimeSystemMailboxFrontier(systemMailboxFrontierInput),
   } satisfies HostedRuntimeReconciliationFactsWorkspace;
 
   reportStage?.("canonical_projection");
@@ -268,48 +183,6 @@ export async function readHostedRuntimeReconciliationFacts(
     consumedSeqByLane,
     mailboxLag,
   });
-
-  if (
-    hostedRuntimeReconciliationNeedsAutomationEngagement({
-      freshConversationMailboxLag,
-      now,
-      workspace: workspaceWithSystemMailboxFrontier,
-    })
-    && await hasHostedMemberEstablishedLinqRoute({
-      memberId: input.userId,
-      prisma,
-    })
-    && !(await hasHostedLinqInboundWithinDays({
-      memberId: input.userId,
-      now,
-      prisma,
-    }))
-    && !(await hasHostedMailboxAutomationEngagementSince({
-      prisma,
-      since: new Date(
-        now.getTime()
-          - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      ),
-      userId: input.userId,
-    }))
-  ) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag,
-      reason: "automation_engagement_paused",
-      retryAt: new Date(
-        now.getTime() + HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS,
-      ).toISOString(),
-      workspace: workspaceWithSystemMailboxFrontier,
-    });
-    emitHostedRuntimeReconciliationFacts({
-      now,
-      facts,
-      request: input,
-      usageGateRequired: false,
-      usageGateStatus: "not_required",
-    });
-    return facts;
-  }
 
   reportStage?.("canonical_usage");
   const usageGateRequired = hostedRuntimeReconciliationNeedsAiUsageGate({
@@ -320,19 +193,30 @@ export async function readHostedRuntimeReconciliationFacts(
 
   if (usageGateRequired) {
     const gate = await resolveHostedRuntimeAiUsageGate({
-      mode: input.usageGateMode ?? "mutating",
+      // Reconciliation predicts runnable work; spend accounting owns period
+      // creation. Confirm denials under the existing lock before acting on them.
+      mode: input.usageGateMode === "read_only" ? "read_only" : "read_first",
       now,
       userId: input.userId,
     });
 
     if (gate.status === "health_data_consent_withdrawn") {
+      reportStage?.("canonical_consent");
+      // A thread container inherits its owner's denial here, but claim still
+      // admits its retention and model-free work. Only its own withdrawal quiesces.
+      const withdrawn = await readHostedHealthDataConsentState({
+        memberId: input.userId,
+        prisma,
+      }) === "revoked";
       reportStage?.("canonical_projection");
-      const facts = buildHostedRuntimeBlockedFacts({
-        mailboxLag,
-        reason: "health_data_consent_withdrawn",
-        retryAt: null,
-        workspace: workspaceWithSystemMailboxFrontier,
-      });
+      const facts = withdrawn
+        ? buildHostedRuntimeConsentWithdrawnFacts(projectedWorkspace)
+        : buildHostedRuntimeBlockedFacts({
+            mailboxLag,
+            reason: "health_data_consent_withdrawn",
+            retryAt: null,
+            workspace: workspaceWithSystemMailboxFrontier,
+          });
       emitHostedRuntimeReconciliationFacts({
         now,
         facts,
@@ -343,13 +227,14 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
-    if (
-      gate.status === "denied"
-      && !(await readSelectedHostedInferenceConnectionOverride({
-        memberId: input.userId,
-        prisma,
-      }))
-    ) {
+    if (gate.status === "denied") {
+      // Only the canonical denial permits the broader deterministic selection.
+      // Keep the runner's imported watermark/projection authoritative under skew.
+      workspaceWithSystemMailboxFrontier.systemMailboxFrontier =
+        await readHostedRuntimeSystemMailboxFrontier({
+          ...systemMailboxFrontierInput,
+          assistantExecutionBlocked: true,
+        });
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         if (freshConversationMailboxLag) {
@@ -380,6 +265,7 @@ export async function readHostedRuntimeReconciliationFacts(
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
           aiRetryAt: gate.decision.retryAfter.toISOString(),
+          modelFreeWakeAt,
           noticeRetryAt,
           now,
           workspace: workspaceWithSystemMailboxFrontier,
@@ -392,6 +278,7 @@ export async function readHostedRuntimeReconciliationFacts(
         request: input,
         usageGateRequired: true,
         usageGateStatus: gate.status,
+        usageLimitExceeded: gate.decision.reason === "ai_usage_limit_exceeded",
       });
       return facts;
     }
@@ -426,6 +313,52 @@ export async function readHostedRuntimeReconciliationFacts(
     usageGateStatus: "not_required",
   });
   return facts;
+}
+
+async function buildHostedRuntimeInactiveFacts(input: {
+  now: Date;
+  prisma: PrismaClient;
+  userId: string;
+  workspace: HostedRuntimeReconciliationFactsWorkspace | null;
+}): Promise<HostedRuntimeReconciliationFacts> {
+  const { now, prisma, workspace } = input;
+  const retentionEligible = workspace?.inboxMediaRetentionWakeAt != null
+    && await prisma.hostedMember.findUnique({
+      select: { id: true },
+      where: { id: input.userId, AND: [hostedRuntimeMemberEligibleWhere()] },
+    });
+  const retentionWakeAt = retentionEligible ? workspace.inboxMediaRetentionWakeAt : null;
+  return buildHostedRuntimeBlockedFacts({
+    mailboxLag: [],
+    reason: "user_not_active",
+    retryAt: readHostedRuntimeFutureTimestamp(retentionWakeAt, now),
+    workspace: workspace ? {
+      ...workspace,
+      systemMailboxFrontier: null,
+      inboxMediaRetentionWakeAt: retentionWakeAt,
+    } : null,
+  });
+}
+
+function buildHostedRuntimeConsentWithdrawnFacts(
+  workspace: HostedRuntimeReconciliationFactsWorkspace | null,
+): HostedRuntimeReconciliationFacts {
+  return buildHostedRuntimeBlockedFacts({
+    mailboxLag: [],
+    reason: "health_data_consent_withdrawn",
+    retryAt: null,
+    workspace: workspace ? {
+      ...workspace,
+      systemMailboxFrontier: null,
+      inboxMediaRetentionWakeAt: null,
+      nextWakeAt: null,
+      nextWakeReason: null,
+      ...(workspace.systemMailboxProgressGeneration === undefined ? {} : {
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+      }),
+    } : null,
+  });
 }
 
 function buildHostedRuntimeBlockedFacts(input: {
@@ -467,32 +400,9 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
     && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
 }
 
-function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
-  freshConversationMailboxLag: boolean;
-  now: Date;
-  workspace: HostedRuntimeReconciliationFactsWorkspace;
-}): boolean {
-  const defaultProcessingWake = readHostedRuntimeDefaultProcessingWake(
-    input.workspace,
-  );
-  return !input.freshConversationMailboxLag
-    && isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
-    && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
-}
-
-async function hasHostedMemberEstablishedLinqRoute(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<boolean> {
-  if (await hasHostedMemberEstablishedLinqHomeRoute(input)) {
-    return true;
-  }
-
-  return await hasHostedMemberEstablishedLinqThreadRoute(input);
-}
-
 function resolveHostedRuntimeAiBlockedRetryAt(input: {
   aiRetryAt: string | null;
+  modelFreeWakeAt: string | null | undefined;
   noticeRetryAt: Date | null;
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
@@ -503,6 +413,7 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   return earliestHostedRuntimeReconciliationTimestamp([
     input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
+    readHostedRuntimeFutureTimestamp(input.modelFreeWakeAt ?? null, input.now),
     defaultProcessingWake.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
       ? readHostedRuntimeFutureTimestamp(defaultProcessingWake.at, input.now)
       : null,
@@ -714,10 +625,9 @@ function parseHostedMailboxReconciliationSeq(
 function emitHostedRuntimeReconciliationFacts(event: {
   now: Date;
   facts: HostedRuntimeReconciliationFacts;
-  request: HostedRuntimeReconciliationFactsRequest & {
-    decisionSource?: HostedRuntimeReconciliationDecisionSource;
-  };
+  request: Parameters<typeof readHostedRuntimeReconciliationFacts>[0];
   usageGateRequired: boolean;
+  usageLimitExceeded?: boolean;
   usageGateStatus: HostedRuntimeReconciliationUsageGateStatus;
 }): void {
   const { blocked, mailboxLag, workspace } = event.facts;
@@ -872,14 +782,19 @@ function readHostedRuntimeDefaultProcessingWake(
 }
 
 async function readHostedRuntimeSystemMailboxFrontier(input: {
+  assistantExecutionBlocked?: boolean;
   at: Date;
   handledThroughSeq: string;
-  maxSeqByLane: readonly { lane: string; maxSeq: string }[];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  modelFreeWakeAt: string | null | undefined;
   prisma: PrismaClient;
   userId: string;
 }): Promise<HostedRuntimeSystemMailboxFrontierClass | null> {
-  const systemMaxSeq = input.maxSeqByLane.find(({ lane }) => lane === "system")
-    ?.maxSeq ?? "0";
+  // Local continuations can outlive the Web handled prefix entirely.
+  if (isHostedRuntimeWakeDue(input.modelFreeWakeAt ?? null, input.at)) return "model_free";
+  const systemLane = input.mailboxLag.find(({ lane }) => lane === "system");
+  const systemMaxSeq = systemLane?.maxSeq ?? "0";
+  const importedSeq = systemLane?.importedSeq ?? "0";
   if (BigInt(systemMaxSeq) <= BigInt(input.handledThroughSeq)) {
     return null;
   }
@@ -894,21 +809,39 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
     return null;
   }
 
-  const executionClass = classifyHostedFirstLiveSystemItemOwnership(frontier);
-  if (executionClass === "model_free") return executionClass;
-  // Readiness is independent of the handled prefix. A retained assistant item
-  // must not hide consented deterministic work when assistant usage is blocked.
+  const executionClass = classifyHostedFirstLiveSystemItemOwnership({ ...frontier, assistantExecutionBlocked: input.assistantExecutionBlocked });
+  const legacyCheckpoint = input.modelFreeWakeAt === undefined;
+  if (legacyCheckpoint && executionClass === "model_free") return executionClass;
+  // Only the runtime knows whether an imported independent row is still pending.
+  // Old checkpoints retain the exact handled-prefix lookup until they publish it.
   const independent = await readHostedMailboxFirstLiveSystemItemAfterSeq({
-    afterSeq: input.handledThroughSeq,
+    afterSeq: !legacyCheckpoint && BigInt(importedSeq) > BigInt(input.handledThroughSeq)
+      ? importedSeq
+      : input.handledThroughSeq,
     at: input.at,
     modelFreeOnly: true,
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     prisma: input.prisma,
     userId: input.userId,
   });
-  return independent ? classifyHostedFirstLiveSystemItemOwnership(independent) : executionClass;
+  return independent
+    ? classifyHostedFirstLiveSystemItemOwnership({ ...independent, assistantExecutionBlocked: input.assistantExecutionBlocked })
+    : executionClass === "default_owned" ? executionClass : null;
+}
+
+function readHostedRuntimeSystemModelFreeWakeAt(
+  workspace: HostedWorkspaceRecord | null,
+): string | null | undefined {
+  const status = readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson);
+  if (status?.hostedMailboxSystemModelFreeWakeVersion !== workspace?.version) return undefined;
+  const at = status?.hostedMailboxSystemModelFreeWakeAt;
+  return at === null || typeof at === "string" && Number.isFinite(Date.parse(at))
+    ? at
+    : undefined;
 }
 
 export function classifyHostedFirstLiveSystemItemOwnership(input: {
+  assistantExecutionBlocked?: boolean;
   dedupeKey: string | null | undefined;
   kind: string;
 }): HostedRuntimeSystemMailboxFrontierClass {

@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "group-recovery-concurrency",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable group setup recovery",
+    "summary": "Private recovery messages for group setup can proceed during simultaneous messaging activity.",
+    "details": "A concurrency fix prevents one cause of interrupted recovery while preserving eligibility checks and duplicate-message protection.",
+    "relevanceTags": [
+      "groups",
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4242
+    ]
+  }
+}

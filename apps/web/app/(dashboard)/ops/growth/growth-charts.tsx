@@ -467,9 +467,8 @@ export function GrowthCharts(input: GrowthChartsProps) {
             An estimate, not invoices: the month&apos;s latest recorded
             subscription rate plus top-up and group sponsorship cash paid that
             UTC month. Refunds are not subtracted, and account deletion can
-            remove past purchase cash or leave an old group gift counted as a
-            regular top-up. The newest bar is month to date, a month with no
-            snapshot withholds its total, and months from before the
+            remove past purchase cash. The newest bar is month to date, a month
+            with no snapshot withholds its total, and months from before the
             subscription split show subscriptions as one combined line. Hover,
             tap, or focus a bar for the breakdown.
           </p>

@@ -191,7 +191,7 @@ describe('Codex subagent usage drafts', () => {
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: 'openai',
       ordinalStart: 3,
-      parentModel: 'gpt-5.6-terra',
+      parentModel: 'gpt-6.1-sol',
       subagentTokenUsageByTurn: new Map([
         [
           'first',
@@ -230,8 +230,8 @@ describe('Codex subagent usage drafts', () => {
         usage: {
           inputTokens: 80,
           outputTokens: 20,
-          requestedModel: 'gpt-5.6-terra',
-          servedModel: 'gpt-5.6-terra',
+          requestedModel: 'gpt-6.1-sol',
+          servedModel: 'gpt-6.1-sol',
           totalTokens: 100,
         },
       },
@@ -241,8 +241,8 @@ describe('Codex subagent usage drafts', () => {
         usage: {
           inputTokens: 120,
           outputTokens: 30,
-          requestedModel: 'gpt-5.6-terra',
-          servedModel: 'gpt-5.6-terra',
+          requestedModel: 'gpt-6.1-sol',
+          servedModel: 'gpt-6.1-sol',
           totalTokens: 150,
         },
       },

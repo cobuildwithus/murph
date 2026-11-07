@@ -69,7 +69,6 @@ async function main(): Promise<void> {
 
     console.log(`Hosted runner smoke passed.`);
     console.log(`childCwdIsIsolated=${result.childCwdIsIsolated}`);
-    console.log(`murphCommandDiscovered=${result.murphCommandDiscovered}`);
     console.log(`vaultCliCommandDiscovered=${result.vaultCliCommandDiscovered}`);
     console.log(`codexCommandDiscovered=${result.codexCommandDiscovered}`);
     console.log(`codexVersion=${result.codexVersion}`);
@@ -99,7 +98,7 @@ async function main(): Promise<void> {
       `codexGroupReadSecretEnvironmentDenied=${result.codexGroupReadSecretEnvironmentDenied}`,
     );
     console.log(`codexHostedShellVaultCliLlmsBytes=${result.codexHostedShellVaultCliLlmsBytes}`);
-    console.log(`codexHostedShellMurphPathBytes=${result.codexHostedShellMurphPathBytes}`);
+    console.log(`codexHostedShellVaultCliPathBytes=${result.codexHostedShellVaultCliPathBytes}`);
     console.log(`codexHostedShellPythonVersion=${result.codexHostedShellPythonVersion}`);
     console.log(`codexHostedCliSchemaVaultOptionHidden=${result.codexHostedCliSchemaVaultOptionHidden}`);
     console.log(`codexHostedCliVaultCommandProofCount=${result.codexHostedCliVaultCommandProofCount}`);
@@ -109,11 +108,10 @@ async function main(): Promise<void> {
     console.log(`reportedVaultIdMatchesExpected=${result.reportedVaultIdMatchesExpected}`);
     console.log(`vaultShowBytes=${result.vaultShowBytes}`);
     console.log(`healthCommonsCatalogHash=${result.healthCommonsCatalogHash}`);
-    console.log(`healthCommonsFinnishDrySaunaTitle=${result.healthCommonsFinnishDrySaunaTitle}`);
+    console.log(`healthCommonsRuntimeBiomarkerDesiredDirection=${result.healthCommonsRuntimeBiomarkerDesiredDirection}`);
     console.log(`healthCommonsCliGoalProofCount=${result.healthCommonsCliGoalProofCount}`);
-    console.log(`healthCommonsCliProtocolListBytes=${result.healthCommonsCliProtocolListBytes}`);
-    console.log(`healthCommonsRuntimeSearchHitKeys=${result.healthCommonsRuntimeSearchHitKeys.join(",")}`);
-    console.log(`healthCommonsRuntimeProtocolHitKeys=${result.healthCommonsRuntimeProtocolHitKeys.join(",")}`);
+    console.log(`healthCommonsCliKnowledgeSearchBytes=${result.healthCommonsCliKnowledgeSearchBytes}`);
+    console.log(`healthCommonsRuntimeKnowledgeEntityKeys=${result.healthCommonsRuntimeKnowledgeEntityKeys.join(",")}`);
     console.log(`audioNormalizedMp3Bytes=${result.audioNormalizedMp3Bytes}`);
     console.log(`audioPreparedWavBytes=${result.audioPreparedWavBytes}`);
     console.log(`pythonVersion=${result.pythonVersion}`);

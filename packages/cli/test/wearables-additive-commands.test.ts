@@ -863,3 +863,12 @@ test('every range-bearing wearable command rejects reversed dates before queryin
     assert.equal(query.mock.calls.length, 0, testCase.method)
   }
 })
+
+test('retired Patterns command cannot start work', async () => {
+  const { cli, services } = createWearablesCliAndServices()
+  const latest = vi.spyOn(services.query, 'showWearableLatest')
+  const result = await runInProcessJsonCli(cli, ['wearables', 'patterns', '--format', 'json'])
+  assert.equal(result.envelope.ok, false)
+  assert.notEqual(result.exitCode, 0)
+  assert.equal(latest.mock.calls.length, 0)
+})

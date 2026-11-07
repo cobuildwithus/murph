@@ -53,11 +53,11 @@ const FAQ_ITEMS = [
   ],
   [
     "What happens to my data?",
-    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Murph encrypts sensitive data at rest and keeps storage scoped by purpose. The service can decrypt data when it needs to run requested tasks or maintain the service. Local Murph keeps your vault on your device.",
+    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Murph encrypts sensitive data at rest and keeps storage scoped by purpose. The service can decrypt data when it needs to run requested tasks or maintain the service.",
   ],
   [
-    "Can I self-host Murph?",
-    "Yes. Murph is open source under Apache 2.0. Run it locally with one command. The hosted version is for people who'd rather not run anything themselves.",
+    "Is Murph open source?",
+    "Yes. Murph’s source is available under Apache 2.0. Members use the hosted service through messaging and the iOS app.",
   ],
   [
     "Can I cancel anytime?",
@@ -65,20 +65,7 @@ const FAQ_ITEMS = [
   ],
 ] as const;
 
-const MODEL_PROVIDER_FAQ_ITEM = [
-  "Can I choose which AI provider Murph uses?",
-  "Yes. In Settings, choose OpenAI or Venice for Murph’s core assistant replies. Specialized tools can still use their own managed providers.",
-] as const;
-
-export function FaqSection({
-  veniceAvailable = false,
-}: {
-  veniceAvailable?: boolean;
-} = {}) {
-  const items = veniceAvailable
-    ? [...FAQ_ITEMS, MODEL_PROVIDER_FAQ_ITEM]
-    : FAQ_ITEMS;
-
+export function FaqSection() {
   return (
     <section id="faq" className="px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
@@ -89,7 +76,7 @@ export function FaqSection({
             </h2>
           </div>
           <div className="grid gap-x-16 gap-y-0 sm:grid-cols-2">
-            {items.map(([question, answer]) => (
+            {FAQ_ITEMS.map(([question, answer]) => (
               <div key={question} className="border-b border-[#c4a882]/15 py-5">
                 <p className="text-[0.9375rem] font-semibold text-[#2d3436]">
                   {question}

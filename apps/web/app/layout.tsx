@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { HostedSessionRenewal } from "@/src/components/hosted-onboarding/hosted-session-renewal";
 import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import { PhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/phone-country-code-provider";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
@@ -50,6 +51,7 @@ export default async function RootLayout(input: { children: React.ReactNode }) {
             {input.children}
           </PhoneCountryCodeProvider>
         </AuthProvider>
+        <HostedSessionRenewal authenticated={authenticated} />
         <VercelTelemetry />
         {process.env.NODE_ENV === "development" ? (
           <Script src="https://ui.sh/ui-picker.js" />

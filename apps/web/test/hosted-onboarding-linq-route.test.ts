@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   finishHostedOnboardingTiming: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
+  hostedLinqDailyStateUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
@@ -28,6 +30,23 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook: mocks.handleHostedOnboardingLinqWebhook,
 }));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => ({
+    hostedLinqDailyState: { updateMany: mocks.hostedLinqDailyStateUpdateMany },
+  }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-identity-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-identity-store");
+
+  return {
+    ...actual,
+    lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
@@ -73,6 +92,10 @@ describe("hosted onboarding Linq webhook route", () => {
       chatId: "chat_visible_route",
       messageId: "msg_visible_reply",
     });
+    mocks.hostedLinqDailyStateUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "hbm_visible_route", suspendedAt: null },
+    });
   });
 
   afterEach(() => {
@@ -99,6 +122,7 @@ describe("hosted onboarding Linq webhook route", () => {
 
     expect(response.status).toBe(202);
     expect(mocks.handleHostedOnboardingLinqWebhook).toHaveBeenCalledWith({
+      webhookReceivedAt: expect.any(Date),
       rawBody: JSON.stringify({
         ok: true,
       }),
@@ -109,6 +133,9 @@ describe("hosted onboarding Linq webhook route", () => {
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-onboarding.route.linq-webhook",
       expect.objectContaining({
+        processUptimeMs: expect.any(Number),
+        routeModuleAgeMs: expect.any(Number),
+        routeModuleRequestOrdinal: expect.any(Number),
         signaturePresent: true,
         signalAbortedAtStart: false,
         timestampPresent: true,
@@ -144,7 +171,33 @@ describe("hosted onboarding Linq webhook route", () => {
     );
   });
 
-  it("composes visible secondary replies through the public Linq route", async () => {
+  it("records process and route-module age so pre-handler boot time is attributable", async () => {
+    vi.spyOn(process, "uptime").mockReturnValue(3.4567);
+    const post = () => hostedOnboardingLinqRoute.POST(new Request(
+      "https://join.example.test/api/hosted-onboarding/linq/webhook",
+      { method: "POST", body: "{}" },
+    ));
+
+    await post();
+    await post();
+
+    const routeStarts = mocks.startHostedOnboardingTiming.mock.calls
+      .filter(([step]) => step === "hosted-onboarding.route.linq-webhook")
+      .map(([, details]) => details as Record<string, unknown>);
+    expect(routeStarts).toHaveLength(2);
+    expect(routeStarts[0]).toMatchObject({ processUptimeMs: 3457 });
+    expect(routeStarts[0]?.routeModuleAgeMs).toBeGreaterThanOrEqual(0);
+    expect(routeStarts[1]?.routeModuleRequestOrdinal)
+      .toBe(Number(routeStarts[0]?.routeModuleRequestOrdinal) + 1);
+  });
+
+  it.each([
+    ["sms", false],
+    ["iMessage", true],
+    ["RCS", true],
+    [undefined, false],
+    ["unknown", true],
+  ] as const)("composes %s signup reminders through the public Linq route", async (service, sendsReminder) => {
     mocks.handleHostedOnboardingLinqWebhook.mockResolvedValueOnce({
       ignored: true,
       ok: true,
@@ -180,7 +233,7 @@ describe("hosted onboarding Linq webhook route", () => {
           service: "sms",
         },
         sent_at: "2026-07-25T12:00:00.000Z",
-        service: "sms",
+        service,
       },
       event_id: "evt_visible_route",
       event_type: "message.received",
@@ -199,15 +252,25 @@ describe("hosted onboarding Linq webhook route", () => {
     );
 
     expect(response.status).toBe(202);
+    if (!sendsReminder) {
+      await expect(response.json()).resolves.toMatchObject({
+        ignored: true,
+        reason: "signup-link-already-sent",
+      });
+      expect(mocks.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
+      expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+      return;
+    }
     await expect(response.json()).resolves.toMatchObject({
       ignored: false,
       reason: "visible-secondary-reply:signup-link-already-sent",
     });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_visible_route",
-      idempotencyKey: "visible-secondary:evt_visible_route",
+      idempotencyKey: "signup-link-reminder:hbm_visible_route:2026-07-25",
       message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
-      replyToMessageId: "msg_visible_route",
+      replyToMessageId: null,
     });
   });
 

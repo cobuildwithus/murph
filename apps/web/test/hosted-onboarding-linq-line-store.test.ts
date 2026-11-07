@@ -337,6 +337,7 @@ describe("listHostedLinqAssignableHomeLines", () => {
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       take: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT + 1,
       where: {
+        assignmentWeight: { gt: 0 },
         configuredAt: { not: null },
         egressPolicy: "enabled",
         healthStatus: { in: ["healthy", "unknown"] },
@@ -739,6 +740,7 @@ describe("hosted Linq proactive-conversation capacity", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       where: {
+        assignmentWeight: { gt: 0 },
         phoneNumberLookupKey: "lookup:line-1",
         proactiveConversationCount: { lt: 50 },
         proactiveConversationDayUtc: dayUtc,
@@ -767,6 +769,7 @@ describe("hosted Linq proactive-conversation capacity", () => {
 
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: {
+        assignmentWeight: { gt: 0 },
         phoneNumberLookupKey: "lookup:line-1",
         OR: [
           { proactiveConversationDayUtc: null },
@@ -893,7 +896,7 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
 });
 
 describe("upsertHostedLinqLineForPhoneTx", () => {
-  it("keeps the advisory lock, candidate lookup, and upsert inside one transaction for plain clients", async () => {
+  it("rechecks missing line candidates under the phone lock inside one transaction", async () => {
     const events: string[] = [];
     const transactionClient = {
       $executeRaw: vi.fn().mockImplementation(() => {
@@ -937,12 +940,14 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
 
     expect(events).toEqual([
       "transaction:start",
+      "candidate-read",
       "lock",
       "candidate-read",
       "write",
       "transaction:commit",
     ]);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transactionClient.hostedLinqLine.findMany).toHaveBeenCalledTimes(2);
     expect(transactionClient.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
   });
 
@@ -1001,7 +1006,8 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
       phoneNumberLookupKey: legacyLookupKey,
     });
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalledTimes(1);
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         phoneNumberLookupKey: {
@@ -1021,6 +1027,63 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
     }));
     expect(updateMany).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("reuses a legacy row created while waiting on the normalized phone lock", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+    const phoneNumber = "+15550100001";
+    const lookupKeys = createHostedPhoneLookupKeyReadCandidates(phoneNumber);
+    const legacyLookupKey = lookupKeys.find((key) => key.startsWith("hbidx:phone:v1:"));
+    if (!legacyLookupKey) {
+      throw new Error("Expected a readable legacy phone key.");
+    }
+
+    const executeRaw = vi.fn().mockResolvedValue(1);
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ phoneNumberLookupKey: legacyLookupKey }]);
+    const update = vi.fn().mockResolvedValue({ phoneNumberLookupKey: legacyLookupKey });
+    const upsert = vi.fn();
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const observedAt = new Date("2026-06-30T12:00:00.000Z");
+
+    await expect(upsertHostedLinqLineForPhoneTx({
+      observedAt,
+      phoneNumber: "+1 (555) 010-0001",
+      prisma: {
+        $executeRaw: executeRaw,
+        hostedLinqLine: { findMany, update, upsert, updateMany },
+      } as never,
+      source: "provider",
+    })).resolves.toEqual({ phoneNumberLookupKey: legacyLookupKey });
+
+    expect(executeRaw).toHaveBeenCalledExactlyOnceWith(
+      expect.arrayContaining([expect.stringContaining("hashtext('hosted_linq_line_phone')")]),
+      phoneNumber,
+    );
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenNthCalledWith(1, {
+      select: { phoneNumberLookupKey: true },
+      where: { phoneNumberLookupKey: { in: lookupKeys } },
+    });
+    expect(findMany).toHaveBeenNthCalledWith(2, findMany.mock.calls[0]?.[0]);
+    expect(update).toHaveBeenCalledExactlyOnceWith({
+      where: { phoneNumberLookupKey: legacyLookupKey },
+      data: expect.objectContaining({
+        phoneNumberEncrypted: expect.any(String),
+        phoneNumberHint: "*** 0001",
+        providerLastSeenAt: observedAt,
+        providerSeenAt: observedAt,
+      }),
+    });
+    expect(updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { phoneNumberLookupKey: legacyLookupKey, providerFirstSeenAt: null },
+      data: { providerFirstSeenAt: observedAt },
+    });
+    expect(upsert).not.toHaveBeenCalled();
   });
 });
 

@@ -11,7 +11,6 @@ import {
   normalizeIdentifier,
   normalizeOriginList,
   normalizeString,
-  normalizeStringList,
   parseJsonObject,
   sanitizeStoredDeviceSyncMetadata,
   sha256Text,
@@ -82,7 +81,6 @@ test("device-syncd shared helpers normalize metadata, timestamps, and JSON paylo
   assert.equal(sha256Text("murph"), "7fa8398c9888bd7abca8fa94f2b0b813aa8a50bca1dd965281741afda32a0db4");
   assert.equal(normalizeIdentifier(42), "42");
   assert.equal(normalizeIdentifier("   "), undefined);
-  assert.deepEqual(normalizeStringList([" a ", "", 7, "b"]), ["a", "b"]);
   assert.deepEqual(
     sanitizeStoredDeviceSyncMetadata({
       " key ": "value",

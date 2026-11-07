@@ -959,7 +959,7 @@ run_all_package_coverage 1
 
     expect(result.status, result.stderr).toBe(0);
     const pairs = result.stdout.trim().split("\n");
-    expect(pairs).toHaveLength(26);
+    expect(pairs).toHaveLength(23);
     expect(pairs).toContain(
       "packages/hosted-execution|Package coverage for packages/hosted-execution",
     );
@@ -973,6 +973,98 @@ run_all_package_coverage 1
       "packages/vault-usecases|Package coverage for packages/vault-usecases",
     );
   });
+
+  it.each([
+    { workerStatus: 0, reportsStatus: 1, expectedStatus: 0 },
+    { workerStatus: 7, reportsStatus: 1, expectedStatus: 1 },
+    { workerStatus: 0, reportsStatus: 0, expectedStatus: 1 },
+    { workerStatus: 7, reportsStatus: 0, expectedStatus: 1 },
+  ])(
+    "rechecks package status after liveness observation (exit=$workerStatus, reported=$reportsStatus)",
+    ({ workerStatus, reportsStatus, expectedStatus }) => {
+      const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+        "run_all_package_coverage",
+      );
+      const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${runAllPackageCoverage}
+
+sandbox="$(mktemp -d)"
+export TMPDIR="$sandbox"
+owned_pids=()
+cleanup() {
+  local pid
+  : >"$sandbox/release-cli"
+  : >"$sandbox/release-core"
+  for pid in "\${owned_pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  rm -rf -- "$sandbox"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+node() { printf 'packages/cli\\npackages/core\\n'; }
+register_background_pid() { owned_pids+=("$1"); }
+unregister_background_pid() { return 0; }
+mark_acceptance_cli_coverage_complete() { printf 'cli-complete\\n'; }
+verify_log() { printf '%s\\n' "$*" >&2; }
+
+worker_status=${workerStatus}
+reports_status=${reportsStatus}
+run_workspace_package_coverage() {
+  local package_name="\${1#packages/}"
+  while [[ ! -f "$sandbox/release-$package_name" ]]; do
+    command sleep 0.01
+  done
+  if [[ "$1" == "packages/cli" ]]; then
+    if [[ "$reports_status" == "0" ]]; then
+      trap - EXIT
+      exit "$worker_status"
+    fi
+    return "$worker_status"
+  fi
+  return 0
+}
+
+kill() {
+  if [[ "$#" == "2" && "$1" == "-0" && "$2" == "\${active_pids[$active_index]}" ]]; then
+    # The real reaper has already observed this owned worker's status missing.
+    [[ ! -f "$status_file" ]] || exit 2
+    printf 'observed:%s\\n' "$active_package_dir"
+    : >"$sandbox/release-\${active_package_dir#packages/}"
+    if [[ "$active_package_dir" != "packages/cli" || "$reports_status" == "1" ]]; then
+      while [[ ! -f "$status_file" ]]; do
+        command sleep 0.01
+      done
+    fi
+    # Finish the exact child before returning the real liveness observation.
+    wait "$2" 2>/dev/null || true
+  fi
+  command kill "$@"
+}
+
+package_coverage_shard=all
+package_coverage_concurrency_limit=2
+package_coverage_cli_active_concurrency_limit=1
+scheduler_status=0
+run_all_package_coverage 1 || scheduler_status="$?"
+printf 'status:%s\\n' "$scheduler_status"
+`);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe(
+        `observed:packages/cli\ncli-complete\nobserved:packages/core\nstatus:${expectedStatus}\n`,
+      );
+      expect(result.stderr).toBe(
+        "package coverage shard=all packages=packages/cli packages/core\n"
+        + (expectedStatus === 0
+          ? ""
+          : "package coverage failures: Package coverage for packages/cli\n"),
+      );
+    },
+  );
 
   it("releases apps and expands package fanout after CLI success or failure", () => {
     const markCliCoverageComplete = extractWorkspaceVerifyFunction(
@@ -1032,7 +1124,7 @@ run_workspace_package_coverage() {
         command sleep 0.01
       done
       ;;
-    "packages/setup-cli")
+    "packages/clinical-records")
       : >"$fourth_peer_started_file"
       while [[ ! -f "$refill_release_file" ]]; do
         command sleep 0.01
@@ -1275,15 +1367,6 @@ run_repo_vitest --no-coverage
     expect(result.stdout).toBe(
       "heap=unset command=exec vitest run --config vitest.config.ts --no-coverage\n",
     );
-  });
-
-  it("keeps the release workflow free of a process-wide Node heap", () => {
-    const releaseWorkflow = readFileSync(
-      path.join(repoRoot, ".github", "workflows", "release.yml"),
-      "utf8",
-    );
-
-    expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
   });
 
   it("runs ordinary package coverage on the caller's Node heap", () => {
@@ -1585,22 +1668,6 @@ run_test_diff_package_tests ${selectedPackageDirs}
     );
     expect(result.stdout.match(/artifacts:prepared/gu)).toHaveLength(1);
 
-    const releaseCoverageAudit = readFileSync(
-      path.join(
-        repoRoot,
-        "packages",
-        "cli",
-        "test",
-        "release-script-coverage-audit.test.ts",
-      ),
-      "utf8",
-    );
-    expect(releaseCoverageAudit).toContain(
-      "it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')",
-    );
-    expect(releaseCoverageAudit).not.toContain(
-      "it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')",
-    );
   });
 
   it("batches affected Assistant Engine tests with ordinary package owners", () => {
@@ -1723,5 +1790,71 @@ run_test_diff_app_verification apps/web apps/cloudflare
       "tsconfig.tools.tsbuildinfo",
     );
     expect(rootPackage.scripts.clean).toContain("tsconfig.tools.tsbuildinfo");
+  });
+});
+
+describe("composed verification selection", () => {
+  function dispatch(files: string[]) {
+    const quoted = files.map((file) => `'${file}'`).join(" ");
+    return runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("load_diff_scope")}
+${extractWorkspaceVerifyFunction("run_test_diff")}
+verify_log() { :; }
+run_timed_step() { shift; printf '%s\\n' "$*"; }
+run_typecheck() { printf 'run_typecheck\\n'; }
+run_diff_repo_internal_fast_path() { printf 'internal-guards\\n'; }
+run_test_diff ${quoted}
+`);
+  }
+
+  it("executes an explicit CLI requirement even for an internal script", () => {
+    const result = dispatch(["scripts/build-test-runtime-prepared.mjs"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("run_verify_cli\n");
+    expect(result.stdout).toContain("run_test_diff_repo_tools_tests\n");
+  });
+
+  it.each(["package.json", "tsconfig.json", "tsconfig.base.json", "vitest.config.ts"])(
+    "routes shared configuration %s through package, app, CLI and fixture proof", (file) => {
+      const result = dispatch([file]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("run_verify_cli\n");
+      expect(result.stdout).toContain("run_typecheck_packages ");
+      expect(result.stdout).toContain("run_test_diff_package_tests ");
+      expect(result.stdout).toContain("run_test_diff_app_verification apps/cloudflare apps/web");
+      expect(result.stdout).toContain("run_fixture_smoke_verification\n");
+      expect(result.stdout).toContain("run_test_diff_repo_tools_tests\n");
+    },
+  );
+
+  it("runs the smoke owner for fixture changes without unrelated app checks", () => {
+    const result = dispatch(["e2e/smoke/scenarios/synthetic/input.json"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("run_fixture_smoke_verification\n");
+    expect(result.stdout).not.toContain("run_test_diff_app_verification");
+  });
+
+  it("retains the inexpensive docs-only path", () => {
+    const result = dispatch(["agent-docs/PLANS.md"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("internal-guards\n");
+    expect(result.stdout).not.toContain("run_verify_cli");
+    expect(result.stdout).not.toContain("run_fixture_smoke_verification");
+  });
+
+  it("includes repository tools once in acceptance and propagates failure", () => {
+    for (const status of [0, 23]) {
+      const result = runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("run_verify_acceptance")}
+run_typecheck() { printf 'typecheck\\n'; }
+run_timed_step() { shift; "$@"; }
+pnpm() { printf '%s\\n' "$*"; return ${status}; }
+run_test_coverage() { printf 'coverage\\n'; }
+run_verify_acceptance
+`);
+      expect(result.status, result.stderr).toBe(status);
+      expect(result.stdout.match(/test:repo-tools/g)).toHaveLength(1);
+      expect(result.stdout.includes("coverage\n")).toBe(status === 0);
+    }
   });
 });

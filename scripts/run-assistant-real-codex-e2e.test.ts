@@ -19,6 +19,7 @@ describe('assistant real Codex local runner', () => {
     ])).toEqual({
       authMode: 'subscription',
       codexHome: null,
+      codexCommand: null,
       help: false,
       model: null,
       testPattern: 'adaptive wearable no-data outreach',
@@ -34,12 +35,13 @@ describe('assistant real Codex local runner', () => {
       '--auth',
       'provider',
       '--model',
-      'gpt-5.6-sol',
+      'gpt-6.1-sol',
     ])).toEqual({
       authMode: 'provider',
       codexHome: null,
+      codexCommand: null,
       help: false,
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       testPattern: 'member preference',
     })
   })
@@ -52,6 +54,7 @@ describe('assistant real Codex local runner', () => {
     ])).toEqual({
       authMode: 'subscription',
       codexHome: '/alternate-codex-home',
+      codexCommand: null,
       help: false,
       model: null,
       testPattern: 'member preference',
@@ -68,6 +71,40 @@ describe('assistant real Codex local runner', () => {
       '--codex-home',
       'relative-codex-home',
     ])).toThrow('--codex-home requires an absolute path.')
+  })
+
+  it.each(['subscription', 'provider'])('selects an explicit native binary for %s runs', (auth) => {
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const options = parseAssistantRealCodexRunArgs([
+      'synthetic journey', '--auth', auth,
+      '--codex-command', '/synthetic native build/codex',
+    ])
+    const status = executeAssistantRealCodexRun(options, {
+      runCommand: (request) => {
+        requests.push(request)
+        return request.stdio === 'capture'
+          ? { status: 0, stdout: JSON.stringify([{ name: 'synthetic journey' }]) }
+          : { status: 0 }
+      },
+      sourceEnv: { MURPH_REAL_CODEX_COMMAND: '/ambient/codex' },
+      writeStderr: () => undefined,
+      writeStdout: () => undefined,
+    })
+    expect(status).toBe(0)
+    expect(requests[0]?.env.MURPH_REAL_CODEX_COMMAND).toBe('/synthetic native build/codex')
+    expect(requests.at(-1)?.env.MURPH_REAL_CODEX_COMMAND).toBe('/synthetic native build/codex')
+    const loginRequests = requests.filter(({ stdio }) => stdio === 'ignore')
+    expect(loginRequests).toHaveLength(auth === 'subscription' ? 1 : 0)
+    if (auth === 'subscription') {
+      expect(loginRequests[0]?.command).toBe('/synthetic native build/codex')
+      expect(loginRequests[0]?.args).toEqual(['login', 'status'])
+    }
+  })
+
+  it.each(['relative/codex', '--model', ''])('rejects a non-absolute selected binary: %s', (command) => {
+    expect(() => parseAssistantRealCodexRunArgs([
+      'synthetic journey', '--codex-command', command,
+    ])).toThrow(/--codex-command requires/)
   })
 
   it('sets only the live-test controls owned by the selected auth mode', () => {
@@ -152,6 +189,7 @@ describe('assistant real Codex local runner', () => {
       '--config',
       'vitest.config.ts',
       '--no-coverage',
+      '--reporter=default',
       'test/assistant-codex-real-e2e.test.ts',
       '--testNamePattern',
       '^real Codex adaptive wearable saves \\(10 days\\)$',
@@ -196,8 +234,37 @@ describe('assistant real Codex local runner', () => {
 
     expect(status).toBe(2)
     expect(errors.join('')).toContain(message)
+    expect(errors.join('')).toContain('MURPH_RUN_REAL_CODEX_E2E=1 pnpm --dir packages/assistant-engine exec vitest list')
+    for (const entry of listed) expect(errors.join('')).toContain(entry.name)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.stdio).toBe('capture')
+  })
+
+  it('bounds ambiguous selector diagnostics and reports omitted matches', () => {
+    const errors: string[] = []
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const status = executeAssistantRealCodexRun(
+      parseAssistantRealCodexRunArgs(['synthetic']),
+      {
+        runCommand: (request) => {
+          requests.push(request)
+          return {
+            status: 0,
+            stdout: JSON.stringify(Array.from({ length: 25 }, (_, index) => ({
+              name: `synthetic journey ${index}`,
+            }))),
+          }
+        },
+        sourceEnv: {},
+        writeStderr: (message) => errors.push(message),
+        writeStdout: () => undefined,
+      },
+    )
+    expect(status).toBe(2)
+    expect(requests).toHaveLength(1)
+    expect(errors.join('')).toContain('synthetic journey 19')
+    expect(errors.join('')).not.toContain('synthetic journey 20')
+    expect(errors.join('')).toContain('5 more matches')
   })
 
   it('routes one explicit subscription home through preflight and the live journey', () => {

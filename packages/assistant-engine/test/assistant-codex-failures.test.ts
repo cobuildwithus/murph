@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { computeAssistantAutoReplyRetryAt } from '../src/assistant/automation/auto-reply-retry.ts'
+
 import {
   ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE,
   buildCodexConnectionFailureMessage,
@@ -435,6 +437,86 @@ describe('assistant Codex failure helpers', () => {
         retryable: false,
       },
     })
+  })
+
+  it.each([
+    [null, true],
+    [400, false],
+    [401, false],
+    [403, false],
+    [404, false],
+    [408, true],
+    [422, false],
+    [429, true],
+    [502, true],
+    [503, true],
+  ] as const)('uses HTTP status %s to classify Codex 0.158 connection failures', (httpStatusCode, retryable) => {
+    const input = {
+      errorInfo: { httpStatusCode, kind: 'httpConnectionFailed' },
+      fallback: 'connection failed; retrying',
+      providerActionCount: 0,
+      codexThreadId: 'thread-http-status',
+    }
+    const expected = {
+      code: retryable ? 'ASSISTANT_CODEX_CONNECTION_LOST' : 'ASSISTANT_CODEX_FAILED',
+      context: { retryable, recoverableConnectionLoss: retryable },
+    }
+    expect(buildCodexTurnFailedError({ ...input, status: 'failed' })).toMatchObject(expected)
+    expect(buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' })).toMatchObject(expected)
+  })
+
+  it.each(['serverOverloaded', 'flexUnavailable', 'policyCapacityUnavailable'])('retries structured capacity error %s without diagnosing connection loss', (kind) => {
+    const input = {
+      errorInfo: { kind, httpStatusCode: null },
+      fallback: 'Synthetic provider rejection.',
+      providerActionCount: 0,
+      codexThreadId: null,
+    }
+    const failures = [
+      buildCodexTurnFailedError({ ...input, status: 'failed' }),
+      buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' }),
+    ]
+    for (const failure of failures) {
+      expect(failure).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexErrorInfo: kind,
+          connectionLost: false,
+          recoverableConnectionLoss: false,
+          retryable: true,
+        },
+      })
+      expect(failure.message).not.toMatch(/lost its connection|restore connectivity/iu)
+      expect(computeAssistantAutoReplyRetryAt(failure, Date.parse('2030-01-15T10:00:00Z')))
+        .toBe('2030-01-15T10:05:00.000Z')
+    }
+  })
+
+  it.each(['invalidPrompt', 'modelNotFound'])('keeps structured rejection %s terminal despite retry-like prose', (kind) => {
+    const input = {
+      errorInfo: { kind, httpStatusCode: null },
+      fallback: kind === 'modelNotFound'
+        ? 'rate limit; stream disconnected; retrying'
+        : 'stream disconnected; capacity unavailable; retrying',
+      providerActionCount: 0,
+      codexThreadId: 'thread-terminal-error',
+    }
+    for (const failure of [
+      buildCodexTurnFailedError({ ...input, status: 'failed' }),
+      buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' }),
+    ]) {
+      expect(failure).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexErrorInfo: kind,
+          connectionLost: false,
+          recoverableConnectionLoss: false,
+          retryable: false,
+        },
+      })
+      expect(computeAssistantAutoReplyRetryAt(failure, Date.parse('2030-01-15T10:00:00Z')))
+        .toBeNull()
+    }
   })
 
   it('combines stdin write fallback details without duplicating identical messages', () => {

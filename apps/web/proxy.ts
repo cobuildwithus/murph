@@ -11,10 +11,20 @@ const WORKFLOW_WEBHOOK_ROUTE_PREFIX = "/.well-known/workflow/v1/webhook/";
 const PUBLIC_HOMEPAGE_PATH = "/";
 
 export const config = {
-  matcher: ["/", "/.well-known/workflow/v1/webhook/:path*"],
+  matcher: [
+    "/",
+    "/.well-known/workflow/v1/webhook/:path*",
+    "/refer((?:%2[fF]|%5[cC]).*)",
+    "/(%5[cC].*)",
+  ],
 };
 
 export function proxy(request: NextRequest): NextResponse {
+  // Reject encoded referral separators and root backslashes before generated page selection.
+  if (/^\/(?:refer(?:%2[fF]|%5[cC])|%5[cC])/u.test(request.nextUrl.pathname)) {
+    return new NextResponse("Not Found", { status: 404 });
+  }
+
   const malformedWebhookResponse = rejectMalformedWorkflowWebhookToken(
     request.nextUrl.pathname,
   );

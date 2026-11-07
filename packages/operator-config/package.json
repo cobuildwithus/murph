@@ -14,6 +14,11 @@
       "import": "./dist/assistant-cli-contracts.js",
       "default": "./dist/assistant-cli-contracts.js"
     },
+    "./assistant-delivery-contracts": {
+      "types": "./dist/assistant-delivery-contracts.d.ts",
+      "import": "./dist/assistant-delivery-contracts.js",
+      "default": "./dist/assistant-delivery-contracts.js"
+    },
     "./assistant/shared": {
       "types": "./dist/assistant/shared.d.ts",
       "import": "./dist/assistant/shared.js",
@@ -59,16 +64,6 @@
       "import": "./dist/device-cli-contracts.js",
       "default": "./dist/device-cli-contracts.js"
     },
-    "./device-daemon": {
-      "types": "./dist/device-daemon.d.ts",
-      "import": "./dist/device-daemon.js",
-      "default": "./dist/device-daemon.js"
-    },
-    "./device-sync-client": {
-      "types": "./dist/device-sync-client.d.ts",
-      "import": "./dist/device-sync-client.js",
-      "default": "./dist/device-sync-client.js"
-    },
     "./elevenlabs-runtime": {
       "types": "./dist/elevenlabs-runtime.d.ts",
       "import": "./dist/elevenlabs-runtime.js",
@@ -113,21 +108,6 @@
       "types": "./dist/operator-config.d.ts",
       "import": "./dist/operator-config.js",
       "default": "./dist/operator-config.js"
-    },
-    "./setup-cli-contracts": {
-      "types": "./dist/setup-cli-contracts.d.ts",
-      "import": "./dist/setup-cli-contracts.js",
-      "default": "./dist/setup-cli-contracts.js"
-    },
-    "./setup-prompt-io": {
-      "types": "./dist/setup-prompt-io.d.ts",
-      "import": "./dist/setup-prompt-io.js",
-      "default": "./dist/setup-prompt-io.js"
-    },
-    "./setup-runtime-env": {
-      "types": "./dist/setup-runtime-env.d.ts",
-      "import": "./dist/setup-runtime-env.js",
-      "default": "./dist/setup-runtime-env.js"
     },
     "./telegram-runtime": {
       "types": "./dist/telegram-runtime.d.ts",
@@ -181,7 +161,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
@@ -193,12 +173,13 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/query": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
+    "@murphai/runtime-state": "workspace:*",
+    "mpg123-decoder": "1.0.3"
   },
   "devDependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   }
 }

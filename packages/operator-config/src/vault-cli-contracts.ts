@@ -5,6 +5,9 @@ import {
 } from '@murphai/contracts'
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import * as z from '@murphai/contracts/zod-runtime'
+import { isoTimestampSchema, pathSchema } from './primitive-schemas.js'
+
+export { isoTimestampSchema, pathSchema }
 
 export const VAULT_CLI_BATCH_RESULT_SCHEMA = 'murph.vault-cli.batch-result.v1'
 export const VAULT_CLI_BATCH_MAX_COMMANDS = 50
@@ -15,11 +18,6 @@ function describeQueryRecordTypes(values: readonly string[]): string {
 
 const queryRecordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 const queryRecordTypeDescription = describeQueryRecordTypes(queryRecordTypeValues)
-
-export const isoTimestampSchema = z
-  .string()
-  .datetime({ offset: true })
-  .describe('Timestamp in ISO 8601 format with an explicit UTC offset.')
 
 export const localDateSchema = z
   .string()
@@ -53,11 +51,6 @@ export const slugSchema = z
     'Expected a lowercase kebab-case slug.',
   )
   .describe('Stable lowercase kebab-case identifier.')
-
-export const pathSchema = z
-  .string()
-  .min(1)
-  .describe('Filesystem path supplied by the operator.')
 
 const vaultCliBatchCommandErrorStageSchema = z.enum([
   'authorization',
@@ -266,6 +259,7 @@ export const documentImportResultSchema = z.object({
 })
 
 export const mealAddResultSchema = z.object({
+  name: z.string().nullable(),
   vault: pathSchema,
   mealId: z.string().min(1),
   eventId: z.string().min(1),
@@ -966,20 +960,8 @@ export type CaptureResultItem = z.infer<typeof captureResultItemSchema>
 export type CaptureAddResult = z.infer<typeof captureAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
 export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
-export type WorkoutImportInspectResult = z.infer<typeof workoutImportInspectResultSchema>
-export type WorkoutImportCsvResult = z.infer<typeof workoutImportCsvResultSchema>
-export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
 export type SamplesImportCsvResult = z.infer<
   typeof samplesImportCsvResultSchema
->
-export type SampleWindowSummaryResult = z.infer<
-  typeof sampleWindowSummarySchema
->
-export type SamplesSummarizeResult = z.infer<
-  typeof samplesSummarizeResultSchema
->
-export type SamplesCsvProfileResult = z.infer<
-  typeof samplesCsvProfileResultSchema
 >
 export type ExperimentCreateResult = z.infer<
   typeof experimentCreateResultSchema
@@ -995,7 +977,5 @@ export interface ListEntity extends Omit<ReadEntity, 'markdown' | 'data'> {
 export type ListItem = ListEntity
 export type ShowResult = z.infer<typeof showResultSchema>
 export type ListFilters = z.infer<typeof listFilterSchema>
-export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type ListResult = z.infer<typeof listResultSchema>
-export type DeleteResult = z.infer<typeof deleteResultSchema>
 export type ExportPackResult = z.infer<typeof exportPackResultSchema>

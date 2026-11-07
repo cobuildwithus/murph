@@ -3,7 +3,6 @@ import path from "node:path";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 import { encodeRandomCrockford, generateUlid } from "@murphai/runtime-state/node/ulid";
 
-export const DEFAULT_DEVICE_SYNC_HOST = "127.0.0.1";
 
 export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);
@@ -61,16 +60,6 @@ export function normalizeIdentifier(value: unknown): string | undefined {
   return normalizeString(value);
 }
 
-export function normalizeStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => normalizeString(entry))
-    .filter((entry): entry is string => typeof entry === "string");
-}
-
 export function splitScopeList(value: unknown): string[] {
   if (typeof value !== "string") {
     return [];
@@ -124,14 +113,6 @@ export function computeRetryDelayMs(attempts: number): number {
   const sequence = [15_000, 60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000];
   const retryIndex = Math.min(Math.max(attempts - 1, 0), sequence.length - 1);
   return sequence[retryIndex] ?? sequence[sequence.length - 1]!;
-}
-
-export function coerceRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  return value as Record<string, unknown>;
 }
 
 export function normalizePublicBaseUrl(value: string): string {

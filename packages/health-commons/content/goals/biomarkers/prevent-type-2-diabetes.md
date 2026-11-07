@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:prevent-type-2-diabetes
 slug: prevent-type-2-diabetes
-title: Prevent Type 2 Diabetes
-summary: Lower the chance of developing type 2 diabetes with proven activity, weight, food, sleep, and follow-up strategies.
+title: Understand Type 2 Diabetes Prevention
+summary: Learn about type 2 diabetes risk factors, lifestyle evidence, screening, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:improve-blood-sugar-control
   outcomeKind: function
-  goalPhrase: prevent type 2 diabetes
+  goalPhrase: understand type 2 diabetes prevention
   successSignals:
     - id: diabetes_risk_markers
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me prevent type 2 diabetes.
+  startPrompt: Hey Murph, help me understand type 2 diabetes prevention.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -90,4 +90,4 @@ Excess thirst, frequent urination, blurred vision, unexplained weight loss, or c
 
 ## Related goals
 
-[Move Out of the Prediabetes Range](/goals/move-out-of-prediabetes-range) · [Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Lower My Risk of Heart Disease](/goals/reduce-heart-disease-risk)
+[Understand My Prediabetes](/goals/move-out-of-prediabetes-range) · [Track My Blood Sugar](/goals/improve-blood-sugar-control) · [Understand Heart Disease Prevention](/goals/reduce-heart-disease-risk)

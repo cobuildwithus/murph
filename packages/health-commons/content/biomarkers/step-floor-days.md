@@ -16,14 +16,13 @@ categories:
 - walking
 - adherence
 relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: cites
-  target: source_artifact:pmid-15809569
-- type: cites
-  target: source_artifact:pmid-22429600
-- type: cites
-  target: source_artifact:10000steps-setting-step-goal-2026-04-26
+  - type: cites
+    target: source_artifact:pmid-15809569
+  - type: cites
+    target: source_artifact:pmid-22429600
+  - type: cites
+    target: source_artifact:10000steps-setting-step-goal-2026-04-26
+
 measurementContexts:
 - manual_log
 - phone_step_counter

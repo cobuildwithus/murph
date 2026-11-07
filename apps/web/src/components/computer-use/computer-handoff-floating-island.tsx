@@ -48,10 +48,13 @@ function readStoredOffset(persistKey: string | null): Offset | null {
 export function ComputerHandoffFloatingIsland({
   handle,
   children,
+  keepInViewport = true,
   persistKey = DEFAULT_STORAGE_KEY,
 }: {
   handle: ReactNode;
   children: ReactNode;
+  /** The catalog shows it far down a long page, where this would lift it away. */
+  keepInViewport?: boolean;
   persistKey?: string | null;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -88,13 +91,16 @@ export function ComputerHandoffFloatingIsland({
   }, [setOffset]);
 
   useEffect(() => {
+    if (!keepInViewport) {
+      return;
+    }
     const frame = window.requestAnimationFrame(reclampToViewport);
     window.addEventListener("resize", reclampToViewport);
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", reclampToViewport);
     };
-  }, [reclampToViewport]);
+  }, [keepInViewport, reclampToViewport]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const el = rootRef.current;
@@ -154,7 +160,7 @@ export function ComputerHandoffFloatingIsland({
   return (
     <div
       ref={rootRef}
-      className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-border/60 bg-card/95 px-3 py-2 shadow-lg shadow-black/15 backdrop-blur-md transition-shadow"
+      className="pointer-events-auto flex min-h-[72px] w-full max-w-[370px] items-center gap-3 rounded-[36px] bg-[#1C1915] py-2.5 pl-6 pr-2.5 text-[#FFFCF6] shadow-lg shadow-black/25 transition-shadow"
       style={{
         transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
         boxShadow: grabbing
@@ -164,7 +170,7 @@ export function ComputerHandoffFloatingIsland({
     >
       <div
         className={cn(
-          "-my-2 -ml-3 flex select-none items-center gap-3 self-stretch py-2 pl-3 pr-1",
+          "-my-2.5 -ml-6 flex min-w-0 flex-1 select-none items-center self-stretch py-2.5 pl-6",
           grabbing ? "cursor-grabbing" : "cursor-grab",
         )}
         style={{ touchAction: "none" }}

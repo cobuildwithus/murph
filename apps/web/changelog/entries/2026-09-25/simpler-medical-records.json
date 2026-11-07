@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "simpler-medical-records",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Medical records, easier to scan",
+    "summary": "See your latest import outcome and open lab results from a simpler medical records page.",
+    "details": "Import details and connection controls sit together under Manage. Incomplete imports stay visible, and Data & privacy remains within reach.",
+    "relevanceTags": [
+      "medical-records",
+      "privacy"
+    ],
+    "sourcePullRequests": [3714],
+    "tryIt": {
+      "label": "View medical records",
+      "href": "/records"
+    }
+  }
+}

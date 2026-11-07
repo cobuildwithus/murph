@@ -1,0 +1,378 @@
+import { readdir, readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  configSchemaPath,
+  generateIncurArtifacts,
+  incurGeneratedTypesPath,
+  vaultCliSkillHashPath,
+} from './incur-config-schema.js'
+
+interface PackageJsonShape {
+  name?: string
+  private?: boolean
+  dependencies?: Record<string, string | undefined>
+  devDependencies?: Record<string, string | undefined>
+  optionalDependencies?: Record<string, string | undefined>
+  main?: string
+  types?: string
+  bin?: Record<string, string>
+  exports?: Record<string, {
+    default?: string
+    import?: string
+    types?: string
+  }>
+  repository?: string | {
+    type?: string
+    url?: string
+  }
+  scripts?: Record<string, string | undefined>
+}
+
+interface TsConfigShape {
+  extends?: string
+  compilerOptions?: {
+    declaration?: boolean
+    noEmit?: boolean
+    outDir?: string
+    paths?: Record<string, string[] | undefined>
+    rootDir?: string
+  }
+  include?: string[]
+  references?: Array<{
+    path?: string
+  }>
+}
+
+const packageDir = fileURLToPath(new URL('../', import.meta.url))
+const packageJson = JSON.parse(
+  await readFile(path.join(packageDir, 'package.json'), 'utf8'),
+) as PackageJsonShape
+const tsconfig = JSON.parse(
+  await readFile(path.join(packageDir, 'tsconfig.json'), 'utf8'),
+) as TsConfigShape
+const tsconfigBuild = JSON.parse(
+  await readFile(path.join(packageDir, 'tsconfig.build.json'), 'utf8'),
+) as TsConfigShape
+const tsconfigTypecheck = JSON.parse(
+  await readFile(path.join(packageDir, 'tsconfig.typecheck.json'), 'utf8'),
+) as TsConfigShape
+const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
+const packageLocalRelativePaths = packageLocalTsFiles.map((filePath) =>
+  path.relative(packageDir, filePath),
+)
+
+assert(
+  packageJson.name === '@murphai/murph',
+  'package.json must keep the workspace package name @murphai/murph.',
+)
+assert(
+  packageJson.private === true,
+  'package.json must remain private for hosted-only runtime use.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/device-syncd'] === 'workspace:*',
+  'package.json must depend on @murphai/device-syncd so the hosted CLI imports the device runtime.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/operator-config'] === 'workspace:*',
+  'package.json must depend on @murphai/operator-config so the hosted @murphai/murph package installs the operator-config owner directly.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/assistant-engine'] === 'workspace:*',
+  'package.json must depend on @murphai/assistant-engine so the hosted @murphai/murph package installs the vault and inbox owner directly.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/health-commons'] === 'workspace:*',
+  'package.json must depend on @murphai/health-commons so the hosted @murphai/murph package ships the public Health Commons catalog.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/exercise-library'] === 'workspace:*',
+  'package.json must depend on @murphai/exercise-library so the hosted @murphai/murph package ships the public exercise catalog.',
+)
+
+assert(
+  packageJson.main === './dist/index.js',
+  'package.json must expose ./dist/index.js as main.',
+)
+assert(
+  packageJson.types === './dist/index.d.ts',
+  'package.json must expose ./dist/index.d.ts as types.',
+)
+
+assert(
+  packageJson.dependencies?.incur === '0.5.1',
+  'package.json must keep incur pinned to the reviewed runtime with Murph error-envelope and canonical skill-hash patches.',
+)
+assert(
+  packageJson.dependencies?.zod === '^4.5.4',
+  'package.json must install Zod because the hosted CLI bundles private declarations that name zod/v4.',
+)
+assert(
+  packageJson.devDependencies?.zod === undefined,
+  'package.json must not classify Zod as dev-only while hosted bundled declarations require it.',
+)
+assert(
+  packageJson.bin?.['vault-cli'] === 'dist/bin.js',
+  'package.json must expose vault-cli from dist/bin.js.',
+)
+
+assert(
+  JSON.stringify(Object.keys(packageJson.bin ?? {}).sort()) ===
+    JSON.stringify(['vault-cli']),
+  'package.json must expose only the vault-cli binary.',
+)
+assert(
+  packageLocalRelativePaths.every(
+    (relativePath) => !relativePath.includes('runner-vault-cli'),
+  ),
+  'packages/cli must not reintroduce runner-vault-cli compatibility files because vault-cli uses dist/bin.js.',
+)
+assert(
+  packageJson.exports?.['.']?.default === './dist/index.js',
+  'package.json exports must target dist/index.js.',
+)
+assert(
+  packageJson.exports?.['.']?.types === './dist/index.d.ts',
+  'package.json exports must target dist/index.d.ts for types.',
+)
+assert(
+  JSON.stringify(Object.keys(packageJson.exports ?? {}).sort()) ===
+    JSON.stringify(['.']),
+  'package.json must expose only the CLI root entrypoint.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/gateway-core'] === 'workspace:*',
+  'package.json must depend on @murphai/gateway-core so the hosted CLI installs the required gateway contract package.',
+)
+assert(
+  packageJson.optionalDependencies?.['@murphai/gateway-core'] === undefined,
+  'package.json must not mark @murphai/gateway-core optional because CLI gateway imports require it at runtime.',
+)
+assert(
+  (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===
+    'https://github.com/cobuildwithus/murph',
+  'package.json repository.url must stay pinned to the Murph repository.',
+)
+assert(
+  packageJson.scripts?.build &&
+    packageJson.scripts?.typecheck &&
+    packageJson.scripts?.test === 'pnpm test:source' &&
+    packageJson.scripts?.['test:source'] ===
+      'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+    packageJson.scripts?.['test:coverage'] === 'pnpm test:source:coverage' &&
+    packageJson.scripts?.['test:source:coverage'] ===
+      'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+    packageJson.scripts?.['verify:prepared-runtime'] ===
+      'pnpm --dir ../.. exercise-library:generate && pnpm --dir ../.. health-commons:generate && pnpm --dir ../.. build:test-runtime:prepared' &&
+    packageJson.scripts?.build ===
+      'node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json' &&
+    packageJson.scripts?.['verify:runtime-artifacts'] ===
+      'pnpm build && node --import=tsx ./scripts/verify-runtime-artifacts.ts' &&
+    packageJson.scripts?.['test:built-runtime'] ===
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+    packageJson.scripts?.['test:built-runtime:coverage'] ===
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+    packageJson.scripts?.verify ===
+      'pnpm verify:prepared-runtime && pnpm verify:runtime-artifacts && pnpm test:built-runtime' &&
+    packageJson.scripts?.['verify:coverage'] ===
+      'pnpm verify:prepared-runtime && pnpm verify:runtime-artifacts && pnpm test:built-runtime:coverage',
+  'package.json must keep source-local test scripts separate from explicit built-runtime/runtime-artifact verification scripts.',
+)
+assert(
+  !packageJson.scripts?.test?.includes('build:test-runtime:prepared') &&
+    !packageJson.scripts?.test?.includes('verify-runtime-artifacts') &&
+    !packageJson.scripts?.['test:coverage']?.includes('build:test-runtime:prepared') &&
+    !packageJson.scripts?.['test:coverage']?.includes('verify-runtime-artifacts'),
+  'package.json local test scripts must not block on prepared-runtime or runtime-artifact acceptance gates.',
+)
+assert(
+  !packageJson.scripts?.['verify:release-target'] &&
+    !packageJson.scripts?.['changelog:update'] &&
+    !packageJson.scripts?.['release:notes'] &&
+    !packageJson.scripts?.['release:check'] &&
+    !packageJson.scripts?.['release:patch'] &&
+    !packageJson.scripts?.['release:minor'] &&
+    !packageJson.scripts?.['release:major'],
+  'package.json must not keep package-local release scripts once the monorepo release flow is root-owned.',
+)
+assert(
+  Object.entries(packageJson.scripts ?? {}).every(
+    ([name, script]) =>
+      name === 'verify:runtime-artifacts' || script?.includes('node --import=tsx') !== true,
+  ),
+  'package.json must reserve node --import=tsx for the verify:runtime-artifacts acceptance script only.',
+)
+assert(
+  tsconfig.extends === '../../tsconfig.base.json',
+  'tsconfig.json must extend ../../tsconfig.base.json.',
+)
+assert(
+  tsconfig.compilerOptions?.outDir === 'dist',
+  'tsconfig.json must emit into dist.',
+)
+assert(
+  tsconfig.compilerOptions?.rootDir === 'src',
+  'tsconfig.json must compile from src.',
+)
+assert(
+  tsconfig.compilerOptions?.declaration === undefined ||
+    tsconfig.compilerOptions.declaration === true,
+  'tsconfig.json must preserve declaration output from the shared base config.',
+)
+assert(
+  tsconfigBuild.extends === './tsconfig.json',
+  'tsconfig.build.json must extend ./tsconfig.json.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../operator-config') === true,
+  'tsconfig.json must reference ../operator-config so build outputs include the operator-config owner package.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../assistant-engine') === true,
+  'tsconfig.json must reference ../assistant-engine so build outputs include the canonical assistant/vault/inbox owner package.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../vault-inbox') !== true,
+  'tsconfig.json must not keep a ../vault-inbox reference after collapsing to the assistant-engine owner.',
+)
+
+assert(
+  tsconfigTypecheck.references === undefined,
+  'tsconfig.typecheck.json must stay source-resolved and avoid project references that require prebuilt workspace artifacts.',
+)
+assert(
+  tsconfigTypecheck.extends === '../../tsconfig.base.json',
+  'tsconfig.typecheck.json must extend ../../tsconfig.base.json.',
+)
+assert(
+  tsconfigTypecheck.compilerOptions?.rootDir === '../..',
+  'tsconfig.typecheck.json must widen rootDir to the repo root so source-resolved workspace owner imports typecheck without TS6059.',
+)
+assert(
+  tsconfigTypecheck.compilerOptions?.noEmit === true,
+  'tsconfig.typecheck.json must stay noEmit.',
+)
+assert(
+  tsconfigTypecheck.include?.includes('scripts/**/*.ts') &&
+    tsconfigTypecheck.include?.includes('test/**/*.ts'),
+  'tsconfig.typecheck.json must include package-local scripts and tests.',
+)
+
+for (const filePath of packageLocalTsFiles) {
+  const source = await readFile(filePath, 'utf8')
+  assert(
+    !/\.\.\/\.\.\/[^"'`]+\/src\//u.test(source),
+    `${path.relative(packageDir, filePath)} still reaches into another package's src tree.`,
+  )
+}
+
+const libraryEntry = await readFile(path.join(packageDir, 'src/index.ts'), 'utf8')
+const configSchema = JSON.parse(
+  await readFile(configSchemaPath, 'utf8'),
+) as {
+  type?: string
+  properties?: {
+    commands?: {
+      properties?: Record<string, unknown>
+    }
+  }
+}
+assertImportSafeLibraryEntry(libraryEntry)
+assertConfigSchemaSmoke(configSchema)
+await assertGeneratedArtifactsFresh(configSchema)
+
+console.log('packages/cli runtime artifacts verified.')
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message)
+  }
+}
+
+function assertImportSafeLibraryEntry(libraryEntry: string): void {
+  assert(
+    !/\.serve\(\)/u.test(libraryEntry),
+    'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
+  )
+  assert(
+    !/@murph(?:ai)?\/assistant-core\//u.test(libraryEntry),
+    'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
+  )
+}
+
+function assertConfigSchemaSmoke(configSchema: {
+  type?: string
+  properties?: {
+    commands?: {
+      properties?: Record<string, unknown>
+    }
+  }
+}): void {
+  assert(
+    configSchema.type === 'object',
+    'config.schema.json must stay a JSON object schema.',
+  )
+  assert(
+    typeof configSchema.properties?.commands?.properties?.vault === 'object' &&
+      typeof configSchema.properties?.commands?.properties?.assistant === 'object',
+    'config.schema.json must cover the nested vault and assistant command groups.',
+  )
+  assert(
+    JSON.stringify(configSchema).includes('"x-incur-') !== true,
+    'config.schema.json must stay on native incur output and avoid Murph-specific x-incur metadata.',
+  )
+}
+
+async function assertGeneratedArtifactsFresh(configSchema: object): Promise<void> {
+  const generatedTypes = await readFile(incurGeneratedTypesPath, 'utf8')
+  const generatedSkillHashModule = await readFile(vaultCliSkillHashPath, 'utf8')
+  const generatedArtifacts = await generateIncurArtifacts({ rebuildCli: false })
+
+  assert(
+    JSON.stringify(configSchema)
+      === JSON.stringify(JSON.parse(generatedArtifacts.configSchema)),
+    'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
+  )
+  assert(
+    generatedTypes === generatedArtifacts.types,
+    'src/incur.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
+  )
+  assert(
+    generatedSkillHashModule === generatedArtifacts.skillHashModule,
+    'src/vault-cli-skill-hash.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
+  )
+}
+
+async function listFiles(
+  packageRoot: string,
+  directories: string[],
+): Promise<string[]> {
+  const files: string[] = []
+
+  for (const directory of directories) {
+    files.push(...(await listFilesRecursive(path.join(packageRoot, directory))))
+  }
+
+  return files
+}
+
+async function listFilesRecursive(directoryPath: string): Promise<string[]> {
+  const entries = await readdir(directoryPath, { withFileTypes: true })
+  const files: string[] = []
+
+  for (const entry of entries) {
+    const entryPath = path.join(directoryPath, entry.name)
+
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursive(entryPath)))
+      continue
+    }
+
+    if (entry.isFile()) {
+      files.push(entryPath)
+    }
+  }
+
+  return files
+}

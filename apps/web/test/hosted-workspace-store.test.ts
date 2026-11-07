@@ -16,7 +16,6 @@ import {
   ensureHostedWorkspace,
   readHostedBrowserVaultReplicaState,
   publishLatestBrowserVaultReplicaRefTx,
-  claimHostedAcceptedAttemptFailureRecheck,
   type HostedWorkspaceTransactionRunner,
   type HostedWorkspaceRow,
 } from "@/src/lib/hosted-workspace/store";
@@ -1023,57 +1022,6 @@ describe("hosted workspace store", () => {
       },
     });
     expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
-  });
-
-});
-
-describe("hosted accepted-attempt recheck claim", () => {
-  it("claims the accepted-attempt recheck cooldown on workspace control state", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const prisma = Object.assign(Object.create(null), {
-      hostedWorkspace: { updateMany },
-    }) as Parameters<typeof claimHostedAcceptedAttemptFailureRecheck>[0]["prisma"];
-
-    await expect(claimHostedAcceptedAttemptFailureRecheck({
-      cooldownMs: 30_000,
-      now: "2026-05-27T12:34:30.000Z",
-      prisma,
-      userId: "member_workspace_1",
-    })).resolves.toBe(true);
-
-    // One conditional update decides the owner, so recovery never depends on a
-    // diagnostic row having been written or read back.
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        acceptedAttemptFailureRecheckClaimedAt: new Date("2026-05-27T12:34:30.000Z"),
-      },
-      where: {
-        OR: [
-          { acceptedAttemptFailureRecheckClaimedAt: null },
-          {
-            acceptedAttemptFailureRecheckClaimedAt: {
-              lt: new Date("2026-05-27T12:34:00.000Z"),
-            },
-          },
-        ],
-        userId: "member_workspace_1",
-      },
-    });
-  });
-
-  it("does not claim the recheck while another failure owns the cooldown", async () => {
-    const prisma = Object.assign(Object.create(null), {
-      hostedWorkspace: {
-        updateMany: vi.fn(async () => ({ count: 0 })),
-      },
-    }) as Parameters<typeof claimHostedAcceptedAttemptFailureRecheck>[0]["prisma"];
-
-    await expect(claimHostedAcceptedAttemptFailureRecheck({
-      cooldownMs: 30_000,
-      now: "2026-05-27T12:34:30.000Z",
-      prisma,
-      userId: "member_workspace_1",
-    })).resolves.toBe(false);
   });
 
 });

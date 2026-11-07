@@ -1165,22 +1165,9 @@ function createInboxServices(): InboxServices {
   }
 
   return {
-    bootstrap: unreachable,
     init: unreachable,
-    sourceAdd: unreachable,
-    sourceList: unreachable,
-    sourceRemove: unreachable,
-    sourceSetEnabled: unreachable,
-    doctor: unreachable,
-    setup: unreachable,
     repairEnvelopes: unreachable,
     compactParserAttempts: unreachable,
-    parse: unreachable,
-    requeue: unreachable,
-    backfill: unreachable,
-    run: unreachable,
-    status: unreachable,
-    stop: unreachable,
     list: unreachable,
     listAttachments: unreachable,
     showAttachment: unreachable,

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { junctionProviderAdapter } from "@murphai/importers/device-providers/junction";
+import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
@@ -43,6 +44,8 @@ import type {
 } from "../src/types.ts";
 
 const NOW = "2026-06-11T12:00:00.000Z";
+// One ordinary scheduled pass; history slots rotate on this cadence.
+const RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
@@ -434,6 +437,7 @@ function createProvider(input: {
   providerListRequests?: { count: number };
   providerState?: MutableProviderState;
   historicalPullState?: MutableHistoricalPullState;
+  reconcileIntervalMs?: number;
   requests: TimeseriesRequest[];
   summaryBackfillDays?: number;
   timeseriesBackfillDays?: number;
@@ -455,6 +459,9 @@ function createProvider(input: {
     region: "us",
     summaryResources: ["activity"],
     summaryBackfillDays: input.summaryBackfillDays ?? 30,
+    ...(input.reconcileIntervalMs === undefined
+      ? {}
+      : { reconcileIntervalMs: input.reconcileIntervalMs }),
     timeseriesResources: input.timeseriesResources
       ? [...input.timeseriesResources]
       : input.includeNote
@@ -556,7 +563,7 @@ function createProvider(input: {
         };
         const noteWindowStart = url.searchParams.get("start_date");
         const noteWindowEnd = url.searchParams.get("end_date");
-        const logicalResource = resource === "body_fat" ? "fat" : resource;
+        const logicalResource = resource === "body_fat" ? "fat" : resource === "body_weight" ? "weight" : resource;
         const noteRecords = (input.noteRecords ?? []).filter((record) => {
           const timestamp = typeof record.start === "string" ? record.start : null;
           return timestamp !== null
@@ -1273,13 +1280,15 @@ test("prior Oura note coverage receives one current semantic reimport while dens
     initialResult: boundedResult,
     provider,
   });
-  // Bounded dual-owner shape: seven ordinary UTC provider-date requests from
-  // the broad correction sweep plus one exact vault-local temporal window for
-  // the newest lag-closed day.
+  // Ordinary history stays at seven provider dates. Complete-day authority is
+  // separately queued for the same bounded horizon, without an inline request.
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    8,
+    7,
   );
+  assert.equal(boundedResult.scheduledJobs?.filter((job) =>
+    job.payload?.resource === "stress_level" && job.payload?.temporalAuthorityTimeZone
+  ).length, 7);
 
   const completed = createScheduledJobs(
     createStoredAccount({ metadata: result.metadataPatch, sources }),
@@ -1790,7 +1799,7 @@ test("stable dead coordinates cannot starve any ordinary history coordinate", as
     const selectedSources: string[] = [];
 
     for (let pass = 0; pass < 8; pass += 1) {
-      const now = new Date(Date.parse(NOW) + pass * 60 * 60_000).toISOString();
+      const now = new Date(Date.parse(NOW) + pass * RECONCILE_INTERVAL_MS).toISOString();
       const resourceJobs = createScheduledJobs(account, now, {
         findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({
           accountId: storedAccount.id,
@@ -1927,10 +1936,10 @@ test("maximum history matrix applies active and completed coordinate suppression
   const afterActiveSuppression = selectRoot(NOW);
   assert.notEqual(afterActiveSuppression.dedupeKey, activeRoot.dedupeKey);
 
-  const scheduleSlot = Math.floor(Date.parse(NOW) / (60 * 60_000));
+  const scheduleSlot = Math.floor(Date.parse(NOW) / RECONCILE_INTERVAL_MS);
   const ordinaryPassOffset = (3 - scheduleSlot % 4 + 4) % 4;
   const ordinaryNow = new Date(
-    Date.parse(NOW) + ordinaryPassOffset * 60 * 60_000,
+    Date.parse(NOW) + ordinaryPassOffset * RECONCILE_INTERVAL_MS,
   ).toISOString();
   const completedRoot = selectRoot(ordinaryNow);
   assert.equal(completedRoot.payload?.sourceLifecycleEpoch, 1);
@@ -1995,7 +2004,7 @@ test("schedule-time extended history admits one account root and rotates determi
   for (let slot = 0; slot < 4; slot += 1) {
     const offered = extendedRoots(createScheduledJobs(
       account,
-      new Date(slotStart + slot * 60 * 60_000).toISOString(),
+      new Date(slotStart + slot * RECONCILE_INTERVAL_MS).toISOString(),
     ).jobs);
     for (const job of offered) {
       seenCoordinates.add(`${job.payload?.resource}:${job.payload?.sourceProviderSlug}`);
@@ -2023,7 +2032,7 @@ test("schedule-time extended history admits one account root and rotates determi
   for (let slot = 0; slot < 2; slot += 1) {
     const offered = requireValue(extendedRoots(createScheduledJobs(
       reducedAccount,
-      new Date(slotStart + slot * 60 * 60_000).toISOString(),
+      new Date(slotStart + slot * RECONCILE_INTERVAL_MS).toISOString(),
     ).jobs)[0]);
     reducedSeen.add(`${offered.payload?.resource}:${offered.payload?.sourceProviderSlug}`);
   }
@@ -2079,7 +2088,8 @@ test.each([
   }
 });
 
-test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", () => {
+// Exhaust every root at full source cardinality, including under package fanout.
+test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", { timeout: 120_000 }, () => {
   const resources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
   const availability = Object.fromEntries(
     ["blood_pressure", ...resources].map((resource) => [resource, true]),
@@ -2420,6 +2430,8 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     historicalPullState: { providerSlug: "omron", resource: "caffeine", status: "success" },
     providerListRequests,
     providerState: { resourceAvailability: availability, status: "connected" },
+    // Hourly slots keep the selected window near the fixed execution clock.
+    reconcileIntervalMs: 60 * 60_000,
     requests,
     timeseriesRecords: {
       caffeine: [{
@@ -2792,6 +2804,53 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
   }
 });
 
+test("empty sparse history shares bounded jobs while preserving populated and foreground boundaries", async () => {
+  for (const scenario of ["empty", "populated", "foreground"] as const) {
+    const requests: TimeseriesRequest[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createProvider({
+      requests,
+      historicalPullState: { resource: "body_temperature", status: "success" },
+      providerState: {
+        resourceAvailability: { body_temperature: true },
+        status: "connected",
+      },
+      timeseriesResources: ["body_temperature"],
+      timeseriesRecords: scenario === "populated" ? {
+        body_temperature: [{ timestamp: "2026-05-24T08:00:00.000Z", value: 36.6, unit: "c" }],
+      } : {},
+    });
+    const job = withHistoricalFixtureDays(
+      createScheduledResourceJob(provider, "body_temperature"), 20,
+    );
+    const context = createJobContext({
+      importedSnapshots,
+      ...(scenario === "foreground" ? { shouldYield: () => requests.length >= 3 } : {}),
+    });
+    const first = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord(job, 1));
+    const continuation = findResourceJob(first.scheduledJobs ?? [], "body_temperature");
+    const expectedDays = scenario === "empty" ? 16 : 3;
+    assert.equal(requests.length, expectedDays, scenario);
+    assert.equal(continuation.dedupeKey, job.dedupeKey, scenario);
+    assert.equal(continuation.payload?.windowStart,
+      new Date(Date.parse(String(job.payload?.windowStart)) + expectedDays * 86_400_000).toISOString(), scenario);
+    assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd, scenario);
+    assert.equal(importedSnapshots.length, scenario === "populated" ? 1 : 0, scenario);
+    if (scenario === "populated") {
+      const imported = requireValue(junctionProviderAdapter.parseSnapshot)(importedSnapshots[0]);
+      assert.equal(imported.windowStart, "2026-05-24T00:00:00.000Z");
+      assert.equal(imported.windowEnd, "2026-05-25T00:00:00.000Z");
+    }
+    assertHistoryCoverage(first.metadataPatch, "omron", "body_temperature", false);
+    if (scenario === "empty") {
+      const last = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord(continuation, 2));
+      assert.equal(requests.length, 20);
+      assert.equal(last.scheduledJobs?.length ?? 0, 0);
+      assertHistoryCoverage(last.metadataPatch, "omron", "body_temperature");
+    }
+  }
+});
+
 test("sparse history waits for upstream pull success beyond the empty retry ladder", async () => {
   const readinessDecisions: string[] = [];
   const recordHistoricalPullReadiness = (readiness: string): void => {
@@ -3020,7 +3079,7 @@ test("successful upstream pull with no sparse rows completes after one scan", as
     resource: "caffeine",
   });
 
-  assert.equal(completed.executionCount, 2);
+  assert.equal(completed.executionCount, 1);
   assert.equal(requests.length, 2);
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
 });
@@ -3059,7 +3118,7 @@ test("unavailable upstream status cannot certify zero-row sparse history", async
   });
   const retry = findResourceJob(first.result.scheduledJobs ?? [], "caffeine");
 
-  assert.equal(first.executionCount, 2);
+  assert.equal(first.executionCount, 1);
   assert.equal(requests.length, 2);
   assertHistoryCoverage(first.result.metadataPatch, "omron", "caffeine", false);
   assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
@@ -3318,7 +3377,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
       startingIndex: 3,
     });
 
-    assert.equal(completed.executionCount, 34);
+    assert.equal(completed.executionCount, 3);
     assert.equal(requests.length, 34);
     assert.equal(requests[0]?.start, "2026-06-11");
     assert.equal(requests.at(-1)?.end, "2026-07-14");
@@ -6081,5 +6140,135 @@ test("prior coverage reopens all 13 resources at the fixed 180-day generation", 
       assert.equal(job.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
       assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
     }
+  }
+});
+
+test("pending weight history imports available records and keeps one retry across day boundaries", async () => {
+  const historicalPullState: MutableHistoricalPullState = { resource: "weight", status: "in_progress" };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState, requests, timeseriesResources: ["weight"],
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+    timeseriesRecords: { weight: [{ id: "weight-history-1", timestamp: "2026-06-09T08:00:00.000Z", value: 70, unit: "kg" }] },
+  });
+  const schedule = requireValue(requireValue(provider.jobExecutor).createScheduledJobs);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const account = createStoredAccount({ sources });
+  const root = findResourceJob(schedule(account, NOW).jobs, "weight");
+  const tomorrow = "2026-06-12T12:00:00.000Z";
+  assert.equal(findResourceJob(schedule(account, tomorrow).jobs, "weight").dedupeKey, root.dedupeKey);
+  assert.equal(schedule(account, tomorrow, { findActiveDedupeKeys: () => new Set([root.dedupeKey!]) })
+    .jobs.some((job) => job.payload?.resource === "weight"), false);
+  const snapshots: unknown[] = [];
+  const initial = withHistoricalFixtureDays(root, 2);
+  const context = createJobContext({ account: createAccount({ sources }), importedSnapshots: snapshots });
+  const pending = await executeImmediateResourceContinuations({
+    context, job: toJobRecord({ ...initial, dedupeKey: "legacy-window-specific-key" }, 1), provider, resource: "weight",
+  });
+  assert.ok(requests.length > 0, "pending completion cannot prevent available historical reads");
+  const normalized = await Promise.all(snapshots.map(importWithRealJunctionNormalizer));
+  assert.equal(normalized.reduce((count, receipt) => count + receipt.canonicalEventCount, 0), 1,
+    "available weight becomes a canonical measurement while history is pending");
+  assertHistoryCoverage(pending.result.metadataPatch, "omron", "weight", false);
+  const retry = findResourceJob(pending.result.scheduledJobs ?? [], "weight");
+  assert.equal(retry.availableAt, tomorrow);
+  assert.equal(retry.dedupeKey, "legacy-window-specific-key", "accepted legacy windows keep their exact continuation owner");
+  historicalPullState.status = "success";
+  const completed = await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ sources }), now: tomorrow }), job: toJobRecord(retry, 2), provider, resource: "weight",
+  });
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "weight");
+});
+
+test("a scan that began while weight history was pending never certifies coverage after upstream finishes mid-scan", async () => {
+  const historicalPullState: MutableHistoricalPullState = { resource: "weight", status: "in_progress" };
+  const requests: TimeseriesRequest[] = [];
+  const weightRecords: Record<string, unknown>[] = [];
+  const provider = createProvider({
+    historicalPullState, requests, timeseriesResources: ["weight"],
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+    timeseriesRecords: { weight: weightRecords },
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const root = withHistoricalFixtureDays(
+    findResourceJob(requireValue(executor.createScheduledJobs)(createStoredAccount({ sources }), NOW).jobs, "weight"), 31,
+  );
+  const historicalWindowStart = root.payload?.historicalWindowStart;
+  assert.equal(typeof historicalWindowStart, "string");
+  const lateReadingAt = new Date(Date.parse(historicalWindowStart as string) + 60 * 60 * 1_000).toISOString();
+  const scan = async (input: {
+    afterFirstYield?: () => void; now: string; start: DeviceSyncJobInput; startingIndex: number;
+  }) => {
+    const snapshots: unknown[] = [];
+    const context = createJobContext({ account: createAccount({ sources }), importedSnapshots: snapshots, now: input.now });
+    const continuationFlags: unknown[] = [];
+    let job = toJobRecord(input.start, input.startingIndex);
+    let index = input.startingIndex + 1;
+    for (;;) {
+      const result = await executor.executeJob(context, job);
+      const continuation = (result.scheduledJobs ?? []).find((scheduled) =>
+        scheduled.kind === "resource" && scheduled.payload?.resource === "weight");
+      if (!continuation || (continuation.availableAt && continuation.availableAt !== context.now)) {
+        const normalized = await Promise.all(snapshots.map(importWithRealJunctionNormalizer));
+        return {
+          continuationFlags,
+          imported: normalized.reduce((count, receipt) => count + receipt.canonicalEventCount, 0),
+          result,
+        };
+      }
+      continuationFlags.push(continuation.payload?.historicalPullPending);
+      if (continuationFlags.length === 1) {
+        assert.ok(String(continuation.payload?.windowStart) > lateReadingAt, "the first window was already scanned");
+        input.afterFirstYield?.();
+      }
+      job = toJobRecord(continuation, index);
+      index += 1;
+    }
+  };
+  const pending = await scan({
+    afterFirstYield: () => {
+      // Upstream populates a day this scan already read, then finishes.
+      weightRecords.push({ id: "weight-late", timestamp: lateReadingAt, value: 70, unit: "kg" });
+      historicalPullState.status = "success";
+    },
+    now: NOW, start: root, startingIndex: 1,
+  });
+  assert.ok(pending.continuationFlags.length > 0 && pending.continuationFlags.every((flag) => flag === true),
+    "every continuation carries the pending start");
+  assert.equal(pending.imported, 0, "the late reading was not visible to the scan that began pending");
+  assertHistoryCoverage(pending.result.metadataPatch, "omron", "weight", false,
+    "a scan that began pending cannot certify coverage once upstream finishes");
+  const retry = findResourceJob(pending.result.scheduledJobs ?? [], "weight");
+  const tomorrow = "2026-06-12T12:00:00.000Z";
+  assert.equal(retry.availableAt, tomorrow);
+  assert.equal(retry.payload?.windowStart, historicalWindowStart, "the daily continuation restarts from the history start");
+  assert.equal(retry.dedupeKey, root.dedupeKey);
+  const ready = await scan({ now: tomorrow, start: retry, startingIndex: 100 });
+  assert.ok(ready.continuationFlags.every((flag) => flag === undefined), "a scan that starts ready clears the pending start");
+  assert.equal(ready.imported, 1, "the next ready scan imports the late reading");
+  assertHistoryCoverage(ready.result.metadataPatch, "omron", "weight");
+});
+
+
+test("a complete 180-day weight scan uses six bounded windows without dropping history", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ requests, timeseriesResources: ["weight"],
+    historicalPullState: { resource: "weight", status: "in_progress" },
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+  });
+  const root = createScheduledResourceJob(provider, "weight");
+  await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ sources: [
+      createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true }),
+    ] }) }), job: toJobRecord(root, 1), provider, resource: "weight",
+  });
+  const windows = requests.filter((request) => request.resource === "body_weight");
+  assert.equal(windows.length, 6);
+  assert.equal(windows[0]?.start, root.payload?.windowStart);
+  assert.equal(windows.at(-1)?.end, root.payload?.windowEnd);
+  for (const [index, window] of windows.entries()) {
+    assert.ok(Date.parse(window.end!) - Date.parse(window.start!) <= 30 * 86_400_000);
+    if (index > 0) assert.equal(window.start, windows[index - 1]?.end);
   }
 });

@@ -1,8 +1,8 @@
+import { metricSourcePriority } from "@murphai/health-metrics";
+
 import {
   type BrowserVaultEntity,
   type BrowserVaultEntityFilters,
-  type BrowserVaultExperimentRunCard,
-  type BrowserVaultExperimentRunCardLookup,
   type BrowserVaultCoreQueryClient,
   type BrowserVaultCoreReplica,
   type BrowserVaultLabsQueryClient,
@@ -52,30 +52,11 @@ import {
 } from "@murphai/health-metrics";
 
 export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): BrowserVaultQueryClient {
-  return createBrowserVaultQueryClientAccess(deepFreezeBrowserVaultValue(
-    normalizeBrowserVaultReplica(replica),
-  ));
-}
-
-/** Internal producer path: the replica-under-construction must remain mutable. */
-export function createBrowserVaultProjectionQueryClient(
-  replica: BrowserVaultReplica,
-): BrowserVaultQueryClient {
-  return createBrowserVaultQueryClientAccess(normalizeBrowserVaultReplica(replica));
-}
-
-function normalizeBrowserVaultReplica(replica: BrowserVaultReplica): BrowserVaultQueryClient["replica"] {
-  return {
+  const frozenReplica = deepFreezeBrowserVaultValue({
     ...replica,
     experimentOutcomes: replica.experimentOutcomes ?? [],
-    experimentRunCards: replica.experimentRunCards ?? [],
     hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
-  };
-}
-
-function createBrowserVaultQueryClientAccess(
-  frozenReplica: BrowserVaultQueryClient["replica"],
-): BrowserVaultQueryClient {
+  });
   return {
     capability: "core+metrics+labs",
     ...createCoreQueryAccess(frozenReplica),
@@ -210,7 +191,7 @@ export function createBrowserVaultLabsQueryClient(
 
 type BrowserVaultCoreQueryAccess = Pick<
   BrowserVaultCoreQueryClient,
-  "entities" | "experimentRunCards" | "search" | "timeline"
+  "entities" | "search" | "timeline"
 >;
 type BrowserVaultMetricsQueryAccess = Pick<
   BrowserVaultMetricsQueryClient,
@@ -220,16 +201,12 @@ type BrowserVaultLabsQueryAccess = Pick<BrowserVaultLabsQueryClient, "labResults
 
 function createCoreQueryAccess(replica: BrowserVaultCoreReplica): BrowserVaultCoreQueryAccess {
   const byLookupId = new Map<string, BrowserVaultEntity>();
-  const experimentRunCardById = new Map<string, BrowserVaultExperimentRunCard>();
 
   for (const entity of replica.entities) {
     byLookupId.set(entity.id, entity);
     for (const lookupId of entity.lookupIds) {
       byLookupId.set(lookupId, entity);
     }
-  }
-  for (const card of replica.experimentRunCards) {
-    experimentRunCardById.set(card.id, card);
   }
 
   return {
@@ -239,19 +216,6 @@ function createCoreQueryAccess(replica: BrowserVaultCoreReplica): BrowserVaultCo
       },
       list(filters: BrowserVaultEntityFilters = {}) {
         return replica.entities.filter((entity) => matchesEntityFilters(entity, filters));
-      },
-    },
-    experimentRunCards: {
-      find(lookup: BrowserVaultExperimentRunCardLookup) {
-        return replica.experimentRunCards.find((card) =>
-          matchesExperimentRunCardLookup(card, lookup)
-        ) ?? null;
-      },
-      get(experimentId: string) {
-        return experimentRunCardById.get(experimentId) ?? null;
-      },
-      list() {
-        return replica.experimentRunCards.slice();
       },
     },
     search(query: string, filters: BrowserVaultSearchFilters = {}) {
@@ -271,24 +235,6 @@ function createCoreQueryAccess(replica: BrowserVaultCoreReplica): BrowserVaultCo
       },
     },
   };
-}
-
-function matchesExperimentRunCardLookup(
-  card: BrowserVaultExperimentRunCard,
-  lookup: BrowserVaultExperimentRunCardLookup,
-): boolean {
-  if (typeof lookup === "string") {
-    return card.lookupKeys.experimentIds.includes(lookup)
-      || card.lookupKeys.slugs.includes(lookup)
-      || card.lookupKeys.protocolKeys.includes(lookup);
-  }
-  if (
-    lookup.experimentId
-    && card.lookupKeys.experimentIds.includes(lookup.experimentId)
-  ) return true;
-  if (lookup.slug && card.lookupKeys.slugs.includes(lookup.slug)) return true;
-  return lookup.protocolKeys?.some((key) => card.lookupKeys.protocolKeys.includes(key))
-    ?? false;
 }
 
 function createMetricsQueryAccess(
@@ -409,9 +355,12 @@ function matchesMetricSelectionFilters(row: BrowserVaultMetricSelectionRow, filt
   return true;
 }
 
+/** Each date ends on its highest-priority source, the precedence metric selection uses. */
 function sortMetricRowsAsc(rows: readonly BrowserVaultMetricRow[]): BrowserVaultMetricRow[] {
   return rows.slice().sort((left, right) => {
     if (left.date !== right.date) return left.date.localeCompare(right.date);
+    const priorityDelta = metricSourcePriority(right.sourceKind) - metricSourcePriority(left.sourceKind);
+    if (priorityDelta !== 0) return priorityDelta;
     if (left.observedAt !== right.observedAt) return left.observedAt.localeCompare(right.observedAt);
     return left.id.localeCompare(right.id);
   });

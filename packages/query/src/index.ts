@@ -136,13 +136,6 @@ export type {
   OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview.ts";
-export {
-  buildPersonalPatternReport,
-  buildPersonalPatternReportFromWearableBundle,
-  emptyPersonalPatternReport,
-  parsePersonalPatternVocabulary,
-  PERSONAL_PATTERN_VOCABULARY_SLUG,
-} from "./personal-patterns.ts";
 export { buildJournalView, emptyJournalView } from "./journal-view.ts";
 export type {
   JournalDay,
@@ -150,18 +143,6 @@ export type {
   JournalRecord,
   JournalView,
 } from "./journal-view.ts";
-export type {
-  PersonalPatternCell,
-  PersonalPatternClassification,
-  PersonalPatternFactor,
-  PersonalPatternGrade,
-  PersonalPatternIcon,
-  PersonalPatternOutcome,
-  PersonalPatternReport,
-  PersonalPatternStage,
-  PersonalPatternVocabulary,
-  PersonalPatternVocabularyConcept,
-} from "./personal-patterns.ts";
 export {
   buildSharedGroupWeeklyMembers,
 } from "./group-weekly.ts";
@@ -267,6 +248,7 @@ export type {
 } from "./search-shared.ts";
 export {
   buildMetricSeries,
+  isManualMetricSource,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   listMetricDefinitions,
@@ -440,11 +422,11 @@ export {
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
   orderedUniqueStrings,
-  sameKnowledgeStringSet,
   summarizeKnowledgeBody,
 } from "./knowledge-model.ts";
 export {
   KNOWLEDGE_READ_RECOVERY_ACTION,
+  knowledgeAbsentPageResultSchema,
   knowledgeGetResultSchema,
   knowledgeGraphSearchHitSchema,
   knowledgeGraphSearchResultSchema,
@@ -461,9 +443,11 @@ export {
   knowledgeReadIssueCodeSchema,
   knowledgeSearchHitSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from "./knowledge-contracts.ts";
 export type {
+  KnowledgeAbsentPageResult,
   KnowledgeGetResult,
   KnowledgeGraphSearchHit,
   KnowledgeGraphSearchResult,
@@ -505,6 +489,15 @@ export async function listCanonicalEntities(
 ): Promise<CanonicalEntity[]> {
   const mod = await import("./query-projection.ts");
   return mod.listCanonicalEntitiesRuntime(vaultRoot, filters);
+}
+
+/** Event-only listing: reuse a fresh index, otherwise read the locked family. */
+export async function listCanonicalEventEntities(
+  vaultRoot: string,
+  filters: Pick<QueryCanonicalEntityFilters, "kinds" | "from" | "to"> = {},
+): Promise<CanonicalEntity[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listCanonicalEventEntitiesRuntime(vaultRoot, filters);
 }
 
 export async function listMetricPointsBatch(
@@ -640,14 +633,6 @@ export async function summarizeWearableSleepPatternRuntime(
   return mod.summarizeWearableSleepPatternRuntime(vaultRoot, filters);
 }
 
-export async function buildPersonalPatternReportRuntime(
-  vaultRoot: string,
-  options: { asOf?: Date | string; windowDays?: number } = {},
-): Promise<import("./personal-patterns.ts").PersonalPatternReport> {
-  const mod = await import("./query-projection.ts");
-  return mod.buildPersonalPatternReportRuntime(vaultRoot, options);
-}
-
 export async function summarizeWearableActivityRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
@@ -683,3 +668,14 @@ export async function summarizeWearableSourceHealthRuntime(
 export * from "./scheduled-logs.ts";
 
 export { resolveMealNutritionGoals, type MealNutritionGoalContext, type NutritionTargetResolution } from "./meal-nutrition-goals.ts";
+
+export async function readExperimentQuerySource(vaultRoot: string) {
+  const mod = await import("./experiment-query-source.ts");
+  return mod.readExperimentQuerySource(vaultRoot);
+}
+
+export type { WearableSleepCardNight } from "./wearables/sleep-card.ts";
+export async function resolveWearableSleepCardNight(vaultRoot: string, input: { wakeDate: string }) {
+  const mod = await import("./wearables/sleep-card.ts");
+  return mod.resolveWearableSleepCardNight(vaultRoot, input);
+}

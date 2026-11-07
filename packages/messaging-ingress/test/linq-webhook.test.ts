@@ -18,7 +18,6 @@ import {
   parseLinqTypingIndicatorStartedEvent,
   parseLinqWebhookEvent,
   readLinqRecipientLineHandle,
-  readLinqWebhookHeader,
   parseRawLinqMessageReceivedEvent,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
@@ -434,11 +433,6 @@ test("verifyAndParseLinqWebhookRequest accepts array-backed headers and ArrayBuf
   });
 
   assert.equal(event.event_id, "evt_buffer");
-  assert.equal(
-    readLinqWebhookHeader({ "x-custom": [" value "] }, "X-Custom"),
-    "value",
-  );
-  assert.equal(readLinqWebhookHeader({}, "x-missing"), null);
 });
 
 test("parseLinqWebhookEvent surfaces payload errors through the exported type guards", () => {

@@ -1,17 +1,15 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-09-04
+Last verified: 2026-11-06
 
 Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
 the user requests it. It owns the managed-browser review, exact-head packaging,
-finding disposition, retries, and base-update rules. It does not add a local
-specialist or deep-review pass.
+finding disposition, retries, and base-update rules.
 
 Read the sections needed for the current round. Run on the stable pushed head
 after focused local proof and parent candidate review, concurrently with CI.
 Keep one completion owner. Completion requires the resolved review, zero
-unresolved accepted findings, and green required CI; a retrospective alone is
-not review approval.
+unresolved accepted findings, and green required CI.
 
 ## Outcome and Completion Bar
 
@@ -25,6 +23,14 @@ invariants without replacement machinery. Minor refactoring, UX polish,
 disclosure gaps, and speculative edge cases are not blocking findings. The
 targeted exploratory presets remain available separately.
 
+Both lean and full guarded archives include the tracked native CI controller
+policy, PR evidence template, and assistant verification skill through the
+existing exact always-path manifest. These inputs remain available when they
+are unchanged by the candidate.
+The exact always-path manifest also includes the pinned Containers SDK patch,
+`pnpm-lock.yaml`, and `pnpm-workspace.yaml`, so included readiness tests retain
+the dependency implementation correction and its version/integrity mapping.
+
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
 sensitivity and measures the complete current PR against its base. Sensitive or
@@ -32,10 +38,10 @@ undeclared PRs re-send a fresh full snapshot regardless of size. Routine PRs do
 the same at 500 changed lines or 10 changed files; only routine PRs below both
 cutoffs send the remediation delta and its directly affected paths. An explicit
 `REVIEW_GPT_FULL_REVIEW_REASON` selects a new full-audit conversation. The gate
-completes when the exact patch has a resolved result, local triage has zero
-accepted findings, the finding-disposition boundary is complete, and CI is green
-on the final head. Missing or stale evidence, an invalid model/response,
-unresolved accepted findings, a required retrospective, or a merge conflict is
+completes when the exact patch has a resolved result, or every accepted finding
+is fixed and proven under step 7, the finding-disposition boundary is complete,
+and CI is green on the final head. Missing or stale evidence, an invalid model/response,
+unresolved accepted findings or a merge conflict is
 a stop condition rather than permission to infer the answer.
 
 ## Managed Target Lifecycle
@@ -48,12 +54,25 @@ the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
 
+Up to 10 ReviewGPT reviews may run on each browser lane at the same time. Each
+must run from its own worktree. Never run two from one worktree, because they
+share its `audit-packages` output and can overwrite each other's files.
+
+Synchronous prompt insertion uses the configured draft timeout so healthy large
+multiline inserts can finish. Other page commands retain their shorter deadline;
+insertion still fails when its configured budget expires.
+
 Normal reviews use regular Chat, never ChatGPT Work. The package confirms that
 surface before model selection, before staging, and immediately before send. A
 fresh new-chat target switches the Chat/Work control to Chat when necessary; an
 existing Work conversation or an unconfirmed new-chat surface fails closed.
 Deep Research remains on its dedicated surface. Keep this browser-DOM policy in
 ReviewGPT rather than duplicating it in Murph's lane wrapper or prompts.
+
+The GPT-6 picker can expose a `GPT-6` family row and a separate `Power` control.
+The pinned ReviewGPT package combines that picker state with the sent request's
+model evidence to verify GPT-6 Pro. A generic `Pro` label alone is insufficient;
+keep the concrete model requirement when recovering from picker changes.
 
 This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
@@ -105,6 +124,76 @@ minutes.
 Same-session waiting, polling, and deliberate handoffs all preserve exact-head,
 exact-thread, attachment, model, timeout, and response-marker validation.
 
+### Recover an accepted review after capture failure
+
+After the waited capture owner exits with a hard-refresh or export failure,
+retain its original capture metadata and recover the already accepted request
+before considering another send. For a failure without a confirmed lane rate
+limit, use the installed exact-metadata exporter from the same session:
+
+```bash
+pnpm exec cobuild-review-gpt thread export \
+  --browser-endpoint "$BROWSER_ENDPOINT" \
+  --chat-url "$CHAT_URL" \
+  --capture-metadata "$CAPTURE_METADATA" \
+  --output .tmp/review-gpt-recovered-thread.json
+```
+
+Set `BROWSER_ENDPOINT` and `CHAT_URL` to the original metadata's endpoint and
+conversation, and `CAPTURE_METADATA` to that invocation's unchanged metadata
+file. Keep the export in task-owned ignored scratch space. Do not start this
+recovery while a waiter or detached owner is still capturing the same request.
+The exporter rejects endpoint, thread, accepted-turn, response, or artifact
+identity mismatches; do not remove metadata or broaden the target to make a
+failed export succeed.
+
+A successful export recovers evidence; it does not by itself validate a review.
+Check the exact accepted prompt and attachment, completed response and
+`REVIEW_COMPLETE` marker, requested model evidence, and minimum response time
+under the final gate below. Preserve the original round and head when these
+checks pass. If the response is still incomplete, keep the original completion
+owner and paced polling rule. If identity or model evidence remains missing,
+report that gap without treating a visible answer as a pass. Close only any
+remaining task-owned recovery tab after capture; shared lanes remain untouched.
+Confirmed capability limits retain the separate lane-recovery rule below.
+
+An accepted send can briefly expose a `WEB:<uuid>` conversation URL. New captures
+retain the exact original target and verified committed-turn receipt in that
+case. Once that target obtains its canonical URL, use the unchanged metadata
+with `thread export`; never resend to obtain a different receipt. A missing
+original target cannot be recreated from the transient ID. Older digest-only
+captures retain their strict comparison and do not gain weaker recovery rules.
+
+### Include an authorized companion repository
+
+For a review whose scope includes another repository, pass one
+`--companion-snapshot` JSON descriptor per companion through `pnpm review:gpt`.
+Each descriptor contains `repo` (the local checkout), `head` (its full commit
+SHA), and `prUrl` (its same-repository GitHub PR). The companion must be clean,
+match the live PR head, and declare its committed canonical config and guarded
+packager. Include only repository scopes authorized for that review.
+
+ReviewGPT runs each companion's own guarded packager and retains its full-snapshot
+review-round metadata. It checks the exact head before and after packaging and
+stages each unchanged archive as a separate named attachment. It does not accept
+arbitrary ZIP paths or reuse the primary repository's packaging overrides. All
+expected attachments must survive onto the exact accepted user turn before the
+review receipt can be used. This adds context to the existing review owner; it
+does not start a separate review or satisfy another PR's exact-head gate.
+
+### Review patched tooling dependency source
+
+When a PR changes a locked `@cobuild/review-gpt` or `@cobuild/repo-tools` patch,
+the canonical packager adds the exact registry package and patch from the
+reviewed head under `review-gpt-pr-context/dependencies/`, and the base version
+under `dependencies/base/`. These are the only supported dependency packages.
+Each version must match its source commit’s registry integrity and patch hash;
+only bounded regular files pass the existing archive and privacy checks.
+Provenance records the reviewed head, source commit, role, and individual file
+hashes. Use the included reconstruction instructions to compare complete
+patched owners. This source is part of the guarded snapshot; no inline encoded
+package or separate unguarded archive is needed.
+
 ## Finding Disposition Boundary
 
 Every final `FINDINGS` result uses this parent-owned disposition boundary.
@@ -114,48 +203,25 @@ accepted or rejected disposition, concrete code or path evidence, current user
 or operational harm or removable complexity, and the smallest justified
 correction with its complexity cost.
 
-A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
-and dispositions, then wait for the user to resume before mutating the
-candidate, launching another review, or merging. A validated final
-`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
-the remaining parent review and merge checks without a user-resume pause.
+After reporting a final `ROUND_OUTCOME: FINDINGS` and its dispositions,
+continue correcting accepted findings, verifying, and reviewing within the
+user's existing authorization. Do not end the turn or ask the user to say
+"continue" solely because a review found issues. A validated final
+`ROUND_OUTCOME: PASS` proceeds to the remaining parent review and merge checks.
 
 The parent owns disposition and may reject a finding as wrong, already handled,
 speculative, unproven, or not worth the complexity it would add. The user may
 override that judgment. A rejected finding requires neither a code change nor
 reviewer withdrawal. A `FINDINGS` result needs no review rerun
 when the parent accepts zero findings and records evidence-backed rejection
-reasons. Accepted findings remain unresolved until fixed and verified; the
-final gate requires a later resolved result.
+reasons. Accepted findings remain unresolved until fixed and verified. A fix
+proven under step 7 resolves them without another round.
 
-Two narrow exceptions let a final `FINDINGS` result complete its disposition
-boundary without ending the turn after the parent reports every finding and
-its evidence-backed disposition:
-
-- `Complexity Collapse`: the result contains exactly one finding, classified
-  as Complexity Collapse. The parent proves that its correction preserves all
-  required behavior and invariants, stays within existing edit authority, and
-  yields net deletion or removes meaningful concepts or owners without
-  replacement machinery.
-
-- `Non-Production Remediation`: every accepted finding in the result can be
-  corrected entirely in isolated tests, fixtures, or direct-proof scaffolding;
-  authored repository docs or process text that is not consumed at runtime; or
-  PR-body, review-comment, and review-evidence updates. The parent must prove the
-  complete correction changes no production source, user-visible or runtime
-  behavior, provider/tool/API/schema contract, runtime or deployment config,
-  runtime-consumed or generated artifact, persisted data, dependency,
-  deployment, external state, or destructive action. Rejected findings may
-  coexist because their evidence-backed disposition is terminal, but every
-  accepted finding must qualify.
-
-After either exception qualifies, remediate, verify, push when applicable, and
-continue the ReviewGPT loop without asking the user for separate permission.
-Use the ordinary turn-ending pause when an accepted finding does not qualify,
-the correction expands beyond the proven boundary, requested behavior or the
-intended outcome would change, scope or authority would expand, or a destructive
-or external action needs new approval. Neither exception bypasses a required
-scope decision or the three-round hard cap.
+Ask for a decision only when a correction materially changes the requested
+outcome or scope, needs authority not already granted, or reveals a concrete
+requirement conflict. Continue independent authorized work while that decision
+is pending. Review findings do not grant new authority for destructive actions,
+production mutations, messages, or spending.
 
 `INVALID` stops for an evidence gap. Older review results may contain
 `RETROSPECTIVE_REQUIRED`; triage their concrete evidence under the current
@@ -176,46 +242,55 @@ Run the loop when all of the following hold:
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
-merge target all refer to the same commit. Do not run it on unpushed local
-changes, a dirty worktree, or a checkout that is not at the pushed head.
+merge target all refer to the same commit, except for a later test-only commit
+as described below or a fix proven under step 7. Do not run it on unpushed local changes, a dirty
+worktree, or a checkout that is not at the pushed head.
 
-The PR body must carry the short intent, Product UX result, direct evidence,
-changelog decision, and any risk details required by
-`agent-docs/operations/completion-workflow.md` § PR Description. Complete that
-section's ordered launch preflight before firing a round; do not use a running
-ReviewGPT job to discover missing PR-body metadata.
+A review round needs the pushed head. PR-description content cannot block or
+invalidate a round. The PR description and its separate CI checks remain owned
+by `agent-docs/operations/completion-workflow.md` § PR Description.
 
-Before the final gate starts, the PR body must also contain exactly one
+The PR body may optionally contain one
 `ReviewGPT context sensitivity: routine` or
-`ReviewGPT context sensitivity: sensitive` line plus a short reason. Use
-`sensitive` whenever the final-gate eligibility exclusions or cross-cutting
-conditions in `agent-docs/operations/completion-workflow.md` apply, regardless
-of patch size. A small cosmetic change or narrow bug fix is `routine` only when
-none apply. Missing, malformed, or duplicate declarations are packaged as
-`undeclared` and default to the full snapshot.
+`ReviewGPT context sensitivity: sensitive` line. Use `sensitive` whenever the
+final-gate eligibility exclusions or cross-cutting conditions in
+`agent-docs/operations/completion-workflow.md` apply, regardless of patch size.
+A small cosmetic change or narrow bug fix is `routine` only when none apply.
+Missing, malformed, or duplicate declarations are packaged as `undeclared`
+and default to the full snapshot; they do not stop the round.
 
-At round 1, record the exact first-reviewed head in the PR body. Include the exact machine-readable line
-`ReviewGPT first-reviewed head: <full-sha>`. Keep that line and baseline
-immutable. The packager fails if its supplied first head differs from this
-persisted PR-body value. Later substantive rounds report the remediation delta
-from that baseline without asking the author to maintain a manual line-count
-table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
-value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
+Round 1 derives its first-reviewed head from the current pushed PR head.
+`REVIEW_GPT_FIRST_REVIEWED_HEAD` is optional for round 1 and, if set, must equal
+that head. Later rounds supply `REVIEW_GPT_FIRST_REVIEWED_HEAD` and
+`REVIEW_GPT_PREVIOUS_REVIEWED_HEAD` through the environment, preserving the
+original baseline and existing ancestry checks.
+
+If every initial attempt is invalid and an already-authorized candidate change
+produces a new pushed head, confirm that no valid substantive review exists;
+an accepted prompt still awaiting capture must be recovered first. Retry round
+1 with the new head and a fresh full snapshot, leaving previous-reviewed-head
+unset and using the new head as the context anchor. Do not relabel a valid
+`PASS` or `FINDINGS` response as invalid, erase prior findings, reset a later
+round, or grant new edit authority through this recovery. Same-head tooling
+retries retain their existing baseline.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 runs in parallel with CI. Green CI on the final
 head and a resolved final review remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
-frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
-changes, other low-risk changes that satisfy
+frontend-only PRs that satisfy the eligibility exemption, copy-only changes,
+test-only changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
 cross-cutting trigger still applies, record the opt-out and continue with parent
 review and direct proof; do not substitute a mandatory local subagent.
 Prompt-primary PRs still require parent prompt inspection, and exempt
 frontend-only PRs still require Product UX, rendered, accessibility, and focused
-UI proof.
+UI proof. A test-only commit pushed after a passing round, such as a fixture
+update for a CI failure, needs no new round: the merge head may differ from the
+last reviewed head only by those test files or a fix proven under step 7. Record
+it in the PR body and rely on green CI on the final head.
 Run the separate final gate only when other scope independently requires it or
 the current user explicitly asks for it.
 
@@ -235,6 +310,20 @@ the current user explicitly asks for it.
    pass the substantive round through `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds
    the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
+
+   Full snapshots include `patches/codex-public-live.patch` even when unchanged,
+   because the hosted runner applies that production-source patch during its
+   native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
+
+   When the PR changes that patch, the existing packager also includes complete
+   patched native text files and the bounded
+   configuration/instruction/authentication/transport/recovery owner list under
+   `review-gpt-pr-context/dependencies/codex-<version>/`. It reads the reviewed
+   commit's package pin, Docker source SHA, and patch, verifies the official
+   upstream tag, and applies the patch only to an isolated Git index. The
+   provenance manifest records file hashes and omitted generated/binary paths.
+   No upstream code runs; unavailable source, mismatched pins, unsafe paths,
+   failed patch application, or exceeded bounds stop packaging.
 
    - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`
@@ -281,7 +370,7 @@ the current user explicitly asks for it.
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Changes since the last round: <brief-description>."
    ```
 
    When the existing conversation or its original lane cannot continue, retry
@@ -300,7 +389,7 @@ the current user explicitly asks for it.
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Fresh full audit for substantive round <k>. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Fresh full audit for substantive round <k>. Changes since the last round: <brief-description>."
    ```
 
    Choose a healthy lane for round 1 and keep that value with the conversation
@@ -311,16 +400,10 @@ the current user explicitly asks for it.
    absent or automatic. An explicit full-review reason starts a new conversation
    and may choose a fresh lane.
 
-   The later-round summary is required process metadata. Include each prior
-   finding's accepted/rejected/out-of-scope disposition, the landed correction,
-   and its underlying mechanism. Keep it compact and secret-safe; do not paste
-   repository contents. If a completed retrospective permits continuation, name
-   its decision and why the current delta stays inside it. An explicitly
-   requested full audit starts a new conversation, so a missing,
-   placeholder-only, or too-thin summary makes that run `INVALID`; that audit
-   cannot return `PASS` without enough ledger detail to identify and verify
-   every prior accepted finding. Ordinary later rounds retain the conversation
-   ledger, whether the packager selects a full snapshot or a correction packet.
+   A later-round prompt just says what changed since the last round. Keep it
+   compact and secret-safe. No separate finding ledger or retrospective is
+   required process metadata, and missing summary prose does not invalidate a
+   round.
 
    Round 1 opens a new conversation and attaches the full guarded snapshot. On
    later rounds, the packager reads the PR body's context-sensitivity declaration
@@ -345,8 +428,8 @@ the current user explicitly asks for it.
    recent full-snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
    The repo wrapper runs the current installed Brave binary with one usable
-   ReviewGPT browser lane per run: Eragon on CDP port `9448`, Phlebas on `9442`,
-   Hercules on `9444`, Mountain on `9450`, Vonneumann on `9446`, or Apollo on
+   ReviewGPT browser lane per run: Eragon on CDP port `9448`,
+   Mountain on `9450`, Vonneumann on `9446`, or Apollo on
    `9454`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
@@ -359,7 +442,7 @@ the current user explicitly asks for it.
    Spotlight or scans unrelated filesystem roots for an app bundle.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through six lanes and defaults to all six. A value supplied on the current
+   through four lanes and defaults to all four. A value supplied on the current
    command is authoritative; the local config is only a fallback preference and
    cannot widen or replace that per-run pool cap. A host can narrow the pool by
    setting the count in its local `$XDG_CONFIG_HOME/murph/review-gpt.conf`,
@@ -372,13 +455,26 @@ the current user explicitly asks for it.
    and fails loudly if the profile needs operator cleanup.
 
    The wrapper requests the configured Pro review model on the selected lane.
-   If ChatGPT reports that the selected lane has reached its model limit, do not
-   move an existing conversation to another workspace. Reuse its original lane,
-   or use the fresh-full recovery command above with a different lane instead of
-   downgrading the model.
+   Treat `REVIEW_GPT_RATE_LIMITED`, a visible “Capabilities reduced until…”
+   notice, or Pro becoming unselectable under that notice as a lane rate limit.
+   A completed answer, `PASS`, matching model text, or elapsed-time fallback
+   cannot validate that attempt. Continue automatically on another configured
+   lane within the current pool cap, excluding lanes already limited in this
+   retry sequence. Try each allowed lane at most once; if all are limited,
+   report the reset notice and stop until a lane recovers.
+
+   Start a fresh conversation with the same requested model and reviewed head;
+   never move the limited conversation to another workspace. For round 1,
+   rerun the full review with a different explicit `REVIEW_GPT_BROWSER_LANE`.
+   For later rounds, use the fresh-full recovery command above with a different
+   lane and `REVIEW_GPT_FULL_REVIEW_REASON="previous lane capability limit"`,
+   omitting `REVIEW_GPT_THREAD_URL` and describing what changed since the last
+   round. Keep the substantive round number and first-reviewed head: a
+   rejected rate-limited attempt is not a completed review round. Record the
+   replacement lane and conversation for subsequent same-thread work.
 
    To pin a specific lane, preserve a conversation's workspace, or debug one
-   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain|vonneumann|apollo` on
+   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|mountain|vonneumann|apollo` on
    that command.
    `aragon` is accepted as an alias for `eragon`. A first round may leave it
    unset to select a usable lane automatically, but its handoff must record the
@@ -392,8 +488,10 @@ the current user explicitly asks for it.
    if that lane cannot continue, use the fresh-full recovery command.
 
    Use `--wait` for normal review runs so ReviewGPT closes the tab it created
-   after capture. Do not resend an accepted prompt during recovery; continue
-   from the same thread and close any task-owned recovery tab when done.
+   after capture. For capture failures without a confirmed lane rate limit,
+   do not resend an accepted prompt; continue from the same thread and close
+   any task-owned recovery tab when done. Confirmed lane rate limits follow
+   the fresh-full recovery path above.
 
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run leaves an empty/preliminary response, lacks
@@ -422,10 +520,11 @@ the current user explicitly asks for it.
 
    A response with `ROUND_OUTCOME: INVALID` does not count as a substantive
    round. Correct its evidence or invocation gap and retry the same round number
-   against the same pushed head.
+   against the same pushed head. An authorized head change before any valid
+   initial review uses the round-one baseline recovery above.
 
-   Require at least 3 minutes (180 seconds) for a marked concrete-model final
-   response. The repository wrapper passes `--minimum-marked-response-time 180s`
+   Require at least 80 seconds for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 80s`
    to align the tool's attestation fallback with this final-gate minimum. Below
    that minimum, the response does not count. At or above it, inspect the exact
    turn, attachment, requested model selection, completion marker, and a
@@ -494,11 +593,9 @@ the current user explicitly asks for it.
    reconciliation for a low-incidence temporary window.
 
    Apply the parent-owned finding-disposition boundary after completing this
-   triage. A final `FINDINGS` result pauses steps 5–7 until the user resumes,
-   except that qualifying `Complexity Collapse` or `Non-Production Remediation`
-   may proceed immediately after the report. Remediation remains limited to accepted findings and the
-   proven task or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
-   without that pause.
+   triage. Report findings and dispositions, then continue steps 5–7 for accepted
+   corrections within existing task authority. A validated final
+   `ROUND_OUTCOME: PASS` proceeds to the remaining completion checks.
 
 5. Revisit the requirement before fixing only when concrete evidence shows
    remediation is repeatedly failing at the same cause, growing compensating
@@ -513,11 +610,15 @@ the current user explicitly asks for it.
    verification under `verification-and-runtime.md`, update affected evidence,
    and push to the PR branch.
 
-7. Fire the next substantive round immediately after a pushed accepted fix
-   changes production source, runtime config, schema, behavior, or the
-   implemented contract. Conflict resolution creates a new substantive round
-   only when it makes one of those changes; the behavior-preserving base-update
-   exception below owns mechanical conflict resolution. The packager selects a
+7. One round is the default. After a pushed accepted fix, prove it with a test
+   or direct evidence, record both in the PR, then finish the merge checks.
+   Fire the next substantive round only when a fix changes the design (adds
+   state, a migration or a new authority path) or reaches a risky surface the
+   last round didn't see, or a later commit adds behavior no round reviewed;
+   never just to confirm a fix. Conflict resolution creates a new substantive
+   round only when it does one of those;
+   the behavior-preserving base-update exception below owns mechanical
+   conflict resolution. The packager selects a
    re-sent full audit or same-thread correction from the full current PR shape.
    Run it in parallel with the new CI run. If CI later fails on a reviewed head,
    the round's findings still count.
@@ -572,28 +673,25 @@ or unresolved ownership or product decisions to finish a merge.
 
 ## Stop Condition
 
-- Stop when the exact current patch has a resolved result, local triage produces
-  zero accepted findings, and every required finding-disposition boundary is
-  complete. A resolved result is `ROUND_OUTCOME: PASS`, which requires no
-  user-resume pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected
-  for an evidence-backed reason after its disposition boundary.
+- Stop when the exact current patch has a resolved result and every required
+  finding-disposition boundary is complete. A resolved result is
+  `ROUND_OUTCOME: PASS`, or `ROUND_OUTCOME: FINDINGS` with every finding either
+  rejected for an evidence-backed reason after its disposition boundary or fixed
+  and proven under step 7.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - A concrete requirement or authority gap pauses dependent remediation until
   the parent resolves the scope decision under step 5. The reviewer reports
   qualifying findings or evidence gaps, not escalation by size or round number.
-- Hard cap: 3 rounds per PR. There is no automatic fourth substantive round. An
+- Default cap: 3 rounds per PR. There is no automatic fourth substantive round. An
   accepted round-three finding may still be reproduced and fixed; do not leave a
   known bug in place merely because the review counter reached three. After that
   fix, pause the ReviewGPT loop and confirm parent final review, verification,
-  and PR CI are all complete. Record the cap
-  retrospective and obtain an explicit continuation decision before starting
-  round four; the answer may be delete, revert, shrink, split, redesign,
-  continue, or abandon. A green non-ReviewGPT gate does not make the PR
-  merge-ready without the required later resolved result.
-- Report a per-round summary at handoff: findings received, accepted, rejected
-  with reasons, origin/mechanism, what landed, source-shape movement, and any
-  retrospective decision. Report tooling retries separately.
+  and PR CI are all complete. The parent justifies any fourth round against
+  the existing task authority before starting it. Ask the user only if the decision
+  requires a change of scope or authority.
+- Report the review result, what changed, and any unresolved findings at handoff.
+  Report tooling retries separately.
 
 ## Boundaries
 

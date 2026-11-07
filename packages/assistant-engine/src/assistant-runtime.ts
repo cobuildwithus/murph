@@ -7,7 +7,6 @@ export {
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'
 export * from './assistant-service.js'
-export * from './assistant-status.js'
 export * from './inbox-evidence-projection.js'
 export {
   normalizeAssistantRawAttachmentArtifactPath,
@@ -25,11 +24,18 @@ export * from './assistant/conversation-policy.js'
 export * from './assistant/conversation-ref.js'
 export {
   prepareHostedCodexAssistantProcess,
+  startHostedCodexAssistantVoice,
 } from './assistant/codex-runtime.js'
 export type {
   HostedCodexAssistantProcessPreparation,
   HostedCodexAssistantProcessPreparationInput,
+  HostedCodexAssistantVoiceInput,
 } from './assistant/codex-runtime.js'
+export type {
+  CodexRealtimeInput,
+  CodexRealtimeClosure,
+  CodexRealtimeSession,
+} from './assistant-codex.js'
 export * from './assistant/hosted-context-diagnostics.js'
 export * from './assistant/hosted-turn-timing.js'
 export * from './assistant/quarantine.js'

@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import {
+  archiveScheduledLogIfOccurrenceCurrent,
   buildScheduledLogMarkdownPreview,
   deleteEvent,
   executeScheduledLogOccurrence,
@@ -254,7 +255,8 @@ test("scheduled logs reject schedules the cron runner cannot execute", async () 
         measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
       },
     }),
-    /Invalid ISO datetime/u,
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
 
   await assert.rejects(
@@ -885,3 +887,45 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     await fs.rm(path.join(badScheduleVault, relativePath), { force: true });
   }
 });
+
+for (const scenario of ["current", "equal instant", "revision", "occurrence", "paused", "recurring", "missing", "duplicate"] as const) {
+  test(`scheduled log completion checks current revision and occurrence: ${scenario}`, async () => {
+    const vaultRoot = await makeTempDirectory("scheduled-log-completion");
+    try {
+      await initializeVault({ vaultRoot });
+      const { record } = await upsertScheduledLog({
+        ...scaffoldScheduledLogPayload(), scheduledLogId: undefined, vaultRoot,
+        status: scenario === "paused" ? "paused" : "active",
+        schedule: scenario === "recurring"
+          ? { kind: "every", everyMs: 60_000 }
+          : { kind: "at", at: "2026-09-01T12:20:00.000Z" },
+        now: new Date("2026-09-01T12:00:00.000Z"),
+      });
+      const input = {
+        vaultRoot,
+        scheduledLogId: scenario === "missing" ? "slog_01K00000000000000000000000" : record.scheduledLogId,
+        expectedUpdatedAt: scenario === "revision" ? "2026-09-01T11:00:00.000Z" : record.updatedAt,
+        occurrenceAt: scenario === "equal instant" ? "2026-09-01T08:20:00-04:00"
+          : scenario === "occurrence" ? "2026-09-02T12:20:00.000Z" : "2026-09-01T12:20:00.000Z",
+        now: new Date("2026-09-01T12:21:00.000Z"),
+      };
+      if (scenario === "duplicate") {
+        assert.equal(await archiveScheduledLogIfOccurrenceCurrent(input), true);
+        input.expectedUpdatedAt = (await readScheduledLog({ vaultRoot, scheduledLogId: record.scheduledLogId })).updatedAt;
+      }
+      const before = await snapshotVaultFiles(vaultRoot);
+      const beforeStat = await fs.stat(path.join(vaultRoot, record.relativePath));
+      const archives = scenario === "current" || scenario === "equal instant";
+      assert.equal(await archiveScheduledLogIfOccurrenceCurrent(input), archives);
+      if (archives) {
+        const archived = await readScheduledLog({ vaultRoot, scheduledLogId: record.scheduledLogId });
+        assert.deepEqual(archived, { ...record, status: "archived", updatedAt: input.now.toISOString(), markdown: archived.markdown });
+      } else {
+        assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+        assert.equal((await fs.stat(path.join(vaultRoot, record.relativePath))).mtimeMs, beforeStat.mtimeMs);
+      }
+    } finally {
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+}

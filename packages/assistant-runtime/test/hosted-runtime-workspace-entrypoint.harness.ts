@@ -18,7 +18,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -33,7 +32,6 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -147,6 +145,28 @@ import {
   readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, type Mock, test, vi } from "vitest";
+import { assertHostedVaultShareWorkerBuilt } from "./hosted-vault-share-worker-build.ts";
+
+// The shared mailbox fixture exercises one summary resource. Keep the real
+// Junction scheduler, executor and importer while excluding unrelated timeseries
+// backfills from these authority and concurrency proofs. Only the explicitly
+// named shared fixture is narrowed; custom Junction configurations keep their resources.
+vi.mock("@murphai/device-syncd/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/device-syncd/config")>();
+  return {
+    ...actual,
+    createConfiguredDeviceSyncProvidersFromConfigs: (
+      configs: Parameters<typeof actual.createConfiguredDeviceSyncProvidersFromConfigs>[0],
+    ) => actual.createConfiguredDeviceSyncProvidersFromConfigs({
+      ...configs,
+      ...(configs.junction?.apiKey === "sk_us_mailbox_fixture" ? { junction: {
+        ...configs.junction, apiBaseUrl: "https://junction.example.test",
+        summaryResources: ["sleep"], timeseriesResources: [], summaryBackfillDays: 1,
+        reconcileDays: 1, reconcileIntervalMs: 6 * 60 * 60_000,
+      } } : {}),
+    }),
+  };
+});
 
 type HasCompleteAssistantAutoReplyDeliveryTerminalEvidence = (
   input: {
@@ -476,7 +496,6 @@ import {
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
-  hostedCanonicalWriteReceiptRecoveryStatusFields,
   readHostedCanonicalWriteReceiptRecoveryWake,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import type {
@@ -540,7 +559,6 @@ import {
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -573,13 +591,6 @@ const HOSTED_UNSTABLE_PROCESS_ENV_KEYS = [
 const execFileAsync = promisify(execFile);
 
 process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS ??= "0";
-
-function continueRuntimeLiveness(): Awaited<ReturnType<RuntimeLivenessPort["touch"]>> {
-  return {
-    instruction: { kind: "continue" },
-    ok: true,
-  };
-}
 
 async function readCheckpointConversationWatermark(
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -648,8 +659,6 @@ function readCapturedRuntimePhaseLogs(input: {
       && entry.details?.attemptId === input.attemptId
     );
 }
-
-
 
 interface OpenAiHttpsProbeResult {
   body?: string;
@@ -932,28 +941,24 @@ function createPlatform(input: {
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
   phoneCalls?: HostedRuntimePlatform["phoneCalls"] | null;
-  runtimeLivenessIntervalMs?: number | null;
-  runtimeLivenessPort?: RuntimeLivenessPort | null;
-  runtimeLivenessRequired?: boolean | null;
   snapshotFixtureVaultRelativePath?: "vault";
   stageSamples?: StageTimingSample[];
   vaultSharePort?: HostedRuntimePlatform["vaultSharePort"] | null;
   workspacePort: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
+  if (input.vaultSharePort) assertHostedVaultShareWorkerBuilt();
   const uploadedArtifactBytesByHash = new Map<string, Uint8Array>();
   const defaultAssistantConfigurationToolPort: NonNullable<
     HostedRuntimePlatform["assistantConfigurationToolPort"]
   > = {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
-        availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-        availableProviders: ["openai", "venice"],
+        availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-terra",
-        provider: "openai",
+        model: "gpt-6-sol",
         reasoningEffort: "low",
         solAvailable: false,
       };
@@ -1055,13 +1060,6 @@ function createPlatform(input: {
     ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
     ...(input.phoneCalls ? { phoneCalls: input.phoneCalls } : {}),
-    ...(input.runtimeLivenessIntervalMs
-      ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
-      : {}),
-    ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
-    ...(input.runtimeLivenessRequired !== undefined
-      ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
-      : {}),
     ...(input.vaultSharePort ? { vaultSharePort: input.vaultSharePort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
     workspaceSnapshotPort: input.workspaceSnapshotPort === null ? null : input.workspaceSnapshotPort ?? {
@@ -1069,7 +1067,7 @@ function createPlatform(input: {
       async completeSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
       async putSnapshotObjectDirect() { throw new Error("Snapshot publication is injected by each test."); },
       async startSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
-      async restoreWorkspaceSnapshot({ durableRoot, ref }) {
+      async restoreWorkspaceSnapshot({ durableRoot, ref, usePreparedRestore }) {
         // Fixture archives use the portable codec; the runtime sees only the v2 port.
         // Encrypted tar transport and staged installation are covered by Cloudflare tests.
         const bytes = await platform.artifactStore.get(ref.archive.plaintextArchiveSha256, { purpose: "workspace_restore" });
@@ -1079,7 +1077,7 @@ function createPlatform(input: {
           await restoreHostedBundleRoots({
             bytes,
             expectedKind: "vault",
-            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? "") },
+            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? (usePreparedRestore === false ? "vault" : "")) },
           });
           await rm(durableRoot, { force: true, recursive: true });
           await rename(stagedRoot, durableRoot);
@@ -1278,7 +1276,6 @@ async function writeMailboxImportStateFile(
 }
 
 function createMailboxPort(input: {
-  assistantProvider?: HostedMailboxFetchResponse["assistantProvider"];
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
@@ -1291,7 +1288,6 @@ function createMailboxPort(input: {
         input.events.push("mailbox.fetch");
         input.fetchRequests?.push(request);
         return {
-          assistantProvider: input.assistantProvider ?? "openai",
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),
@@ -1392,6 +1388,7 @@ function createCanonicalReceiptLogArtifacts(
   entryCount: number,
   options: {
     activeEntryCount?: number;
+    payload?: { bytes: Buffer; targetRelativePath: string };
   } = {},
 ): {
   artifactBytesByHash: Map<string, Uint8Array>;
@@ -1399,8 +1396,18 @@ function createCanonicalReceiptLogArtifacts(
   receiptLogBytes: Buffer;
   receiptLogHash: string;
 } {
+  const payloadHash = options.payload ? sha256Hex(options.payload.bytes) : null;
   const receiptBytes = Buffer.from(`${JSON.stringify({
-    actions: [],
+    actions: options.payload && payloadHash
+      ? [{
+          byteLength: options.payload.bytes.byteLength,
+          contentRef: { byteSize: options.payload.bytes.byteLength, sha256: payloadHash },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: payloadHash,
+          targetRelativePath: options.payload.targetRelativePath,
+        }]
+      : [],
     committedAt: TEST_NOW,
     createdAt: TEST_NOW,
     occurredAt: TEST_NOW,
@@ -1435,6 +1442,9 @@ function createCanonicalReceiptLogArtifacts(
     artifactBytesByHash: new Map<string, Uint8Array>([
       [receiptHash, receiptBytes],
       [receiptLogHash, receiptLogBytes],
+      ...(options.payload && payloadHash
+        ? [[payloadHash, options.payload.bytes] as const]
+        : []),
     ]),
     receiptHash,
     receiptLogBytes,
@@ -1442,11 +1452,12 @@ function createCanonicalReceiptLogArtifacts(
   };
 }
 
-function createSaturatedCanonicalReceiptLogArtifacts(): ReturnType<
-  typeof createCanonicalReceiptLogArtifacts
-> {
+function createSaturatedCanonicalReceiptLogArtifacts(
+  payload?: { bytes: Buffer; targetRelativePath: string },
+): ReturnType<typeof createCanonicalReceiptLogArtifacts> {
   return createCanonicalReceiptLogArtifacts(
     HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+    payload ? { payload } : {},
   );
 }
 
@@ -1899,52 +1910,6 @@ async function enqueueDeviceSyncSystemMailboxItemForTest(input: {
   });
 }
 
-async function enqueueEnvironmentInterviewSystemMailboxItemForTest(input: {
-  item: HostedMailboxItem;
-  vaultRoot: string;
-}) {
-  return await enqueueHostedSystemMailboxItem({
-    item: {
-      item: input.item,
-      payload: {
-        payloadCiphertext: "ciphertext",
-        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-        requestId: "request_entrypoint_environment_interview",
-        source: "inline",
-        status: "resolved",
-      },
-      route: {
-        action: "run-environment-interview",
-        advanceProgress: true,
-        itemRef: {
-          id: input.item.id,
-          kind: input.item.kind,
-          lane: input.item.lane,
-          laneSeq: input.item.laneSeq,
-        },
-        state: "route",
-      },
-    },
-    vaultRoot: input.vaultRoot,
-    wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
-      completedAt: input.item.occurredAt,
-      completionId: "550e8400-e29b-41d4-a716-446655440000",
-      eventId: input.item.dedupeKey,
-      memberId: TEST_USER_ID,
-      occurredAt: input.item.occurredAt,
-      topics: [{
-        answers: [{
-          aspectId: "sleep-environment",
-          indicatorId: "night_temp_c",
-          note: "The bedroom stays near 19 degrees at night.",
-          value: 19,
-        }],
-        topicId: "sleep:0",
-      }],
-    }),
-  });
-}
-
 function createResolvedPendingEffectsSystemMailboxItem(
   item: HostedMailboxItem,
 ): HostedMailboxResolvedImportItem {
@@ -2020,7 +1985,7 @@ function createWorkspaceRunRequest(
 ): HostedWorkspaceInvocationRequest {
   return {
     attemptId: "attempt_synthetic_workspace_run",
-    idleCheckpointDelayMs: 1,
+    runnerIdleTtlMs: 1,
     leaseGeneration: "1",
     userId: TEST_USER_ID,
     workspaceVersion: "0",
@@ -2043,9 +2008,13 @@ function createWorkspaceRuntimeJobInput(input: {
         ...TEST_HOSTED_CODEX_FORWARDED_ENV,
         ...(input.forwardedEnv ?? {}),
       },
-      ...(input.platformEnv === undefined
-        ? {}
-        : { platformEnv: input.platformEnv }),
+      platformEnv: input.platformEnv ?? (input.resolvedConfig?.deviceSync ? {
+        JUNCTION_API_KEY: "sk_us_mailbox_fixture",
+        JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-client-secret",
+        JUNCTION_ENV: "sandbox",
+        JUNCTION_REGION: "us",
+        JUNCTION_API_BASE_URL: "https://junction.example.test",
+      } : {}),
       ...(input.resolvedConfig === undefined ? {} : { resolvedConfig: input.resolvedConfig }),
     },
   };
@@ -2092,12 +2061,11 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6-sol",
     sessionId: "asst_entrypoint_usage",
-    stripeMeterSource: "murph",
     surface: null,
     tokenPricingBasis: "standard",
     totalTokens: 15,
@@ -2150,30 +2118,47 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
       telegramBotConfigured: false,
     },
     deviceSync: {
-      providerConfigs: {
-        whoop: {
-          baseUrl: "https://whoop.example.test",
-          clientId: "synthetic-whoop-client",
-          clientSecret: "synthetic-whoop-secret",
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "synthetic-device-sync-secret",
     },
   };
 }
 
+function buildJunctionSleepFixtureResponse(pathname: string, sleep?: {
+  id: string;
+  start: string;
+  end: string;
+  updated_at: string;
+}): Record<string, unknown> {
+  if (pathname.includes("/user/providers/")) {
+    return { providers: [{ slug: "whoop_v2", name: "WHOOP", status: "connected", resource_availability: { sleep: true } }] };
+  }
+  if (pathname.includes("/summary/sleep/")) {
+    return { sleep: sleep ? [{
+      id: sleep.id, date: `${sleep.end.slice(0, 10)}T00:00:00.000Z`,
+      calendar_date: sleep.end.slice(0, 10), bedtime_start: sleep.start, bedtime_stop: sleep.end,
+      duration: (Date.parse(sleep.end) - Date.parse(sleep.start)) / 1_000,
+      type: "long_sleep", updated_at: sleep.updated_at, source: { provider: "whoop_v2" },
+    }] : [] };
+  }
+  return { sleep_cycle: [], data: [] };
+}
+
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
+  connectionStatus?: "active" | "disconnected";
   nextReconcileAt: string;
   onApplyUpdates?: (() => Promise<void> | void) | null;
   onFetchSnapshot?: ((signal: AbortSignal | null) => Promise<void> | void) | null;
 }): HostedRuntimeDeviceSyncPort & {
   readonly applyUpdatesCalls: number;
   readonly fetchSnapshotCalls: number;
+  readonly fetchSourceSnapshotCalls: number;
 } {
   let applyUpdatesCalls = 0;
   let fetchSnapshotCalls = 0;
+  let fetchSourceSnapshotCalls = 0;
   return {
     async ackDirtyStateProcessed() {
       throw new Error("Device sync dirty ack should not run in this e2e.");
@@ -2183,7 +2168,13 @@ function createSnapshotDeviceSyncPort(input: {
       await input.onApplyUpdates?.();
       return {
         appliedAt: request.occurredAt ?? new Date().toISOString(),
-        updates: [],
+        updates: request.updates.map((update) => ({
+          connection: null,
+          connectionId: update.connectionId,
+          status: "updated" as const,
+          tokenUpdate: "unchanged" as const,
+          writeUpdate: "applied" as const,
+        })),
         userId: TEST_USER_ID,
       };
     },
@@ -2202,6 +2193,9 @@ function createSnapshotDeviceSyncPort(input: {
       };
     },
     async fetchSnapshot(request) {
+      // Junction additionally reads redacted source authority during execution.
+      // Track those explicitly as well as the total snapshot count.
+      if (request?.includeCredentialMaterial === false) fetchSourceSnapshotCalls += 1;
       fetchSnapshotCalls += 1;
       await input.onFetchSnapshot?.(request?.signal ?? null);
       return {
@@ -2211,25 +2205,30 @@ function createSnapshotDeviceSyncPort(input: {
               accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
               connectedAt: TEST_NOW,
               createdAt: TEST_NOW,
-              displayName: "Synthetic WHOOP",
+              displayName: "Synthetic Junction",
               externalAccountId: "synthetic-whoop-account",
               id: input.connectionId,
-              metadata: {},
-              provider: "whoop",
-              scopes: ["offline", "read:recovery", "read:sleep", "read:workout"],
-              status: "active",
+              metadata: {
+                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillWindowStart: "2026-04-26T00:00:00.000Z",
+                junctionHistoricalBackfillWindowEnd: "2026-04-27T00:00:00.000Z",
+              },
+              provider: "junction",
+              scopes: [],
+              status: input.connectionStatus ?? "active",
               updatedAt: TEST_NOW,
             },
             credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: "synthetic-access-token",
-                accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-                keyVersion: "synthetic-key-version",
-                refreshToken: "synthetic-refresh-token",
-                tokenVersion: 1,
-              },
+              kind: "provider_config",
+              providerConfigKey: "junction",
+              credentialMetadata: {},
             },
+            sources: [{
+              sourceProviderSlug: "whoop_v2", displayName: "WHOOP", status: "connected",
+              firstSeenAt: TEST_NOW, lastSeenAt: TEST_NOW, lastDataAt: null,
+              resourceCount: 3, resourceAvailabilitySummary: { sleep: true, activity: true, workouts: true },
+              lastErrorCode: null, lastErrorMessage: null,
+            }],
             localState: {
               lastErrorCode: null,
               lastErrorMessage: null,
@@ -2245,6 +2244,7 @@ function createSnapshotDeviceSyncPort(input: {
         userId: TEST_USER_ID,
       };
     },
+    get fetchSourceSnapshotCalls() { return fetchSourceSnapshotCalls; },
     get fetchSnapshotCalls() {
       return fetchSnapshotCalls;
     },
@@ -2626,6 +2626,7 @@ async function runHostedWorkspaceRuntimeJobInProcess(
 }
 
 export {
+  buildJunctionSleepFixtureResponse,
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
   OPENAI_HTTPS_PROBE_SCRIPT,
@@ -2635,7 +2636,6 @@ export {
   TEST_NOW,
   TEST_USER_ID,
   assertPrivateDirectoryMode,
-  continueRuntimeLiveness,
   createAssistantAskRequestedWake,
   createAssistantProviderUsageDraft,
   createAssistantUsageRecord,
@@ -2669,7 +2669,6 @@ export {
   createWorkspaceState,
   describeCheckpointConversationWatermarkTransition,
   enqueueDeviceSyncSystemMailboxItemForTest,
-  enqueueEnvironmentInterviewSystemMailboxItemForTest,
   enqueuePendingEffectsSystemMailboxItemForTest,
   ensureHostedBootstrapMetadataForSystemMailboxTest,
   execFileAsync,

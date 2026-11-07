@@ -59,7 +59,7 @@ const lateInputDelayAfterWakeMs = readPositiveIntegerEnv(
   "MURPH_E2E_ACTIVE_TURN_LATENCY_LATE_INPUT_DELAY_MS",
   10_000,
 );
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const configuredDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -304,7 +304,7 @@ async function runPostDeliveryMaintenancePreemptionProbe(input: {
   const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
 
   await startProbeScenario({
-    idleCheckpointDelayMs: 3_000,
+    runnerIdleTtlMs: 3_000,
     localDatabaseUrl: input.localDatabaseUrl,
     memberPhone,
   });
@@ -534,7 +534,7 @@ async function runIdleShutdownDelayProbe(input: {
 }
 
 async function startProbeScenario(input: {
-  idleCheckpointDelayMs?: number;
+  runnerIdleTtlMs?: number;
   localDatabaseUrl: string;
   memberPhone: string;
 }): Promise<void> {
@@ -543,7 +543,7 @@ async function startProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(input.idleCheckpointDelayMs ?? 1_000),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(input.runnerIdleTtlMs ?? 1_000),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
@@ -569,8 +569,7 @@ async function startIdleShutdownDelayProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleShutdownDelayProbeIdleDelayMs),
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(idleShutdownDelayProbeIdleDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",

@@ -17,7 +17,7 @@ import {
   MURPH_TAGLINE_LINE_1,
   MURPH_TAGLINE_LINE_2,
 } from "@/src/lib/site-metadata";
-import { type HeroContactInfo } from "@/src/lib/hero-contact-info";
+import type { HeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
   buildMurphSmsHref,
   buildMurphTelegramTextHref,

@@ -1,4 +1,5 @@
 import {
+  HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS,
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
 } from "@murphai/assistant-engine";
@@ -9,15 +10,37 @@ import type {
 } from "@murphai/hosted-execution";
 import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 
+export const HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS = [
+  "turnTimingPreForegroundMs",
+  "turnTimingPreForegroundPreludeMs",
+  "turnTimingDeviceWakeProjectionMs",
+  "turnTimingDeviceWakeModuleLoadMs",
+  "turnTimingSystemMailboxWakeProjectionMs",
+  "turnTimingProviderCleanupPlanningMs",
+] as const;
+
+export type HostedAssistantPreForegroundTiming = Partial<Record<
+  typeof HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS[number], number
+>>;
+
 const HOSTED_ASSISTANT_TURN_TIMING_STAGES = new Set([
   "provider-result-returned",
   "usage-recorded",
   "turn-artifacts-finalized",
   "reply-dispatched",
+  "turn-delivery-finalized",
+  "auto-reply-outcome-committed",
   "scan-state-persisted",
   "automation-pass-finished",
   "foreground-delivery-phase-started",
   "foreground-delivery-phase-finished",
+]);
+
+const HOSTED_ASSISTANT_TURN_TIMING_FINAL_RESPONSE_COMPLETIONS = new Set([
+  "invalid",
+  "observed",
+  "superseded",
+  "unavailable",
 ]);
 
 const HOSTED_ASSISTANT_TURN_TIMING_PROVIDER_OUTCOME_KINDS = new Set([
@@ -50,7 +73,10 @@ const hostedTurnTimingDetailReaders = {
   scanStateChanged: readHostedTurnTimingBoolean,
   turnTimingDeliveryIntentId: readHostedTurnTimingIdentifier,
   turnTimingElapsedMs: readHostedTurnTimingNonnegativeNumber,
+  turnTimingFinalResponseCompletedToProviderResultMs: readHostedTurnTimingNonnegativeInteger,
+  turnTimingFinalResponseCompletion: readHostedTurnTimingFinalResponseCompletion,
   turnTimingProviderRequestElapsedMs: readHostedTurnTimingNonnegativeNumber,
+  turnTimingProviderResultAtEpochMs: readHostedTurnTimingNonnegativeInteger,
   turnTimingSinceProviderResultMs: readHostedTurnTimingNonnegativeNumber,
   turnTimingStage: readHostedTurnTimingStage,
   turnTimingStepElapsedMs: readHostedTurnTimingNonnegativeNumber,
@@ -113,6 +139,14 @@ export function readHostedAssistantTurnTimingTrace(
     }
   }
 
+  for (const key of HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS) {
+    const value = readHostedTurnTimingNonnegativeNumber(record, key);
+    if (value !== undefined) details[key] = value;
+  }
+  for (const key of HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS) {
+    const value = readHostedTurnTimingNonnegativeNumber(record, key);
+    if (typeof value === "number") details[key] = value;
+  }
   return details;
 }
 
@@ -162,6 +196,17 @@ function readHostedTurnTimingAllowedString(
   return stringValue && allowedValues.has(stringValue) ? stringValue : undefined;
 }
 
+function readHostedTurnTimingFinalResponseCompletion(
+  debug: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  return readHostedTurnTimingAllowedString(
+    debug,
+    key,
+    HOSTED_ASSISTANT_TURN_TIMING_FINAL_RESPONSE_COMPLETIONS,
+  );
+}
+
 function readHostedTurnTimingBoolean(
   debug: Record<string, unknown>,
   key: string,
@@ -182,6 +227,16 @@ function readHostedTurnTimingNonnegativeNumber(
     return null;
   }
   return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function readHostedTurnTimingNonnegativeInteger(
+  debug: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = debug[key];
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
 }

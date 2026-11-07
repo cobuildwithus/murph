@@ -27,7 +27,9 @@ import {
   type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -62,6 +64,7 @@ import {
 import {
   hasPhoneCallRuntimeNoActiveEffect,
   markPhoneCallRuntimeNoActiveEffect,
+  type HostedPhoneCallRuntimeRecord,
   type PhoneCallRuntime,
 } from "./types";
 
@@ -299,11 +302,12 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   input.signal.throwIfAborted();
-  const transferNumber = brief.allowTransferToUser
-    ? await resolveTransferNumber({
-        memberId: input.memberId,
-      })
-    : null;
+  const { callAudience, transferNumber } = await resolveHostedPhoneCallParticipants({
+    brief,
+    memberId: input.memberId,
+    notificationDestination,
+    resolveTransferNumber,
+  });
   input.signal.throwIfAborted();
 
   const callId = createHostedPhoneCallId();
@@ -410,6 +414,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     }
     started = await runtime.start({
       brief,
+      callAudience,
       id: call.id,
       memberId: input.memberId,
       transferNumber,
@@ -610,6 +615,28 @@ function assertHostedPhoneCallDirectNotificationDestination(input: {
       "Hosted phone call result notification channel does not match the direct route.",
     );
   }
+}
+
+async function resolveHostedPhoneCallParticipants(input: {
+  brief: HostedPhoneCallBrief;
+  memberId: string;
+  notificationDestination: HostedAssistantNotificationDestination;
+  resolveTransferNumber: typeof resolveVerifiedMemberTransferNumber;
+}): Promise<Pick<HostedPhoneCallRuntimeRecord, "callAudience" | "transferNumber">> {
+  const directCall = !isHostedThreadContainerNotificationDestination(input.notificationDestination)
+    && input.notificationDestination.route.threadIsDirect === true;
+  const verifiedMemberNumber = directCall || input.brief.allowTransferToUser
+    ? await input.resolveTransferNumber({ memberId: input.memberId })
+    : null;
+  const normalizedMemberNumber = normalizePhoneNumber(verifiedMemberNumber);
+  return {
+    callAudience: directCall
+      && normalizedMemberNumber !== null
+      && normalizePhoneNumber(input.brief.to.phoneNumber) === normalizedMemberNumber
+      ? "member"
+      : "third_party",
+    transferNumber: input.brief.allowTransferToUser ? verifiedMemberNumber : null,
+  };
 }
 
 function normalizeHostedPhoneCallBriefForConversation(input: {
@@ -904,6 +931,16 @@ function resolveHostedPhoneCallStore(
         };
       }
 
+      // Product admission includes lapsed people. A new paid provider effect
+      // additionally needs current AI capacity; replaying an existing call does not.
+      const usage = await readHostedAiUsageGate({ memberId: input.data.memberId, prisma: tx });
+      if (!usage.allowed) {
+        throw hostedOnboardingError({
+          code: "HOSTED_PHONE_CALL_USAGE_REQUIRED",
+          httpStatus: 403,
+          message: "AI usage is unavailable for a new phone call.",
+        });
+      }
       const pendingCall = await tx.hostedPhoneCall.findFirst({
         where: hostedPhoneCallNewRequestBlockerWhere(input.data.memberId),
       });

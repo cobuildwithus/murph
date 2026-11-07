@@ -4,6 +4,10 @@ import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("@vercel/analytics", () => ({ track: vi.fn() }));
+vi.mock("next/image", () => ({
+  default: ({ alt, src }: { alt?: string; src: string }) =>
+    createElement("img", { alt: alt ?? "", src }),
+}));
 
 import { track } from "@vercel/analytics";
 
@@ -150,7 +154,8 @@ test("ComputerHandoffActiveView unmounts the iframe while completing a handoff",
   const fallbackLink = successStatus.querySelector("a");
   assert.ok(fallbackLink);
   expect(fallbackLink.getAttribute("href")).toBe("sms:+15550100001?body=Done");
-  expect(fallbackLink.textContent).toContain("Open Murph");
+  expect(fallbackLink.textContent).toContain("Open Messages");
+  expect(fallbackLink.getAttribute("aria-label")).toBe("Open Murph to send your reply");
   expect(container.querySelector("iframe")).toBeNull();
   expect(track).toHaveBeenCalledWith("handoff_completed");
 });

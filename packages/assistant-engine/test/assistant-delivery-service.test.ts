@@ -454,7 +454,7 @@ test('current audience delivery fields prefer actor id over legacy participant i
   })
 })
 
-test('typing indicators use the current audience route', async () => {
+test('group notification audiences never start or refresh typing', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: 'linq-participant',
@@ -500,17 +500,13 @@ test('typing indicators use the current audience route', async () => {
     }),
   })
 
-  expect(indicator).not.toBeNull()
-  await vi.waitFor(() => {
-    expect(startLinqTyping).toHaveBeenCalledWith({
-      replyToMessageId: null,
-      target: 'linq-thread',
-      targetKind: 'thread',
-    })
-  })
+  expect(indicator).toBeNull()
+  expect(startLinqTyping).not.toHaveBeenCalled()
   await indicator?.refreshAfterMessage?.()
-  expect(refreshNow).toHaveBeenCalledTimes(1)
+  expect(refreshNow).not.toHaveBeenCalled()
+  await indicator?.refreshNow?.()
   await indicator?.stop()
+  expect(startLinqTyping).not.toHaveBeenCalled()
 })
 
 test('typing indicators forward explicit Linq targets with reply-to proof', async () => {
@@ -588,7 +584,7 @@ test('typing indicator stop waits for underlying stop and blocks later refreshes
       },
       identityId: null,
       threadId: 'linq-thread',
-      threadIsDirect: false,
+      threadIsDirect: true,
     },
   })
   const input: AssistantMessageInput = {
@@ -626,7 +622,7 @@ test('typing indicator stop waits for underlying stop and blocks later refreshes
         actorId: 'linq-participant',
         channel: 'linq',
         threadId: 'linq-thread',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
     }),
   })
@@ -669,7 +665,7 @@ test('typing indicator stop does not wait for a pending start', async () => {
       },
       identityId: null,
       threadId: 'linq-thread',
-      threadIsDirect: false,
+      threadIsDirect: true,
     },
   })
   const input: AssistantMessageInput = {
@@ -699,7 +695,7 @@ test('typing indicator stop does not wait for a pending start', async () => {
         actorId: 'linq-participant',
         channel: 'linq',
         threadId: 'linq-thread',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
     }),
   })
@@ -739,7 +735,7 @@ test('typing indicator stop is bounded when the underlying stop stalls', async (
         },
         identityId: null,
         threadId: 'linq-thread',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
     })
     const input: AssistantMessageInput = {
@@ -774,7 +770,7 @@ test('typing indicator stop is bounded when the underlying stop stalls', async (
           actorId: 'linq-participant',
           channel: 'linq',
           threadId: 'linq-thread',
-          threadIsDirect: false,
+          threadIsDirect: true,
         },
       }),
     })
@@ -846,8 +842,8 @@ function createAssistantSession(input?: {
 }): AssistantSession {
   const providerOptions = serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
   })
@@ -903,7 +899,6 @@ function createSharedPlan(input?: {
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {
@@ -927,3 +922,70 @@ function createSharedPlan(input?: {
     requestedWorkingDirectory: '/tmp/assistant-delivery-service-test',
   }
 }
+
+test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isolated', 'observer-pending', 'observer-failed', 'prepared'])(
+  'typing evidence follows turn admission and handle lifetime: %s', async (scenario) => {
+    const signal = new AbortController()
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => { release = resolve })
+    let active = true
+    const onTypingAccepted = vi.fn((_event: { acceptedInputIds: readonly string[]; at: string; channel: string }) => {
+      if (scenario === 'observer-pending') return new Promise<void>(() => {})
+      if (scenario === 'observer-failed') throw new Error('Synthetic observer failure')
+    })
+    const startTelegramTyping = vi.fn(async () => {
+      await ready
+      if (scenario === 'failed') throw new Error('Synthetic provider failure')
+      return {
+        ...(scenario === 'prepared' ? { acceptedAt: '2026-09-01T00:00:00.000Z' } : {}),
+        isActive: () => active, stop: async () => { active = false },
+      }
+    })
+    const indicator = startAssistantChannelTypingIndicator({
+      channelDependencies: { startTelegramTyping, onTypingAccepted },
+      input: {
+        abortSignal: signal.signal, channel: 'telegram', deliverResponse: true,
+        bindingDeliveryTarget: '12345', prompt: 'Synthetic initial', vault: '/vaults/test',
+      },
+      session: createAssistantSession({ binding: {
+        actorId: null, channel: 'telegram', conversationKey: null, identityId: null,
+        delivery: { kind: 'thread', target: '12345' }, threadId: '12345', threadIsDirect: true,
+      } }),
+      sharedPlan: createSharedPlan({ audience: {
+        actorId: null, channel: 'telegram', threadId: '12345', threadIsDirect: true,
+      } }),
+    })
+    try {
+      indicator?.recordAcceptedInputs(['initial'])
+      if (scenario === 'pending' || scenario === 'failed') {
+        indicator?.recordAcceptedInputs(['followup'])
+        expect(onTypingAccepted).not.toHaveBeenCalled()
+      }
+      release()
+      if (scenario === 'failed') {
+        await indicator?.refreshNow?.()
+        expect(onTypingAccepted).not.toHaveBeenCalled()
+        return
+      }
+      await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalled())
+      const at = onTypingAccepted.mock.calls[0]![0].at
+      if (scenario === 'prepared') expect(at).toBe('2026-09-01T00:00:00.000Z')
+      if (scenario === 'stopped') await indicator?.stop()
+      if (scenario === 'aborted') signal.abort()
+      if (scenario === 'expired') active = false
+      if (scenario !== 'pending' && scenario !== 'isolated') indicator?.recordAcceptedInputs(['followup'])
+      // Flush the same resolved readiness promise without waiting on the observer.
+      await indicator?.refreshNow?.()
+      expect(onTypingAccepted.mock.calls.map(([event]) => event)).toEqual([
+        { acceptedInputIds: ['initial'], at, channel: 'telegram' },
+        ...(['active', 'pending', 'observer-pending', 'observer-failed', 'prepared'].includes(scenario)
+          ? [{ acceptedInputIds: ['followup'], at, channel: 'telegram' }]
+          : []),
+      ])
+      expect(startTelegramTyping).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await indicator?.stop()
+    }
+  },
+)

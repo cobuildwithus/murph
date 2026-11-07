@@ -8,7 +8,7 @@ Success means the 90-day historical retry only completes on useful summary recor
 
 ## Constraints
 
-- Preserve unrelated working-tree changes, especially current Murph Age files.
+- Preserve unrelated working-tree changes.
 - Keep the retry policy provider-local; do not add a generic service-layer empty retry, hosted dirty recovery policy, or new persisted backfill table.
 - Do not add Junction backfill payload fields outside the manifest.
 - Do not log or persist raw provider payloads, health data, local paths, secrets, account identifiers, or auth headers beyond existing import boundaries.

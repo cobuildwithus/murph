@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "game-prove-it",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Ask a friend to prove it",
+    "summary": "In a 1v1 game, tap your friend's photo on Home and choose Prove it, and Murph opens a short, playful case in your game chat asking them for proof.",
+    "details": "You get one per game, and your friend sees it came from you. Murph never rules on it: the post stands unless your friend marks the day as not counting, and then you get your Prove it back. Available in the latest app version.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4509]
+  }
+}

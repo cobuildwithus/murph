@@ -23,7 +23,6 @@ const SOURCE_ROOTS = [
   'packages/parsers/src',
   'packages/query/src',
   'packages/runtime-state/src',
-  'packages/setup-cli/src',
   'packages/vault-usecases/src',
 ] as const
 

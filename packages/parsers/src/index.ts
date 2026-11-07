@@ -105,7 +105,7 @@ export type {
 export { createInboxParserService } from "./service.js";
 export type { ParseAttachmentInput, ParseAttachmentResult } from "./pipelines/parse-attachment.js";
 export { parseAttachment } from "./pipelines/parse-attachment.js";
-export type { RunAttachmentParseJobResult, RunAttachmentParseWorkerInput } from "./pipelines/worker.js";
+export type { PreparedAttachmentParseJob, RunAttachmentParseJobResult, RunAttachmentParseWorkerInput } from "./pipelines/worker.js";
 export { runAttachmentParseJobOnce, runAttachmentParseWorker } from "./pipelines/worker.js";
 export type { CommandResult } from "./shared.js";
 export { runCommand } from "./shared.js";

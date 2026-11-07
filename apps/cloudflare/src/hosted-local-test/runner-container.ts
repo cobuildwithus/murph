@@ -15,7 +15,6 @@ import {
 import {
   RunnerContainer as BaseRunnerContainer,
 } from "../runner-container.ts";
-import { readHostedRunnerDeployment } from "../hosted-runner-release.ts";
 import {
   handleHostedRunnerGeminiOutbound,
   handleHostedRunnerOpenAiOutbound,
@@ -49,6 +48,7 @@ import {
 
 export interface HostedLocalTestRunnerOutboundContext {
   containerId?: string;
+  className?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -202,14 +202,6 @@ export class NextRunnerContainer extends RunnerContainer {
   }
 }
 
-export class SmallRunnerContainer extends RunnerContainer {
-  protected override readonly slotNamespace = "small" as const;
-
-  constructor(state: unknown, env: Readonly<Record<string, unknown>>) {
-    super(state, env, readHostedRunnerDeployment(env)?.active.bank ?? "primary");
-  }
-}
-
 // The hosted-local generated wrangler config omits the Workers AI binding for
 // the test-routes profile (dev profiles get the real binding), so the
 // transcribe egress handler would fail closed in E2E. Inject a
@@ -262,7 +254,7 @@ const openAiHandler: HostedLocalTestRunnerOutboundHandler | undefined =
 if (!workspaceSnapshotStoreHandler || !effectsPortHandler || !openAiHandler) {
   throw new Error("Hosted-local test composition requires snapshot and image egress handlers.");
 }
-const canonicalCheckpointLostAckUserIds = new Set<string>();
+const canonicalCheckpointLostAcks = new Map<string, { remaining: number; requireCommit: boolean }>();
 const snapshotPublicationCorruptionUserIds = new Set<string>();
 
 export type HostedLocalShutdownCheckpointPublicationBarrierState =
@@ -284,7 +276,10 @@ export function armCanonicalCheckpointLostAck(userId: string): void {
   if (normalizedUserId.length === 0) {
     throw new TypeError("Hosted-local canonical checkpoint lost-ack control requires a user id.");
   }
-  canonicalCheckpointLostAckUserIds.add(normalizedUserId);
+  const armed = canonicalCheckpointLostAcks.get(normalizedUserId);
+  canonicalCheckpointLostAcks.set(normalizedUserId, {
+    remaining: (armed?.remaining ?? 0) + 1, requireCommit: armed?.requireCommit ?? true,
+  });
 }
 
 export function wrapCanonicalCheckpointLostAckForTest(
@@ -294,31 +289,36 @@ export function wrapCanonicalCheckpointLostAckForTest(
     const userId = request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)?.trim() ?? "";
     if (
       userId.length === 0
-      || !canonicalCheckpointLostAckUserIds.has(userId)
+      || !canonicalCheckpointLostAcks.has(userId)
       || !await isCanonicalRuntimeCheckpointRequest(request)
     ) {
       return await handler(request, env, ctx);
     }
 
     // Claim atomically after request classification and before awaiting the
-    // real handler so concurrent checkpoints cannot receive the same one-shot
-    // fault. Restore the arm if the real checkpoint does not commit successfully.
-    if (!canonicalCheckpointLostAckUserIds.delete(userId)) {
+    // real handler so concurrent checkpoints cannot receive the same fault.
+    // The first drop requires a commit; subsequent armed drops include conflicts.
+    const armed = canonicalCheckpointLostAcks.get(userId);
+    if (!armed || !canonicalCheckpointLostAcks.delete(userId)) {
       return await handler(request, env, ctx);
     }
     let committedResponse: Response;
     try {
       committedResponse = await handler(request, env, ctx);
     } catch (error) {
-      canonicalCheckpointLostAckUserIds.add(userId);
+      canonicalCheckpointLostAcks.set(userId, armed);
       throw error;
     }
     if (
-      !committedResponse.ok
-      || !await isCommittedCanonicalRuntimeCheckpointResponse(committedResponse)
+      armed.requireCommit && (!committedResponse.ok
+        || !await isCommittedCanonicalRuntimeCheckpointResponse(committedResponse))
     ) {
-      canonicalCheckpointLostAckUserIds.add(userId);
+      canonicalCheckpointLostAcks.set(userId, armed);
       return committedResponse;
+    }
+
+    if (armed.remaining > 1) {
+      canonicalCheckpointLostAcks.set(userId, { remaining: armed.remaining - 1, requireCommit: false });
     }
 
     emitHostedExecutionStructuredLog({
@@ -805,4 +805,3 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
 
 RunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;
 NextRunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;
-SmallRunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;

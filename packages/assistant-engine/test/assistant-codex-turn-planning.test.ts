@@ -1,12 +1,18 @@
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
+import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
+import { createRoutePlanningTailFixture } from './support/route-planning-tail.js'
+import * as followUps from '../src/assistant/follow-ups.js'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import {
@@ -17,6 +23,7 @@ import {
 import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
+import { GAME_LIVE_LORE_GUIDANCE } from '@murphai/hosted-execution/runtime-control'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   normalizeAssistantProviderConfig,
@@ -57,14 +64,12 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
     planningMocks.readAssistantCliSurfaceBootstrapContext,
   scopeAssistantCliSurfaceContractForAssistant: (input: {
     contract: string | null
-    researchAvailable?: boolean
   }) => input.contract === null
     ? null
     : input.contract
         .split('\n')
         .filter((line) =>
           !/^- `assistant style (?:show|set|reset)`/u.test(line)
-          && (input.researchAvailable !== false || !/^- `research(?: |`)/u.test(line))
         )
         .join('\n'),
 }))
@@ -126,7 +131,6 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
-  MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
   MURPH_AUTOMATION_TOOL,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 import {
@@ -150,6 +154,8 @@ import {
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
+  getAssistantSession,
+  runAssistantCodexResumeRetention,
   saveAssistantSession,
 } from '../src/assistant/store.js'
 import {
@@ -182,11 +188,37 @@ import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
+import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
+import { executeConversationPollTool } from '../src/assistant-codex/dynamic-tools/conversation-polls.js'
 import {
   assistantChannelDeliverySchema,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
+import { buildCodexThreadIdentity, type CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
+
+// Minimal synthetic prior advertisement with types factored outside action branches.
+const priorFactoredAutomationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: { enum: ['inspect', 'patch'] },
+    lookup: { type: 'string' },
+    expectedUpdatedAt: { type: 'string' },
+  },
+  required: ['action'],
+  oneOf: [
+    {
+      properties: { action: { const: 'inspect' }, lookup: {} },
+      required: ['action', 'lookup'],
+      additionalProperties: false,
+    },
+    {
+      properties: { action: { const: 'patch' }, lookup: {}, expectedUpdatedAt: {} },
+      required: ['action', 'lookup', 'expectedUpdatedAt'],
+      additionalProperties: false,
+    },
+  ],
+}
 
 afterEach(() => {
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
@@ -204,6 +236,117 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('attributes each thread rotation without changing provider declarations', async () => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
+      executionContext: null, input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(), sharedPlan: createSharedPlan(),
+    }
+    const baseline = await resolveAssistantRouteTurnPlan(planInput)
+    expect(baseline.planningDiagnostics.threadRotationReason).toBe('binding_absent')
+    const binding = {
+      assistantContractFingerprint: baseline.assistantContractFingerprint,
+      routeFingerprint: planInput.route.routeFingerprint ?? planInput.route.routeId,
+      threadId: 'synthetic-resume-thread',
+    }
+    for (const reason of [null, 'route_mismatch', 'contract_mismatch', 'profile_isolated', 'native_resume_disabled'] as const) {
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: reason !== 'native_resume_disabled' })
+      const plan = await resolveAssistantRouteTurnPlan({
+        ...planInput,
+        profile: { ...planInput.profile, threadScope: reason === 'profile_isolated' ? 'isolated-thread' : 'session-thread' },
+        session: createSession({ resumeState: {
+          ...binding,
+          ...(reason === 'route_mismatch' ? { routeFingerprint: 'synthetic-other-route' } : {}),
+          ...(reason === 'contract_mismatch' ? { assistantContractFingerprint: 'f'.repeat(64) } : {}),
+        } }),
+      })
+      expect(plan.planningDiagnostics.threadRotationReason).toBe(reason)
+      expect(plan.resume?.codexThreadId ?? null).toBe(reason === null ? binding.threadId : null)
+      expect(plan.dynamicTools).toEqual(baseline.dynamicTools)
+      expect(plan.assistantContractFingerprint).toEqual(baseline.assistantContractFingerprint)
+      for (const key of ['systemPrompt', 'developerInstructions', 'turnContextPrompt'] as const) {
+        expect(Buffer.from(plan[key] ?? '')).toEqual(Buffer.from(baseline[key] ?? ''))
+      }
+    }
+  })
+
+  it.each([0, 20, 200])('attributes the serial route-planning tail with %i automations without changing prompt bytes', async (count) => {
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'murph-tail-planning-'))
+    let clock = Date.parse('2026-11-05T12:00:00.000Z')
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    const originalFollowUp = followUps.resolveAssistantFollowUpTurnContext
+    const followUp = vi.spyOn(followUps, 'resolveAssistantFollowUpTurnContext')
+    try {
+      await createRoutePlanningTailFixture(vault, count)
+      const session = createSession()
+      session.binding = {
+        ...session.binding, channel: 'telegram', actorId: 'synthetic-actor',
+        threadId: 'synthetic-thread', threadIsDirect: true,
+      }
+      const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
+        executionContext: null,
+        input: { ...createMessageInput(), vault },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+        route: createRoute(), session, sharedPlan: createSharedPlan(),
+      }
+      const baseline = await resolveAssistantRouteTurnPlan(planInput)
+      expect(baseline.turnContextPrompt?.includes('Pending optional follow-ups')).toBe(count > 0)
+      for (const branch of ['followUp', 'refresh', 'currentState'] as const) {
+        followUp.mockImplementation(async (input) => {
+          const result = await originalFollowUp(input)
+          if (branch === 'followUp') clock += 41
+          return result
+        })
+        planningMocks.refreshAssistantContextSnapshotBestEffort.mockImplementation(async () => {
+          if (branch === 'refresh') clock += 73
+          return { pendingDirtyDomains: [], refreshed: false, skipped: true }
+        })
+        planningMocks.readAssistantContextSnapshotPrompt.mockImplementation(async () => {
+          if (branch === 'currentState') clock += 29
+          return null
+        })
+        const plan = await resolveAssistantRouteTurnPlan(planInput)
+        expect(plan.planningDiagnostics).toMatchObject({
+          followUpContextElapsedMs: branch === 'followUp' ? 41 : 0,
+          assistantContextSnapshotRefreshElapsedMs: branch === 'refresh' ? 73 : 0,
+          assistantContextSnapshotElapsedMs: branch === 'currentState' ? 29 : 0,
+          routePlanningMeasuredElapsedMs: branch === 'followUp' ? 41 : branch === 'refresh' ? 73 : 29,
+          routePlanningUnaccountedElapsedMs: 0,
+          routePlanningSlowestStage: branch === 'followUp' ? 'follow_up_context'
+            : branch === 'refresh' ? 'assistant_context_snapshot_refresh' : 'assistant_context_snapshot',
+        })
+        for (const key of ['systemPrompt', 'developerInstructions', 'turnContextPrompt'] as const) {
+          expect(Buffer.from(plan[key] ?? '')).toEqual(Buffer.from(baseline[key] ?? ''))
+        }
+        expect(plan.resume).toEqual(baseline.resume)
+        expect(plan.followUpInvocation).toBe(baseline.followUpInvocation)
+        expect(plan.followUpAttachmentAllowed).toBe(baseline.followUpAttachmentAllowed)
+      }
+    } finally {
+      followUp.mockRestore()
+      now.mockRestore()
+      await rm(vault, { recursive: true, force: true })
+    }
+  })
+
+  it('reports null for a foreground snapshot refresh the turn skipped', async () => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: { promptProfile: 'assistant-ask-continuation', threadScope: 'isolated-thread', toolProfile: 'output-only-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
+    expect(plan.planningDiagnostics?.assistantContextSnapshotRefreshElapsedMs).toBeNull()
+  })
+
   it('characterizes complete route-plan outputs across planner branch families', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
@@ -333,6 +476,39 @@ describe('assistant Codex turn planning', () => {
         }),
       }),
     }
+    // Direct turns load the weekly audit rule from its skill; group turns
+    // retain the resident rule. Fingerprints characterize both compositions.
+    const feedbackSkill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'product-feedback', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(feedbackSkill).toContain(
+      'Scheduled audits report evidence and coverage limits without questions.',
+    )
+    for (const plan of [plans.group]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain(
+          'Scheduled audits report evidence and coverage limits without questions.',
+        )
+      }
+    }
+    for (const plan of [plans.direct, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
+        expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
+        expect(instructions).toContain('start from exact supplied page references')
+        expect(instructions).toContain(
+          'let the child do this discovery instead of first loading the index and page bodies in root',
+        )
+        expect(instructions).not.toContain(
+          'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
+        )
+        expect(instructions).toContain('`vault-cli knowledge upsert --slug <slug> --body <markdown>`')
+        expect(instructions).not.toContain('dedicated knowledge write surface')
+      }
+    }
+    for (const instructions of [plans.group.systemPrompt, plans.group.developerInstructions]) {
+      expect(instructions).not.toContain('knowledge upsert')
+    }
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
     ) => {
@@ -349,11 +525,11 @@ describe('assistant Codex turn planning', () => {
       // snapshot below retains its pre-adapter identity projection so no
       // unrelated planner output is rebaselined or exempted by this migration.
       expect(plan.assistantContractFingerprint).toBe(fingerprintThreadDeclarations({
-        baseInstructions: start.baseInstructions as string,
-        developerInstructions: start.developerInstructions as string | null,
         dynamicTools: start.dynamicTools,
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }))
+      const { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: catalog, ...historicalCliEnv } = plan.cliEnv
+      expect(catalog).toBe('/synthetic/hosted-models.json')
       return createHash('sha256').update(JSON.stringify({
         assistantCliContract: plan.assistantCliContract,
         assistantContractFingerprint: fingerprintThreadDeclarations({
@@ -364,7 +540,7 @@ describe('assistant Codex turn planning', () => {
         }),
         assistantPreferredElevenLabsVoiceId:
           plan.assistantPreferredElevenLabsVoiceId,
-        cliEnv: plan.cliEnv,
+        cliEnv: historicalCliEnv,
         codexContinuation: plan.codexContinuation,
         conversationHistoryMessages: plan.conversationHistoryMessages,
         developerInstructions: plan.developerInstructions,
@@ -395,11 +571,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "757568d3540567e1636768d073f456bdf2a41cde31565d7e31a6e3c061a31cf1",
-        "group": "054070d3529e0550288c4393ac6bc943e8179587bc4977b2dbfc6e03d40c2918",
-        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
-        "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "a0115a2444bc2e56bc1c413fc02af91731685cf17a2a2a767432416a80bfbe06",
+        "direct": "6c3b1413186ac3a49b38ce055d1cbd25bb6d5ed09010ef4cd596147518685a8c",
+        "group": "5e8717c31c8b36b5a25aeb9ff3ec646ac67609f76b296de49b344416649ee480",
+        "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
+        "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
+        "scheduledEmail": "5749052441aa37a3b6288d5a8c5734dd5f0094a98adae3b92e84bbfdb5e3674f",
       }
     `)
   })
@@ -454,6 +630,8 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt)
       .toHaveBeenCalledTimes(1)
     expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+    expect(directPlan.systemPrompt).toContain('Follow relevant saved answer formats; offer at most one optional follow-up.')
+    expect(directPlan.systemPrompt).not.toContain('and offer at most one useful next step.')
 
     planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
@@ -480,186 +658,6 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(groupPlan.systemPrompt).not.toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
-  })
-
-  it('exposes grounded research guidance only when Exa is configured across conversation routes', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
-      'Murph CLI Contract:',
-      '- `research scout`: Search current human research.',
-    ].join('\n'))
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
-    const preferenceContext = {
-      assistantPersona: null,
-      assistantPersonality: null,
-      assistantTone: null,
-      assistantVoice: null,
-    }
-    const profile = {
-      promptProfile: 'conversation' as const,
-      threadScope: 'session-thread' as const,
-      toolProfile: 'provider-turn' as const,
-    }
-    const promptTimeContext = {
-      currentLocalDate: '2026-08-06',
-      currentTimeZone: 'America/New_York',
-    }
-    const route = createRoute()
-    const resolvePlan = async (input: {
-      channel?: 'email' | 'telegram'
-      configured: boolean
-      group?: boolean
-      progressAvailable?: boolean
-      scheduled?: boolean
-    }) => {
-      const group = input.group ?? false
-      const channel = input.channel ?? 'telegram'
-      return await resolveAssistantRouteTurnPlan({
-        executionContext: group
-          ? {
-              hosted: {
-                dynamicContextPrompts: [],
-                memberId: 'member-research-fixture',
-                userEnvKeys: input.configured ? ['EXA_API_KEY'] : [],
-              },
-            }
-          : null,
-        input: {
-          ...createMessageInput(),
-          channel,
-          threadIsDirect: !group,
-          ...(input.scheduled
-            ? {
-                scheduledAutomationAuthority: {
-                  automationId: 'automation_research_fixture',
-                  occurrenceAt: '2026-08-06T13:00:00.000Z',
-                },
-                scheduledOccurrenceAt: '2026-08-06T13:00:00.000Z',
-                turnTrigger: 'automation-cron' as const,
-              }
-            : {}),
-        },
-        preferenceContext,
-        profile,
-        promptTimeContext,
-        progressDelivery: input.progressAvailable
-          ? {
-              send: async () => ({ kind: 'sent', source: 'model' }),
-            }
-          : null,
-        route,
-        session: createSession(),
-        sharedPlan: createSharedPlan({
-          cliAccess: {
-            env: input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {},
-            rawCommand: 'vault-cli',
-            setupCommand: 'murph',
-          },
-        }, {
-          channel,
-          threadIsDirect: !group,
-          threadId: 'thread-test',
-        }),
-      })
-    }
-
-    for (const configuredPlan of await Promise.all([
-      resolvePlan({ configured: true }),
-      resolvePlan({ configured: true, group: true }),
-      resolvePlan({ configured: true, scheduled: true }),
-    ])) {
-      expect(configuredPlan.systemPrompt).toContain('Configured Exa research:')
-      expect(configuredPlan.developerInstructions).toContain('Configured Exa research:')
-      expect(configuredPlan.turnContextPrompt).not.toContain('Configured Exa research:')
-      expect(configuredPlan.systemPrompt).toContain(
-        '`resultIndex` maps to a result',
-      )
-      expect(configuredPlan.systemPrompt).toContain(
-        'no usable current source',
-      )
-      expect(configuredPlan.systemPrompt).toContain(
-        'Use `research scout-batch` for broad discovery or automation',
-      )
-      expect(configuredPlan.systemPrompt).toContain(
-        'never send a mode-less single-scout request',
-      )
-    }
-
-    for (const group of [false, true]) {
-      const configured = await resolvePlan({ configured: true, group })
-      const unavailable = await resolvePlan({ configured: false, group })
-      expect(configured.assistantContractFingerprint).not.toBe(unavailable.assistantContractFingerprint)
-    }
-
-    const directProgressPlan = await resolvePlan({
-      configured: true,
-      progressAvailable: true,
-    })
-    const groupProgressPlan = await resolvePlan({
-      configured: true,
-      group: true,
-      progressAvailable: true,
-    })
-    const emailWithoutProgressPlan = await resolvePlan({
-      channel: 'email',
-      configured: true,
-    })
-    const directProgressPrompt = directProgressPlan.systemPrompt
-    const groupProgressPrompt = groupProgressPlan.systemPrompt
-    if (!directProgressPrompt || !groupProgressPrompt) {
-      throw new Error('Expected progress-capable conversation prompts.')
-    }
-
-    expect(directProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
-      'send_progress_update',
-    )
-    expect(directProgressPrompt.match(
-      /Use `murph\.send_progress_update` for interim updates/gu,
-    )).toHaveLength(1)
-    expect(groupProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
-      'send_progress_update',
-    )
-    expect(groupProgressPrompt.match(
-      /use `murph\.send_progress_update` much more sparingly/gu,
-    )).toHaveLength(1)
-    for (const plan of [directProgressPlan, groupProgressPlan]) {
-      expect(plan.systemPrompt).not.toContain(
-        'Before a noticeable foreground pass',
-      )
-      expect(plan.systemPrompt).not.toContain(
-        'a research lookup alone does not justify a status message',
-      )
-      expect(plan.systemPrompt).not.toContain(
-        'call `send_progress_update` before bounded local media tools',
-      )
-    }
-
-    expect(emailWithoutProgressPlan.systemPrompt).toContain(
-      'Configured Exa research:',
-    )
-    expect(emailWithoutProgressPlan.systemPrompt).toContain(
-      'For voice memos and audio/video, use transcript fragments directly',
-    )
-    expect(emailWithoutProgressPlan.systemPrompt).toContain(
-      'Member-visible interim progress is unavailable on this route',
-    )
-    expect(emailWithoutProgressPlan.dynamicTools.map((tool) => tool.name))
-      .not.toContain('send_progress_update')
-    expect(emailWithoutProgressPlan.systemPrompt)
-      .not.toContain('send_progress_update')
-
-    for (const unavailablePlan of await Promise.all([
-      resolvePlan({ configured: false }),
-      resolvePlan({ configured: false, group: true }),
-      resolvePlan({ configured: false, scheduled: true }),
-    ])) {
-      expect(unavailablePlan.systemPrompt).not.toContain(
-        'Configured Exa research:',
-      )
-      expect(unavailablePlan.systemPrompt).not.toContain('`research scout`')
-    }
   })
 
   it('does not expose per-turn route env in Codex execution plans', async () => {
@@ -755,7 +753,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env,
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
       })
@@ -898,7 +895,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -933,7 +930,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).not.toContain('CLI bootstrap')
       expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
-      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
+      expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(plan.turnContextPrompt).toContain('current mobility prescription')
@@ -973,7 +970,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1062,7 +1059,7 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         preferenceContext: {
-          assistantPersona: 'navy-seal',
+          assistantPersona: 'classic',
           assistantPersonality: {
             detail: 10,
             humor: 10,
@@ -1104,169 +1101,11 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_COMMITTED_HISTORY')
-      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
+      expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
       expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
-    } finally {
-      await rm(vault, { force: true, recursive: true })
-    }
-  })
-
-  it('plans creative notifications with committed group history and the normal provider tools', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
-      'PRIVATE_CLI_CONTRACT',
-    )
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
-      'PRIVATE_CONTEXT_SNAPSHOT',
-    )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
-    const vault = await mkdtemp(
-      path.join(os.tmpdir(), 'assistant-group-sponsorship-plan-'),
-    )
-    const session = createSession({
-      resumeState: {
-        assistantContractFingerprint: 'f'.repeat(64),
-        routeFingerprint: 'route-test',
-        threadId: 'ordinary-group-thread',
-      },
-      turnCount: 2,
-    })
-    session.binding = {
-      actorId: null,
-      channel: 'telegram',
-      conversationKey: 'telegram:group:123',
-      delivery: {
-        kind: 'thread',
-        target: 'telegram-group-123',
-      },
-      identityId: 'telegram-group-identity',
-      threadId: 'telegram-group-123',
-      threadIsDirect: false,
-    }
-
-    try {
-      await appendAssistantTranscriptEntries(vault, session.sessionId, [
-        {
-          kind: 'user',
-          text: 'The wellness senate wants a sponsor jingle.',
-        },
-        { kind: 'assistant', text: 'The wellness senate is now in session.' },
-      ])
-      const plan = await resolveAssistantRouteTurnPlan({
-        allowFinishWithoutReply: false,
-        executionContext: {
-          hosted: {
-            dynamicContextPrompts: ['PRIVATE_HOSTED_CONTEXT'],
-            memberId: 'member-group-container',
-            providerFetch: fetch,
-            userEnvKeys: [],
-          },
-        },
-        hostedToolContext: null,
-        input: {
-          ...createMessageInput(),
-          channel: 'telegram',
-          deliverResponse: true,
-          deliveryKind: 'thread',
-          deliveryTarget: 'telegram-group-123',
-          prompt: 'Create a sponsorship thank-you.',
-          threadId: 'telegram-group-123',
-          threadIsDirect: false,
-          turnTrigger: 'manual-deliver',
-          vault,
-        },
-        preferenceContext: {
-          assistantPersona: 'navy-seal',
-          assistantPersonality: {
-            detail: 10,
-            humor: 10,
-            push: 10,
-          },
-          assistantTone: 'casual',
-          assistantVoice: 'warm',
-        },
-        profile: {
-          promptProfile: 'creative-notification',
-          threadScope: 'isolated-thread',
-          toolProfile: 'provider-turn',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-07-27',
-          currentTimeZone: 'America/New_York',
-        },
-        route: createRoute(),
-        session,
-        sharedPlan: createSharedPlan({}, {
-          channel: 'telegram',
-          threadIsDirect: false,
-          threadId: 'telegram-group-123',
-        }),
-      })
-
-      expect(plan.resume).toBeNull()
-      const dynamicToolNames = plan.dynamicTools.map((tool) => tool.name)
-      expect(dynamicToolNames).toEqual(['generate_song'])
-      expect(plan.dynamicTools[0]?.description).not.toContain(
-        'state the requested action',
-      )
-      expect(plan.dynamicTools[0]?.description).not.toContain(
-        'explain its personal benefit',
-      )
-      expect(plan.environments).toBeUndefined()
-      expect(plan.assistantCliContract).toBeNull()
-      expect(plan.sessionContext).toBeUndefined()
-      expect(plan.conversationHistoryMessages).toEqual([
-        {
-          content: 'The wellness senate wants a sponsor jingle.',
-          role: 'user',
-        },
-        {
-          content: 'The wellness senate is now in session.',
-          role: 'assistant',
-        },
-      ])
-      expect(plan.systemPrompt).toContain(
-        'Call `murph.generate_song` exactly once.',
-      )
-      expect(plan.systemPrompt).toContain('do not call any other tool')
-      expect(plan.systemPrompt).toContain('murph.generate_song')
-      expect(plan.systemPrompt).not.toContain('murph.generate_voice_memo')
-      expect(plan.systemPrompt).toContain(
-        'urgent, medical, serious, sensitive, or conflict-heavy',
-      )
-      expect(plan.systemPrompt).toContain(
-        'keep the song gentle, respectful, and non-comedic',
-      )
-      expect(plan.systemPrompt).not.toContain('PRIVATE_CLI_CONTRACT')
-      expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
-      expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
-      expect(plan.systemPrompt).toContain(
-        'Set `durationSeconds` to exactly 15',
-      )
-      expect(plan.systemPrompt).not.toContain('durationSeconds` to 5–15')
-      expect(plan.systemPrompt).toContain('at most four short lyric lines')
-      expect(plan.systemPrompt).toContain(
-        'Never infer the contributor or payer identity',
-      )
-      expect(plan.systemPrompt).toContain(
-        'use a public alias only when the task explicitly supplies one',
-      )
-      expect(
-        plan.dynamicTools.find((tool) => tool.name === 'generate_song'),
-      ).toBe(MURPH_GENERATE_SONG_TOOL)
-      expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
-        resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
-      )
-      expect(
-        planningMocks.readAssistantCliSurfaceBootstrapContext,
-      ).not.toHaveBeenCalled()
-      expect(
-        planningMocks.readAssistantContextSnapshotPrompt,
-      ).not.toHaveBeenCalled()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -1292,7 +1131,7 @@ describe('assistant Codex turn planning', () => {
       },
     }
     const preferenceContext = {
-      assistantPersona: 'navy-seal' as const,
+      assistantPersona: 'classic' as const,
       assistantPersonality: {
         detail: 10,
         humor: 10,
@@ -1328,7 +1167,7 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and mutation targeting only',
+      'may justify faithful shortening of that exact non-health record without changing meaning',
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
@@ -1345,6 +1184,9 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
     )
+    expect(maintenancePlan.systemPrompt).toContain('Preserve dated context rather than automatically forgetting it')
+    expect(maintenancePlan.systemPrompt).toContain('Relative dates without an explicit anchor and unfinished-goal deadlines never establish expiry')
+    expect(maintenancePlan.systemPrompt).not.toContain('never an independent source for new writes')
     expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
@@ -1353,7 +1195,7 @@ describe('assistant Codex turn planning', () => {
     )
     expect(maintenancePlan.systemPrompt).not.toContain('Humor 10/10')
     expect(maintenancePlan.systemPrompt).not.toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(maintenancePlan.systemPrompt).not.toContain(
       'Assistant tone preference:',
@@ -1390,7 +1232,7 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences',
     )
     expect(ordinaryPlan.systemPrompt).toContain('Humor 10/10')
-    expect(ordinaryPlan.systemPrompt).toContain('Be direct, disciplined, and accountable.')
+    expect(ordinaryPlan.systemPrompt).toContain('Stay balanced, warm, capable, and adaptable.')
     expect(ordinaryPlan.systemPrompt).toContain('Assistant tone preference:')
     expect(ordinaryPlan.sessionContext).toEqual({
       binding: expect.anything(),
@@ -1431,20 +1273,17 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Detail 10/10')
     expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
+    // A private automation run may attach a card, like an ordinary turn.
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
-      ordinaryToolNames.filter((name) =>
-        name !== 'attach_response_card' &&
-        name !== 'attach_exercise_routine_card' &&
-        name !== 'attach_telegram_rich_content'
-      ),
+      ordinaryToolNames,
     )
 
     const onboardingGoalCheckinPlan = await resolveAssistantRouteTurnPlan({
@@ -1471,7 +1310,12 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(onboardingGoalCheckinPlan.dynamicTools).toEqual([])
+    // The check-in is a private scheduled run, so it gets the ordinary tools;
+    // its policy asks it to propose before changing anything. Without a
+    // hosted automation port, only the follow-up-attachment path offers
+    // `automation`, and the check-in never attaches a follow-up.
+    expect(onboardingGoalCheckinPlan.dynamicTools.map((tool) => tool.name))
+      .toEqual(ordinaryToolNames.filter((name) => name !== 'automation'))
     expect(onboardingGoalCheckinPlan.assistantCliContract).toBe(
       'bootstrap contract',
     )
@@ -1516,7 +1360,7 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.developerInstructions).not.toBe(
       scheduledWithoutPersonaPlan.developerInstructions,
     )
-    expect(scheduledNewsletterPlan.assistantContractFingerprint).not.toBe(
+    expect(scheduledNewsletterPlan.assistantContractFingerprint).toBe(
       scheduledWithoutPersonaPlan.assistantContractFingerprint,
     )
 
@@ -1772,6 +1616,44 @@ describe('assistant Codex turn planning', () => {
     expect(localGroupPlan.systemPrompt).not.toContain('Optional rough room tips')
   })
 
+  it.each([true, false])('injects upcoming context only for private conversations and reminders (direct=%s)', async (direct) => {
+    const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+      eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'synthetic race logistics',
+      startsAt: '2026-10-02T08:00:00Z', endsAt: '2026-10-02T12:00:00Z',
+      timeZone: 'UTC', timing: 'timed', status: 'tentative',
+      lastVerifiedAt: '2026-10-01T06:00:00Z', details: ['Travel to the race venue.'],
+    }] }, new Date('2026-10-01T08:00:00Z'))
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(context)
+    for (const scheduled of [false, true]) {
+      planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), threadIsDirect: direct,
+          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+          ...(scheduled ? { scheduledOccurrenceAt: '2026-10-01T08:00:00Z' } : {}),
+        },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-10-01', currentTimeZone: 'UTC' },
+        route: createRoute(), session: createSession(),
+        sharedPlan: createSharedPlan({}, { threadIsDirect: direct }),
+      })
+      expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
+      if (direct) {
+        expect(plan.systemPrompt).toContain('synthetic race logistics')
+        expect(plan.systemPrompt).toContain('proactively suggest one useful preparation or adjustment')
+        expect(plan.systemPrompt).toContain('without waiting for the member to mention the plan')
+        expect(plan.systemPrompt).toContain('For tentative plans, make advice conditional on the plan going ahead')
+        expect(plan.systemPrompt).toContain('do not force irrelevant mentions or create an extra check-in')
+        expect(plan.systemPrompt).toContain('Context grants no authority to change reminder timing')
+        expect(plan.systemPrompt).not.toContain('Use only when it materially improves this answer')
+      } else {
+        expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+        expect(plan.systemPrompt).not.toContain('without waiting for the member to mention the plan')
+      }
+    }
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+  })
+
   it('uses the narrow group room-model maintenance prompt without ordinary group context', async () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'Context snapshot: private health context.',
@@ -1947,8 +1829,9 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
+    expect(plan.systemPrompt).not.toContain('vault-cli commons protocol')
     expect(plan.systemPrompt).toContain(
-      '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
+      'use the experiment-onboarding skill to build a private plan',
     )
     expect(plan.planningDiagnostics).not.toHaveProperty(
       'supportedExperimentProtocolsElapsedMs',
@@ -2002,11 +1885,12 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
+    expect(plan.developerInstructions).toContain('no commands, tool calls, memory writes, delegation, or progress update')
     expect(plan.developerInstructions).toContain(
-      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+      'Do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
     )
     expect(plan.developerInstructions).toContain(
-      `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+      `An immediate request with no onboarding decision goes to the request's owner without loading onboarding. Outside these visible opening exchanges—missing or ambiguous history, established later stages, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
     )
     expect(plan.developerInstructions).not.toContain(
       `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer`,
@@ -2144,7 +2028,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('keeps the absent-persona contract stable and rotates for explicit persona defaults', async () => {
+  it('keeps the thread and refreshes explicit persona defaults', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2201,7 +2085,7 @@ describe('assistant Codex turn planning', () => {
     const personaPlan = await resolveAssistantRouteTurnPlan({
       ...common,
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: null,
@@ -2216,16 +2100,16 @@ describe('assistant Codex turn planning', () => {
       }),
     })
 
-    expect(personaPlan.resume).toBeNull()
-    expect(personaPlan.assistantContractFingerprint).not.toBe(
+    expect(personaPlan.resume?.codexThreadId).toBe('thread-before-persona-change')
+    expect(personaPlan.assistantContractFingerprint).toBe(
       baseline.assistantContractFingerprint,
     )
     expect(personaPlan.developerInstructions).toContain(
-      'Be direct, disciplined, and accountable.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
-    expect(personaPlan.developerInstructions).toContain('Humor 1/10')
-    expect(personaPlan.developerInstructions).toContain('Push 10/10')
-    expect(personaPlan.developerInstructions).toContain('Detail 2/10')
+    expect(personaPlan.developerInstructions).toContain('Humor 3/10')
+    expect(personaPlan.developerInstructions).toContain('Push 3/10')
+    expect(personaPlan.developerInstructions).toContain('Detail 5/10')
     // A persona never contributes an Unhinged band: the member here saved no
     // Unhinged preference, so the sparse thread contract renders no band.
     // (The reusable style-settings guidance still names the Unhinged dial.)
@@ -2234,13 +2118,13 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(personaPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
 
     const staleVoicePlan = await resolveAssistantRouteTurnPlan({
       ...common,
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: 'stale-roster-id',
@@ -2250,7 +2134,7 @@ describe('assistant Codex turn planning', () => {
     expect(staleVoicePlan.assistantPreferredElevenLabsVoiceId).toBeNull()
   })
 
-  it('reads sparse personality preferences and rotates the interactive thread contract', async () => {
+  it('reads sparse personality preferences without rotating the interactive thread', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -2331,8 +2215,8 @@ describe('assistant Codex turn planning', () => {
         session: resumedSession,
       })
 
-      expect(updatedAttemptPlan.routePlan.resume).toBeNull()
-      expect(updatedAttemptPlan.routePlan.assistantContractFingerprint).not.toBe(
+      expect(updatedAttemptPlan.routePlan.resume?.codexThreadId).toBe('thread-before-personality-change')
+      expect(updatedAttemptPlan.routePlan.assistantContractFingerprint).toBe(
         initialAttemptPlan.routePlan.assistantContractFingerprint,
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
@@ -2505,7 +2389,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-resume')
-    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
     expect(resumedPlan.sessionContext).toBeUndefined()
     expect(resumedPlan.turnContextPrompt).toContain(turnContext)
     expect(resumedPlan.planningDiagnostics).toMatchObject({
@@ -2861,7 +2745,7 @@ describe('assistant Codex turn planning', () => {
     expect(resumedPlan.resume?.codexThreadId).toBe(
       'thread-delivery-posture',
     )
-    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
     expect(resumedPlan.assistantContractFingerprint).toBe(
       initialPlan.assistantContractFingerprint,
     )
@@ -3022,7 +2906,7 @@ describe('assistant Codex turn planning', () => {
           replacementThreadId,
         )
         expect(secondPostDeployPlan.conversationHistoryMessages).toBeUndefined()
-        expect(secondPostDeployPlan.developerInstructions).toBeNull()
+        expect(secondPostDeployPlan.developerInstructions).toEqual(expect.any(String))
       } finally {
         await rm(vault, { force: true, recursive: true })
       }
@@ -3061,7 +2945,6 @@ describe('assistant Codex turn planning', () => {
     )
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3490,6 +3373,7 @@ describe('assistant Codex turn planning', () => {
     const toolNames = plan.dynamicTools.map((tool) => tool.name)
     expect(toolNames).toContain('pending_vault_files')
     expect(toolNames).not.toContain('send_vault_file')
+    expect(toolNames).not.toContain('materialize_vault_media')
   })
 
   it('exposes labs to private ordinary turns, including scheduled work', async () => {
@@ -3589,17 +3473,8 @@ describe('assistant Codex turn planning', () => {
     expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
     expect(maintenance.systemPrompt).not.toContain('Lab test discovery:')
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toContain('labs')
-    expect(scheduled.dynamicTools.map((tool) => tool.name)).not.toContain(
-      'attach_response_card',
-    )
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
-      direct.dynamicTools
-        .map((tool) => tool.name)
-        .filter((name) =>
-          name !== 'attach_response_card' &&
-          name !== 'attach_exercise_routine_card' &&
-          name !== 'attach_telegram_rich_content'
-        ),
+      direct.dynamicTools.map((tool) => tool.name),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
@@ -3633,7 +3508,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env,
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
       })
@@ -3646,7 +3520,7 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
-  it('plans calendar links for accepted direct Linq text turns only', async () => {
+  it('plans calendar links for every private direct Linq turn only', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -3701,8 +3575,10 @@ describe('assistant Codex turn planning', () => {
     }
 
     expect(await planToolNamesFor()).toContain('create_calendar_link')
+    // The link is a URL for the reply, so a turn without a new message
+    // (an automation run, say) may build one too.
     expect(await planToolNamesFor({ accepted: false }))
-      .not.toContain('create_calendar_link')
+      .toContain('create_calendar_link')
     expect(await planToolNamesFor({ channel: 'telegram' }))
       .not.toContain('create_calendar_link')
     expect(await planToolNamesFor({ threadIsDirect: false }))
@@ -3759,7 +3635,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env: options.env,
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }, conversationScope === 'group'
           ? {
@@ -3834,7 +3709,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3885,7 +3759,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(linqReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3893,6 +3766,7 @@ describe('assistant Codex turn planning', () => {
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
+          calendarLinkAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -3983,8 +3857,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(linqCurrentMessageNotReactionEligiblePlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions:
-          linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3992,6 +3864,7 @@ describe('assistant Codex turn planning', () => {
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
+          calendarLinkAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -4014,7 +3887,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramBusinessReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4042,7 +3914,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramInferredBindingPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4122,7 +3993,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4132,6 +4002,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
+          voiceMemoModelId: 'eleven_v4',
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -4349,6 +4220,39 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it.each([true, false])('grants anonymous scheduled feedback only to the exact weekly optimizer (%s)', async (optimizer) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
+    const occurrenceAt = '2026-10-05T04:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+        productFeedbackCandidateSink: { acceptProductFeedbackCandidate: vi.fn() } } },
+      input: { ...createMessageInput(), turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+        scheduledInvocationAuthority: { automationId: optimizer ? MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID : 'automation_other', occurrenceAt } },
+      profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-10-05', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(), sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'submit_product_feedback')).toBe(optimizer)
+  })
+
+  it.each([true, false])('offers usage diagnostics in a private turn only with a port (%s)', async (available) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      hostedToolContext: { ...createHostedToolContext(),
+        usageDiagnostics: available ? { read: vi.fn() } : null },
+      input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-07-18', currentTimeZone: 'America/New_York' },
+      route: createRoute(), session: createSession(), sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(plan.dynamicTools.some((tool) => tool.name === 'usage_diagnostics')).toBe(available)
+  })
+
   it('derives a group-scoped prompt and tool surface from the audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -4367,6 +4271,7 @@ describe('assistant Codex turn planning', () => {
       groupEmailEffect: { request: vi.fn() },
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
+      usageDiagnostics: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
       subscriptionTool: { request: vi.fn() },
     }
@@ -4410,7 +4315,7 @@ describe('assistant Codex turn planning', () => {
     const plan = await resolveAssistantRouteTurnPlan({
       ...groupPlanInput,
       preferenceContext: {
-        assistantPersona: 'scientist-with-classic',
+        assistantPersona: 'classic',
         assistantPersonality: {
           humor: 9,
         },
@@ -4431,10 +4336,10 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences for this group room:',
     )
     expect(plan.developerInstructions).toContain('Humor 9/10')
-    expect(plan.developerInstructions).toContain('Push 4/10')
-    expect(plan.developerInstructions).toContain('Detail 9/10')
+    expect(plan.developerInstructions).toContain('Push 3/10')
+    expect(plan.developerInstructions).toContain('Detail 5/10')
     expect(plan.developerInstructions).toContain(
-      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
+      'Stay balanced, warm, capable, and adaptable.',
     )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',
@@ -4463,17 +4368,17 @@ describe('assistant Codex turn planning', () => {
     const personaDefaultPlan = await resolveAssistantRouteTurnPlan({
       ...groupPlanInput,
       preferenceContext: {
-        assistantPersona: 'hype-coach',
+        assistantPersona: 'classic',
         assistantPersonality: null,
         assistantTone: null,
         assistantVoice: null,
       },
     })
     expect(personaDefaultPlan.developerInstructions).toContain(
-      'Casual is a persistent user-facing writing invariant',
+      'Formal is the default and a persistent user-facing writing invariant',
     )
     expect(personaDefaultPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId('football-announcer'),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
@@ -4533,7 +4438,7 @@ describe('assistant Codex turn planning', () => {
       'synthetic Murph instance for this room',
     )
     expect(groupAssistantConfigurationTool?.description).toContain(
-      'Luna, Terra, or Sol may be selected',
+      'Terra and Luna may also be selected for the room',
     )
     const groupAssistantConfigurationSchema = JSON.stringify(
       groupAssistantConfigurationTool?.inputSchema,
@@ -4549,7 +4454,9 @@ describe('assistant Codex turn planning', () => {
       'labs',
       'pending_vault_files',
       'plan_usage',
+      'usage_diagnostics',
       'send_vault_file',
+      'materialize_vault_media',
       'subscription',
     ]) {
       expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
@@ -4952,6 +4859,127 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
+    ['authorized scheduled', false, true, ['read_game']],
+    ['scheduled without authority', false, false, []],
+    ['accepted-input', true, false, ['read_game', 'update_game', 'game_photo']],
+  ] as const)('plans game tools for an %s group turn', async (_label, accepted, scheduledAuthority, expectedTools) => {
+    const occurrenceAt = '2026-08-05T18:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: accepted
+        ? [{ id: `ain_${'e'.repeat(32)}`, source: 'assistant-input' }]
+        : [],
+      executionContext: {
+        hosted: { memberId: 'synthetic-game-member', userEnvKeys: [] },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        scheduledInvocationAuthority: scheduledAuthority
+          ? { automationId: 'automation-scheduled-game-read', occurrenceAt }
+          : null,
+        scheduledOccurrenceAt: accepted ? null : occurrenceAt,
+        threadIsDirect: false,
+        turnTrigger: accepted ? 'automation-auto-reply' : 'automation-cron',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-08-05',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        threadIsDirect: false,
+        threadId: 'synthetic-game-thread',
+      }),
+    })
+
+    const gameTools = plan.dynamicTools
+      .map((tool) => tool.name)
+      .filter((name) => ['read_game', 'update_game', 'game_photo', 'game_lore', 'write_recap'].includes(name))
+    expect(gameTools).toEqual(expectedTools)
+  })
+
+  it.each([
+    ['linq', false, true, false, true],
+    ['telegram', false, true, false, false],
+    ['email', false, true, false, false],
+    ['linq', true, true, false, false],
+    ['linq', false, false, false, false],
+    ['linq', false, true, true, false],
+  ] as const)('gates game photo tool and context for %s direct=%s hosted=%s scheduled=%s', async (channel, threadIsDirect, hosted, scheduled, available) => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: scheduled ? [] : [{ id: `ain_${'e'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: hosted ? { hosted: { memberId: 'synthetic-photo-member', userEnvKeys: [] } } : null,
+      hostedToolContext: hosted ? { ...createHostedToolContext(), groupTool: { request: vi.fn() } } : null,
+      input: { ...createMessageInput(), channel, threadIsDirect, turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-photo-thread' }),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'game_photo')).toBe(available)
+    expect((plan.systemPrompt ?? '').includes('a clear current photo relevant to the sender')).toBe(available)
+  })
+
+  it.each([
+    ['direct', true, null, false],
+    ['group without a live game', false, null, false],
+    ['group with a live game', false, GAME_LIVE_LORE_GUIDANCE, true],
+  ] as const)('exposes game lore only for a %s turn', async (_label, threadIsDirect, loreGuidance, available) => {
+    const prepareGameLore = vi.fn(async () => loreGuidance)
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{ id: `ain_${'f'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: { hosted: { memberId: 'synthetic-lore-member', userEnvKeys: [] } },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+        prepareGameLore,
+      },
+      input: { ...createMessageInput(), channel: 'linq', threadIsDirect, turnTrigger: 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel: 'linq', threadIsDirect, threadId: 'synthetic-lore-thread' }),
+    })
+    const toolNames = plan.dynamicTools.map((tool) => tool.name)
+    expect(toolNames.includes('game_lore')).toBe(available)
+    expect(toolNames).not.toContain('write_recap')
+    expect((plan.systemPrompt ?? '').includes(GAME_LIVE_LORE_GUIDANCE)).toBe(available)
+    expect(prepareGameLore).toHaveBeenCalledTimes(threadIsDirect ? 0 : 1)
+  })
+
+  it.each([
+    ['linq', true, true, false, true],
+    ['linq', false, true, false, false],
+    ['telegram', true, true, false, false],
+    ['email', true, true, false, false],
+    ['linq', true, false, false, false],
+    ['linq', true, true, true, false],
+  ] as const)('gates sender contact for %s direct=%s hosted=%s scheduled=%s', async (channel, threadIsDirect, hosted, scheduled, available) => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: scheduled ? [] : [{ id: `ain_${'d'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: hosted ? { hosted: { memberId: 'synthetic-contact-member', userEnvKeys: [] } } : null,
+      hostedToolContext: hosted ? createHostedToolContext() : null,
+      input: { ...createMessageInput(), channel, threadIsDirect, turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'America/New_York' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-contact-thread' }),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'get_sender_contact')).toBe(available)
+  })
+
+  it.each([
     ['direct Linq', 'linq', true, true],
     ['group Linq', 'linq', false, false],
     ['direct email', 'email', true, false],
@@ -4984,7 +5012,7 @@ describe('assistant Codex turn planning', () => {
           ...createHostedToolContext(),
           clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
           personalizationTool: { request: vi.fn() },
-          phoneCalls: { start: vi.fn() },
+          phoneCalls: { start: vi.fn(), status: vi.fn(), stop: vi.fn() },
           physicalNotes: { send: vi.fn() },
           privateImageUrlPublisher: { publishPrivateImageUrl: vi.fn() },
         },
@@ -5011,7 +5039,7 @@ describe('assistant Codex turn planning', () => {
         route: createRoute(),
         session: createSession(),
         sharedPlan: createSharedPlan({}, {
-          channel: 'linq',
+          channel,
           threadIsDirect,
           threadId: threadIsDirect
             ? 'linq-direct-thread'
@@ -5021,6 +5049,10 @@ describe('assistant Codex turn planning', () => {
 
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
+      // Status is an owner-bound read, so every private turn may check a call.
+      expect(toolNames.includes('get_phone_call_status')).toBe(threadIsDirect)
+      expect(toolNames).not.toContain('stop_phone_call')
+      expect(toolNames.includes('create_calendar_link')).toBe(channel === 'linq' && threadIsDirect)
       expect(toolNames).not.toContain('submit_product_feedback')
       expect(toolNames).not.toContain('send_progress_update')
       expect(plan.systemPrompt).not.toContain('murph.send_progress_update')
@@ -5041,6 +5073,192 @@ describe('assistant Codex turn planning', () => {
       }
     },
   )
+
+  it.each([
+    ['direct', true, true],
+    ['group', false, false],
+  ] as const)(
+    'offers private reads and cards, but no occurrence-keyed effects, to a %s automation run without occurrence authority',
+    async (_scope, threadIsDirect, privateTurn) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      // A device-activity run is a local cron job: it has an occurrence but
+      // no scheduled invocation authority.
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [],
+        executionContext: {
+          hosted: { memberId: 'member-device-activity-run', userEnvKeys: [] },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          phoneCalls: { start: vi.fn(), status: vi.fn(), stop: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          scheduledInvocationAuthority: null,
+          scheduledOccurrenceAt: '2026-11-05T15:17:05.711Z',
+          threadIsDirect,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-11-05',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'linq',
+          threadIsDirect,
+          threadId: threadIsDirect ? 'linq-direct-thread' : 'linq-group-thread',
+        }),
+      })
+
+      const toolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(toolNames.includes('attach_sleep_card')).toBe(privateTurn)
+      expect(toolNames.includes('attach_response_card')).toBe(privateTurn)
+      expect(toolNames.includes('create_calendar_link')).toBe(privateTurn)
+      expect(toolNames.includes('get_phone_call_status')).toBe(privateTurn)
+      // Effects keyed on a scheduled occurrence still need one.
+      expect(toolNames).not.toContain('create_phone_call')
+      expect(toolNames).not.toContain('stop_phone_call')
+      expect(toolNames).not.toContain('poll')
+      expect(toolNames).not.toContain('create_clinical_records_connect_link')
+    },
+  )
+
+  it.each([
+    ['private', true, true],
+    ['group', false, false],
+  ] as const)(
+    'offers event-keyed effects, but no poll, to a %s device-activity run with a wearable event',
+    async (_scope, threadIsDirect, privateTurn) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [],
+        executionContext: {
+          hosted: { memberId: 'member-device-activity-effects', userEnvKeys: [] },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+          phoneCalls: { start: vi.fn(), status: vi.fn(), stop: vi.fn() },
+          pollTool: { request: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          deviceActivityOccurrence: {
+            occurrenceKey: 'a'.repeat(40),
+            parentAutomationId: 'automation-sync-listener',
+          },
+          scheduledInvocationAuthority: null,
+          scheduledOccurrenceAt: '2026-11-05T15:17:05.711Z',
+          threadIsDirect,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-11-05',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'linq',
+          threadIsDirect,
+          threadId: threadIsDirect ? 'linq-direct-thread' : 'linq-group-thread',
+        }),
+      })
+
+      const toolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(toolNames.includes('create_phone_call')).toBe(privateTurn)
+      expect(toolNames.includes('create_clinical_records_connect_link')).toBe(privateTurn)
+      expect(toolNames).not.toContain('poll')
+      expect(toolNames).not.toContain('stop_phone_call')
+    },
+  )
+
+  it('offers cards to an interactive private notification and a group automation run on Telegram', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const plan = async (input: {
+      channel: 'linq' | 'telegram'
+      threadIsDirect: boolean
+      threadScope: 'isolated-thread' | 'session-thread'
+      turnTrigger: 'automation-cron' | 'manual-deliver'
+    }) => (await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [],
+      executionContext: input.threadIsDirect
+        ? null
+        : { hosted: { memberId: 'member-card-turns', userEnvKeys: [] } },
+      input: {
+        ...createMessageInput(),
+        channel: input.channel,
+        scheduledInvocationAuthority: null,
+        scheduledOccurrenceAt: input.turnTrigger === 'automation-cron'
+          ? '2026-11-05T15:17:05.711Z'
+          : null,
+        threadIsDirect: input.threadIsDirect,
+        turnTrigger: input.turnTrigger,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: input.threadScope,
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-11-05',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: input.channel,
+        threadIsDirect: input.threadIsDirect,
+        threadId: 'card-turn-thread',
+      }),
+    })).dynamicTools.map((tool) => tool.name)
+
+    // A manual meal photo estimate runs as an isolated manual-deliver turn.
+    const mealEstimate = await plan({
+      channel: 'linq',
+      threadIsDirect: true,
+      threadScope: 'isolated-thread',
+      turnTrigger: 'manual-deliver',
+    })
+    expect(mealEstimate).toContain('attach_response_card')
+    expect(mealEstimate).toContain('attach_sleep_card')
+
+    const groupTelegramRun = await plan({
+      channel: 'telegram',
+      threadIsDirect: false,
+      threadScope: 'session-thread',
+      turnTrigger: 'automation-cron',
+    })
+    expect(groupTelegramRun).toContain('attach_telegram_rich_content')
+    expect(groupTelegramRun).toContain('attach_exercise_routine_card')
+    expect(groupTelegramRun).not.toContain('attach_sleep_card')
+  })
 
   it('withholds group phone calls without participant targeting authority', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
@@ -5267,7 +5485,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.resume?.codexThreadId).toBe('thread-date-change')
-    expect(plan.developerInstructions).toBeNull()
+    expect(plan.developerInstructions).toEqual(expect.any(String))
     expect(plan.turnContextPrompt).toBe(
       'Today\'s date for the user is May 5, 2026.',
     )
@@ -5276,7 +5494,35 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('starts a fresh thread when stable developer instructions change', async () => {
+  it.each([
+    { change: { modelProvider: 'hosted-openai' }, resumes: false },
+    { change: { sandbox: 'read-only' as const }, resumes: false },
+    { change: { model: 'gpt-6.1-sol' }, resumes: true },
+  ])('preserves only compatible native routes: $change', async ({ change, resumes }) => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    const target = { provider: 'codex-cli' as const, model: 'gpt-6.1-terra', modelProvider: 'openai', sandbox: 'workspace-write' as const }
+    const route = buildCodexThreadIdentity(normalizeAssistantProviderConfig(target))
+    const common = {
+      executionContext: null, input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-02', currentTimeZone: 'UTC' },
+      sharedPlan: createSharedPlan(),
+    } as const
+    const initial = await resolveAssistantRouteTurnPlan({ ...common, route, session: createSession() })
+    const updated = await resolveAssistantRouteTurnPlan({
+      ...common, route: buildCodexThreadIdentity(normalizeAssistantProviderConfig({ ...target, ...change })),
+      session: createSession({ resumeState: {
+        assistantContractFingerprint: initial.assistantContractFingerprint,
+        routeFingerprint: route.routeId, threadCompatibilityFingerprint: route.threadCompatibilityFingerprint,
+        threadId: 'thread-route-compatibility',
+      } }),
+    })
+    expect(updated.resume).toEqual(resumes ? { codexThreadId: 'thread-route-compatibility' } : null)
+  })
+
+  it.each(['hosted', 'local'] as const)('updates developer instructions across releases safely: %s', async (launch) => {
+    const sharedPlan = createSharedPlan()
+    if (launch === 'local') sharedPlan.cliAccess.env = {}
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('old bootstrap')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5297,7 +5543,7 @@ describe('assistant Codex turn planning', () => {
       },
       route,
       session: createSession(),
-      sharedPlan: createSharedPlan(),
+      sharedPlan,
     })
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('new bootstrap')
 
@@ -5321,15 +5567,15 @@ describe('assistant Codex turn planning', () => {
           threadId: 'thread-old-contract',
         },
       }),
-      sharedPlan: createSharedPlan(),
+      sharedPlan,
     })
 
-    expect(plan.resume).toBeNull()
+    expect(plan.resume).toEqual(launch === 'hosted' ? { codexThreadId: 'thread-old-contract' } : null)
     expect(plan.developerInstructions).toContain('new bootstrap')
-    expect(plan.assistantContractFingerprint).not.toBe(oldPlan.assistantContractFingerprint)
+    expect(plan.assistantContractFingerprint === oldPlan.assistantContractFingerprint).toBe(launch === 'hosted')
   })
 
-  it('starts a fresh thread when thread-stable context changes', async () => {
+  it('refreshes timezone, product URL and onboarding on the same thread', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5368,20 +5614,20 @@ describe('assistant Codex turn planning', () => {
         newSharedPlan: createSharedPlan({
           cliAccess: {
             env: {
+              ...createSharedPlan().cliAccess.env,
               HOSTED_WEB_BASE_URL: 'https://new.example.test',
             },
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
         oldPromptTimeContext: basePromptTimeContext,
         oldSharedPlan: createSharedPlan({
           cliAccess: {
             env: {
+              ...createSharedPlan().cliAccess.env,
               HOSTED_WEB_BASE_URL: 'https://old.example.test',
             },
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
         unexpectedTurnText: 'https://new.example.test',
@@ -5428,14 +5674,14 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: scenario.newSharedPlan,
       })
 
-      expect(plan.resume, scenario.name).toBeNull()
+      expect(plan.resume?.codexThreadId, scenario.name).toBe(`thread-old-${scenario.name}`)
       expect(plan.developerInstructions, scenario.name).toContain(
         scenario.expectedDeveloperText,
       )
       expect(plan.turnContextPrompt, scenario.name).not.toContain(
         scenario.unexpectedTurnText,
       )
-      expect(plan.assistantContractFingerprint, scenario.name).not.toBe(
+      expect(plan.assistantContractFingerprint, scenario.name).toBe(
         oldPlan.assistantContractFingerprint,
       )
     }
@@ -5494,7 +5740,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.resume?.codexThreadId).toBe('thread-old-snapshot')
-    expect(plan.developerInstructions).toBeNull()
+    expect(plan.developerInstructions).toEqual(expect.any(String))
     expect(plan.turnContextPrompt).toContain(
       'Updated assistant context snapshot.',
     )
@@ -5579,7 +5825,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
-  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
+  it('replays bounded history once when the factored automation descriptor is replaced, then resumes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -5647,7 +5893,7 @@ describe('assistant Codex turn planning', () => {
         tool.name === MURPH_AUTOMATION_TOOL.name
           ? {
               ...tool,
-              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+              inputSchema: priorFactoredAutomationSchema,
             }
           : tool)
       const oldContractFingerprint = buildAssistantCodexContractFingerprint({
@@ -5659,7 +5905,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint: oldContractFingerprint,
           routeFingerprint,
-          threadId: 'thread-full-automation-schema',
+          threadId: 'thread-factored-automation-schema',
         },
         turnCount: 1,
       })
@@ -5697,14 +5943,14 @@ describe('assistant Codex turn planning', () => {
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
-          codexThreadId: 'thread-compact-automation-schema',
+          codexThreadId: 'thread-canonical-automation-schema',
           routeFingerprint,
           session: transitionSession,
           vault,
         })
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
-        .toBe('thread-compact-automation-schema')
+        .toBe('thread-canonical-automation-schema')
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
@@ -5783,7 +6029,7 @@ describe('assistant Codex turn planning', () => {
         tool.name === MURPH_AUTOMATION_TOOL.name
           ? {
               ...tool,
-              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+              inputSchema: priorFactoredAutomationSchema,
             }
           : tool)
       const oldContractFingerprint = buildAssistantCodexContractFingerprint({
@@ -5795,7 +6041,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint: oldContractFingerprint,
           routeFingerprint,
-          threadId: 'thread-expired-full-automation-schema',
+          threadId: 'thread-expired-factored-automation-schema',
         },
         turnCount: 1,
       })
@@ -5817,14 +6063,14 @@ describe('assistant Codex turn planning', () => {
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
-          codexThreadId: 'thread-expired-compact-automation-schema',
+          codexThreadId: 'thread-expired-canonical-automation-schema',
           routeFingerprint,
           session: transitionSession,
           vault,
         })
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
-        .toBe('thread-expired-compact-automation-schema')
+        .toBe('thread-expired-canonical-automation-schema')
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
@@ -5886,7 +6132,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-sensitive-resume')
-    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
     expect(resumedPlan.turnContextPrompt).toContain(
       'Current assistant context snapshot.',
     )
@@ -6676,6 +6922,33 @@ describe('assistant Codex turn planning', () => {
       ])
     } finally {
       await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('plans a retired session as a fresh thread with the current canonical context snapshot', async () => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('Synthetic canonical context: prefers morning walks.')
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-retired-plan-'))
+    try {
+      const session = await saveAssistantSession(vault, createSession({
+        turnCount: 1,
+        resumeState: { routeFingerprint: 'synthetic-route', threadId: 'retired-thread' },
+      }))
+      await runAssistantCodexResumeRetention({ vault, now: new Date('2026-11-02T12:00:00.000Z') })
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), vault },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-11-02', currentTimeZone: 'UTC' },
+        route: createRoute(),
+        session: await getAssistantSession(vault, session.sessionId),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+      expect(plan.resume).toBeNull()
+      expect(JSON.stringify(plan)).toContain('Synthetic canonical context: prefers morning walks.')
+      expect(JSON.stringify(plan)).not.toContain('retired-thread')
+    } finally {
+      await rm(vault, { recursive: true, force: true })
     }
   })
 
@@ -7483,7 +7756,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('accepts a legacy contract fingerprint during a compatible model switch', async () => {
+  it.each(['route-before-model-switch', 'thread-compatible-route'])('accepts a legacy contract fingerprint during a compatible model switch: %s', async (legacyRouteFingerprint) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -7509,10 +7782,11 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createPrivateSharedPlan(),
     })
-    const legacyContractFingerprint = buildAssistantCodexContractFingerprint({
+    const legacyContractFingerprint = fingerprintThreadDeclarations({
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       developerInstructions: initialPlan.developerInstructions,
-      dynamicTools: initialPlan.dynamicTools,
-      routeFingerprint: 'route-before-model-switch',
+      dynamicTools: initialPlan.dynamicTools.map(withCodexToolInputContract),
+      routeFingerprint: legacyRouteFingerprint,
     })
     const switchedRoute = createRoute({
       routeFingerprint: 'route-after-model-switch',
@@ -7523,7 +7797,7 @@ describe('assistant Codex turn planning', () => {
       executionContext: null,
       input: {
         ...createMessageInput(),
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6.1-sol',
         reasoningEffort: 'high',
       },
       profile: {
@@ -7869,7 +8143,7 @@ describe('assistant Codex turn planning', () => {
         executionContext: null,
         input: {
           ...createMessageInput(),
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           prompt: 'Use medium reasoning now.',
           vault,
         },
@@ -7904,6 +8178,64 @@ describe('assistant Codex turn planning', () => {
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
+  })
+})
+
+describe('scheduled poll advertisement', () => {
+  it('prefers accepted input and otherwise binds the current authorized delivery target', async () => {
+    const occurrenceAt = '2026-11-02T14:00:00.000Z'
+    const inputId = 'ain_' + 'a'.repeat(32)
+    let acceptedInputIds = [inputId]
+    const request = vi.fn(async () => ({ status: 'listed' as const, polls: [] }))
+    const messageInput: AssistantMessageInput = { ...createMessageInput(), turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+      scheduledInvocationAuthority: { automationId: 'automation_poll', occurrenceAt },
+      bindingDeliveryTarget: 'authorized-binding', deliveryTarget: 'authorized-fallback', threadId: 'saved-old-thread',
+    }
+    const context = createAssistantHostedToolContext({
+      executionContext: { memberId: 'member_synthetic', userEnvKeys: [], pollTool: { request }, currentAssistantInputId: () => inputId },
+      getUserActionAcceptedInputIds: () => acceptedInputIds, getConversationScope: () => 'direct',
+      messageInput, session: createSession(),
+    })
+    await executeConversationPollTool({ context, request: { action: 'list' } })
+    expect(request).toHaveBeenLastCalledWith({ assistantInputId: inputId, request: { action: 'list' } })
+    acceptedInputIds = []
+    await executeConversationPollTool({ context, request: { action: 'list' } })
+    expect(request).toHaveBeenLastCalledWith({ origin: { kind: 'automation_occurrence', automationId: 'automation_poll', occurrenceAt }, route: { channel: 'telegram', target: 'authorized-binding' }, request: { action: 'list' } })
+    delete messageInput.bindingDeliveryTarget
+    expect(context.currentConversationPollRoute?.()).toEqual({ channel: 'telegram', target: 'authorized-fallback' })
+    messageInput.bindingDeliveryTarget = ''
+    // An explicitly empty binding cannot fall back to a stale saved thread.
+    expect(context.currentConversationPollRoute?.()).toBeNull()
+  })
+  it.each([
+    { channel: 'linq', direct: true, authority: true, port: true, available: true },
+    { channel: 'linq', direct: false, authority: true, port: true, available: true },
+    { channel: 'telegram', direct: true, authority: true, port: true, available: true },
+    { channel: 'telegram', direct: false, authority: true, port: true, available: true },
+    { channel: 'email', direct: true, authority: true, port: true, available: false },
+    { channel: 'telegram', direct: true, authority: false, port: true, available: false },
+    { channel: 'telegram', direct: true, authority: true, port: false, available: false },
+  ])('advertises polls only with channel, port and verified occurrence: %j', async ({ channel, direct, authority, port, available }) => {
+    const occurrenceAt = '2026-11-02T14:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: { hosted: { memberId: 'member_synthetic', userEnvKeys: [] } },
+      hostedToolContext: {
+        computerToolsAvailable: false, vaultFileSendAvailable: false,
+        pollTool: port ? { request: vi.fn() } : null,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+      },
+      input: { ...createMessageInput(), channel, threadIsDirect: direct,
+        turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+        scheduledInvocationAuthority: authority ? { automationId: 'automation_poll', occurrenceAt } : null,
+      },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-02', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect: direct, threadId: 'thread-test' }),
+      acceptedInputItems: [],
+    })
+    expect(plan.dynamicTools.some((tool) => tool.name === 'poll')).toBe(available)
   })
 })
 
@@ -8021,7 +8353,6 @@ function createHostedToolContext(): AssistantHostedToolContext {
   }
 }
 
-
 function createTrustedGroupImageCompletionCandidate(input: {
   completionAssistantInputId: string
   occurredAt: string
@@ -8124,22 +8455,9 @@ function createUnreachableInboxServices(): InboxServices {
     throw new Error('unreachable inbox service call')
   }
   return {
-    bootstrap: unreachable,
     init: unreachable,
-    sourceAdd: unreachable,
-    sourceList: unreachable,
-    sourceRemove: unreachable,
-    sourceSetEnabled: unreachable,
-    doctor: unreachable,
-    setup: unreachable,
     repairEnvelopes: unreachable,
     compactParserAttempts: unreachable,
-    parse: unreachable,
-    requeue: unreachable,
-    backfill: unreachable,
-    run: unreachable,
-    status: unreachable,
-    stop: unreachable,
     list: unreachable,
     listAttachments: unreachable,
     showAttachment: unreachable,
@@ -8203,9 +8521,8 @@ function createSharedPlan(
 ): AssistantTurnSharedPlan {
   return {
     cliAccess: {
-      env: {},
+      env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: '/synthetic/hosted-models.json' },
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {

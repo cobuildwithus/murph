@@ -30,6 +30,8 @@ import {
 import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
 
+import { persistInterruptedInboxCapture } from "./helpers/interrupted-write.ts";
+
 const require = createRequire(import.meta.url);
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -112,67 +114,6 @@ async function removeInboxCaptureLedgerForOccurredAt(vaultRoot: string, occurred
   );
 }
 
-async function markInboxCapturePersistOperationInterrupted(input: {
-  vaultRoot: string;
-  capturePath: string;
-}): Promise<void> {
-  const operationPaths = await listWriteOperationMetadataPaths(input.vaultRoot);
-  const operations = await Promise.all(
-    operationPaths.map(async (relativePath) => ({
-      relativePath,
-      operation: await readStoredWriteOperation(input.vaultRoot, relativePath),
-    })),
-  );
-  const persistedOperation = operations.find(
-    (entry) =>
-      entry.operation.operationType === "inbox_capture_persist" &&
-      entry.operation.actions.some(
-        (action) =>
-          action.kind === "jsonl_append" &&
-          action.targetRelativePath === input.capturePath,
-      ),
-  ) ?? null;
-  assert.ok(persistedOperation);
-
-  const operationAbsolutePath = path.join(input.vaultRoot, persistedOperation.relativePath);
-  const rawOperation = JSON.parse(await fs.readFile(operationAbsolutePath, "utf8")) as {
-    status: string;
-    updatedAt: string;
-    actions: Array<Record<string, unknown>>;
-  };
-  const stagedCaptureAction = rawOperation.actions.find(
-    (action) =>
-      action.kind === "jsonl_append" && action.targetRelativePath === input.capturePath,
-  );
-  assert.ok(stagedCaptureAction);
-  assert.equal(typeof stagedCaptureAction.stageRelativePath, "string");
-  const stagedCapturePath = path.join(
-    input.vaultRoot,
-    String(stagedCaptureAction.stageRelativePath),
-  );
-  await fs.mkdir(path.dirname(stagedCapturePath), { recursive: true });
-  await fs.copyFile(path.join(input.vaultRoot, input.capturePath), stagedCapturePath);
-  rawOperation.status = "committing";
-  rawOperation.updatedAt = "2026-03-13T10:01:30.000Z";
-  rawOperation.actions = rawOperation.actions.map((action) => {
-    if (action.kind !== "jsonl_append" || action.targetRelativePath !== input.capturePath) {
-      return action;
-    }
-
-    return {
-      ...action,
-      state: "staged",
-      effect: undefined,
-      existedBefore: undefined,
-      originalSize: undefined,
-      committedPayloadReceipt: undefined,
-      appliedAt: undefined,
-    };
-  });
-
-  await fs.writeFile(operationAbsolutePath, `${JSON.stringify(rawOperation, null, 2)}\n`, "utf8");
-}
-
 test("processCapture recovers from a staged canonical record after attachment writes but before the ledger append", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-idempotent-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-idempotent-source");
@@ -196,16 +137,12 @@ test("processCapture recovers from a staged canonical record after attachment wr
   const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2W1";
   const runtime = await openInboxRuntime({ vaultRoot });
 
-  await persistCanonicalInboxCapture({
+  await persistInterruptedInboxCapture({
     vaultRoot,
     captureId,
     eventId,
     input: inbound,
     storedAt: "2026-03-13T10:01:00.000Z",
-  });
-  await markInboxCapturePersistOperationInterrupted({
-    vaultRoot,
-    capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
   });
   await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
 
@@ -326,13 +263,28 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
   const captureId = createDeterministicInboxCaptureId(inbound);
   const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WC";
 
-  const persisted = await persistCanonicalInboxCapture({
-    vaultRoot,
-    captureId,
-    eventId,
-    input: inbound,
-    storedAt: "2026-03-13T10:21:00.000Z",
+  // Inspect the durable terminal record before unlink, without retaining it.
+  const retired: Awaited<ReturnType<typeof readStoredWriteOperation>>[] = [];
+  const unlink = fs.unlink.bind(fs);
+  const observer = vi.spyOn(fs, "unlink").mockImplementation(async file => {
+    const relativePath = path.relative(vaultRoot, String(file));
+    if (/^\.runtime\/operations\/op_[^/]+\.json$/u.test(relativePath)) {
+      retired.push(await readStoredWriteOperation(vaultRoot, relativePath));
+    }
+    await unlink(file);
   });
+  let persisted: Awaited<ReturnType<typeof persistCanonicalInboxCapture>>;
+  try {
+    persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId,
+      eventId,
+      input: inbound,
+      storedAt: "2026-03-13T10:21:00.000Z",
+    });
+  } finally {
+    observer.mockRestore();
+  }
   const stored = persisted.stored;
 
   assert.equal(stored.attachments.length, 1);
@@ -357,20 +309,13 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
   assert.equal(snapshot.stored.attachments[0]?.storedPath, attachment.storedPath);
   assert.equal(snapshot.stored.attachments[0]?.byteSize, attachmentBytes.byteLength);
 
-  const persistOperation = await findOperationByType(vaultRoot, "inbox_capture_persist");
+  const persistOperation = retired.find(operation => operation.operationType === "inbox_capture_persist");
   assert.ok(persistOperation);
-  assert.equal(persistOperation.operation.status, "committed");
-  assert.equal(
-    persistOperation.operation.actions.filter((action) => action.kind === "raw_copy").length,
-    1,
-  );
-  for (const action of persistOperation.operation.actions) {
-    if (action.kind !== "raw_copy") {
-      continue;
-    }
-
-    assert.equal("committedPayloadReceipt" in action, false);
-  }
+  assert.equal(persistOperation.status, "committed");
+  const rawActions = persistOperation.actions.filter(action => action.kind === "raw_copy");
+  assert.equal(rawActions.length, 1);
+  assert.ok(rawActions.every(action => !("committedPayloadReceipt" in action)));
+  assert.deepEqual(await listWriteOperationMetadataPaths(vaultRoot), []);
 });
 
 test("persistCanonicalInboxCapture snapshots file-backed attachment bytes before staging and stores measured size", async () => {
@@ -557,7 +502,13 @@ test("rebuildRuntimeFromVault restores canonical captures and remains idempotent
     storedAt: "2026-03-13T11:01:00.000Z",
   });
 
+  assert.deepEqual(await listWriteOperationMetadataPaths(vaultRoot), []);
   const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const replayed = await pipeline.processCapture(inbound);
+  assert.equal(replayed.deduped, true);
+  assert.equal(replayed.captureId, captureId);
+  assert.equal(replayed.eventId, "evt_01HQW7K0M9N8P7Q6R5S4T3V2W2");
   await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
   await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
 
@@ -592,18 +543,24 @@ test("rebuildRuntimeFromVault restores a staged capture record that is missing f
     ],
   });
   const captureId = createDeterministicInboxCaptureId(inbound);
-  await persistCanonicalInboxCapture({
+  await persistInterruptedInboxCapture({
     vaultRoot,
     captureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W9",
     input: inbound,
     storedAt: "2026-03-13T11:06:00.000Z",
   });
-  await markInboxCapturePersistOperationInterrupted({
-    vaultRoot,
-    capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
-  });
   await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
+
+  const pending = await findOperationByType(vaultRoot, "inbox_capture_persist");
+  assert.ok(pending);
+  const operationPath = path.join(vaultRoot, pending.relativePath);
+  for (const status of ["committed", "rolled_back"] as const) {
+    await fs.writeFile(operationPath, JSON.stringify({ ...pending.operation, status }));
+    assert.equal(await findStoredCaptureSnapshot({ vaultRoot, inbound, captureId }), null);
+  }
+  await fs.writeFile(operationPath, JSON.stringify(pending.operation));
+  assert.ok(await findStoredCaptureSnapshot({ vaultRoot, inbound, captureId }));
 
   const runtime = await openInboxRuntime({ vaultRoot });
   await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
@@ -840,16 +797,12 @@ test("processCapture reuses a staged capture record when retry occurredAt drifts
   });
   const captureId = createDeterministicInboxCaptureId(inbound);
   const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WE";
-  await persistCanonicalInboxCapture({
+  await persistInterruptedInboxCapture({
     vaultRoot,
     captureId,
     eventId,
     input: inbound,
     storedAt: "2026-03-13T11:16:00.000Z",
-  });
-  await markInboxCapturePersistOperationInterrupted({
-    vaultRoot,
-    capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
   });
   await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
 
@@ -888,16 +841,12 @@ test("processCapture ignores a malformed unrelated staged record while reusing m
     text: "Broken unrelated raw-only capture",
   });
   const unrelatedCaptureId = createDeterministicInboxCaptureId(unrelatedInbound);
-  const unrelatedPersisted = await persistCanonicalInboxCapture({
+  const unrelatedPersisted = await persistInterruptedInboxCapture({
     vaultRoot,
     captureId: unrelatedCaptureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WF",
     input: unrelatedInbound,
     storedAt: "2026-02-13T11:21:00.000Z",
-  });
-  await markInboxCapturePersistOperationInterrupted({
-    vaultRoot,
-    capturePath: unrelatedPersisted.capture.relativePath,
   });
   await removeInboxCaptureLedgerForOccurredAt(vaultRoot, unrelatedInbound.occurredAt);
   const unrelatedOperation = await findOperationByType(vaultRoot, "inbox_capture_persist");
@@ -925,16 +874,12 @@ test("processCapture ignores a malformed unrelated staged record while reusing m
   });
   const targetCaptureId = createDeterministicInboxCaptureId(targetInbound);
   const targetEventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WG";
-  const targetPersisted = await persistCanonicalInboxCapture({
+  const targetPersisted = await persistInterruptedInboxCapture({
     vaultRoot,
     captureId: targetCaptureId,
     eventId: targetEventId,
     input: targetInbound,
     storedAt: "2026-03-13T11:26:00.000Z",
-  });
-  await markInboxCapturePersistOperationInterrupted({
-    vaultRoot,
-    capturePath: targetPersisted.capture.relativePath,
   });
   await removeInboxCaptureLedgerForOccurredAt(vaultRoot, targetInbound.occurredAt);
 

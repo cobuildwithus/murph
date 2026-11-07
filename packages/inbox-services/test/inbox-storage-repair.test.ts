@@ -48,3 +48,18 @@ test('storage repairs do not require inbox runtime configuration', async () => {
   assert.equal(parserResult.mode, 'dry-run')
   assert.equal(parserResult.scannedAttemptCount, 0)
 })
+
+test('hosted inbox initialization opens SQLite and remains idempotent with rebuild enabled', async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), 'inbox-init-'))
+  tempRoots.push(vaultRoot)
+  await createIntegratedVaultServices().core.init({ requestId: null, vault: vaultRoot })
+  const services = createIntegratedInboxServices()
+  const first = await services.init({ requestId: null, vault: vaultRoot })
+  assert.equal(first.databasePath, '.runtime/projections/inboxd.sqlite')
+  await access(resolveRuntimePaths(vaultRoot).inboxDbPath)
+  const second = await services.init({ requestId: null, vault: vaultRoot, rebuild: true })
+  assert.deepEqual(second.createdPaths, [])
+  assert.equal(second.rebuiltCaptures, 0)
+  const listed = await services.list({ requestId: null, vault: vaultRoot })
+  assert.deepEqual(listed.items, [])
+})

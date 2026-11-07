@@ -22,6 +22,26 @@ import {
 } from "../src/providers/junction-client.ts";
 import { createJsonResponse, makeTempDirectory, readUrl, requireValue } from "./helpers.ts";
 
+for (const strict of [false, true]) {
+  test.each(["sleep_cycle", "menstrual_cycle"])(`Junction extracts SDK-decoded %s records (strict=${strict})`, async (resource) => {
+    let records: unknown[] = [];
+    const client = new JunctionClient({
+      apiKey: "sk_us_synthetic", environment: "sandbox", region: "us",
+      fetchImpl: async () => createJsonResponse({ [resource]: records }),
+    });
+    const read = () => client.listSummary({
+      resource, userId: "synthetic-user",
+      windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+      requireStructurallyCompleteCollection: strict,
+    });
+    assert.deepEqual(await read(), []);
+    records = [{ id: "synthetic-cycle", start: "2026-04-02T22:00:00.000Z", end: "2026-04-03T06:00:00.000Z" }];
+    const result = await read();
+    assert.equal(result.length, 1);
+    assert.equal((result[0] as { id: string }).id, "synthetic-cycle");
+  });
+}
+
 test("Junction createLinkToken accepts documented Link web URL hosts", async () => {
   const linkWebUrl = "https://link.tryvital.io/?token=link-token-1&env=sandbox&region=us";
   const client = new JunctionClient({
@@ -1527,6 +1547,14 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
 
 test("Junction refresh outlives the server wait and reports timeout without replay", async () => {
   vi.useFakeTimers();
+  // Native AbortSignal.timeout bypasses fake timers; control only its clock.
+  // The native timeout and caller-abort cases above retain real signal coverage.
+  const abortTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+    return controller.signal;
+  });
+  const signals: AbortSignal[] = [];
   let requests = 0;
   let delayMs = 16_000;
   const client = new JunctionClient({
@@ -1537,6 +1565,7 @@ test("Junction refresh outlives the server wait and reports timeout without repl
       requests += 1;
       const signal = init?.signal;
       assert.ok(signal);
+      signals.push(signal);
       return new Promise<Response>((resolve, reject) => {
         const timer = setTimeout(() => resolve(createJsonResponse({
           success: true,
@@ -1566,10 +1595,112 @@ test("Junction refresh outlives the server wait and reports timeout without repl
         return true;
       },
     );
-    await vi.advanceTimersByTimeAsync(35_000);
+    await vi.advanceTimersByTimeAsync(34_999);
+    assert.equal(signals[1]?.aborted, false, "Refresh retains its full client deadline");
+    await vi.advanceTimersByTimeAsync(1);
+    assert.equal(signals[1]?.aborted, true);
+    assert.deepEqual(abortTimeout.mock.calls, [[35_000], [35_000]]);
     await failure;
     assert.equal(requests, 2);
   } finally {
+    abortTimeout.mockRestore();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test.each([
+  { label: "before fetch", body: undefined, stage: "request_setup", headers: false },
+  { label: "no body", body: null, stage: "post_body", headers: true },
+  { label: "observed EOF", body: '{"providers":[]}', stage: "post_body", headers: true },
+])("Junction timeout observes $label without inferring a decode cause", async ({ body, stage, headers }) => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  const abortTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+    return controller.signal;
+  });
+  let requests = 0;
+  try {
+    const client = new JunctionClient({
+      apiKey: "sk_us_synthetic", environment: "sandbox", region: "us",
+      fetchImpl: async () => { requests += 1; return new Response(body); },
+    });
+    // Hold only SDK completion at its existing invoke seam. The real request
+    // owner still wraps and consumes the bounded stream (or observes no body).
+    const execution = client["requestSdkResource"]("GET", {
+      endpointKind: "junction_user_providers",
+    }, async (clientOptions, requestOptions) => {
+      if (body !== undefined) {
+        assert.ok(clientOptions.fetch);
+        const response = await clientOptions.fetch("https://example.test/providers");
+        await response.text();
+      }
+      const signal = requestOptions.abortSignal;
+      assert.ok(signal);
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        if (signal.aborted) reject(signal.reason);
+      });
+    });
+    const checked = assert.rejects(execution, (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
+      assert.equal(error.details?.providerRequestTimeoutMs, 15_000, "Generic default is unchanged");
+      assert.equal(error.details?.providerRequestElapsedMs, 15_000);
+      assert.equal(error.details?.providerRequestAttempt, 1);
+      assert.equal(error.details?.providerRequestStage, stage);
+      assert.equal(error.details?.providerResponseHeadersPresent, headers);
+      return true;
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await checked;
+    assert.equal(requests, headers ? 1 : 0);
+  } finally {
+    abortTimeout.mockRestore();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test("Junction timeout reports the HTTP attempt after an ordinary GET retry", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  const abortTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+    return controller.signal;
+  });
+  let requests = 0;
+  try {
+    const client = new JunctionClient({
+      apiKey: "sk_us_synthetic", environment: "sandbox", region: "us", requestTimeoutMs: 1_000,
+      fetchImpl: async (_input, init) => {
+        requests += 1;
+        if (requests === 1) return createJsonResponse({ error: "temporarily_unavailable" }, 503);
+        const signal = init?.signal;
+        assert.ok(signal);
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          if (signal.aborted) reject(signal.reason);
+        });
+      },
+    });
+    const checked = assert.rejects(client.listUserProviders("synthetic-user"), (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
+      assert.equal(error.details?.providerRequestAttempt, 2);
+      assert.equal(error.details?.providerRequestTimeoutMs, 1_000);
+      assert.equal(error.details?.providerRequestElapsedMs, 1_000, "Elapsed time resets for each HTTP attempt");
+      assert.equal(error.details?.providerRequestStage, "awaiting_headers");
+      assert.equal(error.details?.providerResponseHeadersPresent, false);
+      return true;
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await checked;
+    assert.equal(requests, 2, "Timeout must not trigger a third HTTP attempt");
+  } finally {
+    abortTimeout.mockRestore();
+    vi.clearAllTimers();
     vi.useRealTimers();
   }
 });

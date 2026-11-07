@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "clearer-existing-meal-names",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer names for older meals",
+    "summary": "Older meal labels get short dish names, making your Meals list easier to scan.",
+    "details": "Ingredient lists and extra place or portion details stay in the notes. Nutrition estimates, meal times, and photos stay the same.",
+    "relevanceTags": [
+      "nutrition",
+      "food-journal"
+    ],
+    "sourcePullRequests": [
+      4457
+    ]
+  }
+}

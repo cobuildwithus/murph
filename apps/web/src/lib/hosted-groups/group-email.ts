@@ -14,7 +14,7 @@ import {
   readHostedMemberVerifiedEmailSnapshots,
 } from "../hosted-onboarding/hosted-member-store";
 import {
-  activeHostedMemberAccessWhere,
+  strictHostedPersonAccessWhere,
   hasActiveHostedMemberAccess,
   hostedMemberAccessSelect,
   hostedMemberPersonAccessSelect,
@@ -113,7 +113,7 @@ function buildHostedGroupEmailMemberAccessSelect(now: Date) {
             ...activeHostedThreadContainerParticipantWhere({ now }),
             participant: {
               AND: [
-                activeHostedMemberAccessWhere(),
+                strictHostedPersonAccessWhere(),
                 hostedHealthDataConsentNotRevokedWhere(),
               ],
             },

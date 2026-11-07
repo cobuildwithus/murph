@@ -17,7 +17,7 @@ Success criteria:
 ## Constraints
 
 - Naming and import cleanup only; do not mix in logic changes.
-- Preserve existing dirty worktree edits in hosted/web/runtime/Murph Age lanes.
+- Preserve existing dirty worktree edits in hosted/web/runtime lanes.
 - Do not rename unrelated device/channel provider identifiers.
 - Preserve redaction, secret, transcript, and path privacy behavior.
 

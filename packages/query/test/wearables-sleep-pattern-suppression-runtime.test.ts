@@ -178,9 +178,14 @@ test("direct and projected sleep patterns retain upstream suppression evidence",
       "utf8",
     );
 
+    const cold = await summarizeWearableSleepPatternRuntime(vaultRoot, filters);
+    const warm = await summarizeWearableSleepPatternRuntime(vaultRoot, filters);
     await rebuildQueryProjection(vaultRoot);
     const projected = await summarizeWearableSleepPatternRuntime(vaultRoot, filters);
-    assertSuppressionCounts(projected);
+    for (const summary of [cold, warm, projected]) {
+      assertSuppressionCounts(summary);
+      assert.equal(JSON.stringify(summary), JSON.stringify(projected));
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -226,12 +231,12 @@ test("bounded runtime reads retain source freshness older than the sleep window"
       "utf8",
     );
 
+    const filters = { now: "2026-07-16T12:00:00.000Z", timeZone: "UTC" };
+    const cold = await summarizeWearableSleepPatternRuntime(vaultRoot, filters);
     await rebuildQueryProjection(vaultRoot);
-    const summary = await summarizeWearableSleepPatternRuntime(vaultRoot, {
-      now: "2026-07-16T12:00:00.000Z",
-      timeZone: "UTC",
-    });
+    const summary = await summarizeWearableSleepPatternRuntime(vaultRoot, filters);
 
+    assert.equal(JSON.stringify(cold), JSON.stringify(summary));
     assert.equal(summary.validNightCount, 0);
     assert.deepEqual(summary.sourceFreshness, [{
       lastSleepEvidenceDate: "2026-05-01",

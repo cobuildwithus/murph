@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-24",
+  "order": 50,
+  "item": {
+    "id": "game-chat-changes-clearer",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer game changes in chat",
+    "summary": "Murph now says when a new game request replaces your partner's, and asks only about what was just requested.",
+    "details": "When Murph can't make a change, it explains the rule and suggests the closest option. A day with no post is still open until 3 AM. You can call off a game in chat before it starts; once it's live, Murph explains what you can still change.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4354
+    ]
+  }
+}
