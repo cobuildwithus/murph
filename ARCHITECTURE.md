@@ -1984,6 +1984,20 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   started with, and neither the vault nor the hosted workspace snapshot stores
   a second preference.
 
+  Lapsed personal billing (paused, past due, canceled or unpaid) permits AI
+  only while the person's existing usage-credit balance is positive, unless
+  valid Family sponsorship provides allowance. Unsponsored lapsed people use
+  the zero-limit lifetime period; stale direct paid metadata, including a future
+  period end, never grants included capacity. Read-only checks, admission and
+  settlement resolve funding through the same allowance owner. This performs
+  no Starter enrollment, credit grant or billing write. Exhaustion restores the
+  billing-inactive notice rather than a Starter usage notice. Already-admitted
+  usage still settles, with existing overshoot absorption and frozen beneficiary
+  semantics. Suspension and health-data consent remain ahead of new spending.
+  Personal credit cannot sponsor room creation, room access or another member;
+  those callers use the access owner's explicit sponsorship-only check. New credit
+  purchases, referral qualification and welcomes retain strict eligibility.
+
   Monthly and valid in-window trial allowance remain measured and noticed,
   retaining requested-model and served-model attribution. Subsequent
   usage-bearing work is denied only when included capacity and generic usage

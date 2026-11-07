@@ -452,6 +452,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
   }
   const candidateSenderAccess = candidateSender
     ? await readHostedRuntimeAiAccessDecision({
+        sponsorshipOnly: true,
         memberId: candidateSender.memberId,
         prisma: input.prisma,
       })
@@ -3898,6 +3899,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     && isHostedMemberSuspended(sender.suspendedAt);
   const senderAccess = sender && !senderSuspended
     ? await readHostedRuntimeAiAccessDecision({
+        sponsorshipOnly: true,
         memberId: sender.id,
         prisma: input.prisma,
       })
@@ -3988,6 +3990,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     });
     if (
       !(await readHostedRuntimeAiAccessDecision({
+        sponsorshipOnly: true,
         memberId: activeSenderMemberId,
         prisma: input.prisma,
       })).allowed

@@ -365,6 +365,9 @@ eligibility, and returning-member activation proof are owned by
 [Architecture](../ARCHITECTURE.md); local evidence and the caller audit are in
 [the worker access plan](exec-plans/completed/2026-11-06-lapsed-worker.md).
 
+Lapsed personal credit spending, strict room sponsorship and billing notices are
+owned by [Architecture](../ARCHITECTURE.md) and [the invariants](../docs/contracts/00-invariants.md).
+
 # Murph Agent Docs Index
 
 The weekly game's flag-gated Terms check on app writes

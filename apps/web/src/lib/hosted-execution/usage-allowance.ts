@@ -57,6 +57,7 @@ import {
   hasActiveHostedThreadContainerAccessWithParticipants,
   readGameChatAllowanceBeneficiary,
 } from "../hosted-onboarding/member-access";
+import { isHostedLapsedBillingStatus } from "../hosted-onboarding/lifecycle";
 import { getPrisma } from "../prisma";
 import {
   admitHostedGroupSponsorshipRefillTx,
@@ -332,19 +333,25 @@ async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   billingStatus: HostedBillingStatus;
   memberId: string;
+  suspendedAt: Date | null;
+  usageCreditBalanceUsdMicros: bigint;
   tx: Prisma.TransactionClient;
 }): Promise<{
   billingRef: HostedAiUsageAllowanceBillingRef | null;
-  familyAccessActive: boolean;
+  personalAccessActive: boolean;
+  creditOnly: boolean;
 }> {
-  if (
-    input.billingStatus === HostedBillingStatus.active &&
-    isHostedAiUsagePaidBillingRef(input.billingRef)
-  ) {
-    return {
-      billingRef: input.billingRef,
-      familyAccessActive: false,
-    };
+  const lapsed = isHostedLapsedBillingStatus(input.billingStatus);
+  // Stale paid metadata never supplies included capacity after a lapse, even
+  // with a future provider period. Null resolves to the zero-limit lifetime
+  // period; it does not enroll the member or grant Starter credit.
+  const directBillingRef = lapsed ? null : input.billingRef;
+  if (input.suspendedAt !== null) {
+    return { billingRef: directBillingRef, personalAccessActive: false, creditOnly: lapsed };
+  }
+  if (input.billingStatus === HostedBillingStatus.active
+    && isHostedAiUsagePaidBillingRef(input.billingRef)) {
+    return { billingRef: input.billingRef, personalAccessActive: true, creditOnly: false };
   }
 
   const familyBillingRef = await readHostedFamilySponsoredBillingRefForMember({
@@ -352,15 +359,14 @@ async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
     tx: input.tx,
   });
   if (familyBillingRef) {
-    return {
-      billingRef: familyBillingRef,
-      familyAccessActive: true,
-    };
+    return { billingRef: familyBillingRef, personalAccessActive: true, creditOnly: false };
   }
 
   return {
-    billingRef: input.billingRef,
-    familyAccessActive: false,
+    billingRef: directBillingRef,
+    personalAccessActive: input.billingStatus === HostedBillingStatus.active
+      || (lapsed && input.usageCreditBalanceUsdMicros > 0n),
+    creditOnly: lapsed,
   };
 }
 
@@ -1144,17 +1150,16 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     throw new TypeError("Hosted AI usage allowance member does not exist.");
   }
   const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
-  const allowanceAccess = memberState.suspendedAt === null
-    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-        billingRef: memberState.billingRef,
-        billingStatus: memberState.billingStatus,
-        memberId: input.memberId,
-        tx: input.tx,
-      })
-    : {
-        billingRef: memberState.billingRef,
-        familyAccessActive: false,
-      };
+  const allowanceAccess = await resolveHostedAiUsageAllowanceBillingRefForMember({
+    billingRef: memberState.billingRef,
+    billingStatus: memberState.billingStatus,
+    memberId: input.memberId,
+    suspendedAt: memberState.suspendedAt,
+    usageCreditBalanceUsdMicros: usageCreditProjection.usageCreditBalanceUsdMicros,
+    tx: input.tx,
+  });
+  const lapsedPersonalCredit = !memberState.threadContainer
+    && allowanceAccess.creditOnly;
   const threadContainerAccessActive = input.allowanceBeneficiaryMemberId && memberState.threadContainer
     ? true // Charge already-admitted work even if its game or room changed.
     : await hasHostedAiUsageThreadContainerAccess({
@@ -1211,7 +1216,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
+    return { ...settlement, limitNoticeCandidate: !lapsedPersonalCredit && settlement.limitNoticeCandidate
       ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
   }
   const priced = operatorFunded
@@ -1256,7 +1261,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     sourceUsageId: input.record.usageId,
     tx: input.tx,
   });
-  return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
+  return { ...settlement, limitNoticeCandidate: !lapsedPersonalCredit && settlement.limitNoticeCandidate
     ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
 }
 
@@ -1494,19 +1499,15 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
     }
     const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
-    const allowanceAccess = memberState.suspendedAt === null
-      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          billingRef: memberState.billingRef,
-          billingStatus: memberState.billingStatus,
-          memberId: input.memberId,
-          tx,
-        })
-      : {
-          billingRef: memberState.billingRef,
-          familyAccessActive: false,
-        };
+    const allowanceAccess = await resolveHostedAiUsageAllowanceBillingRefForMember({
+      billingRef: memberState.billingRef,
+      billingStatus: memberState.billingStatus,
+      memberId: input.memberId,
+      suspendedAt: memberState.suspendedAt,
+      usageCreditBalanceUsdMicros: usageCreditProjection.usageCreditBalanceUsdMicros,
+      tx,
+    });
     const allowanceBillingRef = allowanceAccess.billingRef;
-    const familyAccessActive = allowanceAccess.familyAccessActive;
     const threadContainerAccessActive = input.gameFundingResolved && memberState.threadContainer
       ? true
       : await hasHostedAiUsageThreadContainerAccess({
@@ -1519,14 +1520,13 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
 
     // Thread-container members are synthetic (`not_started` own billing):
     // their access is decided by the container branch of the allowance-period
-    // resolver below. Only non-container members are denied on their own
-    // billing here; suspension always fails closed.
+    // resolver below. Only non-container members need personal funding here;
+    // suspension always fails closed.
     if (
       memberState.suspendedAt !== null ||
       (
         !memberState.threadContainer &&
-        memberState.billingStatus !== HostedBillingStatus.active &&
-        !familyAccessActive
+        !allowanceAccess.personalAccessActive
       )
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
@@ -1663,19 +1663,15 @@ async function readHostedAiUsageGateForMember(input: {
   }
   const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
-  const allowanceAccess = memberState.suspendedAt === null
-    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-        billingRef: memberState.billingRef,
-        billingStatus: memberState.billingStatus,
-        memberId: input.memberId,
-        tx: prisma,
-      })
-    : {
-        billingRef: memberState.billingRef,
-        familyAccessActive: false,
-      };
+  const allowanceAccess = await resolveHostedAiUsageAllowanceBillingRefForMember({
+    billingRef: memberState.billingRef,
+    billingStatus: memberState.billingStatus,
+    memberId: input.memberId,
+    suspendedAt: memberState.suspendedAt,
+    usageCreditBalanceUsdMicros: usageCreditProjection.usageCreditBalanceUsdMicros,
+    tx: prisma,
+  });
   const allowanceBillingRef = allowanceAccess.billingRef;
-  const familyAccessActive = allowanceAccess.familyAccessActive;
   const threadContainerAccessActive = gameFundingResolved && memberState.threadContainer
     ? true
     : memberState.threadContainer
@@ -1690,14 +1686,13 @@ async function readHostedAiUsageGateForMember(input: {
 
   // Thread-container members are synthetic (`not_started` own billing):
   // their access is decided by the container branch of the allowance-period
-  // resolver below. Only non-container members are denied on their own
-  // billing here; suspension always fails closed.
+  // resolver below. Only non-container members need personal funding here;
+  // suspension always fails closed.
   if (
     memberState.suspendedAt !== null ||
     (
       !memberState.threadContainer &&
-      memberState.billingStatus !== HostedBillingStatus.active &&
-      !familyAccessActive
+      !allowanceAccess.personalAccessActive
     )
   ) {
     return resolveHostedAiUsageInactiveGateDecision({
@@ -1959,18 +1954,24 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
       usageCreditLedgerVersion: true,
     },
   });
-  if (
-    !memberState ||
-    memberState.billingStatus !== HostedBillingStatus.active ||
-    memberState.suspendedAt !== null
-  ) {
+  if (!memberState || memberState.suspendedAt !== null) {
     throw new Error("Hosted AI usage allowance member is not active.");
   }
   const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
-
+  const allowanceAccess = await resolveHostedAiUsageAllowanceBillingRefForMember({
+    billingRef: memberState.billingRef,
+    billingStatus: memberState.billingStatus,
+    memberId: input.memberId,
+    suspendedAt: memberState.suspendedAt,
+    usageCreditBalanceUsdMicros: usageCreditProjection.usageCreditBalanceUsdMicros,
+    tx: input.tx,
+  });
+  if (!allowanceAccess.personalAccessActive && !allowanceAccess.creditOnly) {
+    throw new Error("Hosted AI usage allowance member is not active.");
+  }
   const period = await ensureHostedAiUsageAllowancePeriodTx({
     at: input.now,
-    billingRef: memberState.billingRef,
+    billingRef: allowanceAccess.billingRef,
     memberId: input.memberId,
     now: input.now,
     tx: input.tx,

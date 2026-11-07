@@ -414,6 +414,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   const accessNow = new Date();
   const accessDecision = await readHostedRuntimeAiAccessDecision({
+    sponsorshipOnly: !summary.isDirect,
     memberId: existingMember.id,
     now: accessNow,
     prisma: input.prisma,
