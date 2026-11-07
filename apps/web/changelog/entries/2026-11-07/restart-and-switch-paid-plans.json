@@ -9,7 +9,7 @@
     "summary": "After your plan is canceled, choosing a plan opens its Stripe Checkout instead of the card-management page.",
     "details": "Lower-plan switches are clearly marked and start at your next renewal, with your current access kept until then. Manage billing stays separate for payment methods and invoices.",
     "relevanceTags": ["account", "billing", "settings"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [4735],
     "tryIt": { "label": "Open plan settings", "href": "/settings#subscription" }
   }
 }
