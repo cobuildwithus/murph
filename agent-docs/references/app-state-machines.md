@@ -180,14 +180,14 @@ The real PostgreSQL regression uses a settled previous game and proves both
 on-to-off and off-to-on overwrite. The optional every-day field is independent:
 an older client that changes only on/off must not prevent normal every-day
 carry-over. Correction uses immutable per-field facts in the existing GameEvent
-history, set-based writes and exact player ownership; no new schema or per-game
+history, set-based writes and the existing game lock; no new schema or per-game
 activation loop on settings save is needed. Both lock orderings, optional-field
 inheritance, feature-disabled saves, activation replay, and kickoff reservation
 pass real PostgreSQL proof. At 1 versus 1,000 live games, settings uses the same
 query count (at most 12) and one connection; at most two immutable facts per
 seat are inserted, and retries add none. No artificial application cap was added.
 The added settings operation is one set-based database insert before player
-writes; activation adds an exact player lock and a two-key fact lookup. No
+writes; activation adds only a bounded two-key fact lookup. No
 network or encryption work was added to these database transactions.
 
 ## Web client machines
@@ -1019,11 +1019,11 @@ Invariant: one member-wide daily reminder attempt, including failed/ambiguous/su
 
 Sources: `apps/web/src/lib/game/{private-kickoff,private-notification,direct-tool,service,chat-lifecycle,reminder-preferences}.ts`; existing `GameEvent`, `GamePlayer`, `HostedLinqDelivery` and mailbox owners.
 States: each preference field implicit default/explicitly chosen (append-only event fact); per-player activation unmarked/marked (`messageKind` none/new_person/new_rhythm); optional kickoff awaiting_generation/generation_queued/delivery/skipped-expired; profile-private text disabled/enabled/unavailable; per-member/date evening opportunity unclaimed/awaiting_generation/generation_queued/delivery with derived paused state.
-Invariant: activation is idempotent under the game lock; carry-over comes from explicit rematch lineage or the latest earlier same audience and matches member identity, independently of seat order. Explicit current-game choices survive activation recovery: saves record per-field immutable facts set-wise before player writes; activation holds the game and exact player lock before checking those facts and copies only untouched fields. The off fact also bounds affected seats to admitted preference authority; newly admitted seats are not caught by a later broad update. These preference facts remain separate from activation/kickoff completion. Kickoff is reserved only for new-person/rhythm notice within 24 hours and delivered 09:00–21:00 local. Private text never grants AI access or creates a direct route; it requires current existing direct Linq authority, consent/funding/usage and applicable reminder opt-in. Private evening excludes games that an eligible room evening can cover; exact terms/day batch and conversation watermark must still match at egress.
+Invariant: activation is idempotent under the game lock; carry-over comes from explicit rematch lineage or the latest earlier same audience and matches member identity, independently of seat order. Explicit current-game choices survive activation recovery: saves record per-field immutable facts set-wise before player writes; activation holds the game lock before checking those facts and copies only untouched fields. The off fact also bounds affected seats to admitted preference authority; newly admitted seats are not caught by a later broad update. These preference facts remain separate from activation/kickoff completion. Kickoff is reserved only for new-person/rhythm notice within 24 hours and delivered 09:00–21:00 local. Private text never grants AI access or creates a direct route; it requires current existing direct Linq authority, consent/funding/usage and applicable reminder opt-in. Private evening excludes games that an eligible room evening can cover; exact terms/day batch and conversation watermark must still match at egress.
 
 | From | Event / guard | To / effect |
 | --- | --- | --- |
-| Unmarked live player | Post-commit activation or bounded sweep recovery under game/player locks | Copy only prior fields without explicit choice facts; mark activation once; optionally reserve kickoff |
+| Unmarked live player | Post-commit activation or bounded sweep recovery under the game lock | Copy only prior fields without explicit choice facts; mark activation once; optionally reserve kickoff |
 | Marked activation | Retry | No recopy or second kickoff |
 | Default/current preference | Explicit save, even while feature disabled | Record off fact and optional every-day fact before writing settings; immutable keys collapse retries |
 | Explicit current-game preference saved | Delayed/concurrent activation recovery | Keep explicit fields; untouched every-day field may still inherit; kickoff continues |
@@ -1036,9 +1036,9 @@ Invariant: activation is idempotent under the game lock; carry-over comes from e
 | Queued notification | Current batch/seat/access/route/expiry fails egress check | Send rejected as stale; no private disclosure |
 | Three accepted private evenings within prior 28 dates, no later inbound | Derived pause | Further private evening reservation blocked until inbound/new policy evidence |
 
-Confirmed reproduction: settle earlier rematch with both per-seat flags false (repeat with true), create live rematch, inject one activation transaction failure, call production `runGameCommand(setReminders)` with opposite flags, then `reconcilePrivateGameActivations`. Both flags revert to the settled game's values. Regression executes real PostgreSQL and real activation/save/sweep owners; baseline 2 failures/6 existing passes in `game-private-activation-postgres.test.ts`. Fixed activation suite: 12 passed, including both toggle directions, PostgreSQL-observed activation-first/save-first contention, feature-off to enabled, omitted every-day inheritance, and preserved new-rhythm kickoff. Existing ordinary reminder suite: 28 passed. Issue: [#4732](https://github.com/cobuildwithus/murph/issues/4732).
+Confirmed reproduction: settle earlier rematch with both per-seat flags false (repeat with true), create live rematch, inject one activation transaction failure, call production `runGameCommand(setReminders)` with opposite flags, then `reconcilePrivateGameActivations`. Both flags revert to the settled game's values. Regression executes real PostgreSQL and real activation/save/sweep owners; baseline 2 failures/6 existing passes in `game-private-activation-postgres.test.ts`. Fixed activation suite: 14 passed, including both toggle directions, four PostgreSQL-observed activation-first/save-first cases with absent or partially existing facts, feature-off to enabled, omitted every-day inheritance, and preserved new-rhythm kickoff. Existing ordinary reminder suite: 28 passed. Issue: [#4732](https://github.com/cobuildwithus/murph/issues/4732).
 
-Load proof: saving 1,000 live games has the same operation/query count as one game, at most 12 SQL statements, one pool acquisition, and at most two preference facts per seat (2,000 total after repeated saves). The added save work is one set-based insert; activation adds one exact-player lock and one bounded two-key fact read. Added work has no provider/crypto calls or per-game loop, and imposes no new product cap. Insert facts before player updates: their game foreign-key lock coordinates with activation's existing game FOR UPDATE lock; reversing this order could deadlock.
+Load proof: saving 1,000 live games has the same operation/query count as one game, at most 12 SQL statements, one pool acquisition, and at most two preference facts per seat (2,000 total after repeated saves). The added save work is one set-based insert; activation adds one bounded two-key fact read. The separate player-lock query was removed as redundant. Added work has no provider/crypto calls or per-game loop, and imposes no new product cap. Insert facts before player updates: their game foreign-key lock coordinates with activation's existing game FOR UPDATE lock; reversing this order could deadlock.
 
 ## Native iOS machines
 
@@ -1362,7 +1362,7 @@ Invariants: extension never receives host product session; derived grant is memb
 | SM-02 diagnostic transition loss | 6 new lifecycle cases failed; ordinary-success case passed | Lifecycle, feedback sanitizer and runtime route: 16 passed across 3 files |
 | SM-03 iOS stale game projections | Four original tests fail with eight assertions; review adds red stale-denial, offline delete/create, and partial-post assertions | 276/276 tests across nine simulator suites; build and tracked SwiftFormat pass; independent reviewer has no outstanding findings; local commit `624c8e6` |
 | SM-04 warmup cancellation | New case failed (1 failed, 5 passed): canceled preparation spawned child and returned timed_out | Six tests pass; direct synthetic proof returns aborted without starting child; Cloudflare typecheck passes |
-| SM-05 reminder choice | Real PostgreSQL: two new recovery cases fail, six existing cases pass | Activation 12 passed; ordinary reminders 28 passed; both lock orders, optional fields, feature-disabled saves, replay, and 1,000-game constant-query proof |
+| SM-05 reminder choice | Real PostgreSQL: two new recovery cases fail, six existing cases pass | Activation 14 passed; ordinary reminders 28 passed; both lock orders, optional fields, feature-disabled saves, replay, and 1,000-game constant-query proof |
 | Web types | Not a baseline comparison | `pnpm --dir apps/web typecheck` passed |
 | Complexity | Existing member-message handler hotspot 21 | Guard passed for five authored source files; hotspot unchanged; reminder helper maximum 4 |
 | Changelog | Internal diagnostics/warmup need no public note; duplicate upstream parser note removed | Member-visible reminder correction has `game-reminder-choices-stay-saved`; production archive rendering: four tests pass |
@@ -1434,3 +1434,20 @@ required CI, native simulator proof, deployment and live provider verification.
   rules, failure schedule and evidence here alongside its canonical owner doc.
   A new defect requires a concrete supported caller, interleaving and impact;
   group fixes at the owner that restores the invariant.
+
+## Shipping and simplification follow-up
+
+The subsequent shipping request removes a redundant player lock from reminder
+activation: a new preference fact must acquire a foreign-key KEY SHARE lock on
+the already-locked game, while an existing fact prevents that field from being
+copied. Four real PostgreSQL contention cases preserve both orderings and the
+independent optional field. No new state, schema or fallback was added. The two
+immutable field facts remain necessary evidence of explicit choice. Diagnostic
+CAS checks and their one shared durable-winner read remain the minimum behavior
+needed by the demonstrated failures.
+
+Native cache-write ownership is being narrowed to accepted mutations so fresh
+Home reads and cached presentation do not perform redundant writes. The original
+completed audit plan remains historical evidence; the active shipping plan and
+PRs own release progression. Merge, deployment and native upload are distinct
+outcomes and are not yet claimed here.

@@ -140,11 +140,14 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     expect(await receipt(current, a)).toMatchObject({ template: "game_private_kickoff" });
   });
 
-  it.each(["activation", "save"] as const)("preserves the explicit choice when %s obtains the game lock first", async first => {
+  it.each([["activation", false], ["save", false], ["activation", true], ["save", true]] as const)(
+    "preserves the explicit choice when %s obtains the game lock first (existing off choice=%s)", async (first, existingOff) => {
     const a = await member("Alex"), b = await member("Sam");
     const previous = await game([a, b], { startedAt: new Date("2026-11-05T18:00:00Z") });
     await db.game.update({ where: { id: previous }, data: { status: "settled" } });
     const current = await game([a, b], { previousGameId: previous, schedule: { count: 3 } });
+    if (existingOff) expect(await runGameCommand({ actorMemberId: a, command: { type: "setReminders", minutes: 1140,
+      push: true, text: false, offGameIds: [current] } })).toMatchObject({ ok: true });
     const acquired = deferred<number>(), release = deferred<void>();
     const holding = db.$transaction(async tx => {
       const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
@@ -158,7 +161,7 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     }, { timeout: 10_000 });
     const activate = () => activatePrivateGamePlayers(current, now);
     const save = () => runGameCommand({ actorMemberId: a, command: { type: "setReminders", minutes: 1140,
-      push: true, text: false, offGameIds: [current], everyDayGameIds: [current] } });
+      push: true, text: false, offGameIds: existingOff ? [] : [current], everyDayGameIds: [current] } });
     let activation: Promise<void> | undefined, saved: ReturnType<typeof save> | undefined;
     try {
       const pid = await acquired.promise;
@@ -176,7 +179,7 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
       await Promise.allSettled([holding, activation, saved]);
     }
     expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: current, memberId: a } } }))
-      .toMatchObject({ reminderOff: true, reminderEveryDay: true });
+      .toMatchObject({ reminderOff: !existingOff, reminderEveryDay: true });
     expect(await receipt(current, a)).toMatchObject({ template: "game_private_kickoff" });
   });
 

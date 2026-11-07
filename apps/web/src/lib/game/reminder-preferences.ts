@@ -25,10 +25,9 @@ export async function recordGameReminderPreferencesTx(tx: Prisma.TransactionClie
   `;
 }
 
-/** Caller holds the game lock. Defaults never replace a field the member explicitly chose. */
+/** Caller holds the game lock: it blocks new choice facts via their FK; existing facts protect their fields. */
 export async function carryOverGameReminderPreferencesTx(tx: Prisma.TransactionClient, gameId: string, memberId: string,
   previous: { reminderOff: boolean; reminderEveryDay: boolean }): Promise<void> {
-  await tx.$queryRaw`SELECT game_id FROM game_player WHERE game_id = ${gameId} AND member_id = ${memberId} FOR UPDATE`;
   const choices = await tx.gameEvent.findMany({ where: { commandKey: { in: [
     choiceKey(gameId, memberId, GAME_REMINDER_OFF_CHOICE_EVENT), choiceKey(gameId, memberId, EVERY_DAY_CHOICE_EVENT),
   ] } }, select: { type: true } });
