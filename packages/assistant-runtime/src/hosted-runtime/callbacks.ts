@@ -186,6 +186,8 @@ type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | s
 export type HostedAssistantDeliveryEffect = HostedExecutionAssistantDeliveryEffect & {
   /** Dispatch only after this effect's exact prepared claim is in a published snapshot. */
   publishBeforeDispatch?: true;
+  /** Publish promptly after dispatch to preserve canonical settlement state. */
+  publishAfterDispatch?: true;
 };
 
 interface HostedAssistantDeliveryBoundaryFields {
@@ -438,6 +440,20 @@ function buildHostedAssistantDeliveryEffects({
     intents.filter(hostedLinqIntentCarriesDurableObligation)
       .map(readHostedAssistantDeliveryBoundaryKey),
   );
+  const settlementBoundaryKeys = new Set(
+    intents.filter((intent) => intent.channel === "linq"
+      && hostedAssistantIntentOwesProviderSend(intent)
+      && assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent))
+      .map(readHostedAssistantDeliveryBoundaryKey),
+  );
+  for (const intent of intents) {
+    const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
+    if (settlementBoundaryKeys.has(boundaryKey)
+      && hostedAssistantIntentOwesProviderSend(intent)
+      && !intent.deliveryTransportIdempotent) {
+      obligationBoundaryKeys.add(boundaryKey);
+    }
+  }
   const claimedBoundaryKeys = new Set<string>();
   const effects: HostedAssistantDeliveryEffect[] = [];
   for (const [candidates, phase] of [
@@ -458,6 +474,8 @@ function buildHostedAssistantDeliveryEffects({
         effect.publishBeforeDispatch = true;
         // A blocked successor must get its own published claim in a later pass.
         if (!intent.deliveryTransportIdempotent) claimedBoundaryKeys.add(boundaryKey);
+      } else if (settlementBoundaryKeys.has(boundaryKey)) {
+        effect.publishAfterDispatch = true;
       }
       effects.push(effect);
     }
@@ -485,12 +503,9 @@ function hostedAssistantIntentRetryNeedsPublishedClaim(
 }
 
 function hostedLinqIntentCarriesDurableObligation(intent: AssistantOutboxIntent): boolean {
-  return intent.channel === "linq" && (
-    (intent.status === "awaiting_approval"
-      && parseHostedActionApprovalCycleOwnerKey(intent.deliveryIdempotencyKey) !== null)
-    || (hostedAssistantIntentOwesProviderSend(intent)
-      && assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent))
-  );
+  return intent.channel === "linq"
+    && intent.status === "awaiting_approval"
+    && parseHostedActionApprovalCycleOwnerKey(intent.deliveryIdempotencyKey) !== null;
 }
 
 /**

@@ -6630,7 +6630,7 @@ async function resolveHostedPostDeliveryNextWake(
       ]);
 }
 
-async function drainHostedPostCheckpointDelivery(input: {
+async function drainHostedPostCheckpointDelivery(request: {
   afterDurableCheckpoint?: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null;
   assistantMetrics?: HostedAssistantMetrics | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffects;
@@ -6648,6 +6648,13 @@ async function drainHostedPostCheckpointDelivery(input: {
   shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  const afterDurableCheckpoint = request.assistantDeliveryEffects.some((effect) => effect.publishAfterDispatch)
+    ? [
+        ...listHostedAssistantPhaseDurableCheckpointEffects(request.afterDurableCheckpoint ?? null),
+        Object.assign(() => {}, { checkpointStartByMs: Date.now() }),
+      ]
+    : request.afterDurableCheckpoint;
+  const input = { ...request, afterDurableCheckpoint };
   const hasDeliveryEffects = input.assistantDeliveryEffects.length > 0;
   if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
@@ -6815,7 +6822,7 @@ async function drainHostedPostCheckpointDelivery(input: {
     }
 
     return {
-      ...(input.afterDurableCheckpoint ? { afterDurableCheckpoint: input.afterDurableCheckpoint } : {}),
+      afterDurableCheckpoint,
       checkpointReason: input.checkpointReason,
       nextWakeAt: postNextWakeAt,
       nextWakeReason: postNextWake.reason,
@@ -6849,7 +6856,7 @@ async function drainHostedPostCheckpointDelivery(input: {
       ),
     ]);
     return {
-      ...(input.afterDurableCheckpoint ? { afterDurableCheckpoint: input.afterDurableCheckpoint } : {}),
+      afterDurableCheckpoint,
       checkpointReason: input.checkpointReason,
       nextWakeAt: recoveryWake.at,
       nextWakeReason: recoveryWake.reason,

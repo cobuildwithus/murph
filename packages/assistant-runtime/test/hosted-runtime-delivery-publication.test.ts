@@ -106,6 +106,7 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
     routeAuthority: null, service: "iMessage", target, threadIsDirect: true,
   };
   const env = { TELEGRAM_BOT_TOKEN: "synthetic-token", LINQ_API_TOKEN: "synthetic-token" };
+  let publications = 0;
   let checkpointedAt: string | null = null;
   let actionApprovalPort: HostedRuntimeActionApprovalPort | undefined;
   let signal: AbortSignal | undefined;
@@ -172,7 +173,8 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
     setApproval: (port: HostedRuntimeActionApprovalPort) => { actionApprovalPort = port; },
     setSignal: (value?: AbortSignal) => { signal = value; },
     setCheckpoint: (at: string) => { checkpointedAt = at; },
-    publish: async () => { await rm(snapshot, { force: true, recursive: true }); await cp(vaultRoot, snapshot, { recursive: true }); },
+    publications: () => publications,
+    publish: async () => { await rm(snapshot, { force: true, recursive: true }); await cp(vaultRoot, snapshot, { recursive: true }); publications += 1; },
     restore: async () => { await rm(vaultRoot, { recursive: true }); await cp(snapshot, vaultRoot, { recursive: true }); },
     sends: () => channel === "email" ? sendEmail.mock.calls.length : providerFetch.mock.calls.filter(([url]) => !String(url).includes("/typing")).length,
   };
@@ -282,8 +284,8 @@ describe("post-foreground maintenance publication", () => {
 });
 
 describe("post-send failure recovery", () => {
-  it("keeps the accepted receipt when resetting the remainder throws and retries the remaining effect", async () => {
-    const f = await fixture("linq");
+  it.each([false, true])("keeps the accepted receipt when resetting the remainder throws and retries the remaining effect (obligation: %s)", async (obligation) => {
+    const f = await fixture("linq", obligation ? { followUpRequest } : {});
     const remaining = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "reset-second", sessionId: "session_reset", turnId: "turn_reset" });
     const effects = await f.collect([f.intent.intentId, remaining.intentId]);
     expect(effects).toHaveLength(2);
@@ -297,7 +299,9 @@ describe("post-send failure recovery", () => {
     });
     vi.mocked(resetAssistantOutboxPreparedDispatchById).mockRejectedValueOnce(new Error("Synthetic prepared reset unavailable"));
 
-    const { result } = await f.phase("general", [f.intent.intentId, remaining.intentId], () => yieldNow);
+    const { result, post } = await f.phase("general", [f.intent.intentId, remaining.intentId], () => yieldNow);
+    if (obligation) expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toEqual([Date.now()]);
+    else expect(post.afterDurableCheckpoint).toBeUndefined();
     expect(f.sends()).toBe(1);
     expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
     expect(await f.read(remaining.intentId)).toMatchObject({ status: "sending", preparedDispatchToken: expect.any(String) });
@@ -829,54 +833,172 @@ describe.each(["foreground", "general"] as const)("Linq %s fast path", (entry) =
     expect(f.wireKeys.every((key) => key === f.wireKeys[0])).toBe(true);
   });
 
-  it.each(["follow-up", "nutrition", "both"] as const)("restores and settles %s exactly once after accepted reply loss", async (kind) => {
+  it.each(["follow-up", "nutrition", "both"] as const)("sends %s before publication and restores its accepted settlement exactly once", async (kind) => {
     const f = await fixture("linq", {
       ...(kind !== "nutrition" ? { followUpRequest } : {}),
       ...(kind !== "follow-up" ? { message: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO } : {}),
     });
+    const send = f.providerFetch.getMockImplementation()!;
+    f.providerFetch.mockImplementation(async (...args) => {
+      expect(f.publications()).toBe(0);
+      return send(...args);
+    });
+    expect(await f.collect([f.intent.intentId])).toEqual([
+      expect.objectContaining({ publishAfterDispatch: true }),
+    ]);
+    expect((await f.collect([f.intent.intentId]))[0]?.publishBeforeDispatch).toBeUndefined();
+    if (kind === "follow-up") vi.mocked(registerAutomationFollowUp).mockRejectedValueOnce(new Error("Synthetic settlement unavailable"));
+    else vi.mocked(upsertMemory).mockRejectedValueOnce(new Error("Synthetic settlement unavailable"));
     const { post } = await f.phase(entry, [f.intent.intentId]);
-    expect(f.sends()).toBe(0);
-    expect(post?.afterDurableCheckpoint).toBeDefined();
-    await f.publish();
-    if (kind === "follow-up") vi.mocked(registerAutomationFollowUp).mockRejectedValueOnce(new Error("Synthetic crash before settlement"));
-    else vi.mocked(upsertMemory).mockRejectedValueOnce(new Error("Synthetic crash before settlement"));
-    await runHostedWorkspaceDurableCheckpointEffects(post?.afterDurableCheckpoint);
+    expect(f.sends()).toBe(1);
+    expect(f.publications()).toBe(0);
+    expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now());
     expect(f.consumed.has("mailbox_publication")).toBe(true);
-    expect((await f.read()).deliveryConfirmationPending).toBe(true);
+    const accepted = await f.read();
+    expect(accepted.deliveryConfirmationPending).toBe(true);
+    await f.publish();
+    expect(await runHostedWorkspaceDurableCheckpointEffects(post.afterDurableCheckpoint))
+      .not.toMatchObject({ requiresFollowUpCheckpoint: true });
     await f.restore();
-    vi.setSystemTime(new Date(Date.now() + 600_000));
+    expect(await f.read()).toMatchObject({
+      intentId: accepted.intentId, deliveryIdempotencyKey: accepted.deliveryIdempotencyKey,
+      deliveryConfirmationPending: true, delivery: accepted.delivery,
+    });
+    vi.setSystemTime(new Date(accepted.nextAttemptAt!));
     const restored = await f.phase(entry, [f.intent.intentId]);
-    await runHostedWorkspaceDurableCheckpointEffects(restored.post?.afterDurableCheckpoint);
-    expect((await f.read()).status).toBe("sent");
+    await runHostedWorkspaceDurableCheckpointEffects(restored.post.afterDurableCheckpoint);
+    expect(await f.read()).toMatchObject({ status: "sent", deliveryConfirmationPending: false });
     expect(await listAutomations(f.vaultRoot)).toHaveLength(kind === "nutrition" ? 0 : 1);
     expect((await readMemoryDocument(f.vaultRoot)).records).toHaveLength(kind === "follow-up" ? 0 : 1);
-    expect(new Set(f.wireKeys).size).toBe(1);
-    expect(f.wireKeys).not.toContain("missing");
+    expect(f.wireKeys).toEqual([`assistant-outbox:${f.intent.intentId}`]);
     expect(f.visibleReplies.size).toBe(1);
     await f.phase();
     expect(await listAutomations(f.vaultRoot)).toHaveLength(kind === "nutrition" ? 0 : 1);
+    expect((await readMemoryDocument(f.vaultRoot)).records).toHaveLength(kind === "follow-up" ? 0 : 1);
+    expect(f.sends()).toBe(1);
   });
+
+  it("recovers an already-published sending obligation under its original wire identity", async () => {
+    const f = await fixture("linq", { followUpRequest, message: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO });
+    const send = f.providerFetch.getMockImplementation()!;
+    f.providerFetch.mockImplementationOnce(async (...args) => {
+      expect(await f.read()).toMatchObject({ status: "sending", delivery: null });
+      await f.publish(); // Model a sending record published before this change.
+      return send(...args);
+    });
+    vi.mocked(upsertMemory).mockRejectedValueOnce(new Error("Synthetic settlement unavailable"));
+    await f.phase(entry, [f.intent.intentId]);
+    expect(f.sends()).toBe(1);
+    await f.restore();
+    vi.setSystemTime(new Date(Date.now() + 600_000));
+    await f.phase(entry, [f.intent.intentId]);
+    expect(await f.read()).toMatchObject({ intentId: f.intent.intentId, status: "sent" });
+    expect(f.wireKeys).toEqual(Array(2).fill(`assistant-outbox:${f.intent.intentId}`));
+    expect(f.visibleReplies.size).toBe(1);
+    expect(await listAutomations(f.vaultRoot)).toHaveLength(1);
+    expect((await readMemoryDocument(f.vaultRoot)).records).toHaveLength(1);
+  });
+
+  it("requests immediate publication after successful settlement even when cleanup fails", async () => {
+    const f = await fixture("linq", { followUpRequest, message: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO });
+    mocks.recordHostedProviderCleanupAfterDelivery.mockRejectedValueOnce(new Error("Synthetic cleanup unavailable"));
+    const { post } = await f.phase(entry, [f.intent.intentId]);
+    expect(f.sends()).toBe(1);
+    expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now());
+    expect(await f.read()).toMatchObject({ status: "sent", deliveryConfirmationPending: false });
+    await f.publish();
+    await f.restore();
+    await f.phase();
+    expect(await listAutomations(f.vaultRoot)).toHaveLength(1);
+    expect((await readMemoryDocument(f.vaultRoot)).records).toHaveLength(1);
+    expect(f.wireKeys).toEqual([`assistant-outbox:${f.intent.intentId}`]);
+  });
+
+  it("requests one harmless early publication for a rejected obligation reply", async () => {
+    const f = await fixture("linq", { followUpRequest });
+    f.providerFetch.mockImplementation(async () => Response.json({ error: "Synthetic rejection" }, { status: 429 }));
+    const { post } = await f.phase(entry, [f.intent.intentId]);
+    expect(f.sends()).toBe(3); // The provider adapter exhausts its bounded 429 retries.
+    expect(await f.read()).toMatchObject({ status: "retryable", delivery: null });
+    expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toEqual([Date.now()]);
+    expect(await runHostedWorkspaceDurableCheckpointEffects(post.afterDurableCheckpoint))
+      .not.toMatchObject({ requiresFollowUpCheckpoint: true });
+    expect(f.sends()).toBe(3);
+  });
+
 });
 
-it("sends an unrelated keyed reply immediately while another boundary waits for publication", async () => {
+it("sends ordinary and obligation replies together before requesting publication", async () => {
   const f = await fixture("linq");
   const affected = await createAssistantOutboxIntent({ ...f.base, turnId: "turn_obligation", dedupeToken: "obligation", followUpRequest });
   const { post } = await f.phase("foreground", [f.intent.intentId, affected.intentId]);
-  expect(f.sends()).toBe(1);
+  expect(f.sends()).toBe(2);
   expect((await f.read()).status).toBe("sent");
-  expect((await f.read(affected.intentId)).status).toBe("sending");
-  expect(post?.afterDurableCheckpoint).toBeDefined();
+  expect((await f.read(affected.intentId)).status).toBe("sent");
+  expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now());
   await f.publish();
   await runHostedWorkspaceDurableCheckpointEffects(post?.afterDurableCheckpoint);
   expect(f.sends()).toBe(2);
 });
 
-it("does not treat Linq voice provider entry as acceptance or settle its obligation after restore", async () => {
+it("publishes an accepted reply boundary when its obligation bubble yields", async () => {
+  const f = await fixture("linq");
+  vi.setSystemTime(new Date(Date.now() + 1));
+  const remaining = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "obligation-bubble", followUpRequest });
+  const effects = await f.collect([f.intent.intentId, remaining.intentId]);
+  expect(effects).toHaveLength(2);
+  expect(effects[0]?.effectId).toBe(f.intent.intentId);
+  expect(effects.every((effect) => effect.publishAfterDispatch && !effect.publishBeforeDispatch)).toBe(true);
+  mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce(effects);
+  let yieldNow = false;
+  const send = f.providerFetch.getMockImplementation()!;
+  f.providerFetch.mockImplementation(async (...args) => {
+    const response = await send(...args);
+    if (!String(args[0]).includes("/typing")) yieldNow = true;
+    return response;
+  });
+  const { post } = await f.phase("general", [f.intent.intentId, remaining.intentId], () => yieldNow);
+  expect(f.sends()).toBe(1);
+  expect(await f.read(remaining.intentId)).toMatchObject({ status: "pending", delivery: null });
+  expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now());
+  await f.publish();
+  await f.restore();
+  expect(await f.read(remaining.intentId)).toMatchObject({ intentId: remaining.intentId, followUpRequest });
+});
+
+it.each(["text", "voice"] as const)("publishes earlier bubbles when a non-idempotent boundary carries a %s obligation", async (obligation) => {
+  const f = await fixture("linq", obligation === "text" ? { followUpRequest } : {});
+  vi.setSystemTime(new Date(Date.now() + 1));
+  const voice = await createAssistantOutboxIntent({
+    ...f.base, dedupeToken: "voice-obligation-bubble",
+    followUpRequest: obligation === "voice" ? followUpRequest : undefined,
+    media: [{
+      kind: "voice_memo", filename: "memo.mp3", transcript: "Requested voice reply.",
+      transport: { kind: "linq_attachment", attachmentId: "attachment_voice_boundary" },
+    }],
+  });
+  expect(voice.deliveryTransportIdempotent).toBe(false);
+  const effects = await f.collect([f.intent.intentId, voice.intentId]);
+  expect(effects.map((effect) => effect.effectId)).toEqual([f.intent.intentId, voice.intentId]);
+  expect(effects.every((effect) => effect.publishBeforeDispatch && !effect.publishAfterDispatch)).toBe(true);
+  const { post } = await f.phase("foreground", [f.intent.intentId, voice.intentId]);
+  expect(f.providerFetch).not.toHaveBeenCalled();
+  expect(f.consumed.size).toBe(0);
+  await f.publish();
+  await runHostedWorkspaceDurableCheckpointEffects(post.afterDurableCheckpoint);
+  expect(await f.read()).toMatchObject({ status: "sent" });
+  expect(await f.read(voice.intentId)).toMatchObject({ status: "sent" });
+  expect(f.wireKeys.filter((key) => key === "missing")).toHaveLength(1);
+  expect(f.consumed.has("mailbox_publication")).toBe(true);
+});
+
+it.each(["fresh", "published"] as const)("does not treat %s Linq voice provider entry as acceptance or settle its obligation after restore", async (claim) => {
   const f = await fixture("linq", { followUpRequest, media: [{
     kind: "voice_memo", filename: "memo.mp3", transcript: "Requested voice reply.",
     transport: { kind: "linq_attachment", attachmentId: "attachment_voice_publication" },
   }] });
   expect(f.intent.deliveryTransportIdempotent).toBe(false);
+  if (claim === "published") f.setCheckpoint(NOW);
   const controller = new AbortController();
   f.setSignal(controller.signal);
   const { post } = await f.phase("foreground", [f.intent.intentId]);
