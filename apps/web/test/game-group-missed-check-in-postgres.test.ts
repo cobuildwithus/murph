@@ -229,6 +229,16 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(prepared?.policy.expiresAt).toBe("2030-03-04T20:30:00.000Z");
   });
 
+  it("still asks when a fully posted game in the room sets a later horizon", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), open = await f.addGame(), posted = await f.addGame(10, f.people.map(() => "Atlantic/Azores"));
+    for (const person of f.people) await db.gameEntry.create({ data: { id: randomUUID(), gameId: posted, memberId: person.id, dayIndex: 0, attempt: 1, kind: "words", receivedAt: eveningAt } });
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    const at = new Date("2030-03-04T21:05:00Z");
+    expect(await reserveGameEveningCheckIn(f.roomId, [open, posted], at)).toBe(1);
+    expect((await prepareGameEveningCheckIn(f.roomId, date, at))?.policy.batch.map(game => game.gameId)).toEqual([open]);
+  });
+
   it("suppresses unjoined and far-apart audiences, and excludes a switched-off player", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);
@@ -334,6 +344,9 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     }
     const fourthEvent = gameEveningEventId(f.roomId, fourth); events.push(fourthEvent);
     expect(await reserveGameEveningCheckIn(f.roomId, [id], at)).toBe(0);
+    // A paused evening sends nothing, and that must not end the pause.
+    const fifthEvent = gameEveningEventId(f.roomId, "2030-03-08"); events.push(fifthEvent);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], new Date("2030-03-08T20:05:00Z"))).toBe(0);
     await conversation(f, "I'm here.");
     expect(await reserveGameEveningCheckIn(f.roomId, [id], at)).toBe(1);
   });

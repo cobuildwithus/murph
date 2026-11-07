@@ -129,15 +129,13 @@ function skipUnprovableRoom(error: unknown): null {
   return null;
 }
 
+/** The latest three sends, not the latest three dates: a paused evening sends nothing, and that mustn't end the pause. */
 async function paused(roomId: string, horizons: Map<string, Date>, date: string, tx: Prisma.TransactionClient): Promise<boolean> {
-  const previous = [...horizons].filter(([day]) => day < date).sort(([a], [b]) => b.localeCompare(a)).slice(0, 3);
-  if (previous.length < 3) return false;
-  const keys = previous.map(([day]) => createHostedLinqDeliveryIdempotencyLookupKey(gameEveningEventId(roomId, day))!);
-  const accepted = await tx.hostedLinqDelivery.findMany({ where: { idempotencyKey: { in: keys }, acceptedAt: { not: null } }, select: { idempotencyKey: true, acceptedAt: true } });
-  if (accepted.length !== 3) return false;
-  const since = accepted.find(row => row.idempotencyKey === keys[2])?.acceptedAt;
-  if (!since) return false;
-  const inbound = await tx.hostedMailboxItem.findFirst({ where: { userId: roomId, kind: "conversation.message", lane: "conversation", occurredAt: { gte: since } }, select: { id: true } });
+  const keys = [...horizons.keys()].filter(day => day < date).map(day => createHostedLinqDeliveryIdempotencyLookupKey(gameEveningEventId(roomId, day))!);
+  const accepted = await tx.hostedLinqDelivery.findMany({ where: { idempotencyKey: { in: keys }, acceptedAt: { not: null } },
+    orderBy: { acceptedAt: "desc" }, take: 3, select: { acceptedAt: true } });
+  if (accepted.length < 3) return false;
+  const inbound = await tx.hostedMailboxItem.findFirst({ where: { userId: roomId, kind: "conversation.message", lane: "conversation", occurredAt: { gte: accepted[2]!.acceptedAt! } }, select: { id: true } });
   return !inbound;
 }
 
@@ -223,9 +221,8 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   const profiles = await tx.gameProfile.findMany({ where: { memberId: { in: [...memberIds] } }, select: { timeZone: true } });
   if (profiles.length !== memberIds.length || profiles.some(profile => !normalizeIanaTimeZone(profile.timeZone))
     || gameZoneSpreadHours(profiles.map(profile => profile.timeZone), now) >= GAME_ROOM_FAR_APART_HOURS) return false;
-  const dueAt = gameEveningCheckInHorizons(games.map(game => game.state), new Set([policy.date])).get(policy.date);
-  if (!dueAt || new Date(policy.expiresAt).getTime() !== dueAt.getTime() + WINDOW_MS
-    || JSON.stringify(addressedBatch(games, policy.date, now)) !== JSON.stringify(policy.batch)) return false;
+  // Only the addressed games are loaded here, so the room's horizon can't be rebuilt; the frozen expiry above stands.
+  if (JSON.stringify(addressedBatch(games, policy.date, now)) !== JSON.stringify(policy.batch)) return false;
   if (!checkConversation) return true;
   await acquireHostedMailboxCausalAppendLockTx({ tx, userId: policy.roomId });
   const [watermark] = await readHostedMailboxMaxSeqByLane({ prisma: tx, userId: policy.roomId, lanes: ["conversation"] });
