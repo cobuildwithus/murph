@@ -74,6 +74,7 @@ import {
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_SUBSCRIPTION_TOOL,
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
@@ -8506,7 +8507,6 @@ text(JSON.stringify(result));
           },
         },
         computerToolsAvailable: false,
-        currentAssistantInputId: () => assistantInputId,
         currentAssistantTarget: () => ({
           model: 'gpt-6.1-sol',
           provider: 'openai',
@@ -10949,6 +10949,213 @@ text(JSON.stringify(result.lookupId));
     expect(effects).toEqual(['slow-effect'])
     expect(result.finalMessage).toBe('STEERED_AFTER_YIELD_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it.each([
+    {
+      cell: `const inspection = tools.murph__automation({ action: "inspect", lookup: "slow-effect" });
+await new Promise((resolve) => setTimeout(resolve, 200));
+const change = tools.murph__subscription({ action: "change_plan", targetPlanCode: "launch_edge_monthly", quoteId: "quote_synthetic" });
+await Promise.allSettled([inspection, change]);`,
+      name: 'queued behind a slow tool',
+    },
+    {
+      cell: `await tools.murph__automation({ action: "inspect", lookup: "slow-effect" });
+await tools.murph__subscription({ action: "change_plan", targetPlanCode: "launch_edge_monthly", quoteId: "quote_synthetic" }).catch(() => null);`,
+      name: 'issued by a cell authored before the follow-up',
+    },
+  ])('refuses a subscription change $name once the turn is steered', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ cell }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    let releaseInspection!: () => void
+    const inspectionGate = new Promise<void>((resolve) => {
+      releaseInspection = resolve
+    })
+    let inspectionStarted!: () => void
+    const inspectionStartedPromise = new Promise<void>((resolve) => {
+      inspectionStarted = resolve
+    })
+    const subscriptionRequest = vi.fn(async () => {
+      throw new Error('A stale subscription change must not reach transport.')
+    })
+    const claimSubscriptionAssistantInputId = vi.fn(() => `ain_${'b'.repeat(32)}`)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 30000}\n${cell}\ntext("done");\n`,
+          name: 'exec',
+        },
+      },
+      {
+        requestIncludes: ['Cancel that upgrade.', 'Script running'],
+        respond: () => {
+          setTimeout(releaseInspection, 500)
+          return {
+            functionCall: {
+              arguments: { cell_id: '1', yield_time_ms: 30_000 },
+              name: 'wait',
+            },
+          }
+        },
+      },
+      { text: 'CANCEL_HANDLED' },
+    )
+    let steered: Promise<void> | null = null
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SUBSCRIPTION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async () => {
+            inspectionStarted()
+            await inspectionGate
+            return {
+              action: 'inspect' as const,
+              automationId: 'automation-slow-effect',
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'slow-effect',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        claimSubscriptionAssistantInputId,
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        subscriptionTool: { request: subscriptionRequest },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        // Concurrent cell calls can arrive in either order, so the queued case
+        // starts the change only after the inspection holds the serialized chain.
+        steered = inspectionStartedPromise
+          .then(() => delay(1_000))
+          .then(() => turn.steer({ prompt: 'Cancel that upgrade.' }))
+        return () => {}
+      },
+      prompt: 'Upgrade my plan.',
+    })
+
+    await steered
+    expect(result.finalMessage).toBe('CANCEL_HANDLED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(subscriptionRequest).not.toHaveBeenCalled()
+    expect(claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
+  })
+
+  it('refuses a subscription change after a steer is acknowledged but not yet consumed', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let releaseInspection!: () => void
+    const inspectionGate = new Promise<void>((resolve) => {
+      releaseInspection = resolve
+    })
+    let subscriptionPreflighted!: () => void
+    const subscriptionPreflight = new Promise<void>((resolve) => {
+      subscriptionPreflighted = resolve
+    })
+    let liveTurn: CodexAppServerLiveTurn | null = null
+    let toolPreflightCount = 0
+    const subscriptionRequest = vi.fn(async () => {
+      throw new Error('A stale subscription change must not reach transport.')
+    })
+    const claimSubscriptionAssistantInputId = vi.fn(() => `ain_${'b'.repeat(32)}`)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `// @exec: {"yield_time_ms": 1000}
+await tools.murph__automation({ action: "inspect", lookup: "slow-effect" });
+await tools.murph__subscription({ action: "change_plan", targetPlanCode: "launch_edge_monthly", quoteId: "quote_synthetic" }).catch(() => null);
+text("done");
+`,
+          name: 'exec',
+        },
+      },
+      {
+        // Codex holds a steer until the stream opens, so this request has not
+        // consumed the follow-up while the old cell carries on.
+        beforeRespond: async () => {
+          await liveTurn?.steer({ prompt: 'Cancel that change.' })
+          releaseInspection()
+          await subscriptionPreflight
+          await delay(250)
+        },
+        requestIncludes: ['Script running'],
+        text: 'STALE_ANSWER',
+      },
+      {
+        requestIncludes: ['Cancel that change.'],
+        text: 'CANCEL_HANDLED',
+      },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SUBSCRIPTION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async () => {
+            await inspectionGate
+            return {
+              action: 'inspect' as const,
+              automationId: 'automation-slow-effect',
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'slow-effect',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                kind: 'dailyLocal' as const,
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        beforeToolExecution: async () => {
+          toolPreflightCount += 1
+          if (toolPreflightCount === 2) subscriptionPreflighted()
+        },
+        claimSubscriptionAssistantInputId,
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        subscriptionTool: { request: subscriptionRequest },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        liveTurn = turn
+        return () => {}
+      },
+      prompt: 'Apply the quoted change.',
+    })
+
+    expect(result.finalMessage).toBe('CANCEL_HANDLED')
+    expect(toolPreflightCount).toBe(2)
+    expect(subscriptionRequest).not.toHaveBeenCalled()
+    expect(claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
   })
 
   it('incorporates rapid successive steers into one reply without stale preempted text', {

@@ -1,3 +1,4 @@
+import { pruneSupersededClinicalExtractionCaches } from "@murphai/vault-usecases/clinical-enrichment";
 import { HostedRuntimeMediaWriteError } from "./platform.ts";
 import { runHostedMealMediaMaintenance, hasHostedPhotoRetry, HOSTED_MEAL_MEDIA_RETRY_MS } from "./meal-media-maintenance.ts";
 import {
@@ -329,7 +330,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     // Finite content-retention wakes must not rescan unrelated canonical
     // history. Ordinary idle checkpoints remain the archive owner.
     if (input.vaultRoot && input.processingMode !== "inbox_media_retention") {
-      await archiveHostedIdleCanonicalHistory({
+      await maintainHostedIdleStorage({
         memberId: input.memberId,
         signal: abortController.signal,
         vaultRoot: input.vaultRoot,
@@ -416,7 +417,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   }
 }
 
-async function archiveHostedIdleCanonicalHistory(input: {
+async function maintainHostedIdleStorage(input: {
   memberId: string;
   signal: AbortSignal;
   vaultRoot: string;
@@ -447,6 +448,17 @@ async function archiveHostedIdleCanonicalHistory(input: {
   } catch (error) {
     if (input.signal.aborted) return;
     emitIntegrationIngestArchiveFailureLog({ error, memberId: input.memberId });
+  }
+  if (archiveSignal.aborted) return;
+  try {
+    await pruneSupersededClinicalExtractionCaches({ vaultRoot: input.vaultRoot, signal: archiveSignal });
+  } catch (error) {
+    if (archiveSignal.aborted) return;
+    emitHostedExecutionStructuredLog({
+      component: "runtime", level: "warn", phase: "checkpoint", userId: input.memberId,
+      message: "Hosted idle maintenance could not prune obsolete clinical extraction caches.",
+      error,
+    });
   }
 }
 

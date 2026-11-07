@@ -226,7 +226,6 @@ function hostedToolContext(
   return {
     ...additions,
     computerToolsAvailable: false,
-    currentAssistantInputId: () => null,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     currentInvocationScope: () => scope,

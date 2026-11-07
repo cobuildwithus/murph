@@ -77,7 +77,6 @@ import {
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
-  snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
   writePendingAssistantRuntimeIssueRecord,
   writeHostedBundleTextFile,
@@ -920,7 +919,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("binds provider batches to stored input ids and conversation activity", async () => {
+  test("records conversation activity from accepted provider batches", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const conversationActivity: number[] = [];
 
@@ -945,7 +944,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         },
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
-          assert.equal(input.currentAssistantInputId?.(), null);
           const firstInputId = await stageAssistantInputEventForMailboxItem({
             causalSeq: "41",
             item: createMailboxItem({
@@ -974,7 +972,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               },
             ],
           });
-          assert.equal(input.currentAssistantInputId?.(), null);
           assert.deepEqual(conversationActivity, []);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
@@ -984,13 +981,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               { id: firstInputId, source: "assistant-input" },
             ],
           });
-          assert.equal(
-            input.currentAssistantInputId?.(),
-            secondInputId,
-          );
           assert.equal(typeof release, "function");
           await release?.();
-          assert.equal(input.currentAssistantInputId?.(), null);
           assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
 
           const systemInputId = await stageAssistantInputEventForMailboxItem({

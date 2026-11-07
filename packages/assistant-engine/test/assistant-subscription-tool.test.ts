@@ -176,30 +176,6 @@ describe("assistant subscription tool", () => {
     expect(readToolText(result)).toContain("current user-sourced input");
   });
 
-  it("rejects a generic current input that is not the eligible user-action input", async () => {
-    const subscriptionTool = { request: vi.fn() };
-    const hostedToolContext = createHostedToolContext({
-      assistantInputId: `ain_${"c".repeat(32)}`,
-      subscriptionTool,
-      userActionAssistantInputId: null,
-    });
-
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext,
-      nextUsageOrdinal: () => 0,
-      progressDelivery: null,
-      request: readSubscriptionRequest("start_pulse_now"),
-    });
-
-    expect(hostedToolContext.currentAssistantInputId?.()).toBe(
-      `ain_${"c".repeat(32)}`,
-    );
-    expect(subscriptionTool.request).not.toHaveBeenCalled();
-    expect(result.rpcResult.success).toBe(false);
-  });
-
   it("does not expose transport failures", async () => {
     const sensitiveDetail = "sensitive Stripe customer detail";
     const result = await executeMurphDynamicToolRequest({
@@ -299,7 +275,6 @@ function readQuotedSubscriptionRequest() {
 function createHostedToolContext(input: {
   assistantInputId: string | null;
   subscriptionTool: NonNullable<AssistantHostedToolContext["subscriptionTool"]>;
-  userActionAssistantInputId?: string | null;
 }): AssistantHostedToolContext {
   let subscriptionActionClaimed = false;
   return {
@@ -307,9 +282,7 @@ function createHostedToolContext(input: {
       if (subscriptionActionClaimed) {
         return null;
       }
-      const assistantInputId = input.userActionAssistantInputId === undefined
-        ? input.assistantInputId
-        : input.userActionAssistantInputId;
+      const assistantInputId = input.assistantInputId;
       if (assistantInputId === null) {
         return null;
       }
@@ -317,7 +290,6 @@ function createHostedToolContext(input: {
       return assistantInputId;
     },
     computerToolsAvailable: false,
-    currentAssistantInputId: () => input.assistantInputId,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     sendVaultFile: vi.fn(async () => ({

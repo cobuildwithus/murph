@@ -1252,8 +1252,6 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
-  currentAssistantInputId?:
-    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
   deviceSyncMessagingReturnTarget?:
     HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncMessagingReturnTarget"];
   importedCount?: number;
@@ -1323,7 +1321,6 @@ function createPhaseInput(input: {
     foregroundCausalOnly: input.foregroundCausalOnly,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
-    currentAssistantInputId: input.currentAssistantInputId,
     deviceSyncMessagingReturnTarget: input.deviceSyncMessagingReturnTarget,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,

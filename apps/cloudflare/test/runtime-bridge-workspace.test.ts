@@ -873,7 +873,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         eventCode: "checkpoint.snapshot_failed",
         redactedJson: expect.objectContaining({
           safeErrorDetail: "Hosted workspace snapshot exceeds the total plain size limit.",
-          snapshotArchiveBuildElapsedMs: expect.any(Number),
+          snapshotArchivePlanElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
         }),
       }),

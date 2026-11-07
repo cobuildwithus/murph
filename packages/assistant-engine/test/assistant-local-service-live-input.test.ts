@@ -58,6 +58,8 @@ import {
   waitForRpcMethod,
 } from './assistant-codex-runtime.harness.ts'
 import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
+import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from '../src/assistant/group-reply-reconsideration.ts'
 
 test.each([false, true])('live-steered input keeps provider-start typing telemetry (direct: %s)', async (direct) => {
@@ -5380,4 +5382,199 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
       providerResumeStateAction: 'clear',
     }),
   )
+}, 30_000)
+
+test('assistant configuration keeps accepted-input authority after a live steer acknowledgement', async () => {
+  const context = await createTempVaultContext('assistant-local-service-steer-configuration-')
+  tempRoots.push(context.parentRoot)
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'actor_1',
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|actor:actor_1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+  })
+  const storeInput = (input: { label: string; laneSeq: string }) =>
+    upsertAssistantInputEvent({
+      vault: context.vaultRoot,
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      event: {
+        content: { attachmentDescriptors: [], text: input.label },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'telegram',
+          threadId: 'thread-1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:00.000Z',
+        replyTarget: {
+          channel: 'telegram',
+          messageId: `message-${input.laneSeq}`,
+          threadId: 'thread-1',
+        },
+        sourceRef: createHostedMailboxSourceRef({
+          eventId: `evt_steer_configuration_${input.laneSeq}`,
+          laneSeq: input.laneSeq,
+        }),
+      },
+    })
+  const initialInput = await storeInput({ label: 'Initial request', laneSeq: '1' })
+  const steeredInput = await storeInput({ label: 'Set reasoning to high', laneSeq: '2' })
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async (input) => {
+    if (
+      input.availableInputIds?.includes(steeredInput.inputId) !== true ||
+      input.knownInputIds?.includes(steeredInput.inputId) === true
+    ) {
+      return { kind: 'no-new-input' }
+    }
+    return {
+      acceptedInputs: [{
+        ...assistantInputCandidateFromStoredEvent(steeredInput).acceptedInput,
+        promptFallbackReason: 'missing-content-ref',
+        promptFallbackText: 'Set reasoning to high',
+      }],
+      kind: 'accepted',
+      prompt: 'Set reasoning to high',
+      transcriptText: 'Set reasoning to high',
+      userMessageContent: [{ text: 'Set reasoning to high', type: 'text' }],
+    }
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = true
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    realAcceptedInputPersistence: true,
+    session,
+  })
+  const { notifyAssistantActiveTurnInputAvailable } = await import(
+    '../src/assistant/active-turn-input-controller.ts'
+  )
+  const configurationRequest = vi.fn(async (_request: unknown) => ({
+    action: 'update' as const,
+    result: {
+      appliesAt: 'next_turn' as const,
+      availableModels: [],
+      availableReasoningEfforts: ['low' as const, 'high' as const],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: 'gpt-6.1-terra' as const,
+      reasoningEffort: 'high' as const,
+      requiredPlan: null,
+      solAvailable: false,
+      status: 'updated' as const,
+    },
+  }))
+  const updateRequest = readTestMurphDynamicToolRequest({
+    method: 'item/tool/call',
+    params: {
+      arguments: { action: 'update', reasoningEffort: 'high' },
+      namespace: 'murph',
+      tool: 'assistant_configuration',
+    },
+  })
+  assert.ok(updateRequest)
+  const providerStarted = createDeferred<void>()
+  const steerAcknowledged = createDeferred<void>()
+  const releaseProviderAcceptedInputs = vi.fn(async () => undefined)
+  const releasedBeforeTool: number[] = []
+  const liveSteeredPrompts: string[] = []
+  const toolResults: string[] = []
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: { kind: 'explicit-structured-history' },
+    })
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'thread-live',
+      providerTurnId: 'turn-live-provider',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await steerAcknowledged.promise
+    const callTool = async (deliveryContextOrdinal: number) => {
+      await providerInput.hostedToolContext?.beforeToolExecution?.(deliveryContextOrdinal)
+      releasedBeforeTool.push(releaseProviderAcceptedInputs.mock.calls.length)
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: providerInput.hostedToolContext ?? null,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request: updateRequest,
+      })
+      toolResults.push(`${result.rpcResult.success}:${String(result.rpcResult.contentItems[0]?.text).slice(0, 70)}`)
+    }
+    // An older ordinal must not borrow the later acknowledged input.
+    await callTool(0)
+    await callTool(1)
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'Saved for your next message.',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'Saved for your next message.',
+        session,
+      },
+    }
+  })
+
+  const resultPromise = sendAssistantMessageLocal({
+    activeTurnCheckpoint: vi.fn(
+      async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
+    ),
+    acceptedTurnInput: {
+      initialInputs: [assistantInputCandidateFromStoredEvent(initialInput).acceptedInput],
+    },
+    activeTurnInput,
+    beforeProviderAcceptedInputs: async () => releaseProviderAcceptedInputs,
+    executionContext: {
+      hosted: {
+        assistantConfigurationTool: { request: configurationRequest },
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Initial request',
+    vault: context.vaultRoot,
+  })
+  await providerStarted.promise
+  await notifyAssistantActiveTurnInputAvailable({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'direct',
+    },
+    inputIds: [steeredInput.inputId],
+    vault: context.vaultRoot,
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Set reasoning to high'])
+    expect(releaseProviderAcceptedInputs).toHaveBeenCalled()
+  })
+  steerAcknowledged.resolve()
+  await resultPromise
+
+  expect(toolResults).toEqual([expect.stringMatching(/^true:/u), expect.stringMatching(/^true:/u)])
+  expect(releasedBeforeTool.every((count) => count > 0)).toBe(true)
+  expect(configurationRequest.mock.calls.map(([request]) => request)).toEqual([
+    expect.objectContaining({ action: 'update', assistantInputId: initialInput.inputId }),
+    expect.objectContaining({ action: 'update', assistantInputId: steeredInput.inputId }),
+  ])
 }, 30_000)

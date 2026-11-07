@@ -140,7 +140,6 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
     const hostedToolContext = {
       computerToolsAvailable: false,
-      currentAssistantInputId: () => 'input_image_origin',
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentUserActionScope: () => ({
@@ -412,7 +411,6 @@ describe('murph.generate_image dynamic tool schema', () => {
     >(() => 'started')
     const hostedToolContext = {
       computerToolsAvailable: false,
-      currentAssistantInputId: () => batchTailInputId,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentUserActionScope: () => ({
@@ -494,7 +492,6 @@ describe('murph.generate_image dynamic tool schema', () => {
     let generation: Promise<unknown> | null = null
     const hostedToolContext = {
       computerToolsAvailable: false,
-      currentAssistantInputId: () => 'input_image_failure_origin',
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentUserActionScope: () => ({

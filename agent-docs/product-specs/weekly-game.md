@@ -962,7 +962,9 @@ introduces the agreed challenge in one natural message and offers optional
 reminders for the first few days. Acceptance never schedules reminders. Groups
 use the same offer after the second acceptance activates play; other addressed
 people may still join. A strictly earlier live game suppresses a later kickoff's
-offer. Simultaneous starts each offer, and settled games do not suppress it.
+offer. Players 3 or more hours apart at kickoff get no offer and no mention of
+reminders, because one message in their chat can't suit them all; the gap is the
+widest between any two seated players' clocks at that instant. Simultaneous starts each offer, and settled games do not suppress it.
 There is no room reminder claim. A bare yes needs a time and number of days;
 one person or a majority cannot consent for another. Existing automations save
 only the requesting member's exact game/member IDs, time, timezone and bounded

@@ -68,12 +68,11 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
-export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
+export async function readHostedAcceptedInputContext(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<{
   conversationActivityReceivedAtEpochMs: number | null;
-  currentInputId: string | null;
   foregroundPriorityInputAccepted: boolean;
   latencyTraceInputGroups: Array<{
     assistantInputIds: string[];
@@ -84,7 +83,6 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   if (inputIds.length === 0) {
     return {
       conversationActivityReceivedAtEpochMs: null,
-      currentInputId: null,
       foregroundPriorityInputAccepted: false,
       latencyTraceInputGroups: [],
     };
@@ -92,7 +90,6 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   if (inputIds.length !== input.assistantInputIds.length) {
     return {
       conversationActivityReceivedAtEpochMs: null,
-      currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
     };
@@ -106,7 +103,6 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   } catch {
     return {
       conversationActivityReceivedAtEpochMs: null,
-      currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
     };
@@ -117,7 +113,6 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   if (events.length !== inputIds.length) {
     return {
       conversationActivityReceivedAtEpochMs: null,
-      currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups,
     };
@@ -138,31 +133,8 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     isHostedConversationActivityInputEvent(event)
     || isAssistantHostedImageCompletionEvent(event)
   );
-  let batch: AssistantInputEventRecord[];
-  try {
-    batch = await selectHostedImageCompletionInputEventBatch({
-      events,
-      hostedImageCompletionInputIds: events
-        .filter(isAssistantHostedImageCompletionEvent)
-        .map((event) => event.inputId),
-      vaultRoot: input.vaultRoot,
-    }) ?? selectHostedAssistantInputEventBatch({
-      events,
-      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-    });
-  } catch {
-    return {
-      conversationActivityReceivedAtEpochMs,
-      currentInputId: null,
-      foregroundPriorityInputAccepted,
-      latencyTraceInputGroups,
-    };
-  }
   return {
     conversationActivityReceivedAtEpochMs,
-    currentInputId: batch.length === events.length
-      ? batch.at(-1)?.inputId ?? null
-      : null,
     foregroundPriorityInputAccepted,
     latencyTraceInputGroups,
   };
