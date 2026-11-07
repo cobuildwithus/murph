@@ -55,6 +55,14 @@ describe("Apple push sender", () => {
     expect(JSON.parse(send.mock.calls[0]![0].body).aps).toEqual({ alert: { body: "New note on your post." }, "content-available": 1 });
   });
 
+  it("adds sound only when requested on an alert", async () => {
+    const send = transport();
+    await sendApplePush({ ...request, sound: "default", message: { kind: "alert", title: "Walk", body: "Still time today." } }, { credentials, transport: send });
+    expect(JSON.parse(send.mock.calls[0]![0].body).aps.sound).toBe("default");
+    await sendApplePush({ ...request, sound: "default" }, { credentials, transport: send });
+    expect(JSON.parse(send.mock.calls[1]![0].body).aps).toEqual({ "content-available": 1 });
+  });
+
   it("reuses one provider token instead of re-signing every push", async () => {
     const send = transport();
     const now = Date.parse("2026-10-05T13:00:00.000Z");

@@ -7843,6 +7843,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it.each([
     [true, true],
     ["true", undefined],
+    [false, false],
+  ] as const)("forwards the typing purpose and preserves only boolean coverage (%s)", async (flag, expected) => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      bodies.push(await request.json());
+      return new Response(JSON.stringify({
+        ok: true,
+        ackCovered: flag,
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: "+15550002",
+          target: "chat_123",
+          targetKind: "thread",
+          threadIsDirect: true,
+        },
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const result = await platform.effectsPort.assertLinqRecentInboundEngagement!({
+      authorityCheckOnly: true,
+      deliveryPurpose: "typing",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+
+    expect(bodies[0]).toMatchObject({ deliveryPurpose: "typing" });
+    expect(result && result.ackCovered).toBe(expected);
+  });
+
+  it.each([
+    [true, true],
+    ["true", undefined],
     [false, undefined],
   ] as const)("forwards the progress purpose and keeps only a literal true suppression flag (%s)", async (flag, expected) => {
     const bodies: unknown[] = [];

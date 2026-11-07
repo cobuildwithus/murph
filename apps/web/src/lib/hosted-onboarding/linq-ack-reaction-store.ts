@@ -76,8 +76,8 @@ function lastOutboundSql(candidates: readonly string[]): Prisma.Sql {
  * Where the current burst starts: Murph's last outbound, but never earlier
  * than the max burst age before `now` (the app clock that writes claimed_at).
  */
-function burstStartSql(candidates: readonly string[], now: Date): Prisma.Sql {
-  const oldest = new Date(now.getTime() - HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS);
+function burstStartSql(candidates: readonly string[], now: Date, maxAgeMs = HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS): Prisma.Sql {
+  const oldest = new Date(now.getTime() - maxAgeMs);
   return Prisma.sql`GREATEST(${lastOutboundSql(candidates)}, ${oldest})`;
 }
 
@@ -253,10 +253,12 @@ export async function releaseHostedLinqAckReaction(input: {
 
 /**
  * True when Linq accepted a tapback for the chat's current burst, so a
- * runtime progress update would repeat the same "on it" signal. Callers run
- * it inside their own transaction while holding the chat ownership lock.
+ * runtime progress update would repeat the same "on it" signal. Progress
+ * suppression uses a 30-second window under the delivery lock; advisory typing
+ * reads use the default two-minute burst window without a transaction.
  */
 export async function isHostedLinqAckReactionCoveringCurrentBurst(input: {
+  maxAgeMs?: number;
   linqChatId: string;
   now?: () => Date;
   prisma: HostedLinqAckReactionTx;
@@ -268,7 +270,7 @@ export async function isHostedLinqAckReactionCoveringCurrentBurst(input: {
       SELECT 1 FROM hosted_linq_ack_reaction s
       WHERE s.linq_chat_lookup_key IN (${Prisma.join(keys.candidates)})
         AND s.reacted_at IS NOT NULL
-        AND s.claimed_at > ${burstStartSql(keys.candidates, input.now?.() ?? new Date())}
+        AND s.claimed_at > ${burstStartSql(keys.candidates, input.now?.() ?? new Date(), input.maxAgeMs)}
     ) AS covered
   `;
   return rows[0]?.covered === true;

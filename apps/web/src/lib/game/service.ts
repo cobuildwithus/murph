@@ -22,6 +22,7 @@ import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
+import type { GameReminders } from "./contract";
 import { addressedGameInvite, lockGameAudience, prepareGameAudience, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
 import { lookupHostedGroupParticipantMemberIdsByHandles } from "../hosted-groups/participant-member";
 import { moderateGameCommand } from "./moderation";
@@ -141,7 +142,7 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; dayOutcome?: GameDayOutcome }
+  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; dayOutcome?: GameDayOutcome }
   | { ok: false; error: GameError; status: number };
 
 export const GAME_RECAP_UI_WAIT_MS = 10 * 60 * 1000;
@@ -162,6 +163,15 @@ const CHAT_TICKET_LIMIT = GAME_MAX_OPEN_PER_PAIR * 3 * GAME_MAX_LENGTH_DAYS;
 const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
 // Open games a block ends per batch; it repeats until none is left.
 const BLOCK_GAME_LIMIT = 50;
+
+export async function readGameReminders(memberId: string, db: Db = getPrisma()): Promise<GameReminders> {
+  const [profile, seats] = await Promise.all([
+    db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
+    db.gamePlayer.findMany({ where: { memberId, reminderOff: true, game: { status: "live" } }, select: { gameId: true }, orderBy: { gameId: "asc" } }),
+  ]);
+  return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
+    canText: false, offGameIds: seats.map(seat => seat.gameId) };
+}
 
 // ------------------------------------------------------------------- writes
 
@@ -193,6 +203,19 @@ export async function runGameCommand(input: {
     await requireUploadedMedia(actor, command);
     if (command.type === "setProfile") {
       return { game: null, ok: true, profile: await setProfile({ actor, beforeMutationTx: input.beforeMutationTx }, command) };
+    }
+    if (command.type === "setReminders") {
+      const reminders = await commandTransaction(input, async tx => {
+        const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
+          reminderMinutes: command.minutes, reminderPush: command.push, reminderText: command.text,
+        } });
+        if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+        const where = { memberId: actor, game: { status: "live" } };
+        await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.offGameIds } }, data: { reminderOff: true } });
+        await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.offGameIds } }, data: { reminderOff: false } });
+        return readGameReminders(actor, tx);
+      });
+      return { game: null, ok: true, reminders };
     }
     const chatAudience = input.chatAudience ?? (input.multiplayer && input.chatContainerMemberId ? await readGameChatAudience(input.chatContainerMemberId) : undefined);
     // A recap receipt is the viewer's own; it touches no game state, so it skips the game write path.
@@ -404,7 +427,7 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
   switch (command.type) {
     case "replyToPost": return replyToPost(context, command);
     case "deleteReply": return deleteReply(context, command);

@@ -34,6 +34,9 @@ export interface AssistantChannelActivityStopOptions {
 export interface AssistantChannelActivityHandle {
   // Retained when an already provider-accepted handle is handed to a turn.
   acceptedAt?: string
+  /** Deferred typing shares acceptance and release across preparation and turn. */
+  ready?: Promise<string | null>
+  release?: () => void
   isActive?: () => boolean
   refreshAfterMessage?: () => Promise<void>
   refreshNow?: () => Promise<void>

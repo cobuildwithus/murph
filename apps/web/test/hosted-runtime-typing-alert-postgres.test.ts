@@ -25,6 +25,41 @@ const env = {
 };
 
 describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
+  it("measures direct Linq provider start without fabricating typing coverage", async () => {
+    await withTables(async (tx) => {
+      await insertTrace(tx, "held-fast", { elapsed: 30_000 });
+      await insertTrace(tx, "held-slow", { elapsed: null });
+      await insertTrace(tx, "held-prior", { elapsed: null });
+      await insertTrace(tx, "later-input", { elapsed: 10_000 });
+      await insertTrace(tx, "future-provider", { elapsed: null });
+      await insertTrace(tx, "already-running-provider", { elapsed: 4000 });
+      await insertTrace(tx, "telegram-provider", { source: "telegram", elapsed: 4000 });
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${new Date(received.getTime() + 2000)}
+        WHERE id IN ('held-fast', 'held-prior', 'telegram-provider')`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${new Date(received.getTime() + 4000)}
+        WHERE id = 'held-slow'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${new Date(now.getTime() + 1000)}
+        WHERE id = 'future-provider'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${new Date(received.getTime() - 1000)}
+        WHERE id = 'already-running-provider'`;
+      await bindConversation(tx, "held-slow", "slow-chat");
+      await insertDelivery(tx, "slow-answer", "slow-chat", 5000);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET linq_delivery_id = 'slow-answer' WHERE id = 'held-slow'`;
+      await bindConversation(tx, "held-prior", "shared-chat");
+      await bindConversation(tx, "later-input", "shared-chat");
+      const result = await runHostedRuntimeTypingAlertMonitor({ now, prisma: tx, env: {} });
+      expect(result.queuedCount).toBe(3);
+      const alerts = await tx.hostedLinqAlert.findMany({ orderBy: { id: "asc" } });
+      expect(alerts.map(row => row.id)).toEqual([
+        "held-slow", "later-input", "telegram-provider",
+      ].map(id => `runtime-typing/${id}`));
+      const slow = alerts.find(row => row.id === "runtime-typing/held-slow")!;
+      expect(slow.subject).toContain("provider start");
+      expect(slow.detailsJson).toMatchObject({ measurementKind: "provider_start", elapsedMs: 4000,
+        measurementAt: new Date(received.getTime() + 4000).toISOString(), typingAcceptedAt: null });
+    });
+  });
+
   it("uses strict webhook-to-first-typing thresholds across warm, cold, rollout, and missing observations", async () => {
     await withTables(async (tx) => {
       await insertTrace(tx, "warm-below", { elapsed: 2999 });
@@ -157,7 +192,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
           orchestration: { ingressConversationIsGroup: "true" },
         } });
       }
-      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${received}`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${new Date(received.getTime() + 4000)}`;
       const result = await runHostedRuntimeTypingAlertMonitor({ now, prisma: tx, env: {} });
       expect(result).toEqual({ queuedCount: 8, scanTruncated: false });
       const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true }, orderBy: { id: "asc" } });

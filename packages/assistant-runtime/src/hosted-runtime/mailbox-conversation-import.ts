@@ -634,6 +634,7 @@ function startHostedConversationAttachmentTyping(input: {
     return null;
   }
   return startHostedLinqInputTyping({
+    effectsPort: input.runtime.platform.effectsPort,
     inputId: input.foregroundAssistantInputId,
     runtimeAttemptId: input.runtimeAttemptId,
     forwardedEnv: input.runtime.forwardedEnv,

@@ -544,6 +544,7 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   outputSchema?: Readonly<Record<string, unknown>> | null
+  onFinalAnswerStarted?: (() => void) | null
   onFirstAssistantResponseCompleted?: (() => void) | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
@@ -5266,6 +5267,7 @@ async function runCodexAppServerTurnOnProcess(
     })
     const suppressDeliveryContext =
       shouldSuppressDeliveryContext(deliveryContextOrdinal)
+    notifyCodexFinalAnswerStarted(normalizedEvent, suppressDeliveryContext, input.onFinalAnswerStarted)
     const isCommentaryAssistantMessage =
       normalizedEvent.kind === 'assistant_message' &&
       normalizedEvent.messagePhase === 'commentary'
@@ -5284,10 +5286,7 @@ async function runCodexAppServerTurnOnProcess(
       }
     }
 
-    if (
-      normalizedEvent.kind !== 'status_item' ||
-      normalizedEvent.itemType !== 'contextCompaction'
-    ) {
+    if (shouldEmitCodexTraceEvent(normalizedEvent)) {
       input.onTraceEvent?.({
         codexThreadId,
         rawEvent: message,
@@ -6703,3 +6702,16 @@ function providerActionFallbackKeyFromNormalized(
 export { resolveGenerateImageReferences } from "./assistant-codex/image-reference-resolver.js"
 
 export { materializeVaultMedia } from './assistant-codex/dynamic-tools/materialize-vault-media.js'
+
+function notifyCodexFinalAnswerStarted(
+  event: CodexNormalizedEvent,
+  suppressed: boolean,
+  notify?: (() => void) | null,
+): void {
+  if (event.kind === 'final_answer_started' && !suppressed) notify?.()
+}
+
+function shouldEmitCodexTraceEvent(event: CodexNormalizedEvent): boolean {
+  return event.kind !== 'final_answer_started'
+    && (event.kind !== 'status_item' || event.itemType !== 'contextCompaction')
+}

@@ -107,6 +107,11 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261106220000_game_reminders",
+    // Constant defaults preserve existing rows and old writers.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20261102120000_hosted_cold_ingest_media",
     // Widens media_kind with integration-ingest and adds a check that only
     // constrains that new kind; every existing row and old writer stays valid.

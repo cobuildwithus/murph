@@ -279,6 +279,7 @@ export async function executeCodexAssistantTurnAttempt(
     publicInternetFetch: input.publicInternetFetch ?? null,
     threadConfig: resolveCodexAssistantThreadConfig(input),
     trustedContextReferences: input.trustedContextReferences ?? null,
+    onFinalAnswerStarted: () => input.activeTurnSteering?.onFinalAnswerStarted?.(),
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
         ? () => input.activeTurnSteering?.onFirstAssistantResponseCompleted()

@@ -31,7 +31,8 @@ export async function registerCompanionPushRoute(memberId: string, registration:
       && current.topic === registration.topic;
     // A wearable-only registration cannot move another installation's game
     // enrollment. Same-address permission refreshes keep its session binding.
-    const data = { ...registration, gameSessionId: sameAddress ? current.gameSessionId : null, updatedAt: new Date() };
+    const data = { ...registration, gameSessionId: sameAddress ? current.gameSessionId : null,
+      gameReminders: sameAddress ? current.gameReminders : false, updatedAt: new Date() };
     await tx.companionPushRoute.upsert({ where: { userId: memberId }, create: { userId: memberId, ...data }, update: data });
   }, transactionOptions);
 }

@@ -66,7 +66,12 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   // A claim can start well after `now`, so its lease runs from the claim, on the same clock as the due check.
   const leaseUntil = () => new Date(now.getTime() + Date.now() - startedAtMs + LIFECYCLE_LEASE_MS);
   const { reserveDueGameMissedDayCheckIns } = await import("./service");
-  await reserveDueGameMissedDayCheckIns(now);
+  const [missed] = await Promise.allSettled([
+    reserveDueGameMissedDayCheckIns(now),
+    import("./reminder-notification").then(({ sendDueGameReminders }) => sendDueGameReminders(now,
+      { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch(() => {}),
+  ]);
+  if (missed.status === "rejected") throw missed.reason;
   const pending = await readOldestReceiptPerChat(prisma, now);
   let queued = 0;
   let attempted = 0;

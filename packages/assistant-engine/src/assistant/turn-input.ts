@@ -94,6 +94,7 @@ export interface AssistantActiveTurnLiveProviderTurn {
 }
 
 export interface AssistantActiveTurnLiveProviderSteering {
+  onFinalAnswerStarted?(): void
   onFirstAssistantResponseCompleted(): void
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
 }

@@ -25,14 +25,19 @@ describe("game push registration", () => {
     expect((await POST(request(registration))).status).toBe(200);
     expect(m.upsert).toHaveBeenCalledExactlyOnceWith({
       where: { userId: "free-game-player" },
-      create: { ...registration, gameSessionId: "game-session", userId: "free-game-player", updatedAt: expect.any(Date) },
-      update: { ...registration, gameSessionId: "game-session", updatedAt: expect.any(Date) },
+      create: { ...registration, gameReminders: false, gameSessionId: "game-session", userId: "free-game-player", updatedAt: expect.any(Date) },
+      update: { ...registration, gameReminders: false, gameSessionId: "game-session", updatedAt: expect.any(Date) },
     });
+  });
+  it("records explicit reminder capability", async () => {
+    expect((await POST(request({ ...registration, gameReminders: true }))).status).toBe(200);
+    expect(m.upsert.mock.calls[0]?.[0].update.gameReminders).toBe(true);
   });
   it.each([
     { ...registration, memberId: "another-member" },
     { ...registration, topic: "unrelated.app" },
     { ...registration, token: "not-a-token" },
+    { ...registration, gameReminders: "true" },
   ])("rejects forged authority and invalid addresses", async (body) => {
     expect((await POST(request(body))).status).toBe(400);
     expect(m.upsert).not.toHaveBeenCalled();
