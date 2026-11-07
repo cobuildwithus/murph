@@ -1,6 +1,6 @@
 # Private game reminders
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -229,8 +229,15 @@ ReviewGPT architecture round (Mountain lane), findings and outcomes:
 Answers: minute sweep, `GameEvent` for push, `hostedLinqDelivery` for text,
 separate private adapter, copy at activation.
 
+Outcome: shipped through #4714, #4717, #4724, #4728 and murph-ios #470. ReviewGPT
+passed every PR. A Codex deep review on each backend PR found what ReviewGPT did not:
+the route recheck order, the evening pause lapsing, a later room horizon failing the
+recheck, private texts on Telegram skipping final checks, an overnight send after
+queueing, and a missing game-on check. All are fixed with regression tests.
+
 ## Verification
 
 - Deterministic tests for `openGameDay`, spread, sweep claims, egress recheck.
 - Real-Codex journeys for far-apart kickoff, evening check-in and the DM.
 - iOS build, UI tests and visual proof for the Notifications page.
+Completed: 2026-11-06
