@@ -36,6 +36,7 @@ interface ScriptedResponseRoute {
 
 export type ScriptedResponseBody = (
   | { text: string }
+  | { compaction: string }
   | {
       commentaryAndFunctionCall: {
         commentary: string
@@ -351,7 +352,9 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
           },
         ]
       : [
-          'toolSearchCall' in body
+          'compaction' in body
+            ? { type: 'compaction', encrypted_content: body.compaction }
+            : 'toolSearchCall' in body
             ? {
                 arguments: {
                   query: body.toolSearchCall.query,

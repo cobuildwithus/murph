@@ -68,6 +68,7 @@ const CONNECTED_APPS_ERROR_MESSAGE_MAX_LENGTH = 300
 export const MURPH_CONNECTED_APPS_MANAGE_TOOL = {
   namespace: 'murph',
   name: 'connected_apps_manage',
+  deferLoading: true,
   description:
     'List, connect, rename, or disconnect the current user’s connected app accounts. Disconnect only after an explicit revoke request for the exact account. connect returns an action URL; the account is not connected until authorization completes.',
   inputSchema: z.toJSONSchema(hostedConnectedAppsManageInputSchema, { io: 'input' }),

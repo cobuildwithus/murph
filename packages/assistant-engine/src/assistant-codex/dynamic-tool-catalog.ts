@@ -86,6 +86,7 @@ import {
 } from './dynamic-tools/assistant-style.js'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_AUTOMATION_INSPECT_TOOL,
   MURPH_ATTACH_FOLLOW_UP_TOOL,
 } from './dynamic-tools/automation.js'
 import {
@@ -141,7 +142,7 @@ export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
 export type {
   AssistantStyleTurnSettingsOverlay,
 } from './dynamic-tools/assistant-style.js'
-export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
+export { MURPH_AUTOMATION_TOOL, MURPH_AUTOMATION_INSPECT_TOOL } from './dynamic-tools/automation.js'
 export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
 export {
@@ -657,6 +658,7 @@ export const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
 export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
+  deferLoading: true,
   description:
     'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update those fields. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
@@ -710,6 +712,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
 export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
+  deferLoading: true,
   description:
     'Read the current hosted turn OpenAI model and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model and GPT-6.1 Terra is the default; Sol models require an active paid subscription, and Astra requires an active paid Edge or Max plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; Murph does not offer none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. An explicit request to restore the default authorizes that model change: read availability and apply the default without another confirmation. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
@@ -1779,6 +1782,7 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_AUTOMATION_TOOL,
+  MURPH_AUTOMATION_INSPECT_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
@@ -1925,6 +1929,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
   new Map<MurphDynamicTool, AvailabilityPredicate>([
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
     [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
+    [MURPH_AUTOMATION_INSPECT_TOOL, defaultOff((a) => a.automationAvailable)],
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],

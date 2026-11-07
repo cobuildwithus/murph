@@ -15,6 +15,7 @@ import {
 export const MURPH_CREATE_CALENDAR_LINK_TOOL = {
   namespace: 'murph',
   name: 'create_calendar_link',
+  deferLoading: true,
   description:
     'Prepare one self-contained Add to Calendar link from appointment details the member explicitly provided or confirmed in the current private text conversation. This does not add the event. Require an explicit title, start, end, and UTC offset; never guess a missing date, time, duration, or offset. When any required detail is missing, ask for every missing required detail together. Pass startsAt and endsAt as RFC 3339 date-times with offsets. Creating this link does not replace private appointment follow-through: when scheduled automation changes are available, also ensure exactly one one-shot reminder under the appointment reminder policy in this same turn, using tool search for `murph automation` to load and call `murph.automation` when needed, and preserve its verified or pending result in the semantic reply. After success, do not copy, compose, alter, or repeat a URL: write the rest of the truthful semantic reply, and the runtime appends one exact calendar link. Never claim the event was added.',
   inputSchema: {

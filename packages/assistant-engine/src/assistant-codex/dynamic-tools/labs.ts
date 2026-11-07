@@ -22,6 +22,7 @@ const LABS_TOOL_RESULT_MAX_BYTES = 60_000
 export const MURPH_LABS_TOOL = {
   namespace: 'murph',
   name: 'labs',
+  deferLoading: true,
   description:
     'Read the live lab test catalog. This tool discovers available panels and biomarkers with display-ready details, and lists nearby collection sites from a user-provided 5-digit ZIP. It cannot order, book, pay for, reserve, start checkout, or promise a launch date. Catalog listings do not prove member eligibility, appointment availability, final price, or that a particular test can be collected at a listed site.',
   inputSchema: z.toJSONSchema(hostedRuntimeLabsToolRequestSchema, { io: 'input' }),

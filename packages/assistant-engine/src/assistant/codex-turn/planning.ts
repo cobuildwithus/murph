@@ -168,6 +168,7 @@ export interface AssistantRouteTurnPlan {
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   assistantPreferredElevenLabsVoiceId?: string | null
   systemPrompt: string | null
+  currentStatePrompt?: string | null
   turnContextPrompt: string | null
   voiceMemoDeliveryChannel?: AssistantVoiceMemoDeliveryChannel | null
   workingDirectory: string
@@ -1178,7 +1179,7 @@ export async function resolveAssistantRouteTurnPlan(
   }
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
-      ? null
+      ? undefined
       : await measureRoutePlanningAsync(
         routePlanningSpans,
         'assistantContextSnapshotElapsedMs',
@@ -1218,7 +1219,7 @@ export async function resolveAssistantRouteTurnPlan(
 
     if (input.profile.promptProfile === 'assistant-ask-continuation') {
       return buildAssistantAskContinuationSystemPromptWithCacheMetadata({
-        assistantContextSnapshotPrompt,
+        assistantContextSnapshotPrompt: null,
       }, {
         toolSchemaHash,
       })
@@ -1245,7 +1246,7 @@ export async function resolveAssistantRouteTurnPlan(
         input.sharedPlan.cliAccess.env,
       ),
       assistantCliContract: options.assistantCliContract,
-      assistantContextSnapshotPrompt,
+      assistantContextSnapshotPrompt: null,
       assistantDynamicContextPrompts: assistantDynamicContextPrompts,
       assistantHostedAutomationAvailable:
         input.hostedToolContext?.automationTool != null,
@@ -1537,6 +1538,7 @@ export async function resolveAssistantRouteTurnPlan(
     voiceMemoDeliveryChannel,
     workingDirectory,
     systemPrompt,
+    currentStatePrompt: assistantContextSnapshotPrompt,
     turnContextPrompt,
   }
 }

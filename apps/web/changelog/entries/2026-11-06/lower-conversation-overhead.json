@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "lower-conversation-overhead",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less AI usage on follow-up messages",
+    "summary": "Murph reuses unchanged saved context, reducing the AI usage needed to continue a conversation.",
+    "details": "Corrections still take effect, and reminder checks use less overhead while keeping the same saved details.",
+    "relevanceTags": [
+      "messages",
+      "usage"
+    ],
+    "sourcePullRequests": []
+  }
+}

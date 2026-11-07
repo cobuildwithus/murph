@@ -1,6 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
-import { executeAutomationDynamicTool } from '../src/assistant-codex/dynamic-tools/automation.js'
+import { executeAutomationDynamicTool, MURPH_AUTOMATION_INSPECT_TOOL, MURPH_AUTOMATION_TOOL, readAutomationDynamicToolRequest } from '../src/assistant-codex/dynamic-tools/automation.js'
+
+import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+
+describe('lightweight automation inspection contract', () => {
+  const validate = compileToolInputSchema(MURPH_AUTOMATION_INSPECT_TOOL.inputSchema)
+  it.each([
+    { action: 'inspect', lookup: 'automation_synthetic' },
+    { action: 'inspect', lookup: 'automation_synthetic', view: 'model_review' },
+    { action: 'inspect_models', lookups: ['automation_synthetic'] },
+  ])('preserves canonical read semantics for $action', (arguments_) => {
+    expect(validate(arguments_)).toBe(true)
+    const original = readAutomationDynamicToolRequest({ tool: 'automation', arguments: arguments_ })
+    expect(readAutomationDynamicToolRequest({ tool: 'automation_inspect', arguments: arguments_ })).toEqual(original)
+  })
+  it.each(['save', 'patch', 'reconcile', 'attach_follow_up', 'save_onboarding_first_personal_read'])('rejects mutation action %s at the runtime boundary', (action) => {
+    const arguments_ = { action, lookup: 'automation_synthetic', title: 'Synthetic', instructions: 'Synthetic' }
+    expect(validate(arguments_)).toBe(false)
+    expect(readAutomationDynamicToolRequest({ tool: 'automation_inspect', arguments: arguments_ })?.kind).toBe('invalid-automation-arguments')
+  })
+  it('uses the existing availability boundary and a much smaller complete schema', () => {
+    expect(resolveMurphDynamicTools({ automationAvailable: false }).some((tool) => tool.name === 'automation_inspect')).toBe(false)
+    expect(resolveMurphDynamicTools({ automationAvailable: true }).some((tool) => tool.name === 'automation_inspect')).toBe(true)
+    expect(MURPH_AUTOMATION_INSPECT_TOOL.deferLoading).toBe(true)
+    expect(JSON.stringify(MURPH_AUTOMATION_INSPECT_TOOL).length).toBeLessThan(JSON.stringify(MURPH_AUTOMATION_TOOL).length / 4)
+  })
+})
 
 describe('automation definition inspection', () => {
   it.each([

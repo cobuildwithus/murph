@@ -1,5 +1,5 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
-import { supportsCodexTurnDeveloperInstructions, withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
+import { supportsCodexTurnDeveloperInstructions, withCodexAppServerRuntimeFeatureOverrides } from '../src/assistant-codex/config.ts'
 import {
   cliTimingLaunchArgs,
   codexSteeringLaunchArgs,
@@ -156,23 +156,21 @@ describe('assistant codex runtime', () => {
     expect(() => buildCodexAppServerArgs({ oss: true })).toThrow(/must use OpenAI/u)
   })
 
-  it('defaults instant steering and code-mode interruption while keeping explicit caller values', () => {
-    expect(withCodexAppServerSteeringFeatureOverrides(['model="gpt-5"'])).toEqual([
-      'model="gpt-5"',
-      'features.instant_interrupt=true',
-      'features.code_mode_interrupt=true',
-    ])
-    expect(withCodexAppServerSteeringFeatureOverrides([
-      'features.instant_interrupt = false',
-    ])).toEqual([
-      'features.instant_interrupt = false',
-      'features.code_mode_interrupt=true',
-    ])
-    const complete = [
-      'features.code_mode_interrupt=false',
-      'features.instant_interrupt=true',
+  it('preserves explicit steering settings and requires lossless untrusted context retention', () => {
+    const contextFeatures = [
+      'features.retain_client_developer_messages=true',
     ]
-    expect(withCodexAppServerSteeringFeatureOverrides(complete)).toBe(complete)
+    expect(withCodexAppServerRuntimeFeatureOverrides(['model="gpt-5"'])).toEqual([
+      'model="gpt-5"', 'features.instant_interrupt=true',
+      'features.code_mode_interrupt=true', ...contextFeatures,
+    ])
+    expect(withCodexAppServerRuntimeFeatureOverrides([
+      'features.instant_interrupt = false', 'features.retain_client_developer_messages=false',
+    ])).toEqual([
+      'features.instant_interrupt = false', 'features.code_mode_interrupt=true', ...contextFeatures,
+    ])
+    const complete = ['features.code_mode_interrupt=false', 'features.instant_interrupt=true', ...contextFeatures]
+    expect(withCodexAppServerRuntimeFeatureOverrides(complete)).toBe(complete)
   })
 
   it('builds typed Codex app-server turn steer requests for live turns', () => {

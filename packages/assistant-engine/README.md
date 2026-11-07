@@ -183,6 +183,32 @@ applies to every registered dynamic tool, including the private
 `murph.assistant_style` surface; no tool-specific stale-resume fallback is
 needed.
 
+Private current-state memory and snapshots travel in `turn/start.additionalContext`
+as named application references, separately from user input and stable developer
+instructions. Native exact-value deduplication avoids appending unchanged state
+on every turn. Each reference quotes JSON as untrusted vault data, escapes fragment
+delimiters, and splits by escaped UTF-8 bytes below the pinned 4,000-byte entry
+limit; transport never truncates facts. Stable guidance still owns how saved
+preferences and upcoming plans inform replies. Changed and cleared state supersede
+older revisions; group, maintenance, and detached-system turns receive none.
+The launch requires `features.retain_client_developer_messages=true` so native
+remote compaction retains these client references. A completed compaction advances
+an in-memory epoch and refreshes the next turn, including when native retention
+has evicted old context. Cold resume also emits current canonical state. No new
+vault state, extra read, native patch, model change, or compaction-limit increase
+is involved. Native retention can still preserve historical user messages and
+changed snapshots; this removes repeated unchanged input, not all long-thread cost.
+
+Occasional-use device, labs, style, calendar-link, poll, connected-app management,
+personalization, and assistant-configuration contracts load through native tool
+search on demand. Availability and handlers are unchanged. `murph.automation_inspect`
+shares the canonical inspection handler and availability gate but rejects mutation
+actions. Private inventories use the existing compact CLI read; groups keep their
+authenticated read boundary. Mutations retain their full typed contract and version
+checks. Discovery guidance avoids dumping full tool inventories or loading an
+already available contract twice. Sleep summaries prefer the existing bounded
+pattern read and retain missingness, coverage, and exact-detail retrieval.
+
 Idle checkpoint maintenance retires native resume state for every session whose
 `lastTurnAt` (or `updatedAt` when no turn timestamp exists) is strictly older than
 30 days. The assistant store owns this single fixed window and clears both resume

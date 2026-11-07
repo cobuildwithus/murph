@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import type { AssistantHostedExecutionContext } from '../../src/assistant/execution-context.js'
 
-export const PRODUCTION_HOSTED_TOOL_NAMES = `send_progress_update automation device assistant_style
+export const PRODUCTION_HOSTED_TOOL_NAMES = `send_progress_update automation automation_inspect device assistant_style
 attach_response_media attach_response_card attach_sleep_card generate_image generate_voice_memo
 assistant_configuration personalization family_plan plan_usage usage_diagnostics poll subscription
 group_consult group_data group_membership group_usage group_chat group_email generate_song analyze_video
@@ -15,7 +15,7 @@ export function assertProductionHostedCapabilityParity(input: {
   developerInstructions?: string | null
   dynamicTools: readonly { namespace: string; name: string }[]
 }): void {
-  assert.equal(input.dynamicTools.length, 50)
+  assert.equal(input.dynamicTools.length, PRODUCTION_HOSTED_TOOL_NAMES.length)
   assert.deepEqual(input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`), PRODUCTION_HOSTED_TOOL_NAMES)
   const bytes = Buffer.byteLength(input.developerInstructions ?? '')
   assert.ok(bytes >= 87_330 * 0.97 && bytes <= 87_330 * 1.03, `Hosted developer instructions outside production envelope: ${bytes} bytes`)
