@@ -1,6 +1,6 @@
 # End a game at the last post
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -214,3 +214,14 @@ for it. Count-mode streaks in a live game keep their current behavior.
   Postgres service suite; `pnpm typecheck`; `pnpm complexity:diff`.
 - Expected outcomes: all pass, with a test proving tickets and the recap
   reservation happen exactly once at the last post.
+
+Results on the PR head: focused game suites, `pnpm typecheck` and full CI pass.
+ReviewGPT round 1 on the implementation passed with no findings. CI's
+`game-account-deletion-postgres` plan test failed twice before passing with the
+same code: on a near-empty table Postgres may pick `game_event_pkey` over
+`game_event_actor_type_idx`.
+
+Order: the iOS build that shows the result card ships first, then this PR. After
+deploy: a real two-phone last post, and a real tap on the recap link in the
+group chat.
+Completed: 2026-11-06
