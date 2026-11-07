@@ -56,7 +56,7 @@ async function boardGameFacts(db: Db, viewerId: string, otherId: string, room: s
   if (!first?.dayOne) return null;
   const rows = await db.game.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: BOARD_GAME_LIMIT + 1,
     select: { id: true, status: true, terms: true, lengthDays: true, createdBy: true, startsOn: true,
-      devClockOffsetMs: true, players: { take: 2, select: { memberId: true, seat: true, timeZone: true, dayOne: true, joinedAt: true, leftAt: true } } } });
+      settledAt: true, devClockOffsetMs: true, players: { take: 2, select: { memberId: true, seat: true, timeZone: true, dayOne: true, joinedAt: true, leftAt: true } } } });
   const streaks = new Map<string, number | null>([[viewerId, null], [otherId, null]]);
   if (rows.length <= BOARD_GAME_LIMIT) {
     const entries = await db.gameEntry.findMany({ where: { gameId: { in: rows.map(row => row.id) }, attempt: { gt: 0 }, withdrawnAt: null },
@@ -69,7 +69,7 @@ async function boardGameFacts(db: Db, viewerId: string, otherId: string, room: s
       players: row.players.flatMap(player => player.memberId && player.timeZone ? [{ ...player, memberId: player.memberId,
         timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null }] : []),
       entries: entries.filter(entry => entry.gameId === row.id).map(entry => ({ ...entry, kind: "words", mediaKeys: [], blurHash: null })) };
-      return { state, now: new Date(clock.getTime() + Number(row.devClockOffsetMs ?? 0)) };
+      return { state, settledAt: row.settledAt ? new Date(row.settledAt.getTime() + Number(row.devClockOffsetMs ?? 0)) : null, now: new Date(clock.getTime() + Number(row.devClockOffsetMs ?? 0)) };
     });
     for (const id of [viewerId, otherId]) streaks.set(id, pairBoardStreak(states, id));
   }

@@ -17,6 +17,14 @@ function pending(s = state(), now = BEFORE): Omit<GamePendingChange, "votes"> {
     ...decideGameChange(s, "player_a", { kind: "edit", schedule: { days: [5,6] } }, now) };
 }
 describe("weekly game mutually agreed changes", () => {
+  it("closes controls and expires an outstanding change as soon as a pair is decided", () => {
+    const s = state(), proposal = pending(s);
+    s.game.terms.versions[0].schedule = { count: 1 };
+    s.entries = s.players.map(player => ({ id: `finished-${player.seat}`, memberId: player.memberId,
+      dayIndex: 0, attempt: 1, kind: "words", mediaKeys: [], blurHash: null, receivedAt: DURING, withdrawnAt: null }));
+    expect(gameChangeControls(s, DURING, null)).toMatchObject({ canEdit: false, canStartNow: false, canEditStakes: false });
+    expect(isGameChangeExpired(s, proposal, DURING)).toBe(true);
+  });
   it("keeps decline silent and cancellation notices limited to announced app requests", () => {
     const proposal = {...pending(),origin:"app" as const,deliveryStatus:"sent" as const};
     expect(gameChangeCancellationNeedsNotice(proposal,"cancel")).toBe(true);

@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { getPrisma } from "@/src/lib/prisma";
-import { runGameCommand, reserveDueGameMissedDayCheckIns } from "@/src/lib/game/service";
+import { runGameCommand, reserveDueGameMissedDayCheckIns, readGameChatState } from "@/src/lib/game/service";
 import { gameAudienceKeys } from "@/src/lib/game/audience";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { readGameChatTranscript } from "@/src/lib/game/chat-tool";
@@ -215,6 +215,62 @@ afterEach(async () => {
 });
 
 describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
+  it("waits for Pacific morning through the full drain while an Eastern room notice reads the due pair", async () => {
+    const clock = new Date();
+    const [roomId] = await shardRooms(1, Math.floor(clock.getTime() / 60_000) % 60);
+    const f = await fixture(2, roomId);
+    const phones = f.people.map(() => `+1555${String(parseInt(randomUUID().slice(0, 8), 16) % 10_000_000).padStart(7, "0")}`);
+    for (const [seat, person] of f.people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({
+      ...buildHostedMemberPhoneIdentityFields(phones[seat]), memberId: person.id, prisma: tx,
+      phoneNumberVerifiedAt: clock, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+    }));
+    proof.rooms.set(f.roomId, phones);
+    const ending = await f.addGame(2, ["America/New_York", "America/Los_Angeles"]);
+    const continuing = await f.addGame(2);
+    await db.game.updateMany({ where: { id: { in: [ending, continuing] } }, data: { startedAt: new Date(clock.getTime() - 86_400_000) } });
+    const move = async (effective: string) => db.game.update({ where: { id: ending }, data: {
+      lengthDays: 1, devClockOffsetMs: BigInt(Date.parse(effective) - clock.getTime()),
+    } });
+    // March 5 is still standard time: 09:00 Eastern is 06:00 Pacific.
+    await move("2030-03-05T14:00:00Z");
+    await db.$transaction(tx => reserveGameChatLifecycleTx({ gameId: continuing, kind: "started", now: clock, tx }));
+    expect(await drainGameChatLifecycle({ now: clock })).toMatchObject({ queued: 1 });
+    expect((await receipt(gameChatLifecycleEventId(continuing, "started"))).status).toBe("generation_queued");
+    expect((await db.game.findUniqueOrThrow({ where: { id: ending } })).status).toBe("live");
+    expect((await readGameChatState(f.roomId, f.people.map(person => person.id))).games.find(game => game.id === ending)?.status).toBe("live");
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: { startsWith: ending } } })).toBe(0);
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(gameChatLifecycleEventId(continuing, "started"))).id }, data: { status: "sent", acceptedAt: clock } });
+    await move("2030-03-05T16:59:59Z");
+    await drainGameChatLifecycle({ now: clock });
+    expect((await db.game.findUniqueOrThrow({ where: { id: ending } })).status).toBe("live");
+    await move("2030-03-05T17:00:00Z");
+    expect(await drainGameChatLifecycle({ now: clock })).toMatchObject({ queued: 1 });
+    expect((await db.game.findUniqueOrThrow({ where: { id: ending } })).status).toBe("settled");
+    const recapId = gameChatLifecycleEventId(ending, "recap");
+    expect((await receipt(recapId)).status).toBe("generation_queued");
+    expect(await readHostedMailboxWakeByDedupeKey({ userId: f.roomId, dedupeKey: recapId })).toBeTruthy();
+    await drainGameChatLifecycle({ now: clock });
+    expect(await db.gameEvent.count({ where: { gameId: ending, type: "settled" } })).toBe(1);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: ending, template: "game_recap" } })).toBe(1);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: { startsWith: ending }, template: "game_missed" } })).toBe(0);
+  });
+
+  it("settles a due count-schedule pair before the mixed-room group collector", async () => {
+    const [roomId] = await shardRooms(1);
+    const f = await fixture(2, roomId);
+    const group = await f.addGame(10), pair = await f.addGame(2);
+    await db.game.update({ where: { id: pair }, data: { lengthDays: 1,
+      terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 1 }, stakes: [] }] } } });
+    expect(await reserveDueGameMissedDayCheckIns(now)).toBe(1);
+    expect((await db.game.findUniqueOrThrow({ where: { id: pair } })).status).toBe("settled");
+    expect((await db.game.findUniqueOrThrow({ where: { id: group } })).status).toBe("live");
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: pair, template: "game_recap" } })).toBe(1);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: { startsWith: pair }, template: "game_missed" } })).toBe(0);
+    const prepared = await prepareGroupMissedDay(f.roomId, date, now);
+    expect(prepared?.policy.batch.map(game => game.gameId)).toEqual([group]);
+  });
+
   const eveningAt = new Date("2030-03-04T20:05:00Z");
   it("reserves one evening per room and date, and freezes the addressed batch and watermark", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");

@@ -99,13 +99,21 @@ describe("one daily game notifier", () => {
     m.blocks.mockResolvedValue([{ blockerMemberId: "p1", blockedMemberId: "p2" }]);
     expect((await claim(group)).find(n => n.memberId === "p1")!.claims.map(c => c.slot)).toEqual(["first"]);
   });
-  it.each(["withdrawn", "left", "blocked", "reported", "settled", "route", "expired", "milestone"])("suppresses stale %s without releasing claims", async reason => {
+  it("delivers the last post after the settling read", async () => {
+    const s = state();
+    const [notification] = await claim(s);
+    s.game.status = "settled";
+    m.game.mockResolvedValue(stored(s));
+    await deliverGamePostNotification(notification);
+    expect(m.send).toHaveBeenCalledOnce();
+  });
+  it.each(["withdrawn", "left", "blocked", "reported", "void", "route", "expired", "milestone"])("suppresses stale %s without releasing claims", async reason => {
     const s = state(3); s.entries.push(post("p2")); const n = (await claim(s)).find(n => n.memberId === "p1")!;
     if (reason === "withdrawn") s.entries[0].withdrawnAt = clock;
     if (reason === "left") s.players[1].leftAt = clock;
     if (reason === "blocked") m.blocks.mockResolvedValue([{ blockerMemberId: "p1", blockedMemberId: "p2" }]);
     if (reason === "reported") m.report.mockResolvedValue({ id: "report" });
-    if (reason === "settled") s.game.status = "settled";
+    if (reason === "void") s.game.status = "void";
     if (reason === "route") m.route.mockResolvedValue(null);
     if (reason === "expired") vi.setSystemTime(n.request.expiresAt);
     if (reason === "milestone") s.entries.push(post("p1"));

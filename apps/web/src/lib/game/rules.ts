@@ -348,14 +348,25 @@ export function hasUnlockedDay(entries: RuleEntries, memberId: string, dayIndex:
 }
 
 /**
- * Whether a game is past its end: an invite past its expiry, or a live game
- * once the last player's last day (plus grace) is over. Computed from state,
- * so any read can settle it.
+ * An expired invite, a decided pair, or a live game past its natural end.
  */
 export function isGameDue(state: RuleState, now: Date): boolean {
   const { game } = state;
   if (game.status === "invited" || game.status === "negotiating") return isGameInviteExpired(game, now);
-  return game.status === "live" && settleDueAt(state) <= now;
+  return game.status === "live" && (settleDueAt(state) <= now || isGameDecided(state));
+}
+
+/** Nobody can change the score: both remaining pair players have finished. */
+export function isGameDecided(state: RuleState): boolean {
+  const players = remainingPlayers(state);
+  if (state.game.seats !== 2 || state.game.status !== "live" || !isPairRoster(players) || players.some(player => !player.dayOne)) return false;
+  const entries = indexGameEntries(state.entries);
+  const schedule = currentTerms(state.game.terms).schedule;
+  if ("count" in schedule) return players.every(player => scorePlayer(state, player, undefined, entries).score >= schedule.count);
+  for (let day = state.game.lengthDays - 1; day >= 0; day--) {
+    if (isScheduledDay(state, day)) return players.every(player => completedEntry(entries, player.memberId, day) !== null);
+  }
+  return false;
 }
 
 /** The acceptance deadline shared by invited and negotiating games. */
@@ -791,7 +802,7 @@ export function decideDevAdvance(state: RuleState, days: number): { addMs: numbe
 function requireLivePlayer(state: RuleState, memberId: string): RulePlayer {
   const player = playerFor(state, memberId);
   if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
-  if (state.game.status !== "live" || !player.dayOne) reject("GAME_NOT_LIVE", "This game isn't live.");
+  if (state.game.status !== "live" || !player.dayOne || isGameDecided(state)) reject("GAME_NOT_LIVE", "This game isn't live.");
   return player;
 }
 

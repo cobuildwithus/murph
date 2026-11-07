@@ -118,6 +118,34 @@ versions. When no scheduled day remains in this game, the message is
 "Saturday's a day off. No game days left." Existing historical off-day entries
 retain their scoring and visibility rules.
 
+## Pair game ending and recap wait
+
+A pair settles on the read after both players complete the last scheduled day
+or reach N in an any-N game. Incomplete posts leave it open. Results and tickets
+can therefore arrive before the natural end or the hosted recap. Retake,
+withdrawal, Prove it and score edits close as soon as the pair is decided;
+duplicate post retries still succeed. The last post's push still arrives.
+Group timing is unchanged.
+
+Replies remain available until `settleDueAt`, the original natural end including
+applicable offline grace, even while the pair is settled. `settlesAt` keeps its
+existing natural-time meaning. Foreground reads settle due games; background
+chat reads do not. Without a foreground read, the room sweep settles due pairs
+at or after 9am following the last day in the latest remaining player's frozen
+zone, including count schedules and mixed rooms. Due pairs get no check-ins.
+
+`GameView` adds `recapPending?: true`. It is present only for a settled,
+chat-bound game with a null recap during the first 10 minutes after `settledAt`.
+Use it to hold Watch while showing the result. Its absence is not a generation
+failure or deadline: a late recap can still replace the fallback, and the card
+and chat link must still open it. No recap-ready push is sent. Older clients
+ignore the field; the native UI implementation ships separately.
+
+Settled any-N pair board streaks stop creating obligations on the local day play
+ended, so later blank days do not break a run or conflict with a rematch. Recap
+material stops there too and never calls a blank any-N day missed. Natural
+endings and live count-mode streak behavior remain unchanged.
+
 ## Recap superlatives
 
 `GameView.recap` remains nullable. Its existing `pages`, optional `scoreLine`
