@@ -49077,18 +49077,19 @@ describeRealCodex('plan D ordinary group hosting', () => {
 
 
 describeRealCodex('plan D group lifecycle copy', () => {
-  it.each(['first kickoff', 'later kickoff', 'simultaneous kickoff', 'live cancellation', 'same rematch', 'changed rematch', 'fresh invitation'] as const)('plan D notification %s', async scenario => {
+  it.each(['first kickoff', 'far apart kickoff', 'later kickoff', 'simultaneous kickoff', 'live cancellation', 'same rematch', 'changed rematch', 'fresh invitation'] as const)('plan D notification %s', async scenario => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hosting-notice-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
     const { buildGameKickoffInstructions, buildGameRematchInstructions, buildGameInviteCancelledInstructions } = await import('@murphai/hosted-execution/runtime-control')
-    const game = hostingGame()
+    const base = hostingGame()
+    const game = scenario === 'far apart kickoff' ? base : { ...base, players: base.players.map((player, seat) => ({ ...player, timeZone: seat ? 'America/Chicago' : 'America/New_York' })) }
     const kickoff = scenario.includes('kickoff')
     const rematch = scenario.includes('rematch') || scenario === 'fresh invitation'
     const eventId = `${kickoff ? 'game-started' : rematch ? 'game-rematch' : 'game-cancelled'}:${game.id}`
     const reminderRequests: AssistantHostedAutomationToolRequest[] = []
     const instructions = kickoff ? buildGameKickoffInstructions({ kind: 'started', game,
-      ...(scenario === 'first kickoff' ? {} : { room: { tasks: ['Walk outside'], otherGames: [{ status: 'live', tasks: ['Read a chapter'] }], startedAfterAnother: scenario === 'later kickoff' } }) })
+      ...(scenario === 'first kickoff' || scenario === 'far apart kickoff' ? {} : { room: { tasks: ['Walk outside'], otherGames: [{ status: 'live', tasks: ['Read a chapter'] }], startedAfterAnother: scenario === 'later kickoff' } }) })
       : rematch ? buildGameRematchInstructions({ maxPlayers: 10, termsVersion: 2, requester: 'Alex', startsOn: '2030-03-12',
         terms: { defaultTask: 'Walk outside', tasks: [{ seat: 0, text: 'Walk outside' }], stakes: [{ kind: 'prize', item: 'Choose lunch' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, lengthDays: scenario === 'changed rematch' ? 12 : 7, checkInKind: 'any' },
         comparison: scenario === 'fresh invitation' ? null : { sameGame: scenario === 'same rematch', individualTasksChanged: scenario === 'changed rematch',
@@ -49117,7 +49118,7 @@ describeRealCodex('plan D group lifecycle copy', () => {
       if (kickoff) {
         expect(reply).toMatch(/walk/iu); expect(reply).toMatch(/join/iu)
         expect(reply).not.toMatch(/not specified|unspecified|unclear who/iu)
-        if (scenario === 'later kickoff') expect(reply).not.toMatch(/remind|what time|how many days/iu)
+        if (scenario === 'later kickoff' || scenario === 'far apart kickoff') expect(reply).not.toMatch(/remind|what time|how many days|time zone|hours apart|London|New York/iu)
         else { expect(reply).toMatch(/remind/iu); expect(reply).toMatch(/time/iu); expect(reply).toMatch(/how many|number of days/iu) }
       } else if (rematch) {
         expect(reply).toMatch(/Alex/iu); expect(reply).toMatch(/March 12/iu); expect(reply).toMatch(/yes|accept|agree|join/iu)
