@@ -173,6 +173,25 @@ describe.skipIf(!enabled)("chat game setup persistence", () => {
     expect(await getPrisma().gameEvent.count({ where: { gameId: create.gameId, type: "created" } })).toBe(1);
     expect(await f.run(f.a, create)).toMatchObject({ ok: false });
   });
+  it("checks the chat opponent before revealing an open rematch", async () => {
+    const f = await setup(), c = randomUUID(), room = randomUUID();
+    members.push(c, room);
+    await getPrisma().hostedMember.createMany({ data: [c, room].map(id => ({ id, billingStatus: "not_started" })) });
+    expect(await runGameCommand({ actorMemberId: c, command: { type: "setProfile", firstName: "Casey", timeZone: "UTC" } })).toMatchObject({ ok: true });
+    const previous = f.create();
+    expect(await f.run(f.a, previous)).toMatchObject({ ok: true });
+    await getPrisma().game.update({ where: { id: previous.gameId }, data: { status: "settled" } });
+    expect(await f.run(f.b, f.create(randomUUID(), previous.gameId))).toMatchObject({ ok: true });
+    const create = f.create(randomUUID(), previous.gameId);
+    if (create.operation !== "create") throw new Error("fixture");
+    const result = await runGameChatUpdate({ actorMemberId: f.a, chatContainerMemberId: room,
+      chatPlayerMemberIds: [f.a, c], beforeMutationTx: async () => {}, update: { ...create,
+        terms: { ...create.terms, tasks: create.terms.tasks.map(task => ({ ...task, memberId: task.memberId === f.b ? c : task.memberId })) } } });
+    expect(result).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER",
+      message: "Rematch a settled game with the other person in this chat." } });
+    expect(await getPrisma().game.count({ where: { id: create.gameId } })).toBe(0);
+    expect(await getPrisma().game.count({ where: { chatContainerMemberId: room } })).toBe(0);
+  });
   it("enforces listed creation, the unlisted rematch exception and open/outdated chain rules", async () => {
     const f = await setup(); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", f.a);
     expect(await f.run(f.b, f.create())).toMatchObject({ ok: false, error: { code: "GAME_DISABLED" } });

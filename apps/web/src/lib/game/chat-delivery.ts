@@ -21,7 +21,7 @@ import { isGameInviteExpired } from "./rules";
 import { pendingGameChangeView } from "./changes";
 import { assertGameProposalDeliveryCurrentTx } from "./chat-delivery-authority";
 
-import { bindPairGameChat, findExistingGameChat, readGroupGameChatAuthority, type GameChatAudience, requireExactChat, requireExactGameChat } from "./chat-membership";
+import { bindPairGameChat, findExistingGameChat, readGroupGameChatAuthority, readGroupGameNoticeAuthority, type GameChatAudience, requireExactChat, requireExactGameChat } from "./chat-membership";
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
@@ -100,7 +100,7 @@ export async function readGameProposalDeliveryPlayers(key: string | null, contai
   if (!match) return undefined;
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
   if (game?.maxPlayers !== 10) return requireExactGameChat(containerMemberId);
-  const audience = await readGroupGameChatAuthority(game, containerMemberId);
+  const audience = await readGroupGameNoticeAuthority(game, containerMemberId);
   if (!audience || game.chatContainerMemberId !== containerMemberId || target != null && audience.threadId !== target) {
     if (match[1] === "game-talk" || match[1] === "game-challenge") throw hostedOnboardingError({ code: "GAME_CHANGE_SUPERSEDED",
       httpStatus: 409, message: "This game notice is no longer current.", retryable: false });

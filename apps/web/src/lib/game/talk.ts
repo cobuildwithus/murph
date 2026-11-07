@@ -5,7 +5,7 @@ import { isRecord } from "../primitives";
 import { isPairRoster } from "./roster";
 import { addressedGameInvite, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
 import { currentTerms, isGameDue, type RuleState } from "./rules";
-import { readGroupGameChatAuthority, type GameChatAudience } from "./chat-membership";
+import { readGroupGameNoticeAuthority, type GameChatAudience } from "./chat-membership";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
 export type GameNoticeAudience = GameChatAudience & { talkAuthor?: { memberId: string; contacts: Awaited<ReturnType<typeof readGameVerifiedContacts>> } };
@@ -72,7 +72,7 @@ export async function readCurrentGameTalk(db: Prisma.TransactionClient, gameId: 
   if (!request) return null;
   if (game.maxPlayers === 10) {
     if (request.v !== 2 || !game.chatContainerMemberId) return null;
-    const audience = await readGroupGameChatAuthority(game, game.chatContainerMemberId, prepared, db);
+    const audience = await readGroupGameNoticeAuthority(game, game.chatContainerMemberId, prepared, db);
     if (!audience || !audience.memberIds.includes(request.actor)) return null;
     const contacts = await talkAuthorContacts(request.actor, prepared);
     const keys = await verifiedGameContactKeys(db, request.actor, contacts);

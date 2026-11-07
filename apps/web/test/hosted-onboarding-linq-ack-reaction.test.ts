@@ -157,6 +157,45 @@ describe("runHostedLinqAckReactionBestEffort", () => {
     expect(store.releaseHostedLinqAckReaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["my_data", true],
+    ["calendar", true],
+    ["reminder", true],
+    ["challenge", true],
+    ["do", false],
+    ["research", false],
+    ["make", false],
+    ["look", false],
+    ["picture", false],
+    ["song", false],
+  ] as const)("opts %s into the live-conversation rule: %s", async (kind, skipLiveConversation) => {
+    store.claimHostedLinqAckReaction.mockResolvedValueOnce(null);
+    await run({ classify: vi.fn(async () => decision({ kind })) });
+    expect(store.claimHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({
+      messageReceivedAt: receivedAt,
+      skipLiveConversation,
+    }));
+  });
+
+  it.each(["live_conversation", "answered_or_burst_taken"] as const)("logs %s without sending, confirming, or releasing", async (outcome) => {
+    store.claimHostedLinqAckReaction.mockResolvedValueOnce(outcome === "live_conversation" ? outcome : null);
+    const addReaction = vi.fn();
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      await run({ addReaction });
+      expect(addReaction).not.toHaveBeenCalled();
+      expect(store.confirmHostedLinqAckReaction).not.toHaveBeenCalled();
+      expect(store.releaseHostedLinqAckReaction).not.toHaveBeenCalled();
+      expect(store.markHostedLinqAckReactionHeavy).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledExactlyOnceWith(
+        "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.ack-reaction.",
+        expect.objectContaining({ kind: "reminder", outcome }),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("stays quiet when the burst is taken or Murph already replied", async () => {
     store.claimHostedLinqAckReaction.mockResolvedValueOnce(null);
     const addReaction = vi.fn();

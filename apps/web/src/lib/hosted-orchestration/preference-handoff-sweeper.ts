@@ -9,6 +9,7 @@ import {
   hostedThreadContainerParticipantAccessCutoff,
 } from "../hosted-groups/thread-container-participant-access";
 import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
+import { activeHostedPersonAccessSql, strictHostedPersonAccessSql } from "../hosted-onboarding/member-access-projections";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedPostCommitDeadline,
@@ -302,23 +303,7 @@ function createHostedPreferenceHandoffCandidateStore(
         "active_person_members" AS (
           SELECT "person"."id"
           FROM "hosted_member" AS "person"
-          LEFT JOIN "hosted_thread_container" AS "person_container"
-            ON "person_container"."member_id" = "person"."id"
-          WHERE "person_container"."member_id" IS NULL
-            AND "person"."suspended_at" IS NULL
-            AND (
-              "person"."billing_status" = 'active'
-              OR EXISTS (
-                SELECT 1
-                FROM "hosted_account_group_membership" AS "membership"
-                JOIN "hosted_account_group" AS "account_group"
-                  ON "account_group"."id" = "membership"."group_id"
-                WHERE "membership"."member_id" = "person"."id"
-                  AND "membership"."status" = 'active'
-                  AND "account_group"."billing_status" = 'active'
-                  AND "account_group"."suspended_at" IS NULL
-              )
-            )
+          WHERE ${strictHostedPersonAccessSql(Prisma.sql`"person"`)}
         )
         SELECT "mailboxItemId", "userId"
         FROM "pending_handoff_users" AS "pending"
@@ -326,15 +311,13 @@ function createHostedPreferenceHandoffCandidateStore(
           ON "member"."id" = "pending"."userId"
         LEFT JOIN "hosted_thread_container" AS "thread_container"
           ON "thread_container"."member_id" = "member"."id"
-        LEFT JOIN "active_person_members" AS "active_member"
-          ON "active_member"."id" = "member"."id"
         LEFT JOIN "active_person_members" AS "active_owner"
           ON "active_owner"."id" = "thread_container"."owner_member_id"
         WHERE ${hostedRuntimeMemberEligibleSql()}
           AND (
             (
               "thread_container"."member_id" IS NULL
-              AND "active_member"."id" IS NOT NULL
+              AND ${activeHostedPersonAccessSql(Prisma.sql`"member"`)}
             )
             OR (
               "thread_container"."member_id" IS NOT NULL

@@ -1210,6 +1210,10 @@ Media-to-Binary bridge). Provider credentials stay in Web and
 redirects remain disabled. Postgres contains operational counters and encrypted
 authority, never document bodies.
 
+When assistant execution is blocked, clinical acquisition can run on the
+model-free system-mailbox path. AI-allowed acquisition retains default ownership
+and conversation-prefetch ordering; enrichment retains its independent AI gate.
+
 The hosted runtime retrieves and imports one FHIR page with its attachments at
 a time. Private portable clinical checkpoints retain the pending ticket,
 accepted bytes, next cursor, predecessor manifest and cumulative saved counts.
@@ -1537,8 +1541,13 @@ processes a bounded batch containing every durable Retell provider call id,
 stops active calls, and deletes each provider object before clearing its local
 id. The `HostedPhoneCall` row remains the retry owner on any ambiguous provider
 or local-write failure, and the destructive account transaction fails closed
-while any provider id or active unbound reservation remains. Nullable legacy JSON columns are read only when ciphertext is absent
-and exist solely for the bounded migration scrub. Retell reaches `apps/web` only through signed raw-body
+while any provider id or active unbound reservation remains. Phone readers use only
+ciphertext, with a required nonempty encrypted brief and an optional encrypted
+result until analysis is available. A validated predeploy guard rejects retained
+plaintext and missing brief ciphertext. Physical legacy columns remain until the
+separate held contract removal follows encrypted-only reader deployment and the
+complete drain of older functions and deployment-pinned phone-call Workflows.
+Retell reaches `apps/web` only through signed raw-body
 function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.
@@ -3469,14 +3478,39 @@ latest available retained vault replica without waking the paused runtime.
 Renewal reuses the existing consent documents and grant owner; disconnected
 providers require their ordinary explicit reconnect flow.
 
-The historically named `assertActiveHostedMemberAccessAllowed` is product
-admission: signed-up human members with canceled, paused, unpaid or past-due
-billing can use native and Web product surfaces without billing writes or new
-Starter grants. Suspension, unfinished signup and synthetic-container behavior
-remain unchanged. Strict active-access readers, runtime ownership and AI usage
-checks remain independent and unchanged. Companion heartbeat and push-route
+The historically named `ActiveHostedMemberAccess` helpers own product and worker
+admission. Real people retain access with canceled, paused, unpaid or past-due
+billing. An incomplete account retains access only with existing activation proof
+(a member-activated mailbox item or all four active crypto-domain roots), or valid
+Family sponsorship. Never-activated signup and suspension remain excluded.
+The pure projection leaf imports only Prisma; store-backed activation readers
+remain with activation. Product state reads query proof only for incomplete
+accounts. Settings snapshots retain their existing incomplete refusal without
+additional relation reads. Prisma, batch and SQL projections agree; device selection,
+handoff recovery and home-line occupancy apply eligibility before page limits.
+Synthetic containers retain strict own-active/Family owner or leased-participant
+sponsorship and exact-pair game access. Duplicate game rooms retain their frozen
+primary allowance beneficiary. Product access never supplies AI allowance,
+welcomes, referral qualification, or complimentary physical-note funding.
+Linq chooses the existing billing notice from its separate strict AI decision
+for home and new direct chats, without binding or queueing denied input. A
+notice-free denial discards established-member input; product members cannot
+fall into first-contact or instant-start onboarding. Email conversation routing
+remains strict at both entrypoints. Native Telegram welcomes check strict person
+eligibility before sending.
+Clinical transport uses product access with its existing consent and suspension
+floor, including locked egress checks; daily admission additionally requires
+launch consent. Clinical enrichment remains AI-gated. No billing writes or new
+Starter grants accompany these reads. Companion heartbeat and push-route
 registration apply product authority under member and sponsorship locks; runtime
 presence still requires its callback fence.
+
+This Web-only rule changes no wire fields or runner behavior. Existing runners
+can process device imports while AI is denied; deterministic member actions and
+preferences still follow their separately deployed execution classification.
+Inactive AI allowance can request a 15-minute reconciliation retry, which is not
+runner admission. Canonical workspace retention and checkpoint recovery remain
+independent of billing lapse, with consent, suspension and fencing preserved.
 
 Native companion account admission is a bearer-authenticated member lifecycle
 boundary, not a device-sync lifecycle boundary. `POST
@@ -5700,8 +5734,9 @@ material read or seal. After runtime authorization, recap tools answer the share
 `GAME_RECAP_GENERATION_RETIRED` value before roster work; the runner consumes it
 without sending. Temporary unavailability and claimed provider work remain
 uncertain. A pair receipt skipped as `game_blocked` is also terminal after
-unblock because its room cannot be restored; a block row alone and blocked group
-generations remain uncertain, though nothing yet restores a settled group's room.
+unblock because its room cannot be restored. A block row alone remains temporary.
+A group block skips nothing, so its generation waits and completes after the block
+lifts. Older group receipts already skipped as `game_blocked` are terminal.
 Regeneration previews use the pure witness check
 without writes; execution retires stale work before reserving a clean successor.
 The runner image
@@ -5901,10 +5936,9 @@ hide an earlier visible use. Home prioritizes live games in SQL before its
 bounded candidate window. Rematch creation rechecks `previous_game_id`
 descendants and pair capacity under
 the existing pair lock; the ancestry index avoids repeated whole-table scans.
-An open direct rematch conflicts, a settled descendant makes its ancestor
-outdated, and unrelated chains do not conflict; an opposite simultaneous request
-joins the first invite
-after releasing that transaction. Grace accepts captures only from the day
+An open direct rematch conflicts, including the other player's open offer in
+either race order, a settled descendant makes its ancestor outdated, and
+unrelated chains do not conflict. Grace accepts captures only from the day
 that just ended, with the existing clock slack at both boundaries.
 
 `/api/game/v1` routes are thin: they fold path ids into one command. Writes:
@@ -6030,7 +6064,7 @@ calls no provider and checks no image; a provider would plug in at
 blocker deletes it. Block takes the pair's transaction advisory lock
 (`blocks.ts` `lockGamePair`), then every pair game between them in id order: open
 and live pairs end `void` (no result, no tickets; an unshaken invite records
-`cancelled`, otherwise `blocked`), every game between them loses
+`cancelled`, otherwise `blocked`), every pair game between them loses
 `chat_container_member_id`, and their waiting `game_lifecycle` receipts are
 skipped (`game_blocked`), so the chat funding gate finds no game and Murph sends
 nothing more there; `readGameChatState` returns no games for a blocked pair.
@@ -6042,7 +6076,11 @@ days; tickets `left`); the blocker's Home drops those games and tickets and
 lists everyone they blocked in `GameHomeView.blocked`. Media reads refuse a
 blocked pair. Unblocking changes no game.
 
-Groups retain blocked players and their scoring eligibility. Symmetric
+Groups retain blocked players and their scoring eligibility. The game keeps its
+room and receipts. While a block stands, the room fails authority and Murph sends
+nothing there. A block among its current participants also stops game funding.
+`readGroupGameNoticeAuthority` keeps talk and challenge from reading the block as
+stale. Anything still current sends after the block lifts. Symmetric
 `hiddenMemberIds` masks strip post payloads, media, blur hashes and timestamps
 before decryption or signing, retaining only aggregate posted status. Recaps are
 suppressed for affected viewers. Left viewers cannot fetch new game content.

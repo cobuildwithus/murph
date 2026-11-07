@@ -243,7 +243,6 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   return {
     analyzedAt: null,
     briefEncrypted: validBriefEncrypted,
-    briefJson: null,
     createdAt: now,
     endedAt: null,
     id: "hpc_123",
@@ -256,7 +255,6 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     resultDeliveryStatus: null,
     resultDeliveryTerminalAt: null,
     resultEncrypted: null,
-    resultJson: null,
     resultNotificationChannel: null,
     status: "calling",
     stopRequestedAt: null,

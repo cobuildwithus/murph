@@ -4,9 +4,9 @@ import { HOSTED_STANDARD_CHECKOUT_OFFER } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 
 /**
- * AI/runtime entitlement predicates. `billingStatus=active` enables direct
+ * Strict AI/funding entitlement predicates. `billingStatus=active` enables direct
  * access subject to usage; the capacity owner can be Starter or a paid plan.
- * Lapsed humans retain product access through member-access.ts's product guard.
+ * Lapsed humans retain product and worker access through member-access.ts.
  * Sponsored Family/thread access is deliberately derived by member-access.ts.
  */
 export type HostedOwnAccessInput = {

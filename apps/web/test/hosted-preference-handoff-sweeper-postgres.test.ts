@@ -87,6 +87,25 @@ describe.skipIf(!runPostgresProof)(
       await prisma?.$disconnect();
     });
 
+    it.each(["canceled", "paused", "unpaid", "past_due"] as const)("recovers %s work within a limit-one page and stops after import", async (billingStatus) => {
+      const client = requirePrisma(prisma);
+      const now = new Date();
+      const ids = [createId("suspended"), createId("withdrawn"), createId("lapsed")];
+      memberIds.push(...ids);
+      await client.hostedMember.createMany({ data: ids.map((id, index) => ({ id, billingStatus, suspendedAt: index === 0 ? now : null })) });
+      await client.hostedConsentGrant.create({ data: { memberId: ids[1], scope: "launch.health-data", status: "revoked", documentVersionsJson: {}, source: "web_onboarding", grantedAt: now, revokedAt: now } });
+      await client.hostedMailboxItem.createMany({ data: ids.map((userId, index) => mailboxItem({
+        id: createId("lapsed_handoff"), userId, kind: "device-sync.wake", createdAt: new Date(now.getTime() - (4 - index) * 60_000),
+      })) });
+      const requestHandoff = buildRequestHandoff([]);
+      const recover = () => runHostedPreferenceHandoffSweeper({ handoffLimit: 1, now,
+        hasActiveAccess: userId => hasHostedRuntimeActiveAccess(userId, { prisma: client }), logger: buildLogger(), requestHandoff });
+      expect(await recover()).toMatchObject({ handoffAccepted: 1 });
+      expect(requestHandoff).toHaveBeenCalledWith(expect.objectContaining({ expectedUserId: ids[2] }));
+      await client.hostedWorkspace.create({ data: { userId: ids[2], redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" } } });
+      expect(await recover()).toMatchObject({ handoffAttempted: 0 });
+    });
+
     it("excludes expired participant leases before the bounded page", async () => {
       const client = requirePrisma(prisma);
       const now = new Date();

@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-09-25
+Last verified: 2026-11-06
 
 Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
 the user requests it. It owns the managed-browser review, exact-head packaging,
@@ -38,9 +38,9 @@ undeclared PRs re-send a fresh full snapshot regardless of size. Routine PRs do
 the same at 500 changed lines or 10 changed files; only routine PRs below both
 cutoffs send the remediation delta and its directly affected paths. An explicit
 `REVIEW_GPT_FULL_REVIEW_REASON` selects a new full-audit conversation. The gate
-completes when the exact patch has a resolved result, local triage has zero
-accepted findings, the finding-disposition boundary is complete, and CI is green
-on the final head. Missing or stale evidence, an invalid model/response,
+completes when the exact patch has a resolved result, or every accepted finding
+is fixed and proven under step 7, the finding-disposition boundary is complete,
+and CI is green on the final head. Missing or stale evidence, an invalid model/response,
 unresolved accepted findings or a merge conflict is
 a stop condition rather than permission to infer the answer.
 
@@ -214,8 +214,8 @@ speculative, unproven, or not worth the complexity it would add. The user may
 override that judgment. A rejected finding requires neither a code change nor
 reviewer withdrawal. A `FINDINGS` result needs no review rerun
 when the parent accepts zero findings and records evidence-backed rejection
-reasons. Accepted findings remain unresolved until fixed and verified; the
-final gate requires a later resolved result.
+reasons. Accepted findings remain unresolved until fixed and verified. A fix
+proven under step 7 resolves them without another round.
 
 Ask for a decision only when a correction materially changes the requested
 outcome or scope, needs authority not already granted, or reveals a concrete
@@ -242,8 +242,8 @@ Run the loop when all of the following hold:
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
-merge target all refer to the same commit, except for a later short test-only
-commit as described below. Do not run it on unpushed local changes, a dirty
+merge target all refer to the same commit, except for a later test-only commit
+as described below or a fix proven under step 7. Do not run it on unpushed local changes, a dirty
 worktree, or a checkout that is not at the pushed head.
 
 A review round needs the pushed head. PR-description content cannot block or
@@ -279,18 +279,18 @@ to go green first. Final round 1 runs in parallel with CI. Green CI on the final
 head and a resolved final review remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
-frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
-changes, short test-only changes, other low-risk changes that satisfy
+frontend-only PRs that satisfy the eligibility exemption, copy-only changes,
+test-only changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
 cross-cutting trigger still applies, record the opt-out and continue with parent
 review and direct proof; do not substitute a mandatory local subagent.
 Prompt-primary PRs still require parent prompt inspection, and exempt
 frontend-only PRs still require Product UX, rendered, accessibility, and focused
-UI proof. A short test-only commit pushed after a passing round, such as a
-fixture update for a CI failure, needs no new round: the merge head may differ
-from the last reviewed head only by those test files. Record it in the PR body
-and rely on green CI on the final head.
+UI proof. A test-only commit pushed after a passing round, such as a fixture
+update for a CI failure, needs no new round: the merge head may differ from the
+last reviewed head only by those test files or a fix proven under step 7. Record
+it in the PR body and rely on green CI on the final head.
 Run the separate final gate only when other scope independently requires it or
 the current user explicitly asks for it.
 
@@ -610,11 +610,15 @@ the current user explicitly asks for it.
    verification under `verification-and-runtime.md`, update affected evidence,
    and push to the PR branch.
 
-7. Fire the next substantive round immediately after a pushed accepted fix
-   changes production source, runtime config, schema, behavior, or the
-   implemented contract. Conflict resolution creates a new substantive round
-   only when it makes one of those changes; the behavior-preserving base-update
-   exception below owns mechanical conflict resolution. The packager selects a
+7. One round is the default. After a pushed accepted fix, prove it with a test
+   or direct evidence, record both in the PR, then finish the merge checks.
+   Fire the next substantive round only when a fix changes the design (adds
+   state, a migration or a new authority path) or reaches a risky surface the
+   last round didn't see, or a later commit adds behavior no round reviewed;
+   never just to confirm a fix. Conflict resolution creates a new substantive
+   round only when it does one of those;
+   the behavior-preserving base-update exception below owns mechanical
+   conflict resolution. The packager selects a
    re-sent full audit or same-thread correction from the full current PR shape.
    Run it in parallel with the new CI run. If CI later fails on a reviewed head,
    the round's findings still count.
@@ -669,11 +673,11 @@ or unresolved ownership or product decisions to finish a merge.
 
 ## Stop Condition
 
-- Stop when the exact current patch has a resolved result, local triage produces
-  zero accepted findings, and every required finding-disposition boundary is
-  complete. A resolved result is `ROUND_OUTCOME: PASS` or `ROUND_OUTCOME: FINDINGS`
-  with every finding rejected for an evidence-backed reason after its disposition
-  boundary.
+- Stop when the exact current patch has a resolved result and every required
+  finding-disposition boundary is complete. A resolved result is
+  `ROUND_OUTCOME: PASS`, or `ROUND_OUTCOME: FINDINGS` with every finding either
+  rejected for an evidence-backed reason after its disposition boundary or fixed
+  and proven under step 7.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - A concrete requirement or authority gap pauses dependent remediation until
@@ -685,8 +689,7 @@ or unresolved ownership or product decisions to finish a merge.
   fix, pause the ReviewGPT loop and confirm parent final review, verification,
   and PR CI are all complete. The parent justifies any fourth round against
   the existing task authority before starting it. Ask the user only if the decision
-  requires a change of scope or authority. A green non-ReviewGPT gate does not
-  make the PR merge-ready without the required later resolved result.
+  requires a change of scope or authority.
 - Report the review result, what changed, and any unresolved findings at handoff.
   Report tooling retries separately.
 

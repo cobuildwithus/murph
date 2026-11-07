@@ -6,6 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   readHostedUsageReferralRecoveryHeads,
 } from "@/src/lib/hosted-growth/usage-referral-recovery";
+import { observeHostedUsageReferralInboundTx, reconcileHostedUsageReferralRewardAfterCommit, handleHostedUsageReferralGroupTool } from "@/src/lib/hosted-growth/usage-referral";
+import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -43,6 +46,58 @@ describe.skipIf(!runPostgresProof)(
         });
       }
       await prisma?.$disconnect();
+    });
+
+    it("preserves strict referral qualification and settles already-qualified credit after lapse once", async () => {
+      const client = requirePrisma(prisma);
+      const now = new Date();
+      const armedAt = new Date(now.getTime() - 120_000);
+      const ids = [createId("referrer"), createId("introduced"), createId("room")];
+      const [referrer, introduced, room] = ids;
+      const referralId = createId("lapsed_referral");
+      const phone = "+12025550121";
+      const phoneLookupKey = createHostedPhoneLookupKey(phone);
+      if (!phoneLookupKey) throw new Error("Synthetic referral phone must have a lookup key.");
+      try {
+        await client.hostedMember.createMany({ data: ids.map(id => ({ id, billingStatus: "active", createdAt: new Date(now.getTime() - 60_000) })) });
+        await client.hostedMemberIdentity.create({ data: { memberId: introduced, phoneLookupKey } });
+        await client.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: referrer } });
+        await client.hostedMailboxItem.create({ data: { id: createId("activated"), userId: introduced, kind: "member.activated", lane: "system", laneSeq: 1n,
+          dedupeKey: "activation", occurredAt: new Date(now.getTime() - 30_000), payloadSchema: "murph.test.activation.v1" } });
+        await client.hostedUsageReferral.create({ data: { id: referralId, beneficiaryMemberId: referrer, referrerMemberId: referrer,
+          referrerSubjectKey: "authenticated-member", policyCode: "new_person_activation_v1", policyVersion: "new_person_activation_v1",
+          rewardUsdMicros: 2_000_000n, status: "target_bound", targetContainerMemberId: room,
+          armedAt, targetBoundAt: armedAt, expiresAt: new Date(now.getTime() + 86_400_000) } });
+        const observe = (eventKey: string) => client.$transaction(tx => observeHostedUsageReferralInboundTx({
+          containerMemberId: room, enabled: true, eventKey, occurredAt: now, senderMemberId: introduced,
+          senderSubjectKey: phoneLookupKey, tx,
+        }));
+        for (const billingStatus of ["canceled", "paused", "unpaid", "past_due"] as const) {
+          await client.hostedMember.update({ where: { id: introduced }, data: { billingStatus } });
+          expect((await observe(billingStatus)).qualificationCandidateReferralIds).toEqual([]);
+          for (const memberId of [introduced, room]) {
+            expect(await handleHostedUsageReferralGroupTool({ enabled: true, memberId, prisma: client,
+              request: { action: "read_usage_referral", ...(memberId === room ? { linqSenderHandles: [phone] } : {}) },
+            })).toMatchObject({ result: { status: "unavailable" } });
+          }
+        }
+        expect(await client.hostedUsageCreditEntry.count({ where: { beneficiaryMemberId: referrer } })).toBe(0);
+        // Active Starter with exhausted usage is still eligible to earn credit.
+        await client.hostedMember.update({ where: { id: introduced }, data: { billingStatus: "active" } });
+        expect(await readHostedAiUsageGate({ memberId: introduced, now, prisma: client })).toMatchObject({ allowed: false });
+        expect((await observe("eligible")).qualificationCandidateReferralIds).toEqual([referralId]);
+        await client.hostedMember.updateMany({ where: { id: { in: [introduced, referrer] } }, data: { billingStatus: "canceled" } });
+        await reconcileHostedUsageReferralRewardAfterCommit({ referralId, prisma: client });
+        await reconcileHostedUsageReferralRewardAfterCommit({ referralId, prisma: client });
+        expect(await client.hostedUsageCreditEntry.count({ where: { beneficiaryMemberId: referrer } })).toBe(1);
+        expect(await client.hostedUsageReferral.findUnique({ where: { id: referralId }, select: { status: true } })).toEqual({ status: "rewarded" });
+      } finally {
+        await client.hostedUsageCreditGrant.deleteMany({ where: { beneficiaryMemberId: { in: ids } } });
+        await client.hostedUsageCreditEntry.deleteMany({ where: { beneficiaryMemberId: { in: ids } } });
+        await client.hostedUsageReferral.deleteMany({ where: { id: referralId } });
+        await client.hostedThreadContainer.deleteMany({ where: { memberId: room } });
+        await client.hostedMember.deleteMany({ where: { id: { in: ids } } });
+      }
     });
 
     it("selects one live lane head across predecessor, retention, and advanced-cursor states", async () => {

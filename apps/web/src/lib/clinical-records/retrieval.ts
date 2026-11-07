@@ -5,7 +5,7 @@ import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredenti
 import { epicImportQueryEnabled } from "./epic-import-config";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
+import { readClinicalTransportAccess } from "./transport-access";
 
 import { createHash, randomBytes } from "node:crypto";
 
@@ -727,7 +727,7 @@ async function loadRunnableClinicalRun(input: {
   | { run: RunnableClinicalRun }
   | { retryable: boolean; unavailable: string }
 > {
-  if (!(await readHostedRuntimeAiAccessDecision({ memberId: input.memberId })).allowed) {
+  if (!await readClinicalTransportAccess({ memberId: input.memberId })) {
     return { unavailable: "member-processing-inactive", retryable: false };
   }
   const record = await getPrisma().clinicalRecordRetrievalRun.findFirst({
@@ -1146,7 +1146,7 @@ async function claimRetrievalPageRequest(input: {
   try {
     return await prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, input.memberId);
-      if (!(await readHostedRuntimeAiAccessDecision({ memberId: input.memberId, prisma: tx })).allowed) {
+      if (!await readClinicalTransportAccess({ memberId: input.memberId, prisma: tx })) {
         return { claimed: false, errorCode: "member-processing-inactive", retryable: false } as const;
       }
       const reclaimed = await tx.clinicalRecordRetrievalRequest.updateMany({

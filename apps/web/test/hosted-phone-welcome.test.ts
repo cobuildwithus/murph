@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(), access: vi.fn(), route: vi.fn(), append: vi.fn(), signal: vi.fn(), unwrap: vi.fn(), lock: vi.fn(),
 }));
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({ readHostedMemberSnapshot: mocks.read }));
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readActiveHostedMemberAccess: mocks.access }));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readStrictHostedPersonAccess: mocks.access }));
 vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({ resolveHostedMemberActivationLinqRoute: mocks.route }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({ appendHostedMailboxEnvelopeTx: mocks.append }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: mocks.signal }));

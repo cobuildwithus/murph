@@ -38,7 +38,8 @@ import {
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
-  activeHostedMemberAccessWhere,
+  activeHostedPersonAccessWhere,
+  strictHostedPersonAccessWhere,
 } from "@/src/lib/hosted-onboarding/member-access";
 import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
@@ -132,7 +133,7 @@ describe("hosted-member-store", () => {
         signupNotificationEmailAttemptedAt: attemptedAt,
       },
       where: {
-        ...activeHostedMemberAccessWhere(),
+        ...strictHostedPersonAccessWhere(),
         id: "member_123",
         signupNotificationEmailAttemptedAt: null,
       },
@@ -2722,30 +2723,7 @@ describe("hosted-member-store", () => {
           ]),
         },
         OR: [
-          {
-            member: {
-              is: {
-                billingStatus: HostedBillingStatus.active,
-                suspendedAt: null,
-              },
-            },
-          },
-          {
-            member: {
-              is: {
-                accountGroupMemberships: {
-                  some: {
-                    group: {
-                      billingStatus: HostedBillingStatus.active,
-                      suspendedAt: null,
-                    },
-                    status: "active",
-                  },
-                },
-                suspendedAt: null,
-              },
-            },
-          },
+          { member: { is: activeHostedPersonAccessWhere() } },
           {
             linqHomeLineAssignedAt: {
               not: null,

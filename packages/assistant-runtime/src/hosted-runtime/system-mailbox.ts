@@ -369,6 +369,7 @@ async function resolveAssistantAskCompletionCutoff(
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  assistantExecutionBlocked?: boolean;
   pendingOnly?: boolean;
   excludedRouteActions?: readonly HostedSystemMailboxRouteAction[];
   allowedMailboxDedupeKeyPrefixes?: readonly string[] | null;
@@ -448,7 +449,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           allowedRouteActions: input.allowedRouteActions ?? null,
           allowedWakeKinds: input.allowedWakeKinds ?? null,
         })
-          ? selectHostedModelFreeSystemMailboxItems(admissionState)
+          ? selectHostedModelFreeSystemMailboxItems(admissionState, input.assistantExecutionBlocked)
           : admissionState;
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
@@ -1044,6 +1045,7 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
 }
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
+  assistantExecutionBlocked?: boolean;
   deviceSyncCompletionAcceptedInCurrentAdmission?: boolean;
   deviceSyncCompletionReplayed?: boolean;
   item: HostedSystemMailboxPendingItem;
@@ -1067,6 +1069,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      assistantExecutionBlocked: input.assistantExecutionBlocked,
       vaultRoot: input.vaultRoot,
     });
     return {
@@ -1140,7 +1143,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       ),
     ]);
     const nextWake = selectHostedRuntimeWakeCandidate([
-      await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      await resolveHostedSystemMailboxNextWakeCandidate({ assistantExecutionBlocked: input.assistantExecutionBlocked, vaultRoot: input.vaultRoot }),
       deviceSyncWake,
     ]);
     return {
@@ -1161,7 +1164,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const retryMs = hostedSystemMailboxRecordRetryDelay(input.item.postCheckpointRecord, normalized.code);
     if (retryMs === null) {
       await removeHostedSystemMailboxPendingItemIfCurrent({ item: input.item, vaultRoot: input.vaultRoot });
-      const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot });
+      const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ assistantExecutionBlocked: input.assistantExecutionBlocked, vaultRoot: input.vaultRoot });
       return {
         errorCode: normalized.code,
         errorMessage: normalized.message,
@@ -1189,6 +1192,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       });
     }
     const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      assistantExecutionBlocked: input.assistantExecutionBlocked,
       vaultRoot: input.vaultRoot,
     });
     const retryWake = nextWake.at ? nextWake : createHostedRuntimeWakeCandidate(
