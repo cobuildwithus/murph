@@ -1,6 +1,7 @@
 ---
 title: 'Doc gardening repeats shell index comparisons for every historical document'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4265'
 ---
 
 ## Expected Behavior

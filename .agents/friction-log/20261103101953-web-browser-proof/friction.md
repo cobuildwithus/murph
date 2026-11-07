@@ -1,6 +1,7 @@
 ---
 title: 'Web browser proof regenerates stale tracked privacy PDFs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4506'
 ---
 
 ## Expected Behavior

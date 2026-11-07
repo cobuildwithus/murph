@@ -1,6 +1,7 @@
 ---
 title: 'Hosted tool-call fixture holds HTTP headers instead of an active stream'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4229'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Generated workflow route fails the machine route inventory test locally'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4620'
 ---
 
 ## Expected Behavior

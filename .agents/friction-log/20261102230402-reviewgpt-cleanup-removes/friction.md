@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT cleanup removes round metadata before parent validation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4487'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Postgres db-push proof omits handwritten check constraints'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4319'
 ---
 
 ## Problem

@@ -1,6 +1,7 @@
 ---
 title: 'Game account deletion query-plan proof depends on empty-table statistics'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4702'
 ---
 
 ## Expected Behavior

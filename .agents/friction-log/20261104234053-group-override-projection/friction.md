@@ -1,6 +1,7 @@
 ---
 title: 'Group override projection proof assumes PostgreSQL player row order'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4585'
 ---
 
 ## Expected Behavior

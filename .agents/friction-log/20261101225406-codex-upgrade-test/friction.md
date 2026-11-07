@@ -1,6 +1,7 @@
 ---
 title: 'Codex upgrade test command omits built CLI prerequisite'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4446'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Codex warmup timeout proof assumes child startup within 300 ms'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4715'
 ---
 
 ## Expected Behavior

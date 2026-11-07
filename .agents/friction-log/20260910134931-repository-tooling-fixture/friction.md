@@ -1,6 +1,7 @@
 ---
 title: 'Repository tooling fixture calls live GitHub Markdown rendering'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4713'
 ---
 
 ## Expected Behavior

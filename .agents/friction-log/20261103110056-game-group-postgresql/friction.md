@@ -1,6 +1,7 @@
 ---
 title: 'Game group PostgreSQL proof leaves untracked metrics in the checkout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4520'
 ---
 
 ## Expected Behavior

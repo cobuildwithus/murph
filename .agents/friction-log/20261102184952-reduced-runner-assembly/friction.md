@@ -1,6 +1,7 @@
 ---
 title: 'Reduced runner assembly requires the CLI package it excludes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4476'
 ---
 
 ## Expected Behavior

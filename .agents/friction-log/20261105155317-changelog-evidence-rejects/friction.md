@@ -1,6 +1,7 @@
 ---
 title: 'Changelog evidence rejects deleted entry references'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4602'
 ---
 
 ## Expected Behavior

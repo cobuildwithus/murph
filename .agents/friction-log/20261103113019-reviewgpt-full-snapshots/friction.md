@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT full snapshots include image assets outside binary exclusions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4514'
 ---
 
 ## Expected Behavior

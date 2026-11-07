@@ -1,6 +1,7 @@
 ---
 title: 'Provider input baseline reuses candidate model behavior'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4550'
 ---
 
 ## Expected Behavior

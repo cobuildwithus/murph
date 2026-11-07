@@ -1,6 +1,7 @@
 ---
 title: 'Direct app Vitest config ignores the worker-count environment override'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4710'
 ---
 
 ## Expected Behavior

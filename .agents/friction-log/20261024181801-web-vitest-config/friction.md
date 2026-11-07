@@ -1,6 +1,7 @@
 ---
 title: 'Web Vitest config finds no tests when run from apps/web with app-relative paths'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4352'
 ---
 
 ## Expected Behavior
