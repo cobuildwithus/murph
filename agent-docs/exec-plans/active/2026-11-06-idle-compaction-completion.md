@@ -36,3 +36,7 @@ Runtime authority remains bound to attempt and generation. Durable effects retai
 No wire or stored schema change; old/new runners can coexist. A normal runner release enables the fix, and reverting admission restores prior behavior without a new rollback floor. Deployment is separate and requires the existing authorization boundary. Post-release verification should inspect bounded compaction/checkpoint outcomes and fresh-input interruption.
 
 Public release note: `quieter-long-conversations`. Final ReviewGPT is required for hosted concurrency behavior and must start on the stable pushed candidate concurrently with CI. Preserve and report any capability-limit blocker. The proposed larger context threshold remains outside this change.
+
+## Publication handoff
+
+PR: https://github.com/cobuildwithus/murph/pull/4721. Local implementation and parent review are complete. The completion checkout owns this PR; the original implementation branch is retained unchanged. External review and CI remain completion gates.
