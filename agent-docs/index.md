@@ -1986,3 +1986,7 @@ Reply-email sender authentication and public invite-status privacy are owned by
 
 The reply-email parser correction and production rollout are tracked in
 [the shipping plan](exec-plans/completed/2026-11-06-reply-invite-shipping.md).
+
+Named group iMessage acknowledgment eligibility and background usage checks are
+tracked in [group acknowledgments](exec-plans/active/2026-11-06-group-name-tapback.md).
+The egress boundary remains owned by `SECURITY.md`.
