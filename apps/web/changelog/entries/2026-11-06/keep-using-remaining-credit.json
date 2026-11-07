@@ -9,6 +9,6 @@
     "summary": "Your private conversations with Murph can continue on your remaining usage credit after your subscription ends.",
     "details": "When your credit runs out, Murph stops replying until you restart your plan. Your credit does not cover group chats, and buying more needs an active paid plan.",
     "relevanceTags": ["billing", "conversations"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4708]
   }
 }
