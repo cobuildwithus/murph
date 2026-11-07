@@ -1971,8 +1971,9 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
 
   async function visit(currentPath: string): Promise<void> {
     assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+    const filesystemRelativePath = path.relative(rootPath, currentPath);
     const relativePath = normalizeWorkspaceSnapshotRelativePath(
-      path.relative(rootPath, currentPath).split(path.sep).join(path.posix.sep),
+      filesystemRelativePath.split(path.sep).join(path.posix.sep),
     );
     assertHostedWorkspaceSnapshotRelativePathSafe(relativePath);
     if (hasHostedWorkspaceSnapshotExcludedPath(relativePath, excludedRelativePaths)) {
@@ -1982,7 +1983,7 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
     const explicitIncluded = explicitRelativePaths.has(relativePath);
     const explicitDescendant = hasExplicitDescendant(relativePath);
     const archivePath = joinHostedWorkspaceArchivePath(rootArchivePrefix, relativePath);
-    if (relativePath.length > 0 && !policyIncluded && !explicitIncluded && !explicitDescendant) {
+    if (relativePath.length > 0 && !policyIncluded && !explicitDescendant) {
       return;
     }
     let stats;
@@ -2027,6 +2028,22 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
       throw new Error("Hosted workspace snapshot durable root contains unsupported entries.");
     }
 
+    const descendantStart = input.entries.length;
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+    const children = await readdir(currentPath);
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+    for (const child of children.sort((left, right) => left.localeCompare(right))) {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+      await visit(path.join(currentPath, child));
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+    }
+
+    // Every retained descendant below these roots leads to an included file.
+    // Keep the roots and all other directory entries, which carry restore modes.
+    if (isEmptyHostedWorkspaceInboxDirectory(input.root, filesystemRelativePath, input.entries.length - descendantStart)) {
+      return;
+    }
+
     if (archivePath.length > 0 && (policyIncluded || explicitDescendant || relativePath.length === 0)) {
       input.entries.push({
         absolutePath: currentPath,
@@ -2037,15 +2054,6 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
         size: null,
       });
     }
-
-    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-    const children = await readdir(currentPath);
-    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-    for (const child of children.sort((left, right) => left.localeCompare(right))) {
-      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-      await visit(path.join(currentPath, child));
-      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
-    }
   }
 
   try {
@@ -2053,6 +2061,17 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
   } finally {
     assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   }
+}
+
+function isEmptyHostedWorkspaceInboxDirectory(
+  root: "operator-home" | "vault",
+  filesystemRelativePath: string,
+  includedDescendantCount: number,
+): boolean {
+  return root === "vault"
+    && includedDescendantCount === 0
+    && (filesystemRelativePath.startsWith(`raw${path.sep}inbox${path.sep}`)
+      || filesystemRelativePath.startsWith(`derived${path.sep}inbox${path.sep}`));
 }
 
 function hasHostedWorkspaceSnapshotExcludedPath(
