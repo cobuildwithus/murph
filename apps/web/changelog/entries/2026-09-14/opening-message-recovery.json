@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "opening-message-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable opening-message recovery",
+    "summary": "Murph can finish processing an opening iMessage when the messaging provider repeats its notification.",
+    "details": "Recovery keeps the original conversation and saved reply, without sending that reply again.",
+    "relevanceTags": [
+      "imessage",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3434
+    ]
+  }
+}

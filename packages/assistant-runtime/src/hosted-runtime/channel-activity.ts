@@ -2,12 +2,14 @@ import type {
   AssistantChannelTypingDependencies,
 } from "@murphai/assistant-engine";
 import {
+  getAssistantChannelAdapter,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 
 import {
   requireHostedProviderFetchDependencies,
@@ -34,7 +36,18 @@ const HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS = 10 * 60_000;
 type HostedLinqTypingTargetState = {
   activeUntilMs: number;
   cooldownUntilMs: number;
+  cleanup?: () => void;
+  preparation?: {
+    inputId: string;
+    runtimeAttemptId: string | null;
+    cancel(): Promise<void>;
+    providerFetch: typeof fetch;
+    take(signal?: AbortSignal): Promise<HostedLinqTypingHandle | undefined>;
+  };
 };
+
+type HostedLinqTypingHandle = NonNullable<Awaited<ReturnType<typeof startLinqTypingIndicator>>>;
+type HostedChannelTypingInput = Parameters<typeof createHostedAssistantChannelTypingDependencies>[0];
 
 const hostedLinqTypingTargets = new Map<string, HostedLinqTypingTargetState>();
 export function buildHostedLinqChannelEnv(input: {
@@ -42,6 +55,9 @@ export function buildHostedLinqChannelEnv(input: {
   userEnv: Readonly<Record<string, string>>;
 }): Record<string, string> {
   const env: Record<string, string> = {};
+  if (input.forwardedEnv[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV] === "1") {
+    env[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV] = "1";
+  }
 
   const userToken = readHostedChannelEnvValue(input.userEnv, "LINQ_API_TOKEN");
   if (userToken) {
@@ -133,60 +149,14 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       if (!target) {
         return undefined;
       }
+      const existing = hostedLinqTypingTargets.get(target);
+      if (existing?.preparation
+        && existing.preparation.providerFetch === input.providerFetch) {
+        const handle = await existing.preparation.take(input.signal);
+        if (handle) return handle;
+      }
       const typingTarget = claimHostedLinqTypingTarget(target);
-      if (!typingTarget) {
-        return undefined;
-      }
-
-      const dependencies = requireHostedProviderFetchDependencies({
-        env: buildHostedLinqChannelEnv({
-          forwardedEnv: input.forwardedEnv,
-          userEnv: input.userEnv,
-        }) as NodeJS.ProcessEnv,
-        fetchImplementation: input.providerFetch,
-        signal: input.signal,
-      }, "Hosted Linq typing indicator");
-      const typingRequestStartedAt = new Date().toISOString();
-      try {
-        const handle = await startLinqTypingIndicator({
-          target,
-        }, {
-          ...dependencies,
-          maxSessionMs: HOSTED_LINQ_TYPING_MAX_SESSION_MS,
-          refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
-        });
-        recordHostedAssistantMilestonesBestEffort({
-          context: input.latencyTraceContext,
-          milestones: [
-            {
-              at: typingRequestStartedAt,
-              milestone: "linq_typing_request_started",
-            },
-          ],
-        });
-        if (!handle) {
-          releaseHostedLinqTypingTarget(typingTarget, {
-            completedMaxSession: false,
-          });
-          return undefined;
-        }
-        return wrapHostedLinqTypingHandle({
-          handle,
-          target: typingTarget,
-        });
-      } catch (error) {
-        recordHostedAssistantMilestonesBestEffort({
-          context: input.latencyTraceContext,
-          milestones: [{
-            at: typingRequestStartedAt,
-            milestone: "linq_typing_request_started",
-          }],
-        });
-        releaseHostedLinqTypingTarget(typingTarget, {
-          completedMaxSession: false,
-        });
-        throw error;
-      }
+      return typingTarget ? startHostedLinqTypingForTarget(input, typingTarget) : undefined;
     },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({
@@ -200,6 +170,165 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       return startTelegramTypingIndicator(request, dependencies);
     },
   };
+}
+
+// The existing per-chat claim owns preparation and the turn's single refresh
+// loop. The importer can cancel only until a validated turn takes the handle.
+export function startHostedLinqInputTyping(input: Omit<
+  HostedChannelTypingInput, "linqDeliveryContexts"
+> & {
+  inputId: string;
+  runtimeAttemptId?: string | null;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+}): (() => void) | null {
+  const context = input.linqDeliveryContext;
+  const target = context?.target?.trim();
+  if (!context || !target || !input.providerFetch || input.signal?.aborted) {
+    return null;
+  }
+  if (
+    // This is the inbound directness used to build the assistant audience.
+    context.threadIsDirect === false
+    || (context.routeAuthority && context.routeAuthority.threadId !== target)
+    || getAssistantChannelAdapter("linq")?.canAutoReply({
+      externalThreadRouteAuthorityPresent: context.routeAuthority != null,
+      source: "linq",
+      threadIsDirect: context.threadIsDirect,
+    }) !== null
+  ) {
+    return null;
+  }
+  const typingTarget = claimHostedLinqTypingTarget(target);
+  if (!typingTarget) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  let ownerSignal: AbortSignal | undefined;
+  let handedOff = false;
+  let stopped = false;
+  let teardown: Promise<void> | undefined;
+  const detach = () => ownerSignal?.removeEventListener("abort", stop);
+  typingTarget.state.cleanup = detach;
+  const ready = startHostedLinqTypingForTarget({
+    ...input,
+    signal: controller.signal,
+  }, typingTarget).catch(() => undefined);
+
+  function cancel(): Promise<void> {
+    stopped = true;
+    detach();
+    // Let an in-flight start settle before stopping it. Aborting an accepted
+    // request can lose its handle and leave the provider indicator running.
+    return teardown ??= ready.then((handle) => handle?.stop()).catch(() => {});
+  }
+  function stop(): void {
+    controller.abort(ownerSignal?.reason);
+    void cancel();
+  }
+  function bindSignal(signal?: AbortSignal): void {
+    detach();
+    ownerSignal = signal;
+    if (stopped) return;
+    if (signal?.aborted) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
+  }
+
+  typingTarget.state.preparation = {
+    inputId: input.inputId,
+    runtimeAttemptId: input.runtimeAttemptId ?? null,
+    cancel,
+    providerFetch: input.providerFetch,
+    async take(signal) {
+      if (stopped) {
+        await teardown;
+        return undefined;
+      }
+      if (typingTarget.state.activeUntilMs <= Date.now()) return undefined;
+      handedOff = true;
+      delete typingTarget.state.preparation;
+      bindSignal(signal);
+      return ready.then((handle) => stopped ? undefined : handle);
+    },
+  };
+  bindSignal(input.signal);
+  void ready.then((handle) => {
+    if (!handle) {
+      detach();
+      return;
+    }
+    // After handoff, only the turn can observe acceptance for its admitted inputs.
+    if (handedOff || stopped || handle.isActive?.() === false || !handle.acceptedAt) return;
+    recordHostedAssistantMilestonesBestEffort({
+      context: input.latencyTraceContext,
+      milestones: [{ at: handle.acceptedAt, milestone: "linq_typing_accepted" }],
+    });
+  }).catch(() => {});
+  return () => { if (!handedOff) stop(); };
+}
+
+// Only preparations remain here after import; taking a handle removes it.
+export async function cancelHostedLinqInputTyping(input: {
+  runtimeAttemptId?: string | null;
+  inputIds?: readonly string[];
+}): Promise<void> {
+  if (!input.runtimeAttemptId) return;
+  const stops: Promise<void>[] = [];
+  for (const state of hostedLinqTypingTargets.values()) {
+    const preparation = state.preparation;
+    if (preparation?.runtimeAttemptId === input.runtimeAttemptId
+      && (!input.inputIds || input.inputIds.includes(preparation.inputId))) {
+      stops.push(preparation.cancel());
+    }
+  }
+  await Promise.all(stops);
+}
+
+async function startHostedLinqTypingForTarget(
+  input: HostedChannelTypingInput,
+  typingTarget: HostedLinqTypingClaim,
+): Promise<HostedLinqTypingHandle | undefined> {
+  const typingRequestStartedAt = new Date().toISOString();
+  try {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: buildHostedLinqChannelEnv({
+        forwardedEnv: input.forwardedEnv,
+        userEnv: input.userEnv,
+      }) as NodeJS.ProcessEnv,
+      fetchImplementation: input.providerFetch,
+      signal: input.signal,
+    }, "Hosted Linq typing indicator");
+    const handle = await startLinqTypingIndicator({
+      target: typingTarget.target,
+    }, {
+      ...dependencies,
+      maxSessionMs: HOSTED_LINQ_TYPING_MAX_SESSION_MS,
+      refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
+    });
+    if (!handle) {
+      releaseHostedLinqTypingTarget(typingTarget, {
+        completedMaxSession: false,
+      });
+      return undefined;
+    }
+    return wrapHostedLinqTypingHandle({
+      handle: { ...handle, acceptedAt: handle.acceptedAt ?? new Date().toISOString() },
+      target: typingTarget,
+    });
+  } catch (error) {
+    releaseHostedLinqTypingTarget(typingTarget, {
+      completedMaxSession: false,
+    });
+    throw error;
+  } finally {
+    recordHostedAssistantMilestonesBestEffort({
+      context: input.latencyTraceContext,
+      milestones: [{
+        at: typingRequestStartedAt,
+        milestone: "linq_typing_request_started",
+      }],
+    });
+  }
 }
 
 type HostedLinqTypingClaim = {
@@ -216,6 +345,7 @@ function claimHostedLinqTypingTarget(target: string): HostedLinqTypingClaim | nu
   const now = Date.now();
   for (const [key, state] of hostedLinqTypingTargets) {
     if (state.activeUntilMs <= now && state.cooldownUntilMs <= now) {
+      state.cleanup?.();
       hostedLinqTypingTargets.delete(key);
     }
   }
@@ -263,6 +393,8 @@ function releaseHostedLinqTypingTarget(input: HostedLinqTypingClaim, options: {
   if (hostedLinqTypingTargets.get(input.target) !== input.state) {
     return;
   }
+  input.state.cleanup?.();
+  delete input.state.preparation;
   if (!options.completedMaxSession) {
     hostedLinqTypingTargets.delete(input.target);
     return;

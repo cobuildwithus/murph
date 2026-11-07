@@ -51,6 +51,35 @@ test("browser-vault exposes metric-key rows and selections without legacy domain
   assert.deepEqual(client.metrics.seriesMany([{ metricKey: "hrv-rmssd" }, { metricKey: "deep-sleep-minutes" }]).map((series) => series.at(-1)?.value), [72, 81]);
 });
 
+test("browser-vault series ends each date on the row selection picks, not the latest clock time", () => {
+  const date = "2026-04-29";
+  const reading = (id: string, value: number, observedAt: string): MetricPoint =>
+    point(date, "total-sleep-minutes", null, value, "minutes", {
+      id,
+      observedAt,
+      source: { family: "event", kind: "observation", path: "", recordId: `record:${id}`, resultIndex: null },
+    });
+  const points: MetricPoint[] = [
+    point(date, "total-sleep-minutes", null, 480, "minutes", {
+      source: { family: "derived", kind: "sleep-summary", path: "", recordId: "record:night", resultIndex: null },
+    }),
+    reading("metric-point:later", 90, `${date}T13:00:00.000Z`),
+    reading("metric-point:earlier", 60, `${date}T06:00:00.000Z`),
+  ];
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica({
+    metricRows: toBrowserVaultMetricRows({ points }),
+    metricSelectionRows: createBrowserVaultMetricSelectionRows({
+      generatedAt: "2026-04-30T12:00:00.000Z",
+      metricPoints: points,
+      requestedMetrics: [{ metricKey: "total-sleep-minutes" }],
+    }),
+  })));
+
+  assert.deepEqual(client.metrics.series({ metricKey: "total-sleep-minutes" }).map((row) => row.value), [60, 90, 480]);
+  assert.equal(client.metricSelections.get("total-sleep-minutes")?.value, 480);
+  assert.equal(client.metrics.latestRow({ metricKey: "total-sleep-minutes" })?.value, 480);
+});
+
 test("browser-vault biomarker selection prefers the primary metric when secondary metrics share a biomarker", () => {
   const points: MetricPoint[] = [
     point("2026-04-29", "lowest-spo2", "biomarker:blood-oxygen-spo2", 91.2, "percent"),

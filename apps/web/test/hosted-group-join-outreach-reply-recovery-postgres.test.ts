@@ -10,8 +10,11 @@ const providerMocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
   ensureHostedMemberStripeCustomer: vi.fn(),
   getHostedLinqChatSummary: vi.fn().mockResolvedValue({
+    handleCount: 0,
     handles: [],
+    handlesComplete: true,
     isGroup: false,
+    observedAt: new Date(),
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
@@ -129,8 +132,8 @@ const accountDeletionMocks = vi.hoisted(() => ({
       kmsKeyName: "test-key",
       nextAttemptAt: input.now,
       payloadCiphertext: "encrypted",
-      privyCompletedAt: input.now,
-      privyUserLookupKey: null,
+
+
       runtimeMemberIds: [...input.runtimeMemberIds],
       stripeCustomerIds: [...input.stripeCustomerIds],
       stripeCompletedAt: input.now,
@@ -573,7 +576,7 @@ describe.skipIf(!runPostgresProof)(
               memberId: participantMemberId,
               phoneNumber: participantPhone,
               prisma,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -2263,11 +2266,28 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it.each(["canceled", "paused", "unpaid", "past_due"] as const)("skips acquisition outreach for a %s existing person", async billingStatus => {
+      const fixture = await createOpenerRaceFixture();
+      try {
+        const memberId = await fixture.contenderPrisma.$transaction(tx => createPhoneBoundMemberIdentityTx({
+          phoneNumber: fixture.participantPhone, phoneNumberVerifiedAt: fixture.now, tx,
+        }));
+        await fixture.contenderPrisma.hostedMember.update({ where: { id: memberId }, data: { billingStatus } });
+        providerMocks.createHostedLinqChat.mockClear();
+        expect(await drainOneHostedGroupJoinOutreach({ now: fixture.now, prisma: fixture.drainPrisma }))
+          .toMatchObject({ kind: "skipped", outreachId: fixture.outreachId, reason: "recipient_now_active" });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+        expect(await fixture.contenderPrisma.hostedInvite.count({ where: { memberId } })).toBe(0);
+      } finally {
+        await cleanupOpenerRaceFixture(fixture);
+      }
+    });
+
     it.each([
       ["same", true],
       ["different", false],
     ])(
-      "honors an accepted opener reply in the %s chat without replacing a lapsed member's home route",
+      "honors an accepted opener reply in the %s chat without replacing a signup-only member's home route",
       async (_chatRelationship, openerUsesHomeChat) => {
         vi.stubEnv(
           "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -2295,7 +2315,7 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected a phone participant contact.");
         }
         await fixture.contenderPrisma.hostedMember.update({
-          data: { billingStatus: HostedBillingStatus.paused },
+          data: { billingStatus: HostedBillingStatus.not_started },
           where: { id: participantMemberId },
         });
         await fixture.contenderPrisma.$transaction((tx) =>
@@ -2423,7 +2443,7 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected a phone participant contact.");
         }
         await fixture.contenderPrisma.hostedMember.update({
-          data: { billingStatus: HostedBillingStatus.paused },
+          data: { billingStatus: HostedBillingStatus.not_started },
           where: { id: participantMemberId },
         });
         await fixture.contenderPrisma.$transaction((tx) =>
@@ -2466,6 +2486,11 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toEqual({
             kind: "sent",
             outreachId: fixture.outreachId,
+          });
+
+          // The opener was accepted before the account became a returning lapsed member.
+          await fixture.contenderPrisma.hostedMember.update({
+            where: { id: participantMemberId }, data: { billingStatus: HostedBillingStatus.paused },
           });
 
           for (const messageText of [
@@ -3216,9 +3241,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.replyPrisma.hostedGroupSponsorshipAuthorization.count({
           where: { payerMemberId },
         })).resolves.toBe(0);
-        await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
-          where: { creatorMemberId: payerMemberId },
-        })).resolves.toBe(0);
+
         await expectDeletionReplyRaceConverged(fixture);
       } finally {
         deletionGroupLockBarrier.release();
@@ -3356,9 +3379,7 @@ describe.skipIf(!runPostgresProof)(
               where: { payerMemberId: { in: payerMemberIds } },
             }),
           ).resolves.toBe(0);
-          await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
-            where: { creatorMemberId: { in: payerMemberIds } },
-          })).resolves.toBe(2);
+
         } finally {
           fundingGroupLockBarrier.release();
           await Promise.allSettled(checkoutPromises);
@@ -4063,7 +4084,7 @@ describe.skipIf(!runPostgresProof)(
               memberId: fixture.participantMemberId,
               phoneNumber: fixture.participantPhone,
               prisma: fixture.deletionPrisma,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -4889,7 +4910,7 @@ async function createGroupLineRecoveryFixture():
         memberId,
         phoneNumber: participantPhone,
         prisma,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -5120,7 +5141,7 @@ async function createPhoneBoundMemberIdentityTx(input: {
         memberId,
         phoneNumber: input.phoneNumber,
         prisma: input.tx,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -5438,8 +5459,8 @@ function makePreparedDeletionCleanup(input: {
     kmsKeyName: "test-key",
     nextAttemptAt: input.now,
     payloadCiphertext: "encrypted",
-    privyCompletedAt: input.now,
-    privyUserLookupKey: null,
+
+
     runtimeMemberIds: [...input.runtimeMemberIds],
     stripeCustomerIds: [...input.stripeCustomerIds],
     stripeCompletedAt: input.now,
@@ -5583,9 +5604,6 @@ async function cleanupGroupFundingPayer(input: {
   payerMemberId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  await input.prisma.hostedGroupSponsorshipMoment.deleteMany({
-    where: { creatorMemberId: input.payerMemberId },
-  });
   await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: { payerMemberId: input.payerMemberId },
   });

@@ -22,10 +22,12 @@ const mocks = vi.hoisted(() => {
     hostedMemberFindUnique,
     hostedThreadContainerParticipantFindFirst,
     prisma: {
+      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
         await callback({ kind: "tx" })
       ),
       hostedMember: {
+        findMany: vi.fn(async () => []),
         findUnique: hostedMemberFindUnique,
       },
       hostedThreadContainerParticipant: {
@@ -47,6 +49,18 @@ const mocks = vi.hoisted(() => {
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 25_000,
 };
+
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
@@ -130,7 +144,7 @@ describe("hosted runtime Temporal signaling", () => {
     });
     await vi.waitFor(() => expect(mocks.signalWithStart).toHaveBeenCalledTimes(1));
     try {
-      expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
+      expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
       expect(onSignalStarted).toHaveBeenCalledTimes(1);
       expect(settled).toBe(false);
     } finally {
@@ -139,49 +153,10 @@ describe("hosted runtime Temporal signaling", () => {
     }
   });
 
-  it("removes a slow Temporal acknowledgement from hint latency while preserving access and success ordering", async () => {
-    vi.useFakeTimers();
-    try {
-      const startedAt = Date.now();
-      const onSignalStarted = vi.fn();
-      mocks.hostedMemberFindUnique.mockImplementationOnce(() => new Promise((resolve) => {
-        setTimeout(() => resolve(buildActiveMemberRecord()), 80);
-      }));
-      mocks.signalWithStart.mockImplementationOnce(() => new Promise<void>((resolve) => {
-        setTimeout(resolve, 250);
-      }));
-      let settled = false;
-      const signal = signalHostedMailboxAppendRuntime({
-        client: buildClient(),
-        expectedUserId: "member_123",
-        knownCheckpoint: { lane: "conversation", laneSeq: "42", userId: "member_123" },
-        mailboxItemId: "mailbox_123",
-        onSignalStarted,
-      }).then(() => { settled = true; });
-      await vi.advanceTimersByTimeAsync(79);
-      expect(onSignalStarted).not.toHaveBeenCalled();
-      expect(mocks.signalWithStart).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(Date.now() - startedAt).toBe(80);
-      expect(onSignalStarted).toHaveBeenCalledTimes(1);
-      expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(250);
-      await signal;
-      expect(Date.now() - startedAt).toBe(330);
-      expect(settled).toBe(true);
-      expect(onSignalStarted).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not launch a hint after cancellation during access validation", async () => {
+  it("does not launch a committed-pointer hint after cancellation", async () => {
     const controller = new AbortController();
     const reason = new Error("synthetic handoff deadline");
-    mocks.hostedMemberFindUnique.mockImplementationOnce(async () => {
-      controller.abort(reason);
-      return buildActiveMemberRecord();
-    });
+    controller.abort(reason);
     const onSignalStarted = vi.fn();
     await expect(signalHostedMailboxAppendRuntime({
       abortSignal: controller.signal,
@@ -193,6 +168,7 @@ describe("hosted runtime Temporal signaling", () => {
     })).rejects.toBe(reason);
     expect(onSignalStarted).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
   });
 
   it("signals the per-user workflow with only a mailbox pointer", async () => {
@@ -253,7 +229,9 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
   });
 
-  it("skips the checkpoint re-read and workspace ensure but still requires active access when the caller supplies planner lane facts", async () => {
+  it("signals committed planner lane facts without rediscovering admission", async () => {
+    // A database outage after commit must not prevent the durable handoff.
+    mocks.hostedMemberFindUnique.mockRejectedValue(new Error("synthetic database unavailable"));
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       expectedUserId: "member_123",
@@ -270,7 +248,8 @@ describe("hosted runtime Temporal signaling", () => {
 
     expect(mocks.readHostedMailboxItemCheckpointById).not.toHaveBeenCalled();
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantFindFirst).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
@@ -285,100 +264,49 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("signals planner lane facts for participant-authorized thread containers", async () => {
-    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
-      billingStatus: "canceled",
-      threadContainer: {
-        owner: {
-          accountGroupMemberships: [],
-          billingStatus: "paused",
-          suspendedAt: null,
-        },
-      },
-    }));
-    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue({
-      participantMemberId: "member_active_participant",
-    });
+  it.each([false, true])(
+    "requires committed checkpoint=%s to hand off a pointer after suspension",
+    async (hasCommittedCheckpoint) => {
+      mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+        suspendedAt: new Date(),
+      }));
+      const signal = signalHostedMailboxAppendRuntime({
+        client: buildClient(),
+        expectedUserId: "member_123",
+        ...(hasCommittedCheckpoint ? {
+          knownCheckpoint: {
+            lane: "system" as const,
+            laneSeq: "42",
+            userId: "member_123",
+          },
+        } : {}),
+        mailboxItemId: "mailbox_123",
+      });
 
-    await expect(signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      expectedUserId: "member_123",
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-        userId: "member_123",
-      },
-      mailboxItemId: "mailbox_123",
-    })).resolves.toEqual({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
-    });
-
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
-    expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          kind: "mailbox_appended",
-          lane: "conversation",
-          laneSeq: "42",
-          mailboxItemId: "mailbox_123",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
-  });
-
-  it("does not signal planner lane facts without active owner or participant access", async () => {
-    const onSignalStarted = vi.fn();
-    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
-      billingStatus: "canceled",
-      threadContainer: {
-        owner: {
-          accountGroupMemberships: [],
-          billingStatus: "paused",
-          suspendedAt: null,
-        },
-      },
-    }));
-
-    await expect(signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      onSignalStarted,
-      expectedUserId: "member_123",
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-        userId: "member_123",
-      },
-      mailboxItemId: "mailbox_123",
-    })).rejects.toThrow("Hosted runtime user is not active.");
-
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
-    expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
-    expect(onSignalStarted).not.toHaveBeenCalled();
-  });
-
-  it("does not signal planner-checkpoint pointers for inactive members", async () => {
-    const onSignalStarted = vi.fn();
-    mocks.hostedMemberFindUnique.mockResolvedValue(null);
-
-    await expect(signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      onSignalStarted,
-      expectedUserId: "member_123",
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-        userId: "member_123",
-      },
-      mailboxItemId: "mailbox_123",
-    })).rejects.toThrow("Hosted runtime user is not active.");
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
-    expect(onSignalStarted).not.toHaveBeenCalled();
-  });
+      if (!hasCommittedCheckpoint) {
+        await expect(signal).rejects.toThrow("Hosted runtime user is not active.");
+        expect(mocks.signalWithStart).not.toHaveBeenCalled();
+      } else {
+        await expect(signal).resolves.toEqual({
+          signalAccepted: true,
+          workflowId: "hosted-user-runtime:member_123",
+        });
+        expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+        expect(mocks.signalWithStart).toHaveBeenCalledWith(
+          HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+          expect.objectContaining({
+            signalArgs: [{
+              kind: "mailbox_appended",
+              lane: "system",
+              laneSeq: "42",
+              mailboxItemId: "mailbox_123",
+            }],
+          }),
+        );
+      }
+      expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects planner lane facts whose owner does not match the expected user", async () => {
     const onSignalStarted = vi.fn();
@@ -545,11 +473,14 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
+    const abortSignal = new AbortController().signal;
     await signalHostedDeviceSyncMailboxRuntime({
+      abortSignal,
       client: buildClient(),
       mailboxItemId: "mailbox_123",
     });
 
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(abortSignal, expect.any(Function));
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
@@ -924,6 +855,7 @@ describe("hosted runtime Temporal signaling", () => {
         findFirst: vi.fn(async () => null),
       },
       hostedMember: {
+        findMany: vi.fn(async () => []),
         findUnique: explicitHostedMemberFindUnique,
       },
       kind: "explicit-prisma",
@@ -987,16 +919,10 @@ describe("hosted runtime Temporal signaling", () => {
         userId: string;
       }) => Promise<{ status: "allowed" } | { status: "denied" }>;
     }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
-    const explicitPrisma = mocks.prisma;
-    const runUsageTransaction = async (callback: (tx: unknown) => unknown) =>
-      await callback({
-        ...explicitPrisma,
-        $queryRaw: vi.fn(async () => []),
-        hostedAiUsagePeriod: {
-          findUnique: vi.fn(async () => null),
-        },
-      });
-    mocks.prisma.$transaction.mockImplementationOnce(runUsageTransaction);
+    const explicitPrisma = {
+      ...mocks.prisma,
+      hostedAiUsagePeriod: { findUnique: vi.fn(async () => null) },
+    };
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "read_only",
@@ -1059,7 +985,7 @@ describe("hosted runtime Temporal signaling", () => {
 
   it("does not upsert workspace or start workflow for inactive users on explicit signals", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
-      billingStatus: "canceled",
+      billingStatus: "not_started",
     }));
 
     await expect(signalHostedBrowserVaultRefreshRuntime({
@@ -1124,6 +1050,9 @@ describe("hosted runtime Temporal signaling", () => {
 
 function buildClient() {
   return {
+    async withDeadline<R>(_deadline: number, operation: () => Promise<R>): Promise<R> {
+      return operation();
+    },
     async withAbortSignal<R>(
       signal: AbortSignal,
       operation: () => Promise<R>,
@@ -1159,7 +1088,7 @@ function expectHostedRuntimeActiveAccessRead(
   expect(findUnique).toHaveBeenCalledWith({
     select: {
       accountGroupMemberships: hostedSponsorAccessMembershipSelect,
-      assistantProviderPreference: true,
+
       billingStatus: true,
       suspendedAt: true,
       threadContainer: {

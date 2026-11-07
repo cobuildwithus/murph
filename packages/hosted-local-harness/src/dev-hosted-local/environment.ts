@@ -1,3 +1,4 @@
+import { removeHostedLocalWebAuthorityEnvironment } from "../authority-env.ts";
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
 import { lstat, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
@@ -226,7 +227,7 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
-  delete resolvedExisting.HOSTED_APP_SESSION_HMAC_KEY;
+  removeHostedLocalWebAuthorityEnvironment(resolvedExisting);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(input.existing);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(normalizedOverrides);
   stripStaleHostedLocalOidcJwksOverride({
@@ -1123,14 +1124,10 @@ export function buildWranglerLocalDevConfig(
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
       // Keep the legacy binding/application even after its reservation reaches zero.
       buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 0 }),
-      buildRunnerContainerConfig({ className: "SmallRunnerContainer", maxInstances: 1 }),
+      buildRunnerContainerConfig({ className: "SmallRunnerContainer", maxInstances: 0 }),
     ],
     durable_objects: {
       bindings: [
-        {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
@@ -1200,6 +1197,7 @@ export function buildWranglerLocalDevConfig(
       },
       { tag: "v8", new_sqlite_classes: ["NextRunnerContainer"] },
       { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],
@@ -1236,8 +1234,8 @@ export function buildWranglerLocalDevConfig(
     ],
     analytics_engine_datasets: [
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
+        binding: "HOSTED_STANDBY_ANALYTICS",
+        dataset: "murph_hosted_standby_inventory",
       },
     ],
     // Wrangler proxies the Workers AI binding through a remote session. The
@@ -1250,6 +1248,7 @@ export function buildWranglerLocalDevConfig(
     // hosted transcription failing closed at use time instead of `wrangler
     // dev` failing at startup.
     ...(includesWranglerLocalDevAiBinding(source) ? { ai: { binding: "AI" } } : {}),
+    images: { binding: "GAME_IMAGES" },
     send_email: [
       {
         name: "HOSTED_EMAIL",
@@ -1438,7 +1437,7 @@ function resolveWranglerEnvValue(
   }
 
   if (key === "HOSTED_EXECUTION_RUNNER_ENV_PROFILES") {
-    return "device-sync,exa,hosted-email,linq,mapbox,telegram";
+    return "device-sync,hosted-email,linq,mapbox,telegram";
   }
 
   return null;

@@ -30,7 +30,7 @@ Updated: 2026-05-21
 - Out of scope:
   - Changing local `pnpm dev` Temporal lifecycle behavior.
   - Changing production secret names or provider values.
-  - Editing unrelated active Temporal Activity, Murph Age, or MinIO work.
+  - Editing unrelated active Temporal Activity, or MinIO work.
 
 ## Constraints
 

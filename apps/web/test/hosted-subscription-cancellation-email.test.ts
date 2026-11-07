@@ -8,10 +8,24 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   prisma: {
     readonly: true,
+    hostedAccountGroup: { findFirst: vi.fn() },
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
+  stripeSubscriptionRetrieve: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/runtime")
+  >("@/src/lib/hosted-onboarding/runtime");
+  return {
+    ...actual,
+    requireHostedStripeApi: () => ({
+      subscriptions: { retrieve: mocks.stripeSubscriptionRetrieve },
+    }),
+  };
+});
 
 vi.mock("@/src/lib/prisma", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/prisma")>(
@@ -40,6 +54,8 @@ describe("hosted subscription cancellation email", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.prisma.hostedAccountGroup.findFirst.mockResolvedValue(null);
+    mocks.stripeSubscriptionRetrieve.mockReset();
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "canceled",
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -130,6 +146,80 @@ describe("hosted subscription cancellation email", () => {
     })).resolves.toEqual({
       status: "sent",
     });
+    expect(mocks.stripeSubscriptionRetrieve).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("uses the canceled subscription's Stripe billing email when no local recipient exists (family: %s)", async (family) => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.prisma.hostedAccountGroup.findFirst.mockResolvedValue({ id: "hbag_family" });
+    mocks.stripeSubscriptionRetrieve.mockResolvedValue({
+      status: "canceled",
+      customer: { id: "cus_payer", email: " Payer@Example.com " },
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "resend_billing" }), { status: 200 }),
+    );
+    await expect(sendHostedSubscriptionCancellationEmailForMember({
+      ...(family ? { accountGroupId: "hbag_family" } : {}),
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "founder@example.com",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_123",
+    })).resolves.toEqual({ status: "sent" });
+    expect(mocks.stripeSubscriptionRetrieve).toHaveBeenCalledExactlyOnceWith(
+      "sub_123", { expand: ["customer"] },
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).to)
+      .toEqual(["payer@example.com"]);
+  });
+
+  it.each([
+    { status: "active", customer: { email: "payer@example.com" } },
+    { status: "canceled", customer: { deleted: true, id: "cus_deleted" } },
+    { status: "canceled", customer: "cus_unexpanded" },
+    { status: "canceled", customer: { email: null } },
+    { status: "canceled", customer: { email: "invalid" } },
+  ])("skips unavailable or ineligible Stripe billing email: %j", async (subscription) => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.stripeSubscriptionRetrieve.mockResolvedValue(subscription);
+    const fetchMock = vi.fn<typeof fetch>();
+    await expect(sendHostedSubscriptionCancellationEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "founder@example.com",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_123",
+    })).resolves.toEqual({ reason: "no_cancellation_email_recipient", status: "skipped" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failed Stripe recipient read for reconciliation retry without sending", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.stripeSubscriptionRetrieve.mockRejectedValue(new Error("temporary Stripe failure"));
+    const fetchMock = vi.fn<typeof fetch>();
+    try {
+      await expect(sendHostedSubscriptionCancellationEmailForMember({
+        env: {
+          HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+          HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "founder@example.com",
+          RESEND_API_KEY: "re_test",
+        },
+        fetchImpl: fetchMock,
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_123",
+      })).rejects.toThrow("temporary Stripe failure");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("skips when Resend is not configured", async () => {
@@ -167,6 +257,72 @@ describe("hosted subscription cancellation email", () => {
       status: "skipped",
     });
 
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+  });
+
+  it.each(["not_started", "active", "canceled"])(
+    "emails a canceled Family's owner whose personal billing status is %s",
+    async (billingStatus) => {
+      mocks.readHostedMemberCoreState.mockResolvedValue({
+        billingStatus,
+        id: "member_owner",
+        suspendedAt: null,
+      });
+      mocks.prisma.hostedAccountGroup.findFirst.mockResolvedValue({ id: "hbag_family" });
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ id: "resend_family" }), { status: 200 }),
+      );
+
+      await expect(sendHostedSubscriptionCancellationEmailForMember({
+        accountGroupId: "hbag_family",
+        env: {
+          HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+          HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "founder@example.com",
+          RESEND_API_KEY: "re_test",
+        },
+        fetchImpl: fetchMock,
+        memberId: "member_owner",
+        stripeSubscriptionId: "sub_family",
+      })).resolves.toEqual({ status: "sent" });
+
+      expect(mocks.prisma.hostedAccountGroup.findFirst).toHaveBeenCalledWith({
+        select: { id: true },
+        where: {
+          id: "hbag_family",
+          ownerMemberId: "member_owner",
+          billingStatus: "canceled",
+          suspendedAt: null,
+        },
+      });
+      const request = fetchMock.mock.calls[0]?.[1];
+      expect(JSON.parse(String(request?.body)).to).toEqual(["member@example.com"]);
+      expect(request?.headers).toMatchObject({
+        "Idempotency-Key": "hosted-subscription-cancellation/sub_family",
+      });
+    },
+  );
+
+  it("does not fall back to canceled personal billing when Family ownership or state no longer matches", async () => {
+    await expect(sendHostedSubscriptionCancellationEmailForMember({
+      accountGroupId: "hbag_family",
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_family",
+    })).resolves.toEqual({ reason: "member_not_canceled", status: "skipped" });
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("skips a suspended Family owner before reading the recipient", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "canceled",
+      id: "member_owner",
+      suspendedAt: new Date("2026-05-01"),
+    });
+    await expect(sendHostedSubscriptionCancellationEmailForMember({
+      accountGroupId: "hbag_family",
+      memberId: "member_owner",
+      stripeSubscriptionId: "sub_family",
+    })).resolves.toEqual({ reason: "member_not_canceled", status: "skipped" });
+    expect(mocks.prisma.hostedAccountGroup.findFirst).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
   });
 

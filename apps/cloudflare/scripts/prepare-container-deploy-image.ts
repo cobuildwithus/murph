@@ -13,7 +13,7 @@ import type { ListCloudflareContainerApplications } from "./container-release-re
 export async function prepareHostedContainerDeployImage(input: {
   accountId: string;
   configPath: string;
-  release?: { currentVersion: unknown; releaseSha: string; listApplications: ListCloudflareContainerApplications };
+  release?: { currentVersion: unknown; immediate?: boolean; releaseSha: string; listApplications: ListCloudflareContainerApplications };
 }): Promise<string> {
   const source: unknown = JSON.parse(await readFile(input.configPath, "utf8"));
   if (!isObjectRecord(source) || !Array.isArray(source.containers)

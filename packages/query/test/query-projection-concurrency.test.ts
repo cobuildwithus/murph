@@ -15,9 +15,22 @@ afterEach(async () => {
   );
 });
 
-test("concurrent stale projection readers share one rebuild", async () => {
+test("concurrent source and global readers serialize publication and materialize provider rows once", async () => {
   vi.resetModules();
 
+  let wearableProjectionCount = 0;
+  vi.doMock("../src/projection/wearable-summary-projector.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/projection/wearable-summary-projector.ts")>(
+      "../src/projection/wearable-summary-projector.ts",
+    );
+    return {
+      ...actual,
+      buildWearableSummaryProjectionFromDataset: (...args: Parameters<typeof actual.buildWearableSummaryProjectionFromDataset>) => {
+        wearableProjectionCount += 1;
+        return actual.buildWearableSummaryProjectionFromDataset(...args);
+      },
+    };
+  });
   let rebuildCallCount = 0;
   let activeRebuildCount = 0;
   let maxActiveRebuildCount = 0;
@@ -65,7 +78,11 @@ test("concurrent stale projection readers share one rebuild", async () => {
       measured("wearables sources list", () => query.summarizeWearableSourceHealthRuntime(vaultRoot)),
     ]);
     const phases = reports.flatMap((r) => r.commands.flatMap((c) => c.phases));
-    assert.equal(phases.filter((p) => p.phase === "query-rebuild").length, 1);
+    // If sources acquired the lock first, its partial publication and the
+    // later global work are both timed; the provider rows are still built once.
+    const rebuildPhases = phases.filter((p) => p.phase === "query-rebuild").length;
+    assert.ok(rebuildPhases === 1 || rebuildPhases === 2);
+    assert.equal(wearableProjectionCount, 1);
     assert.equal(phases.filter((p) => p.phase === "query-wait").length, 2);
     assert.equal(phases.filter((p) => p.phase === "query-freshness").length, 2);
     assert.deepEqual(reports.flatMap((r) => r.commands.map((c) => c.command)).sort(),
@@ -80,6 +97,7 @@ test("concurrent stale projection readers share one rebuild", async () => {
     assert.equal(maxActiveRebuildCount, 1);
   } finally {
     vi.doUnmock("../src/projection/rebuild.ts");
+    vi.doUnmock("../src/projection/wearable-summary-projector.ts");
     vi.resetModules();
   }
 });

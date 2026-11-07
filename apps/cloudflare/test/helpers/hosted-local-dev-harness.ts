@@ -1,3 +1,4 @@
+import { agePostgresRuntimeForTest, startStuckPostgresRuntimeForTest } from "#hosted-web-testing";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -8,10 +9,15 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
   parseHostedRunnerStatusResponse,
+  parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRunnerStatusResponse,
-  HostedWorkspaceInvocationResult,
+import {
+  HOSTED_RUNTIME_LOG_COMPONENTS,
+  HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LOG_LEVELS,
+  HOSTED_RUNTIME_LOG_PHASES,
+  type HostedRunnerStatusResponse,
+  type HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -31,6 +37,7 @@ import {
   resolveHostedWebDevDistDirName,
   shouldUseHostedWebProductionStart,
 } from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
+import { fetchHostedLocalWorkerWithRestartRetry } from "./hosted-local-worker-restart.ts";
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusRequestTimeoutMs = 10_000;
 const hostedLocalStatusPollIntervalMs = 250;
@@ -48,6 +55,8 @@ export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   /** The app-session HMAC key the web process runs with. */
   hostedAppSessionHmacKey: string;
+  hostedBetterAuthSecret: string;
+  hostedAuthStorageKey: string;
   interventionCount: number;
   oidcToken: string;
   persistDir: string;
@@ -254,18 +263,8 @@ export async function startHostedLocalDevHarness(input: {
         startedAgoMs: number,
       ): Promise<{ attemptId: string; ok: true; startedAt: string }> => {
         assertHostedLocalTestControlsAvailable("ageActiveRuntimeFenceForTest");
-        return await requestJsonForRuntime<{
-          attemptId: string;
-          ok: true;
-          startedAt: string;
-        }>(
-          `/__test/users/${encodeURIComponent(userId)}`
-            + `/active-runtime-fence/age?startedAgoMs=${encodeURIComponent(String(startedAgoMs))}`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
+        interventionCount += 1;
+        return agePostgresRuntimeForTest(stack!.runtimeEnv, userId, startedAgoMs);
       },
       assertNoInterventions: (): void => {
         if (interventionCount === 0) {
@@ -288,6 +287,8 @@ export async function startHostedLocalDevHarness(input: {
         workerPersistDir: persistDir,
       },
       hostedAppSessionHmacKey: stack.hostedAppSessionHmacKey,
+      hostedBetterAuthSecret: stack.hostedBetterAuthSecret,
+      hostedAuthStorageKey: stack.hostedAuthStorageKey,
       oidcToken: stack.oidcToken,
       get interventionCount(): number {
         return interventionCount;
@@ -325,13 +326,8 @@ export async function startHostedLocalDevHarness(input: {
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
         assertHostedLocalTestControlsAvailable("runHostedAlarmForTest");
-        return await requestJsonForRuntime<{ ok: true }>(
-          `/__test/users/${encodeURIComponent(userId)}/alarm`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
+        await requestPostgresProcessing(userId);
+        return { ok: true };
       },
       startStuckInvocationForTest: async (
         userId: string,
@@ -345,25 +341,8 @@ export async function startHostedLocalDevHarness(input: {
         ok: true;
       }> => {
         assertHostedLocalTestControlsAvailable("startStuckInvocationForTest");
-        const searchParams = new URLSearchParams();
-        if (typeof stuckInput?.startedAgoMs === "number") {
-          searchParams.set("startedAgoMs", String(stuckInput.startedAgoMs));
-        }
-        if (stuckInput?.sameWorkerVersion === true) {
-          searchParams.set("sameWorkerVersion", "1");
-        }
-        const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
-        return await requestJsonForRuntime<{
-          attemptId: string;
-          nextWakeAt: string | null;
-          ok: true;
-        }>(
-          `/__test/users/${encodeURIComponent(userId)}/stuck-invocation${suffix}`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
+        interventionCount += 1;
+        return startStuckPostgresRuntimeForTest(stack!.runtimeEnv, userId, stuckInput?.startedAgoMs);
       },
       runtimeEnv: stack.runtimeEnv,
       workerRuntimeEnv: stack.workerRuntimeEnv,
@@ -407,6 +386,14 @@ export async function startHostedLocalDevHarness(input: {
             throw new Error(formatFailure([
               `Hosted runner reported terminal error for ${userId}.`,
               `last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`,
+              `container failure logs: ${[
+                stack?.processes.cloudflare?.stdoutTail(64_000) ?? "",
+                stack?.processes.cloudflare?.stderrTail(64_000) ?? "",
+              ].join("\n")
+                .split("\n")
+                .filter((line) => line.includes("Hosted execution container failed."))
+                .slice(-3)
+                .join("\n")}`,
             ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
           }
 
@@ -539,10 +526,19 @@ export async function startHostedLocalDevHarness(input: {
     interventionCount += countHostedLocalInterventionRequest(pathname, init?.method);
 
     try {
-      response = await fetch(new URL(pathname, `${workerBaseUrl}/`), {
+      const url = new URL(pathname, `${workerBaseUrl}/`);
+      const requestInit = {
         ...init,
         headers: buildAuthenticatedHeaders(stack?.oidcToken ?? "", init?.headers),
-      });
+      };
+      // Repeating this exact zero-byte marker write is safe even if its response was lost.
+      const fetchRequest = url.origin === new URL(workerBaseUrl).origin
+        && requestInit.method?.toUpperCase() === "POST"
+        && /^\/__test\/users\/[^/]+\/direct-r2-locator-marker$/u.test(url.pathname)
+        && typeof requestInit.body === "string"
+        ? fetchHostedLocalWorkerWithRestartRetry
+        : fetch;
+      response = await fetchRequest(url, requestInit);
     } catch (error) {
       throw new Error(formatFailure([
         `${init?.method ?? "GET"} ${pathname} failed before an HTTP response was received.`,
@@ -958,17 +954,33 @@ export async function startHostedLocalDevHarness(input: {
   async function runHostedWorkspaceInvocationForTest(
     userId: string,
   ): Promise<HostedWorkspaceInvocationResult> {
-    return await requestJsonForRuntime<HostedWorkspaceInvocationResult>(
-      `/__test/users/${encodeURIComponent(userId)}/run-until-idle`,
-      {
-        headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-          ...statusHeaders(userId),
+    await requestPostgresProcessing(userId);
+    const deadline = Date.now() + hostedLocalRunUntilIdleTimeoutMs;
+    while (Date.now() < deadline) {
+      const status = await readHostedUserStatus({ requestJson: requestJsonForRuntime, statusHeaders, statusPath, userId });
+      if (!status.inFlight) return { status: status.lastErrorCode ? "failed" : "idle", nextWakeAt: status.workspace?.nextWakeAt ?? null };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("Local Postgres runtime did not become idle before the test deadline.");
+  }
+
+  async function requestPostgresProcessing(userId: string): Promise<void> {
+    const deadline = Date.now() + hostedLocalRunUntilIdleTimeoutMs;
+    const body = JSON.stringify({ orchestrationAttemptId: `synthetic-test-${randomUUID()}` });
+    while (Date.now() < deadline) {
+      const response = parseHostedRuntimeEnsureProcessingResponse(await requestJsonForRuntime(
+        `/internal/users/${encodeURIComponent(userId)}/runtime/ensure-processing`, {
+          body,
+          headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: userId, ...statusHeaders(userId), "content-type": "application/json" },
+          method: "POST", signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
         },
-        method: "POST",
-        signal: AbortSignal.timeout(hostedLocalRunUntilIdleTimeoutMs),
-      },
-    );
+      ));
+      if (response.kind === "runtime_processing_accepted") return;
+      await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(
+        Date.parse(response.retryAt) - Date.now(), deadline - Date.now(),
+      ))));
+    }
+    throw new Error("Local Postgres runtime did not accept processing before the test deadline.");
   }
 
   function requireTestControls<TArgs extends unknown[], TResult>(
@@ -1157,6 +1169,9 @@ function sanitizeHostedFailureValue(value: unknown): unknown {
     if (shouldOmitHostedFailureStatusKey(key)) {
       if (child !== null && child !== undefined) {
         sanitized[`${key}Present`] = true;
+        if (key === "recentLogs" && Array.isArray(child)) {
+          sanitized.recentLogMetadata = summarizeHostedFailureLogMetadata(child);
+        }
       }
       continue;
     }
@@ -1165,6 +1180,25 @@ function sanitizeHostedFailureValue(value: unknown): unknown {
   }
 
   return sanitized;
+}
+
+function summarizeHostedFailureLogMetadata(entries: unknown[]): unknown[] {
+  // Select values from the existing closed contract, never copy log payloads,
+  // free-form errors, timestamps or identifiers into uploaded diagnostics.
+  return entries.slice(-8).flatMap((entry) => {
+    if (!entry || typeof entry !== "object"
+      || !("level" in entry) || !("component" in entry)
+      || !("phase" in entry) || !("eventCode" in entry)) {
+      return [];
+    }
+    const level = HOSTED_RUNTIME_LOG_LEVELS.find((value) => value === entry.level);
+    const component = HOSTED_RUNTIME_LOG_COMPONENTS.find((value) => value === entry.component);
+    const phase = HOSTED_RUNTIME_LOG_PHASES.find((value) => value === entry.phase);
+    const eventCode = HOSTED_RUNTIME_LOG_EVENT_CODES.find((value) => value === entry.eventCode);
+    return level && component && phase && eventCode
+      ? [{ level, component, phase, eventCode }]
+      : [];
+  });
 }
 
 function shouldOmitHostedFailureStatusKey(key: string): boolean {

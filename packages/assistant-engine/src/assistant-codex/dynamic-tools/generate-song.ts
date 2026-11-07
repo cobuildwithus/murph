@@ -1,12 +1,8 @@
-import { toolFailureDiagnostic } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type {
-  AssistantGenerateSongTurnPolicy,
-} from '../../assistant/providers/types.js'
 import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
 import {
   executeGenerateSongTool,
@@ -23,6 +19,7 @@ import {
 export const MURPH_GENERATE_SONG_TOOL = {
   namespace: 'murph',
   name: 'generate_song',
+  deferLoading: true,
   description: [
     'Generate one original song or instrumental track and attach it as a native voice memo to the final response.',
     'On success, the native response media is already attached to the final response; the return value is a text receipt, not audio or an image-generation object.',
@@ -71,11 +68,6 @@ const generateSongArgumentsSchema = z
   })
   .strict()
 
-export interface GenerateSongTurnState {
-  attemptCount: number
-  policy: AssistantGenerateSongTurnPolicy
-}
-
 export function parseGenerateSongArguments(
   value: unknown,
 ):
@@ -93,31 +85,12 @@ export async function executeGenerateSongDynamicTool(input: {
   args: GenerateSongToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
-  turnState?: GenerateSongTurnState | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<DynamicToolResult> {
-  const turnState = input.turnState ?? null
-  if (turnState) {
-    if (turnState.attemptCount >= turnState.policy.maxAttempts) {
-      return wrapVoiceMemoToolResult({
-        failureDiagnostic: toolFailureDiagnostic('limit_reached'),
-        rpcSuccess: false,
-        rpcText:
-          'song generation attempt limit reached for this turn; no song ran',
-      })
-    }
-    turnState.attemptCount += 1
-  }
-
   return wrapVoiceMemoToolResult(
     await executeGenerateSongTool({
       abortSignal: input.abortSignal ?? null,
-      args: turnState
-        ? {
-            ...input.args,
-            durationSeconds: turnState.policy.requiredDurationSeconds,
-          }
-        : input.args,
+      args: input.args,
       currentResponseMedia: input.currentResponseMedia ?? [],
       recordPhaseTiming: input.recordPhaseTiming ?? null,
       runtime: input.voiceMemoRuntime ?? null,

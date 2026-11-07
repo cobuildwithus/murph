@@ -149,30 +149,41 @@ test('unavailable receiver is non-blocking and existing restrictive environment 
 })
 
 
-test('natural sender bounds the datagram and accounts for trimmed command summaries', async () => {
+test.each([
+  ['meal edit', [{ code: 'unknown', stage: 'unknown', count: 1,
+    sourceCause: { code: 'vault_error', vaultCode: 'EVENT_LEDGER_SHARD_AMBIGUOUS' } }]],
+  ['meal remove-photo', [{ code: 'unknown', stage: 'unknown', count: 1,
+    sourceCause: { code: 'vault_error', vaultCode: 'MEAL_PHOTO_RETENTION_REFERENCE_INVALID' } }]],
+] as const)('natural sender bounds the datagram and accounts for trimmed command summaries (%s first)', async (firstCommand, expectedFailures) => {
   const receiver = createCodexCliTimingReceiver()
   const { value } = endpoint(receiver)
   const old = process.env.MURPH_CLI_TIMING_ENDPOINT
   const originalClock = process.hrtime.bigint
   let clock = originalClock()
   process.hrtime.bigint = () => clock
-  const commands = ['goal list', 'family list', 'memory show', 'age calculate',
-    'age evidence', 'age inputs', 'allergy list', 'allergy show', 'audit list',
+  const commands = [firstCommand, ...['meal edit', 'meal remove-photo', 'knowledge append-section', 'provider list',
+    'capture show', 'event list', 'allergy list', 'allergy show', 'audit list',
     'audit show', 'audit tail', 'automation list', 'condition list', 'capture list',
-    'food list', 'meal list']
+    'food list', 'meal list'].filter(command => command !== firstCommand)]
   try {
     await delay(10)
     const finish = receiver.begin()
     process.env.MURPH_CLI_TIMING_ENDPOINT = value
     await withCliTiming(() => timeCliDispatch('batch', async () => {
-      for (const command of commands) for (const failed of [false, true]) {
+      for (const failed of [true, false]) for (const command of commands) {
         const call = withCliTiming(() => timeCliDispatch(command, async () => {
           // Wide safe integer samples deterministically exercise the byte budget,
           // independently of machine speed (the real sender/receiver still run).
           for (const phase of CLI_TIMING_PHASES) await timeCliPhase(phase, async () => {
             clock += 1_000_000_000_000n
           })
-          if (failed) throw Error('synthetic')
+          if (failed && command === firstCommand) {
+            throw Object.assign(Error('PRIVATE_SENTINEL é🍲'), { code: 'vault_error',
+              context: { vaultCode: expectedFailures[0].sourceCause.vaultCode } })
+          }
+          if (failed) throw Object.assign(Error('PRIVATE_SENTINEL'), { name: 'Incur.ValidationError',
+            publicIssues: [{ path: command === 'meal edit' ? 'nutritionProteinGrams' : 'body', code: 'invalid_type', missing: true }],
+          })
         }))
         if (failed) await assert.rejects(call)
         else await call
@@ -187,7 +198,11 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
     assert.equal(report.outOfWindowReports, 0)
     assert.equal(report.transportTruncated, false)
     assert.ok(report.commands.length > 0)
+    assert.ok(report.commands.every(command => command.phases.length === CLI_TIMING_PHASES.length))
     assert.ok(report.droppedCalls > 0)
+    assert.deepEqual(report.commands.find((command) => command.command === firstCommand && command.outcome === 'error')?.failures,
+      expectedFailures)
+    assert.ok(!JSON.stringify(report).includes('PRIVATE_SENTINEL'))
     assert.equal(report.commands.reduce((sum, c) => sum + c.calls, 0) + report.droppedCalls, 32)
     assert.ok(Buffer.byteLength(JSON.stringify(report)) < CLI_TIMING_MAX_REPORT_BYTES)
   } finally {

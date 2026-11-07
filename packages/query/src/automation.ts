@@ -14,6 +14,7 @@ import {
   automationStatusValues,
   automationSupportKindValues,
   normalizeIanaTimeZone,
+  normalizeStoredAssistantModel,
   parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
@@ -83,6 +84,8 @@ export interface AutomationQueryRecord {
 }
 
 export interface AutomationListOptions {
+  /** Omit exact immutable identities before counting or paginating. */
+  excludeAutomationIds?: readonly string[];
   exactTag?: string;
   status?: string | string[];
   text?: string;
@@ -91,6 +94,8 @@ export interface AutomationListOptions {
 
 export interface AutomationListPageOptions extends AutomationListOptions {
   cursor?: string;
+  /** Use immutable ids from the first page, including unfiltered inventories. */
+  orderById?: boolean;
 }
 
 export interface AutomationListPageResult {
@@ -380,7 +385,7 @@ function normalizeAutomationAssistantTargetOverride(
   }
 
   const object = value as Record<string, unknown>;
-  const model = normalizeAutomationAssistantTargetOverrideString(object.model);
+  const model = normalizeStoredAssistantModel(normalizeAutomationAssistantTargetOverrideString(object.model));
   const modelProvider = normalizeAutomationAssistantTargetOverrideString(object.modelProvider);
   const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
     object.reasoningEffort,
@@ -640,7 +645,8 @@ function matchesAutomationOptions(
   record: AutomationQueryRecord,
   options: AutomationListOptions,
 ): boolean {
-  return matchesAutomationStatus(record.status, options.status) &&
+  return !options.excludeAutomationIds?.includes(record.automationId) &&
+    matchesAutomationStatus(record.status, options.status) &&
     matchesAutomationExactTag(record, options.exactTag) &&
     matchesAutomationText(record, options.text);
 }
@@ -660,7 +666,7 @@ export async function listAutomationPage(
 ): Promise<AutomationListPageResult> {
   const filtered = await loadAutomationRecords(vaultRoot, options);
   const stablePagination = Boolean(
-    normalizeNullableString(options.exactTag) || normalizeNullableString(options.cursor),
+    options.orderById || normalizeNullableString(options.exactTag) || normalizeNullableString(options.cursor),
   );
   if (stablePagination) {
     filtered.sort((left, right) => left.automationId.localeCompare(right.automationId));

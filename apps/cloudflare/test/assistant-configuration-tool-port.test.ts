@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from "@murphai/hosted-execution/assistant-model";
 import {
@@ -25,9 +24,6 @@ vi.mock("../src/web-control-plane.ts", async () => {
   };
 });
 
-import {
-  readHostedRunnerWebControlPolicy,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -106,23 +102,6 @@ beforeEach(() => {
 });
 
 describe("hosted assistant configuration tool port", () => {
-  it("allows only the bounded POST web-control route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "assistant_configuration_tool",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: `${HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH}/arbitrary`,
-    }).allowed).toBe(false);
-  });
 
   it("does not forward requests without a runtime write fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -157,7 +136,7 @@ describe("hosted assistant configuration tool port", () => {
         generation: ACTIVE_WRITE_FENCE.generation,
       },
     },
-  ])("does not forward requests with a $label write fence", async ({ writeFence }) => {
+  ])("returns canonical Web rejection for a $label write fence", async ({ writeFence }) => {
     const validateRuntimeWriteFence = vi.fn(async (input: {
       attemptId: string;
       generation: string;
@@ -170,6 +149,7 @@ describe("hosted assistant configuration tool port", () => {
     const { request, url } = createAssistantConfigurationRequest(
       createWriteFenceHeaders(writeFence),
     );
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(Response.json({ error: "Unauthorized" }, { status: 401 }));
 
     const response = await handleRunnerWebControlRequest({
       env: createWriteFenceEnvironment(validateRuntimeWriteFence),
@@ -182,12 +162,12 @@ describe("hosted assistant configuration tool port", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: writeFence.attemptId,
-      generation: writeFence.generation,
-      userId: "member_123",
-    });
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+    const forwarded = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]![0];
+    const headers = new Headers(forwarded.headers);
+    expect(headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(writeFence.attemptId);
+    expect(headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(writeFence.generation);
   });
 
   it("forwards requests with the matching active write fence", async () => {
@@ -221,11 +201,7 @@ describe("hosted assistant configuration tool port", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: ACTIVE_WRITE_FENCE.attemptId,
-      generation: ACTIVE_WRITE_FENCE.generation,
-      userId: "member_123",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
     const [forwarded] = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]!;
     expect(forwarded).toMatchObject({
@@ -257,12 +233,10 @@ describe("hosted assistant configuration tool port", () => {
       };
       const snapshot = {
         availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-        availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
         availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
         configurationAvailable: true,
         dormantSolPreference: false,
         model: HOSTED_ASSISTANT_LUNA_MODEL,
-        provider: "openai",
         reasoningEffort: "high",
         solAvailable: false,
       };
@@ -305,7 +279,6 @@ describe("hosted assistant configuration tool port", () => {
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
-      provider: "venice",
       reasoningEffort: "high",
     })).resolves.toMatchObject({
       action: "update",
@@ -333,7 +306,6 @@ describe("hosted assistant configuration tool port", () => {
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
-      provider: "venice",
       reasoningEffort: "high",
     });
   });
@@ -345,11 +317,9 @@ describe("hosted assistant configuration tool port", () => {
         action: "read",
         result: {
           availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-          availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
           availableReasoningEfforts: ["none"],
           configurationAvailable: true,
           model: HOSTED_ASSISTANT_LUNA_MODEL,
-          provider: "openai",
           reasoningEffort: "none",
           solAvailable: false,
         },

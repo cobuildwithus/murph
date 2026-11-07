@@ -67,7 +67,6 @@ type LocalServiceMockName =
   | 'recordAdditionalAssistantUsageEvents'
   | 'recordAssistantDiagnosticEvent'
   | 'recordAssistantUsageEvent'
-  | 'refreshAssistantStatusSnapshotLocal'
   | 'resolveAssistantAcceptedMessageTarget'
   | 'resolveAssistantExecutionDefaultTarget'
   | 'resolveAssistantMessageSession'
@@ -132,10 +131,10 @@ type LoadedLocalServiceModule =
 
 export const tempRoots: string[] = []
 export const CODEX_MODEL_PROVIDER_CONFIG = {
-  id: 'vercel-ai-gateway',
-  name: 'Vercel AI Gateway',
-  baseUrl: 'https://ai-gateway.vercel.sh/v1',
-  envKey: 'VERCEL_AI_API_KEY',
+  id: 'hosted-openai',
+  name: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+  envKey: 'OPENAI_API_KEY',
   wireApi: 'responses' as const,
 }
 export const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
@@ -165,7 +164,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/store.js')
   vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/diagnostics.js')
-  vi.doUnmock('../src/assistant/status.js')
+
   vi.doUnmock('../src/assistant/turn-plan.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/delivery-service.js')
@@ -451,6 +450,10 @@ export async function loadLocalServiceModule(input?: {
               ? providerOutcome.providerTurn.codexContinuation
               : providerOutcome.codexContinuation,
         })
+        await providerInput.onProviderRequestStarted?.({
+          startedAt: new Date().toISOString(),
+          providerRequestOrdinal: providerInput.providerRequestOrdinal ?? 0,
+        })
         return providerOutcome
       },
     ),
@@ -679,7 +682,7 @@ export async function loadLocalServiceModule(input?: {
       ) => undefined,
     ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
-    refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
+
     saveAssistantSession: vi.fn(
       async (
         _vault: Parameters<
@@ -803,9 +806,7 @@ export async function loadLocalServiceModule(input?: {
   vi.doMock('../src/assistant/diagnostics.js', () => ({
     recordAssistantDiagnosticEvent: mocks.recordAssistantDiagnosticEvent,
   }))
-  vi.doMock('../src/assistant/status.js', () => ({
-    refreshAssistantStatusSnapshotLocal: mocks.refreshAssistantStatusSnapshotLocal,
-  }))
+
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
   }))
@@ -1099,8 +1100,8 @@ export function createAssistantSession(input?: {
       codexHome: null,
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',
@@ -1127,8 +1128,8 @@ export function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'hosted-openai',
     oss: false,
     profile: null,
     reasoningEffort: 'medium',
@@ -1142,7 +1143,6 @@ export function createSharedPlan(): AssistantTurnSharedPlan {
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {

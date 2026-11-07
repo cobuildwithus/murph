@@ -1,6 +1,8 @@
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
   assistantReasoningEffortValues,
   type AssistantReasoningEffort,
+  type AssistantSandbox,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -10,17 +12,19 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  resolveAssistantCodexUsageProviderName,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_GAME_HOST_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
+import { HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV } from '@murphai/hosted-execution/env'
+import { isHostedAiUsageOpenAiTokenPricingProviderName } from '@murphai/hosted-execution/runtime-control'
 import {
-  hasHostedCodexModelCatalogFlexTier,
+  hasHostedCodexModelCatalogServiceTier,
 } from '../assistant-codex/config.js'
 import {
   executeCodexAssistantTurnAttemptFromInput,
@@ -30,7 +34,6 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './message-target-selection.js'
 import type {
-  AssistantGenerateSongTurnPolicy,
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -38,6 +41,7 @@ import type {
   AssistantProviderRequestOutcome,
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
+  AssistantProviderTurnInput,
 } from './providers/types.js'
 import {
   resolveCodexAssistantProviderTokenPricingBasis,
@@ -118,13 +122,10 @@ import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
 import { recordAdditionalAssistantUsageEvents } from './service-usage.js'
+import { classifyAssistantReaction } from './reaction-routing.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
-const ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY = {
-  maxAttempts: 1,
-  requiredDurationSeconds: 15,
-} as const satisfies AssistantGenerateSongTurnPolicy
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
 const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -177,10 +178,6 @@ const ASSISTANT_GROUP_EMAIL_THREAD_CONFIG = {
   'features.multi_agent_v2': false,
   'features.shell_tool': false,
   'features.tool_suggest': false,
-} as const
-const ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG = {
-  'memories.generate_memories': false,
-  'memories.use_memories': false,
 } as const
 
 export {
@@ -334,6 +331,91 @@ export async function executeCodexTurnWithRecovery(input: {
   }
 }
 
+async function executeRoutedCodexAttempt(
+  input: AssistantCodexAttemptInput,
+  reasoningEffort: string,
+  usageAttribution: AssistantUsageAttribution | null,
+): Promise<import('./providers/types.js').AssistantProviderTurnAttemptResult> {
+  return await maybeRouteAssistantReaction(input, usageAttribution)
+    ?? await executeCodexAssistantTurnAttemptFromInput(
+      buildCodexAttemptProviderInput(input, reasoningEffort, usageAttribution),
+    )
+}
+
+async function maybeRouteAssistantReaction(
+  input: AssistantCodexAttemptInput,
+  usageAttribution: AssistantUsageAttribution | null,
+): Promise<import('./providers/types.js').AssistantProviderTurnAttemptResult | null> {
+  const { executionPlan, attemptPlan } = input
+  const reaction = executionPlan.input.reactionRouting
+  // A reaction is always an isolated accepted input. A continuation or mixed
+  // input turn must never let one quiet reaction suppress other work.
+  if (!reaction || (input.providerRequestOrdinal ?? 0) !== 0
+    || executionPlan.acceptedInputItems?.length !== 1
+    || !executionPlan.allowFinishWithoutReply) return null
+  const usages: AssistantProviderUsageDraft[] = []
+  let decision: 'quiet' | 'escalate'
+  try {
+    decision = await classifyAssistantReaction({
+      ...reaction,
+      abortSignal: executionPlan.input.abortSignal,
+      codexCommand: attemptPlan.route.codexCommand ?? executionPlan.input.codexCommand ?? undefined,
+      codexHome: attemptPlan.route.providerOptions.codexHome,
+      env: attemptPlan.routePlan.cliEnv,
+      modelProvider: attemptPlan.route.providerOptions.modelProvider,
+      beforeProviderEntry: async () => {
+        notifyProviderRequestStartedBestEffort({
+          event: { providerRequestOrdinal: input.providerRequestOrdinal, startedAt: new Date().toISOString() },
+          hook: input.onProviderRequestStarted ?? null,
+        })
+      },
+      onProviderUsage: ({ usage }) => { usages.push(usage) },
+      onFallback: (reason) => {
+        try {
+          executionPlan.input.onTraceEvent?.({ codexThreadId: null, updates: [], rawEvent: {
+            type: 'assistant.reaction.routing_fallback', reason,
+          } })
+        } catch { /* Diagnostic failures must not suppress the full turn. */ }
+      },
+    })
+  } finally {
+    // The leaf has a separate identity: neither the parent request nor its
+    // dynamic-tool usage ordinals can collide. Failed/aborted leaves count too.
+    await recordAdditionalAssistantUsageEvents({
+      additionalUsages: usages,
+      effectiveEnv: attemptPlan.routePlan.cliEnv,
+      executionContext: executionPlan.executionContext,
+      providerRequestAcceptedInputIds: (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+      providerResult: {
+        attemptCount: attemptPlan.attemptCount,
+        provider: attemptPlan.route.provider,
+        providerOptions: attemptPlan.route.providerOptions,
+        route: attemptPlan.route,
+        session: attemptPlan.session,
+        usageAttribution: usageAttribution ? { ...usageAttribution, featureKey: 'reaction-routing' } : null,
+      },
+      turnId: `${executionPlan.turnId}:reaction-routing`,
+    })
+  }
+  if (decision !== 'quiet') return null
+  executionPlan.input.abortSignal?.throwIfAborted()
+  await executionPlan.onFinishWithoutReplyAccepted?.({
+    deliveryContextOrdinal: 0, messageReactionPending: false, precedingReplyDeliveryContextOrdinal: null,
+  })
+  await executionPlan.onFinishWithoutReplyRecorded?.({ deliveryContextOrdinal: 0 })
+  return {
+    ok: true,
+    metadata: { activityLabels: [], executedToolCount: 0, providerActionCount: 1, rawToolEvents: [], runtimeIssueInputs: [] },
+    result: {
+      provider: 'codex-cli', providerThreadUnchanged: true,
+      codexThreadId: attemptPlan.routePlan.resume?.codexThreadId ?? null,
+      rawEvents: [], acceptedNoReplyDeliveryContextOrdinals: [0], finalAction: { kind: 'none' },
+      response: '', transcriptResponse: null, responseDeliveryContextOrdinal: 0,
+      stderr: '', stdout: '', usage: null,
+    },
+  }
+}
+
 function createAssistantProviderUsageAttribution(input: {
   attemptPlan: AssistantCodexAttemptPlan
   env: NodeJS.ProcessEnv
@@ -346,11 +428,6 @@ function createAssistantProviderUsageAttribution(input: {
 
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv: null,
-    credentialSourceHint:
-      input.attemptPlan.route.providerOptions.modelProvider
-        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-        ? 'member'
-        : null,
     effectiveEnv: input.env,
     headers: null,
     provider: input.attemptPlan.route.provider,
@@ -360,6 +437,8 @@ function createAssistantProviderUsageAttribution(input: {
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
     featureKey: resolveAssistantUsageFeatureKey({
+      scheduledInvocationAuthority: input.executionPlan.input.scheduledInvocationAuthority,
+      scheduledOccurrenceAt: input.executionPlan.input.scheduledOccurrenceAt,
       deliverResponse: input.executionPlan.input.deliverResponse,
       promptProfile: input.executionPlan.profile.promptProfile,
       turnTrigger: input.executionPlan.input.turnTrigger ?? 'manual-ask',
@@ -370,7 +449,6 @@ function createAssistantProviderUsageAttribution(input: {
       messageInput: input.executionPlan.input,
       session: input.attemptPlan.session,
     }),
-    stripeMeterSource: 'murph',
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),
@@ -412,6 +490,10 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningMemoryOverviewElapsedMs: null,
         routePlanningVaultOverviewElapsedMs: null,
         routePlanningActiveExperimentContextElapsedMs: null,
+        routePlanningFollowUpContextElapsedMs:
+          input.routePlanningDiagnostics.followUpContextElapsedMs,
+        routePlanningAssistantContextSnapshotRefreshElapsedMs:
+          input.routePlanningDiagnostics.assistantContextSnapshotRefreshElapsedMs,
         routePlanningAssistantContextSnapshotElapsedMs:
           input.routePlanningDiagnostics.assistantContextSnapshotElapsedMs,
         routePlanningAnyBootstrapContextPrepared:
@@ -436,6 +518,7 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningUnaccountedElapsedMs:
           input.routePlanningDiagnostics.routePlanningUnaccountedElapsedMs,
         resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
+        threadRotationReason: input.routePlanningDiagnostics.threadRotationReason,
         workingDirectoryKind:
           input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
             ? 'hosted-stable-proc-cwd'
@@ -448,7 +531,7 @@ function emitCodexPlanTraceEvent(input: {
   }
 }
 
-async function executeAssistantCodexAttempt(input: {
+type AssistantCodexAttemptInput = {
   analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
@@ -458,7 +541,11 @@ async function executeAssistantCodexAttempt(input: {
   } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
   providerRequestOrdinal: number | null
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
-}): Promise<AssistantCodexAttemptOutcome> {
+}
+
+async function executeAssistantCodexAttempt(
+  input: AssistantCodexAttemptInput,
+): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
   let attemptMetadata: AssistantProviderAttemptMetadata = {
     activityLabels: [] as readonly string[],
@@ -508,277 +595,7 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    const serviceTier = resolveCodexAttemptServiceTier({
-      env: attemptEnv,
-      executionContext: executionPlan.executionContext,
-      requestedServiceTier: executionPlan.input.serviceTier ?? null,
-      routeModel: attemptPlan.route.providerOptions.model ?? null,
-      routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
-    })
-    const voiceMemoDeliveryChannel =
-      attemptPlan.routePlan.voiceMemoDeliveryChannel ?? null
-    const assistantPreferredElevenLabsVoiceId =
-      attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
-    const outputOnlyTurn =
-      executionPlan.profile.toolProfile === 'output-only-turn'
-    const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
-      executionPlan.input, attemptPlan.routePlan.followUpInvocation,
-    )
-    const hostedRuntimeCapabilitiesRestrictedTurn =
-      outputOnlyTurn ||
-      executionPlan.profile.promptProfile === 'creative-notification'
-    const nativeCapabilitiesRestrictedTurn =
-      hostedRuntimeCapabilitiesRestrictedTurn
-    const creativeNotificationSongTurn =
-      executionPlan.profile.promptProfile === 'creative-notification' &&
-      executionPlan.profile.toolProfile === 'provider-turn'
-    const systemNotificationTurn =
-      executionPlan.profile.promptProfile === 'system-notification' ||
-      executionPlan.profile.promptProfile === 'creative-notification'
-    const groupRoomModelMaintenanceTurn =
-      executionPlan.profile.toolProfile === 'maintenance-turn' &&
-      executionPlan.input.maintenanceProfile === 'group-room-model' &&
-      executionPlan.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
-    const memberMemoryMaintenanceTurn =
-      executionPlan.profile.toolProfile === 'maintenance-turn' &&
-      executionPlan.input.maintenanceProfile === 'member-memory' &&
-      executionPlan.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-    const toolOnlyMaintenanceTurn =
-      groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
-    const habitatVoiceMaintenanceTurn =
-      executionPlan.profile.toolProfile === 'maintenance-turn' &&
-      executionPlan.input.maintenanceProfile === 'habitat-voice'
-    const restrictedOneShotTurn =
-      groupRoomModelMaintenanceTurn ||
-      memberMemoryMaintenanceTurn ||
-      readOnlyAutomationTurn
-    const audience = executionPlan.sharedPlan.conversationPolicy.audience
-    const groupConversation =
-      resolveAssistantConversationScope(audience) === 'group'
-    const groupEmailTurn =
-      audience.threadIsDirect === false &&
-      normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
-    const ordinaryHostedWorkspaceTurn =
-      Boolean(executionPlan.executionContext?.hosted) &&
-      !restrictedOneShotTurn &&
-      !nativeCapabilitiesRestrictedTurn &&
-      !groupEmailTurn
-    const hostedLocalTestProviderTurn =
-      attemptPlan.route.providerOptions.modelProvider ===
-        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
-      attemptPlan.route.providerOptions.modelProvider ===
-        HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-    const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
-      providerConfig: {
-        approvalPolicy:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
-          ? 'never'
-          : attemptPlan.route.providerOptions.approvalPolicy,
-        codexCommand:
-          attemptPlan.route.codexCommand ??
-          executionPlan.input.codexCommand ??
-          undefined,
-        codexHome: attemptPlan.route.providerOptions.codexHome,
-        model: attemptPlan.route.providerOptions.model,
-        modelProvider: attemptPlan.route.providerOptions.modelProvider,
-        oss: attemptPlan.route.providerOptions.oss,
-        profile: attemptPlan.route.providerOptions.profile,
-        provider: attemptPlan.route.provider,
-        reasoningEffort,
-        sandbox:
-          outputOnlyTurn
-            ? null
-            : creativeNotificationSongTurn ||
-                readOnlyAutomationTurn ||
-                groupEmailTurn
-              ? 'read-only'
-              : attemptPlan.route.providerOptions.sandbox,
-      },
-      turn: {
-        abortSignal: serviceTier
-          ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
-          : executionPlan.input.abortSignal,
-        analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
-        activeTurnId: executionPlan.turnId,
-        activeTurnSteering: executionPlan.activeTurnSteering,
-        activeTurnSessionId: attemptPlan.session.sessionId,
-        allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
-        automationRelativeDateReferenceWindow:
-          resolveAssistantAcceptedTurnInputReferenceWindow(
-            executionPlan.acceptedInputItems ?? [],
-          ),
-        authorizeAcceptedMessageTarget:
-          executionPlan.authorizeAcceptedMessageTarget ?? null,
-        codexThreadConfig:
-          nativeCapabilitiesRestrictedTurn
-            ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
-            : toolOnlyMaintenanceTurn
-              ? ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
-              : readOnlyAutomationTurn
-                ? ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
-                : habitatVoiceMaintenanceTurn
-                  ? ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG
-                  : groupEmailTurn
-                    ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG
-                    : null,
-        conversationHistoryMessages:
-          attemptPlan.routePlan.conversationHistoryMessages,
-        developerInstructions: attemptPlan.routePlan.developerInstructions,
-        dynamicTools: outputOnlyTurn || readOnlyAutomationTurn
-          ? []
-          : attemptPlan.routePlan.dynamicTools,
-        environments:
-          nativeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn
-          ? []
-          : attemptPlan.routePlan.environments,
-        env: attemptEnv,
-        ...(creativeNotificationSongTurn
-          ? {
-              generateSongPolicy:
-                ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY,
-            }
-          : {}),
-        followUpAttachmentAllowed: attemptPlan.routePlan.followUpAttachmentAllowed,
-        groupConversation,
-        groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
-        memberMemoryMaintenanceAuthorized: memberMemoryMaintenanceTurn,
-        hostedToolContext:
-          hostedRuntimeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn
-          ? null
-          : executionPlan.hostedToolContext ?? null,
-        materializeWorkspaceArtifacts:
-          hostedRuntimeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn
-          ? null
-          : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
-        onboardingFirstReadCompletionTransitionAvailable:
-          attemptPlan.routePlan.onboardingGuidanceInjected &&
-          executionPlan.input.scheduledOccurrenceAt == null &&
-          executionPlan.input.scheduledInvocationAuthority == null,
-        onAdditionalUsage: executionPlan.executionContext.hosted?.usageRecorder
-          ? (additionalUsage) => recordAdditionalAssistantUsageEvents({
-              additionalUsages: [additionalUsage],
-              effectiveEnv: attemptEnv,
-              executionContext: executionPlan.executionContext,
-              providerRequestAcceptedInputIds:
-                (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
-              providerResult: {
-                attemptCount: attemptPlan.attemptCount,
-                provider: attemptPlan.route.provider,
-                providerOptions: attemptPlan.route.providerOptions,
-                route: attemptPlan.route,
-                session: attemptPlan.session,
-                usageAttribution,
-              },
-              turnId: executionPlan.turnId,
-            })
-          : null,
-        onEvent: executionPlan.input.onProviderEvent ?? undefined,
-        onFinishWithoutReplyAccepted:
-          executionPlan.onFinishWithoutReplyAccepted ?? null,
-        onFinishWithoutReplyRecorded:
-          executionPlan.onFinishWithoutReplyRecorded ?? null,
-        onProviderRequestStarted: (event) => {
-          notifyProviderRequestStartedBestEffort({
-            event: {
-              ...event,
-              providerRequestOrdinal: input.providerRequestOrdinal,
-            },
-            hook: input.onProviderRequestStarted ?? null,
-          })
-        },
-        onTraceEvent: executionPlan.input.onTraceEvent,
-        productFeedbackRecorder: createAssistantProductFeedbackRecorder({
-          acceptedInputItems: executionPlan.acceptedInputItems ?? [],
-          ...(executionPlan.hostedToolContext
-              ?.currentProductFeedbackAcceptedInputIds
-            ? {
-                getAcceptedInputIds:
-                  executionPlan.hostedToolContext
-                    .currentProductFeedbackAcceptedInputIds,
-              }
-            : {}),
-          productFeedbackCandidateSink:
-            executionPlan.executionContext?.hosted?.productFeedbackCandidateSink ?? null,
-        }),
-        providerThreadEphemeral: systemNotificationTurn || restrictedOneShotTurn
-          ? true
-          : executionPlan.input.providerThreadEphemeral ?? null,
-        progressDelivery:
-          hostedRuntimeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn
-          ? null
-          : executionPlan.progressDelivery ?? null,
-        permissions:
-          groupRoomModelMaintenanceTurn
-            ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
-              ? MURPH_MEMBER_READ_PERMISSION_PROFILE
-              : ordinaryHostedWorkspaceTurn
-                ? hostedLocalTestProviderTurn
-                  ? null
-                  : MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
-                : null,
-        ...(restrictedOneShotTurn
-          ? { processLifetime: 'one-shot' as const }
-          : {}),
-        providerFetch:
-          outputOnlyTurn ||
-          readOnlyAutomationTurn
-          ? null
-          : executionPlan.executionContext?.hosted?.providerFetch ?? null,
-        providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        ...(input.providerStartCriticalPath
-          ? { providerStartCriticalPath: input.providerStartCriticalPath }
-          : {}),
-        publicInternetFetch:
-          outputOnlyTurn ||
-          readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn
-          ? null
-          : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-        requireHostedPrivateImageDelivery:
-          !hostedRuntimeCapabilitiesRestrictedTurn &&
-          !readOnlyAutomationTurn &&
-          !toolOnlyMaintenanceTurn &&
-          Boolean(executionPlan.executionContext?.hosted),
-        runtimeWorkspaceRoots:
-          restrictedOneShotTurn || ordinaryHostedWorkspaceTurn
-          ? [attemptPlan.routePlan.workingDirectory]
-          : null,
-        resume: readOnlyAutomationTurn ? null : attemptPlan.routePlan.resume,
-        // Per-turn execution policy from the message input, not route identity.
-        serviceTier,
-        sessionContext: attemptPlan.routePlan.sessionContext
-          ? {
-              binding: attemptPlan.session.binding,
-            }
-          : undefined,
-        showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
-        systemPrompt: attemptPlan.routePlan.systemPrompt,
-        turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
-        trustedContextReferences:
-          executionPlan.input.trustedContextReferences ?? null,
-        usageAttribution,
-        vaultRoot: executionPlan.input.vault,
-        userMessageContent: resolveCodexRouteUserMessageContent({
-          route: attemptPlan.route,
-          userMessageContent: executionPlan.input.userMessageContent,
-        }),
-        userPrompt: executionPlan.input.prompt,
-        assistantPreferredElevenLabsVoiceId,
-        voiceMemoDeliveryChannel,
-        workingDirectory: attemptPlan.routePlan.workingDirectory,
-      },
-    })
+    const attemptResult = await executeRoutedCodexAttempt(input, reasoningEffort, usageAttribution)
     attemptMetadata = normalizeAssistantProviderAttemptMetadata(attemptResult.metadata)
     recordAssistantRuntimeIssueInputsBestEffort({
       issues: attemptMetadata.runtimeIssueInputs,
@@ -907,6 +724,323 @@ async function executeAssistantCodexAttempt(input: {
   }
 }
 
+function resolveCodexAttemptCapabilities(
+  attemptPlan: AssistantCodexAttemptPlan,
+  executionPlan: AssistantCodexTurnExecutionPlan,
+) {
+  const outputOnlyTurn =
+    executionPlan.profile.toolProfile === 'output-only-turn'
+  const gameHostTurn =
+    executionPlan.profile.toolProfile === 'game-host-turn'
+  // Process isolation (one-shot member-read process, read-only sandbox, no
+  // resume) covers both follow-up evaluations and the onboarding check-in.
+  // Only follow-up evaluations also lose Murph tools; the onboarding check-in
+  // keeps the planned tools and their host-side context like any private run.
+  const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
+    executionPlan.input, attemptPlan.routePlan.followUpInvocation,
+  )
+  const followUpEvaluationTurn =
+    attemptPlan.routePlan.followUpInvocation === true
+  const onboardingGoalCheckinTurn = readOnlyAutomationTurn && !followUpEvaluationTurn
+  const nativeCapabilitiesRestrictedTurn = [
+    outputOnlyTurn,
+    gameHostTurn,
+  ].includes(true)
+  const systemNotificationTurn =
+    executionPlan.profile.promptProfile === 'system-notification'
+  const automationId =
+    executionPlan.input.scheduledInvocationAuthority?.automationId
+  const groupRoomModelMaintenanceTurn =
+    executionPlan.profile.toolProfile === 'maintenance-turn' &&
+    executionPlan.input.maintenanceProfile === 'group-room-model' &&
+    automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+  const memberMemoryMaintenanceTurn =
+    executionPlan.profile.toolProfile === 'maintenance-turn' &&
+    executionPlan.input.maintenanceProfile === 'member-memory' &&
+    automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+  const toolOnlyMaintenanceTurn =
+    groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
+  const restrictedOneShotTurn = [
+    toolOnlyMaintenanceTurn,
+    readOnlyAutomationTurn,
+    gameHostTurn,
+  ].includes(true)
+  const audience = executionPlan.sharedPlan.conversationPolicy.audience
+  const groupConversation =
+    resolveAssistantConversationScope(audience) === 'group'
+  const groupEmailTurn =
+    audience.threadIsDirect === false &&
+    normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+  const hostedCapabilitiesRestricted =
+    nativeCapabilitiesRestrictedTurn || restrictedOneShotTurn
+  const hostedToolContextRestricted =
+    hostedCapabilitiesRestricted && !gameHostTurn && !onboardingGoalCheckinTurn
+  const toolsRestricted = outputOnlyTurn || followUpEvaluationTurn
+  // The onboarding check-in keeps its tools but not open web access: its
+  // policy limits it to the conversation and targeted vault reads.
+  const publicInternetRestricted =
+    toolsRestricted || toolOnlyMaintenanceTurn || readOnlyAutomationTurn
+  const ordinaryHostedWorkspaceTurn =
+    Boolean(executionPlan.executionContext?.hosted) &&
+    !hostedCapabilitiesRestricted &&
+    !groupEmailTurn
+  const hostedLocalTestProviderTurn =
+    attemptPlan.route.providerOptions.modelProvider ===
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+  return {
+    outputOnlyTurn,
+    gameHostTurn,
+    readOnlyAutomationTurn,
+    nativeCapabilitiesRestrictedTurn,
+    systemNotificationTurn,
+    groupRoomModelMaintenanceTurn,
+    memberMemoryMaintenanceTurn,
+    toolOnlyMaintenanceTurn,
+    restrictedOneShotTurn,
+    groupConversation,
+    groupEmailTurn,
+    ordinaryHostedWorkspaceTurn,
+    hostedLocalTestProviderTurn,
+    hostedCapabilitiesRestricted,
+    hostedToolContextRestricted,
+    toolsRestricted,
+    publicInternetRestricted,
+  }
+}
+
+type CodexAttemptCapabilities = ReturnType<typeof resolveCodexAttemptCapabilities>
+
+function resolveCodexAttemptThreadConfig(
+  capabilities: CodexAttemptCapabilities,
+): AssistantProviderTurnInput['turn']['codexThreadConfig'] {
+  if (capabilities.nativeCapabilitiesRestrictedTurn) {
+    return ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
+  }
+  if (capabilities.toolOnlyMaintenanceTurn) {
+    return ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
+  }
+  if (capabilities.readOnlyAutomationTurn) {
+    return ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
+  }
+  return capabilities.groupEmailTurn ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG : null
+}
+
+function resolveCodexAttemptPermissions(
+  capabilities: CodexAttemptCapabilities,
+  executionPlan: AssistantCodexTurnExecutionPlan,
+): AssistantProviderTurnInput['turn']['permissions'] {
+  if (capabilities.groupRoomModelMaintenanceTurn) {
+    return MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
+  }
+  if (capabilities.gameHostTurn) {
+    return MURPH_GAME_HOST_PERMISSION_PROFILE
+  }
+  if (capabilities.readOnlyAutomationTurn && executionPlan.executionContext?.hosted) {
+    return MURPH_MEMBER_READ_PERMISSION_PROFILE
+  }
+  if (capabilities.ordinaryHostedWorkspaceTurn && !capabilities.hostedLocalTestProviderTurn) {
+    return MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+  }
+  return null
+}
+
+function resolveCodexAttemptSandbox(
+  capabilities: CodexAttemptCapabilities,
+  attemptPlan: AssistantCodexAttemptPlan,
+): AssistantSandbox | null {
+  if (capabilities.outputOnlyTurn) return null
+  if ([capabilities.gameHostTurn,
+    capabilities.readOnlyAutomationTurn, capabilities.groupEmailTurn].includes(true)) return 'read-only'
+  return attemptPlan.route.providerOptions.sandbox
+}
+
+function buildCodexAttemptProviderInput(
+  input: AssistantCodexAttemptInput,
+  reasoningEffort: string,
+  usageAttribution: AssistantUsageAttribution | null,
+): AssistantProviderTurnInput {
+  const { attemptPlan, executionPlan } = input
+  const attemptEnv = attemptPlan.routePlan.cliEnv
+  const serviceTier = resolveCodexAttemptServiceTier({
+    env: attemptEnv,
+    executionPlan,
+    routeModel: attemptPlan.route.providerOptions.model ?? null,
+    routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
+  })
+  const voiceMemoDeliveryChannel =
+    attemptPlan.routePlan.voiceMemoDeliveryChannel ?? null
+  const assistantPreferredElevenLabsVoiceId =
+    attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
+  const capabilities = resolveCodexAttemptCapabilities(attemptPlan, executionPlan)
+  return {
+    providerConfig: {
+      approvalPolicy:
+        capabilities.nativeCapabilitiesRestrictedTurn ||
+        capabilities.readOnlyAutomationTurn
+          ? 'never'
+          : attemptPlan.route.providerOptions.approvalPolicy,
+      codexCommand:
+        attemptPlan.route.codexCommand ??
+        executionPlan.input.codexCommand ??
+        undefined,
+      codexHome: attemptPlan.route.providerOptions.codexHome,
+      model: attemptPlan.route.providerOptions.model,
+      modelProvider: attemptPlan.route.providerOptions.modelProvider,
+      oss: attemptPlan.route.providerOptions.oss,
+      profile: attemptPlan.route.providerOptions.profile,
+      provider: attemptPlan.route.provider,
+      reasoningEffort,
+      sandbox: resolveCodexAttemptSandbox(capabilities, attemptPlan),
+    },
+    turn: {
+      abortSignal: serviceTier === 'flex'
+        ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
+        : executionPlan.input.abortSignal,
+      analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
+      activeTurnId: executionPlan.turnId,
+      activeTurnSteering: executionPlan.activeTurnSteering,
+      activeTurnSessionId: attemptPlan.session.sessionId,
+      allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+      automationRelativeDateReferenceWindow:
+        resolveAssistantAcceptedTurnInputReferenceWindow(
+          executionPlan.acceptedInputItems ?? [],
+        ),
+      authorizeAcceptedMessageTarget:
+        executionPlan.authorizeAcceptedMessageTarget ?? null,
+      codexThreadConfig: resolveCodexAttemptThreadConfig(capabilities),
+      conversationHistoryMessages:
+        attemptPlan.routePlan.conversationHistoryMessages,
+      developerInstructions: attemptPlan.routePlan.developerInstructions,
+      dynamicTools: capabilities.toolsRestricted
+        ? []
+        : attemptPlan.routePlan.dynamicTools,
+      environments: capabilities.hostedCapabilitiesRestricted
+        ? []
+        : attemptPlan.routePlan.environments,
+      env: attemptEnv,
+      followUpAttachmentAllowed: attemptPlan.routePlan.followUpAttachmentAllowed,
+      groupConversation: capabilities.groupConversation,
+      groupRoomModelMaintenanceAuthorized:
+        capabilities.groupRoomModelMaintenanceTurn,
+      memberMemoryMaintenanceAuthorized: capabilities.memberMemoryMaintenanceTurn,
+      hostedToolContext: capabilities.hostedToolContextRestricted
+        ? null
+        : executionPlan.hostedToolContext ?? null,
+      materializeWorkspaceArtifacts: capabilities.hostedCapabilitiesRestricted
+        ? null
+        : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
+      onboardingFirstReadCompletionTransitionAvailable:
+        attemptPlan.routePlan.onboardingGuidanceInjected &&
+        executionPlan.input.scheduledOccurrenceAt == null &&
+        executionPlan.input.scheduledInvocationAuthority == null,
+      onAdditionalUsage: executionPlan.executionContext.hosted?.usageRecorder
+        ? (additionalUsage) => recordAdditionalAssistantUsageEvents({
+            additionalUsages: [additionalUsage],
+            effectiveEnv: attemptEnv,
+            executionContext: executionPlan.executionContext,
+            providerRequestAcceptedInputIds:
+              (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+            providerResult: {
+              attemptCount: attemptPlan.attemptCount,
+              provider: attemptPlan.route.provider,
+              providerOptions: attemptPlan.route.providerOptions,
+              route: attemptPlan.route,
+              session: attemptPlan.session,
+              usageAttribution,
+            },
+            turnId: executionPlan.turnId,
+          })
+        : null,
+      onEvent: executionPlan.input.onProviderEvent ?? undefined,
+      onFinishWithoutReplyAccepted:
+        executionPlan.onFinishWithoutReplyAccepted ?? null,
+      onFinishWithoutReplyRecorded:
+        executionPlan.onFinishWithoutReplyRecorded ?? null,
+      onProviderRequestStarted: (event) => {
+        notifyProviderRequestStartedBestEffort({
+          event: {
+            ...event,
+            providerRequestOrdinal: input.providerRequestOrdinal,
+          },
+          hook: input.onProviderRequestStarted ?? null,
+        })
+      },
+      onTraceEvent: executionPlan.input.onTraceEvent,
+      productFeedbackRecorder: createAssistantProductFeedbackRecorder({
+        usageOptimizerScope: resolveUsageOptimizerFeedbackScope({
+          conversationScope: resolveAssistantConversationScope(executionPlan.sharedPlan.conversationPolicy.audience),
+          executionContext: executionPlan.executionContext,
+          messageInput: executionPlan.input,
+        }),
+        acceptedInputItems: executionPlan.acceptedInputItems ?? [],
+        ...(executionPlan.hostedToolContext
+            ?.currentProductFeedbackAcceptedInputIds
+          ? {
+              getAcceptedInputIds:
+                executionPlan.hostedToolContext
+                  .currentProductFeedbackAcceptedInputIds,
+            }
+          : {}),
+        productFeedbackCandidateSink:
+          executionPlan.executionContext?.hosted?.productFeedbackCandidateSink ?? null,
+      }),
+      providerThreadEphemeral:
+        capabilities.systemNotificationTurn || capabilities.restrictedOneShotTurn
+          ? true
+          : executionPlan.input.providerThreadEphemeral ?? null,
+      progressDelivery: capabilities.hostedCapabilitiesRestricted
+        ? null
+        : executionPlan.progressDelivery ?? null,
+      permissions: resolveCodexAttemptPermissions(capabilities, executionPlan),
+      ...(capabilities.restrictedOneShotTurn
+        ? { processLifetime: 'one-shot' as const }
+        : {}),
+      providerFetch: capabilities.toolsRestricted
+        ? null
+        : executionPlan.executionContext?.hosted?.providerFetch ?? null,
+      providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+      ...(input.providerStartCriticalPath
+        ? { providerStartCriticalPath: input.providerStartCriticalPath }
+        : {}),
+      publicInternetFetch: capabilities.publicInternetRestricted
+        ? null
+        : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+      requireHostedPrivateImageDelivery:
+        !capabilities.hostedCapabilitiesRestricted &&
+        Boolean(executionPlan.executionContext?.hosted),
+      runtimeWorkspaceRoots:
+        capabilities.restrictedOneShotTurn || capabilities.ordinaryHostedWorkspaceTurn
+          ? [attemptPlan.routePlan.workingDirectory]
+          : null,
+      resume: capabilities.readOnlyAutomationTurn
+        ? null
+        : attemptPlan.routePlan.resume,
+      // Per-turn execution policy from the message input, not route identity.
+      serviceTier,
+      sessionContext: attemptPlan.routePlan.sessionContext
+        ? {
+            binding: attemptPlan.session.binding,
+          }
+        : undefined,
+      showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
+      systemPrompt: attemptPlan.routePlan.systemPrompt,
+      turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
+      trustedContextReferences:
+        executionPlan.input.trustedContextReferences ?? null,
+      usageAttribution,
+      vaultRoot: executionPlan.input.vault,
+      userMessageContent: resolveCodexRouteUserMessageContent({
+        route: attemptPlan.route,
+        userMessageContent: executionPlan.input.userMessageContent,
+      }),
+      userPrompt: executionPlan.input.prompt,
+      assistantPreferredElevenLabsVoiceId,
+      voiceMemoDeliveryChannel,
+      workingDirectory: attemptPlan.routePlan.workingDirectory,
+    },
+  }
+}
+
 function normalizeAssistantProviderAttemptMetadata(
   metadata: AssistantProviderAttemptMetadata,
 ): AssistantProviderAttemptMetadata {
@@ -933,10 +1067,10 @@ function notifyProviderRequestStartedBestEffort(input: {
 
   try {
     void Promise.resolve(input.hook(input.event)).catch(() => {
-      // Provider-start hooks are diagnostic-only and must not block turns.
+      // Provider-start observers are best-effort and must not block turns.
     })
   } catch {
-    // Provider-start hooks are diagnostic-only and must not block turns.
+    // Provider-start observers are best-effort and must not block turns.
   }
 }
 
@@ -1009,29 +1143,47 @@ function countBucket(value: number):
 
 function resolveCodexAttemptServiceTier(input: {
   env: NodeJS.ProcessEnv
-  executionContext: AssistantCodexTurnExecutionPlan['executionContext']
-  requestedServiceTier: AssistantProviderServiceTier | null
+  executionPlan: AssistantCodexTurnExecutionPlan
   routeModel: string | null
   routeModelProvider: string | null
 }): AssistantProviderServiceTier | null {
-  if (input.requestedServiceTier === null) {
+  const { executionContext, input: turn, profile } = input.executionPlan
+  const requestedServiceTier = turn.serviceTier ?? null
+  if (!executionContext?.hosted) {
     return null
   }
-  if (!input.executionContext?.hosted) {
+  const priorityUntil = Date.parse(input.env[HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV] ?? '')
+  const remainingMs = priorityUntil - Date.now()
+  if (requestedServiceTier === null
+    && profile.promptProfile === 'conversation'
+    && turn.turnTrigger !== 'automation-cron'
+    && !turn.scheduledOccurrenceAt
+    && !turn.maintenanceProfile
+    && remainingMs > 0 && remainingMs <= 86_400_000
+    && isHostedAiUsageOpenAiTokenPricingProviderName(
+      resolveAssistantCodexUsageProviderName(input.routeModelProvider),
+    )
+    && hasHostedCodexModelCatalogServiceTier({
+      env: input.env, model: input.routeModel, serviceTier: 'priority',
+    })) {
+    return 'priority'
+  }
+  if (requestedServiceTier === null) {
     return null
   }
   if (resolveCodexAssistantProviderTokenPricingBasis({
     model: input.routeModel,
     modelProvider: input.routeModelProvider,
-    serviceTier: input.requestedServiceTier,
+    serviceTier: requestedServiceTier,
   }) !== 'openai-flex') {
     return null
   }
-  return hasHostedCodexModelCatalogFlexTier({
+  return hasHostedCodexModelCatalogServiceTier({
+    serviceTier: 'flex',
     env: input.env,
     model: input.routeModel,
   })
-    ? input.requestedServiceTier
+    ? requestedServiceTier
     : null
 }
 

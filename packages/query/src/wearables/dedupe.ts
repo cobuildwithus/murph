@@ -12,6 +12,10 @@ export function dedupeExactMetricCandidates(
   exactDuplicateCount: number;
 } {
   const deduped = new Map<string, WearableMetricCandidate>();
+  const duplicateProvenance = new Map<WearableMetricCandidate, {
+    paths: Set<string>;
+    recordIds: Set<string>;
+  }>();
   let exactDuplicateCount = 0;
 
   for (const candidate of candidates) {
@@ -24,9 +28,29 @@ export function dedupeExactMetricCandidates(
     }
 
     exactDuplicateCount += 1;
-    existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
-    existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
+    let provenance = duplicateProvenance.get(existing);
+    if (!provenance) {
+      provenance = {
+        paths: new Set(uniqueStrings(existing.paths)),
+        recordIds: new Set(uniqueStrings(existing.recordIds)),
+      };
+      duplicateProvenance.set(existing, provenance);
+    }
+    for (const value of candidate.paths) {
+      if (value.trim().length > 0) provenance.paths.add(value);
+    }
+    for (const value of candidate.recordIds) {
+      if (value.trim().length > 0) provenance.recordIds.add(value);
+    }
     existing.recordedAt = latestIsoTimestamp([existing.recordedAt, candidate.recordedAt]);
+  }
+
+  // Materialize provenance once per duplicate group, instead of copying its
+  // entire growing history for each row. Unique candidates retain their input
+  // contents, and all returned arrays remain independent from the inputs.
+  for (const [candidate, provenance] of duplicateProvenance) {
+    candidate.paths = [...provenance.paths];
+    candidate.recordIds = [...provenance.recordIds];
   }
 
   return {
@@ -72,14 +96,7 @@ export function dedupeSleepWindowCandidates(
     existing.evidenceOmittedExactDuplicateCount =
       (existing.evidenceOmittedExactDuplicateCount ?? 0)
       + (candidate.evidenceOmittedExactDuplicateCount ?? 0);
-    if (
-      (existing.sleepType === undefined || existing.sleepType === "unknown")
-      && candidate.sleepType !== undefined
-      && candidate.sleepType !== "unknown"
-    ) {
-      existing.sleepType = candidate.sleepType;
-      existing.nap = candidate.sleepType === "nap";
-    }
+    mergeSleepWindowClassification(existing, candidate);
     if (!existing.timeZone && candidate.timeZone) {
       existing.timeZone = candidate.timeZone;
     }
@@ -89,6 +106,24 @@ export function dedupeSleepWindowCandidates(
   }
 
   return [...deduped.values()];
+}
+
+/** For one identical window, a classified type beats unknown and a confirmed state beats tentative. */
+function mergeSleepWindowClassification(
+  existing: WearableSleepWindowCandidate,
+  candidate: WearableSleepWindowCandidate,
+): void {
+  if (
+    (existing.sleepType === undefined || existing.sleepType === "unknown")
+    && candidate.sleepType !== undefined
+    && candidate.sleepType !== "unknown"
+  ) {
+    existing.sleepType = candidate.sleepType;
+    existing.nap = candidate.sleepType === "nap";
+  }
+  if (candidate.sleepState !== undefined && existing.sleepState !== "confirmed") {
+    existing.sleepState = candidate.sleepState;
+  }
 }
 
 export function buildCandidateExactKey(candidate: WearableMetricCandidate): string {

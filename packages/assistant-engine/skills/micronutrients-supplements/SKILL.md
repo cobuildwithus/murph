@@ -107,6 +107,6 @@ Offer one bounded review at a point when the selected outcome could reasonably c
 ## Answer Shape
 
 - Classify as strong, conditional, weak, or avoid/clinician-first for this user.
-- Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals). If the verdict rests only on generic evidence, say so.
+- Name the personal evidence the classification rests on (latest panel date, current regimen, symptoms, goals).
 - Give dose range only when appropriate and include safety/interaction flags.
 - If product shopping follows, state the active ingredient, dose, form, third-party testing preference, and avoid proprietary blends when dose matters.

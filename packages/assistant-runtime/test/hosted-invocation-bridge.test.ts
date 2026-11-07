@@ -1,10 +1,17 @@
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import { fetchAndProcessHostedMailboxPrefix } from "../src/hosted-runtime/mailbox-import.ts";
+import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { createMealMediaStore, mediaFailure } from "./hosted-meal-media.harness.ts";
 import type {
   HostedExecutionAssistantAskCompletedWake,
   HostedExecutionAssistantAskRequestedWake,
   HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 
+import { HOSTED_RETIRED_MAILBOX_KINDS } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedRetiredMailboxKind,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceInvocationRequest,
@@ -23,9 +30,13 @@ import type {
 } from "../src/hosted-runtime/snapshot-bridge.ts";
 
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import {
   access,
+  cp,
+  readFile,
   chmod,
   mkdir,
   mkdtemp,
@@ -37,8 +48,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as core from "@murphai/core";
+import { deleteMealRecord, importEventRecordsFromJsonl } from "@murphai/vault-usecases/records";
 
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
 } from "@murphai/hosted-execution";
@@ -61,6 +75,13 @@ import {
 } from "@murphai/assistant-engine/assistant-state";
 import {
   initializeVault,
+  addMeal,
+  addMeasurement,
+  readEvent,
+  upsertEvent,
+  deleteEvent,
+  runMealPhotoMaintenance,
+  withHostedCanonicalWritePort,
   withCanonicalWriteLock,
 } from "@murphai/core";
 import {
@@ -83,12 +104,21 @@ import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
 
+import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue, resetHostedPhotoIntentsAfterColdRestore } from "../src/hosted-runtime/media-references.ts";
+import { externalizeHostedCanonicalWriteMediaPayloads } from "../src/hosted-runtime/canonical-write-media.ts";
+import { appendHostedCanonicalWriteReceiptToArtifactLog } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
+
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   enqueueHostedPendingAssistantInputId,
 } from "../src/hosted-runtime/pending-input-index.ts";
+
+import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
+import { createHostedMealMediaBudget, withHostedMealMediaRetry } from "../src/hosted-runtime/meal-media-maintenance.ts";
+
+import { runHostedIdleCheckpointMaintenance } from "../src/hosted-runtime/idle-maintenance.ts";
 
 const TEST_REQUEST = {
   attemptId: "attempt_bridge",
@@ -245,6 +275,717 @@ describe("checkpoint bridge post-Web lease diagnostics", () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
+  it.each(["retry", "delete_immediately"])("a lost media reply leaves no orphan when the next action is %s", async (nextAction) => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    const { platform } = createRuntimePlatform();
+    const store = createMealMediaStore();
+    let loseReply = true;
+    store.hooks.after = async operation => {
+      if (operation === "put" && loseReply) { loseReply = false; throw mediaFailure("Synthetic lost media reply"); }
+    };
+    platform.mediaStore = store.mediaStore;
+    const idle = () => deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    const port = { async persistCanonicalWrite(persistence: Parameters<typeof externalizeHostedCanonicalWriteMediaPayloads>[0]["persistence"]) {
+      const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore: platform.mediaStore });
+      await appendHostedCanonicalWriteReceiptToArtifactLog({ ...externalized, artifactStore: platform.artifactStore, previousStatus: null });
+    } };
+    const maintain = () => withHostedCanonicalWritePort(port, () => runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-01T12:00:00.000Z") }));
+    const options = createBridgeOptions({ platform, vaultRoot });
+    const checkpoint = () => options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    try { await maintain(); } catch (error) { expect(String(error)).toContain("Synthetic lost media reply"); }
+    await idle();
+    expect(store.bytes.size).toBe(1);
+    // Reconciliation alone cannot invent a pointer lost before a canonical
+    // commit. Deletion is allowed to arrive before any maintenance retry.
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: platform.mediaStore });
+    if (nextAction === "retry") { await maintain(); await idle(); await checkpoint(); }
+    await withHostedCanonicalWritePort(port, () => deleteEvent({ vaultRoot, eventId: meal.event.id }));
+    await idle(); await checkpoint(); await checkpoint();
+    expect(store.bytes.size).toBe(0);
+    expect(store.activeUnlimited()).toBe(0);
+  });
+
+  it.each([false, true])("acknowledged upload and failed receipt converge after retirement (receiptStored=%s)", async receiptStored => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    const { platform } = createRuntimePlatform();
+    const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+    let failReceipt = true;
+    const port = { async persistCanonicalWrite(persistence: Parameters<typeof externalizeHostedCanonicalWriteMediaPayloads>[0]["persistence"]) {
+      const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore: store.mediaStore });
+      if (failReceipt) {
+        // Seed the acknowledged legacy upload when the new writer defers it.
+        const entry = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+        if (entry.pendingUpload) await store.mediaStore.put({ ...entry, bytes: await readFile(path.join(vaultRoot, entry.relativePath)) });
+      }
+      await appendHostedCanonicalWriteReceiptToArtifactLog({ ...externalized, previousStatus: null,
+        artifactStore: failReceipt ? { ...platform.artifactStore, async put(artifact) {
+          if (receiptStored) await platform.artifactStore.put(artifact);
+          throw new Error("Synthetic receipt response failure");
+        } } : platform.artifactStore });
+    } };
+    const maintain = () => withHostedCanonicalWritePort(port, () => runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-01T12:00:00.000Z") }));
+    await expect(maintain()).rejects.toThrow("Synthetic receipt response failure");
+    expect(store.bytes.size).toBe(1);
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    expect(store.bytes.size).toBe(0);
+    expect([...store.rows.values()].every(row => row.retired)).toBe(true);
+    failReceipt = false;
+    await expect(maintain()).resolves.toMatchObject({ retiredPhotoCount: 1, blockedMealCount: 0 });
+    await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    await withHostedCanonicalWritePort(port, () => deleteEvent({ vaultRoot, eventId: meal.event.id }));
+    await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    await createBridgeOptions({ platform, vaultRoot }).createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    await createBridgeOptions({ platform, vaultRoot }).createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    expect(store.bytes.size).toBe(0); expect(store.activeUnlimited()).toBe(0);
+  });
+
+  it.each(["rejected", "lost_response", "accepted"])("snapshot publication never delivers pending meal media: %s", async outcome => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-01T12:00:00.000Z") });
+    const { calls, platform } = createRuntimePlatform();
+    const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+    const complete = calls.completeSnapshotSession.getMockImplementation()!;
+    calls.completeSnapshotSession.mockImplementationOnce(async input => {
+      expect(store.calls).toEqual([]);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true });
+      const completed = await complete(input);
+      if (outcome === "lost_response") throw new Error("Synthetic lost checkpoint response");
+      if (outcome === "rejected") completed.checkpoint.checkpointed = false;
+      return completed;
+    });
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const build = vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).getMockImplementation()!;
+    vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mockImplementation(async input => {
+      expect(input.archiveEntries.some(entry => entry.relativePath.endsWith("/hosted-media-refs.json"))).toBe(true);
+      return build(input);
+    });
+    const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder });
+    const checkpoint = () => options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    if (outcome === "lost_response") await expect(checkpoint()).rejects.toThrow("Synthetic lost checkpoint response");
+    else await expect(checkpoint()).resolves.toMatchObject({ checkpoint: { checkpointed: outcome === "accepted" } });
+    await checkpoint();
+    expect(store.calls).toEqual([]);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true });
+  });
+
+  it.each(["rejected", "lost_response", "accepted"])("new full-photo intents require exact checkpoint acceptance across warm idle passes: %s", async outcome => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(vaultRoot, "fixture.jpg");
+      await writeFile(sourcePath, "synthetic photo bytes");
+      const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic measurement", occurredAt: "2030-01-01T12:00:00.000Z", measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      const photo = measurement.event.attachments![0]!.relativePath;
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const { calls, platform } = createRuntimePlatform();
+      const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+      const complete = calls.completeSnapshotSession.getMockImplementation()!;
+      calls.completeSnapshotSession.mockImplementationOnce(async input => {
+        // Even a warm idle pass inside completion cannot release discovery.
+        await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+        expect(store.calls).toEqual([]);
+        expect(input.checkpointRequest.inboxMediaRetentionWakeAt).toBe("2030-01-09T13:00:00.000Z");
+        expect(input.checkpointRequest.nextWakeReason).toBe("inbox_media_retention");
+        const completed = await complete(input);
+        if (outcome === "lost_response") throw new Error("Synthetic lost checkpoint response");
+        if (outcome === "rejected") completed.checkpoint.checkpointed = false;
+        return completed;
+      });
+      const builder = createSnapshotArchiveBuilder();
+      const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder: builder });
+      const checkpoint = () => options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+      if (outcome === "lost_response") await expect(checkpoint()).rejects.toThrow("Synthetic lost checkpoint response");
+      else await checkpoint();
+      expect(vi.mocked(builder.buildEncryptedSnapshot).mock.calls[0]![0].archiveEntries)
+        .toContainEqual(expect.objectContaining({ relativePath: photo }));
+      await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+      expect(store.calls.filter(call => call.operation === "put")).toHaveLength(outcome === "accepted" ? 1 : 0);
+      if (outcome !== "accepted") {
+        await checkpoint();
+        await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+      }
+      expect(store.calls.filter(call => call.operation === "put")).toHaveLength(1);
+      await checkpoint();
+      expect(vi.mocked(builder.buildEncryptedSnapshot).mock.lastCall![0].archiveEntries.some(entry => entry.relativePath === photo)).toBe(false);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]?.pendingUpload).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([false, true])("shell meal deletion waits for an accepted tombstone checkpoint (restart=%s)", async restart => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() });
+      await runMealPhotoMaintenance({ vaultRoot });
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint(); await deliverPendingMealMediaForTest(vaultRoot, f.store.mediaStore);
+      await f.checkpoint();
+      const settled = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(settled).toHaveLength(2);
+      const originals = await Promise.all(settled.map(entry => readFile(path.join(vaultRoot, entry.relativePath))));
+      const baseline = f.archive();
+      const sparse = await restorePhotoCheckpoint(baseline);
+      for (const entry of settled) await expectMissing(path.join(sparse, entry.relativePath));
+      // A shell mutation runs outside the hosted scope, so no canonical receipt publisher sees it.
+      await deleteMealRecord({ vault: vaultRoot, lookup: meal.mealId });
+      f.calls.completeSnapshotSession.mockImplementationOnce(async input => {
+        expect(f.store.bytes.size).toBe(2);
+        return { snapshotRef: input.ref, checkpoint: { ...createCheckpointResponse({ snapshotRef: input.ref,
+          userId: TEST_REQUEST.userId, version: TEST_REQUEST.workspaceVersion }), checkpointed: false } };
+      });
+      expect((await f.checkpoint()).checkpoint?.checkpointed).toBe(false);
+      await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: f.store.mediaStore });
+      expect(f.store.bytes.size).toBe(2); // Warm retry is still fenced.
+      const restored = await restorePhotoCheckpoint(baseline);
+      const materialize = createHostedArtifactMaterializer({ vaultRoot: restored, operatorHomeRoot: restored, mediaStore: f.store.mediaStore });
+      expect((await materialize(settled.map(entry => entry.relativePath))).missingArtifactPaths.size).toBe(0);
+      for (const [index, entry] of settled.entries()) expect(await readFile(path.join(restored, entry.relativePath))).toEqual(originals[index]);
+      expect((await readEvent({ vaultRoot: restored, eventId: meal.event.id })).event.lifecycle?.state).not.toBe("deleted");
+      expect((await f.checkpoint()).checkpoint?.checkpointed).toBe(true);
+      expect(f.store.bytes.size).toBe(2);
+      const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest;
+      expect(wake.nextWakeReason).toBe("inbox_media_retention");
+      expect(wake.nextWakeAt).toBe("2030-01-09T13:00:00.000Z");
+      expect(wake.inboxMediaRetentionWakeAt).toBe(wake.nextWakeAt);
+      const target = restart ? await restorePhotoCheckpoint(f.archive()) : vaultRoot;
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot: target })).entries.every(entry => entry.retirementPending)).toBe(true);
+      vi.setSystemTime(new Date(wake.nextWakeAt!));
+      const idle = await runPhotoIdleMaintenance(target, f.store);
+      const cleanup = createPhotoCheckpointFixture(target, f.store);
+      await cleanup.checkpoint(idle);
+      expect(f.store.bytes.size).toBe(0);
+      expect([...f.store.rows.values()].every(row => row.retired)).toBe(true);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot: target })).entries).toEqual([]);
+      expect(cleanup.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({
+        inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["meal", "measurement"] as const)("public secondary references cannot extend or recreate the %s directory owner's intent", async kind => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(sourcePath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const draft = { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] };
+      const owner = kind === "meal" ? await addMeal({ vaultRoot, photoPath: sourcePath, photoCapturedAt: new Date().toISOString() })
+        : await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }], draft });
+      const photo = owner.event.attachments![0]!;
+      if (kind === "meal") await runMealPhotoMaintenance({ vaultRoot });
+      const inputPath = path.join(vaultRoot, "secondary.jsonl");
+      await writeFile(inputPath, JSON.stringify({ ...draft, kind: "measurement", recordedAt: new Date().toISOString(), attachments: [photo] }) + "\n");
+      await importEventRecordsFromJsonl({ vault: vaultRoot, inputFile: `@${inputPath}`, apply: true });
+      if (kind === "measurement") {
+        await upsertEvent({ vaultRoot, allowSpecializedKindRewrite: true,
+          payload: { ...owner.event, attachments: [], rawRefs: [] } });
+        expect((await readEvent({ vaultRoot, eventId: owner.event.id })).event.attachments ?? []).toEqual([]);
+      }
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint(); await deliverPendingMealMediaForTest(vaultRoot, f.store.mediaStore);
+      if (kind === "meal") {
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.find(entry => entry.relativePath === photo.relativePath)?.expiresAt)
+          .toBe("2030-04-01T12:00:00.000Z");
+        await deleteMealRecord({ vault: vaultRoot, lookup: owner.event.kind === "meal" ? owner.event.mealId : "unreachable" });
+      }
+      for (let pass = 0; pass < 3; pass++) {
+        await f.checkpoint(); await deliverPendingMealMediaForTest(vaultRoot, f.store.mediaStore);
+      }
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+      expect(f.store.bytes.size).toBe(0);
+      if (kind === "measurement") {
+        expect(f.store.calls).toEqual([]);
+        expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.nextWakeAt).toBeNull();
+        const restored = await restorePhotoCheckpoint(f.archive());
+        expect(await readFile(path.join(restored, photo.relativePath))).toEqual(await readFile(sourcePath));
+      } else expect([...f.store.rows.values()].every(row => row.retired)).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("an unprovable source manifest keeps attachments inline without blocking unrelated checkpoint changes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "photo.jpg"), manifestPath = path.join(path.dirname(vaultRoot), "manifest.json");
+      await writeFile(photoPath, "synthetic photo"); await writeFile(manifestPath, '{"source":"synthetic"}');
+      const measurement = await addMeasurement({ vaultRoot,
+        attachments: [{ role: "media_1", sourcePath: photoPath }, { role: "source", sourcePath: manifestPath }],
+        draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      const files = measurement.event.attachments!;
+      const expected = await Promise.all(files.map(file => readFile(path.join(vaultRoot, file.relativePath))));
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      await writeFile(path.join(vaultRoot, "note.md"), "unrelated saved change");
+      const f = createPhotoCheckpointFixture(vaultRoot);
+      expect((await f.checkpoint()).checkpoint?.checkpointed).toBe(true);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+      expect(f.store.calls).toEqual([]);
+      const restored = await restorePhotoCheckpoint(f.archive());
+      expect(await readFile(path.join(restored, "note.md"), "utf8")).toBe("unrelated saved change");
+      for (const [index, file] of files.entries()) expect(await readFile(path.join(restored, file.relativePath))).toEqual(expected[index]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["put", "discovery"] as const)("a photo stalled at %s stops dedicated wakes across cold restores and uploads on ordinary idle", async stall => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(path.dirname(vaultRoot), "photo.jpg"); await writeFile(sourcePath, "synthetic stalled photo");
+      const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      const photo = measurement.event.attachments![0]!.relativePath;
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        let started!: () => void;
+        const reached = new Promise<void>(resolve => { started = resolve; });
+        const discovery = stall === "discovery" ? vi.spyOn(core, "visitEventLedgerShardRecordsInterruptible")
+          .mockImplementation(async () => { started(); return await new Promise(() => {}); }) : null;
+        f.store.hooks.before = async operation => { if (stall === "put" && operation === "put") { started(); await new Promise(() => {}); } };
+        const persistRetry = vi.fn(async () => {});
+        const running = runPhotoIdleMaintenance(vaultRoot, f.store, { persistRetry });
+        await reached; await vi.advanceTimersByTimeAsync(2_000);
+        const idle = await running;
+        discovery?.mockRestore();
+        if (attempt >= 5) expect(idle.nextWakeAt).toBeUndefined();
+        const now = Date.now(); vi.useRealTimers(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
+        const checkpoint = await f.checkpoint(idle);
+        const request = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest;
+        if (attempt < 5) expect(request.nextWakeReason).toBe("inbox_media_retention");
+        else {
+          expect(request.inboxMediaRetentionWakeAt).toBeNull();
+          expect(request.nextWakeAt).toBeNull();
+          const workspace = { ...checkpoint.checkpoint!.workspace, inboxMediaRetentionWakeAt: null };
+          expect(await withHostedMealMediaRetry(workspace, vaultRoot)).toEqual(workspace);
+        }
+        const restored = await restorePhotoCheckpoint(f.archive());
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries[0]).toMatchObject({ uploadAttempts: attempt, pendingUpload: true });
+        expect(await readFile(path.join(restored, photo), "utf8")).toBe("synthetic stalled photo");
+        vaultRoot = restored;
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+      }
+      expect(f.store.calls.filter(call => call.operation === "put")).toHaveLength(stall === "put" ? 5 : 0);
+      f.store.hooks.before = undefined;
+      const persistRetry = vi.fn(async () => {});
+      const idle = await runPhotoIdleMaintenance(vaultRoot, f.store, { processingMode: "default", persistRetry });
+      expect(persistRetry).not.toHaveBeenCalled();
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ uploadAttempts: 6, pendingUpload: false });
+      expect([...f.store.bytes.values()].map(bytes => Buffer.from(bytes).toString())).toEqual(["synthetic stalled photo"]);
+      await f.checkpoint(idle);
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.nextWakeAt).toBeNull();
+      const restored = await restorePhotoCheckpoint(f.archive());
+      await expectMissing(path.join(restored, photo));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("an identity error during maintenance stops dedicated wakes at the persisted attempt cap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(path.dirname(vaultRoot), "photo.jpg");
+      await writeFile(sourcePath, "synthetic identity photo");
+      const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      const photo = measurement.event.attachments![0]!.relativePath;
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const manifestPath = path.join(path.dirname(vaultRoot), "manifest.json");
+      await writeFile(manifestPath, '{"source":"synthetic"}');
+      await addMeasurement({ vaultRoot, draft: { id: measurement.event.id, title: "Synthetic measurement",
+        occurredAt: measurement.event.occurredAt, measurements: measurement.event.measurements },
+        attachments: [{ role: "source", sourcePath: manifestPath }] });
+      await expect(core.canonicalRawArtifactMatches({ vaultRoot,
+        ...(await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!,
+      })).rejects.toMatchObject({ code: "RAW_MANIFEST_INVALID" });
+      for (let attempt = 1; attempt <= 6; attempt++) {
+        const reportRetentionIssue = vi.fn(async () => {});
+        const persistRetry = vi.fn(async () => {});
+        const idle = await runPhotoIdleMaintenance(vaultRoot, f.store, { reportRetentionIssue, persistRetry });
+        if (attempt < 5) {
+          expect(idle.nextWakeReason).toBe("inbox_media_retention");
+          expect(reportRetentionIssue).toHaveBeenCalledWith(expect.objectContaining({ stage: "meal_photos", outcome: "failed" }));
+        } else expect(idle.nextWakeAt).toBeUndefined();
+        if (attempt > 5) expect(persistRetry).not.toHaveBeenCalled();
+        await f.checkpoint(idle);
+        if (attempt >= 5) expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({
+          inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+        });
+        const restored = await restorePhotoCheckpoint(f.archive());
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries[0]).toMatchObject({ uploadAttempts: attempt, pendingUpload: true });
+        expect(await readFile(path.join(restored, photo), "utf8")).toBe("synthetic identity photo");
+      }
+      expect(f.store.calls).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("dedicated wakes give 32 healthy thumbnails a delivery turn before charging their attempts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      for (let i = 0; i < 32; i++) await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() });
+      vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+      await runMealPhotoMaintenance({ vaultRoot, maxMeals: 32 });
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const thumbnails = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(thumbnails).toHaveLength(32);
+      const expected = await Promise.all(thumbnails.map(entry => readFile(path.join(vaultRoot, entry.relativePath))));
+      // Each delivery fits alone; the second record crosses the shared deadline.
+      f.store.hooks.before = async op => { if (op === "record" || op === "put") vi.setSystemTime(Date.now() + 750); };
+      for (let pass = 0; pass < 34; pass++) {
+        const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+        if (!wake) break;
+        vi.setSystemTime(new Date(wake));
+        vaultRoot = await restorePhotoCheckpoint(f.archive());
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+        await f.checkpoint(await runPhotoIdleMaintenance(vaultRoot, f.store));
+      }
+      for (const [index, entry] of thumbnails.entries()) expect(await f.store.mediaStore.get(entry, { purpose: "workspace_media_materialization" })).toEqual(expected[index]);
+      const settled = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(settled.every(entry => entry.pendingUpload === false)).toBe(true);
+      for (const entry of settled) {
+        const turns = f.store.calls.filter(call => call.operation === "put" && call.mediaId === entry.mediaId).length;
+        expect(turns).toBe(1);
+        expect(entry.uploadAttempts ?? 0).toBeLessThanOrEqual(turns);
+      }
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([false, true])("rotation preserves scheduled delivery at four attempts after cold restore (cleanupFirst=%s)", async cleanupFirst => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meals = [];
+      for (let i = 0; i < 2; i++) meals.push(await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() }));
+      vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+      await runMealPhotoMaintenance({ vaultRoot, maxMeals: 2 });
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      const [thumbnail, tombstone] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+      const expected = await readFile(path.join(vaultRoot, thumbnail!.relativePath));
+      // Pending cleanup models a lost PUT acknowledgement before canonical deletion.
+      await f.store.mediaStore.record!(tombstone!);
+      await f.store.mediaStore.put({ ...tombstone!, bytes: await readFile(path.join(vaultRoot, tombstone!.relativePath)) });
+      const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
+      await deleteEvent({ vaultRoot, eventId: meals.find(meal => meal.event.mealId === owner.id)!.event.id });
+      thumbnail!.uploadAttempts = 4;
+      catalogue.mealUploadCursor = cleanupFirst ? thumbnail!.mediaId : tombstone!.mediaId;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
+      await f.checkpoint();
+      f.store.hooks.before = async () => { vi.setSystemTime(Date.now() + 750); };
+      let wakes = 0;
+      for (; wakes < 3; wakes++) {
+        const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+        if (!wake) break;
+        vi.setSystemTime(new Date(wake));
+        vaultRoot = await restorePhotoCheckpoint(f.archive());
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+        const idle = await runPhotoIdleMaintenance(vaultRoot, f.store);
+        if (!idle.nextWakeAt) expect(await f.store.mediaStore.get(thumbnail!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+        await f.checkpoint(idle);
+      }
+      expect(wakes).toBe(2);
+      expect(f.store.rows.get(tombstone!.mediaId)?.retired).toBe(true);
+      expect(await f.store.mediaStore.get(tombstone!, { purpose: "workspace_media_materialization" })).toBeNull();
+      expect(await f.store.mediaStore.get(thumbnail!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+      const settled = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(settled).toEqual([expect.objectContaining({ mediaId: thumbnail!.mediaId, pendingUpload: false })]);
+      expect(settled[0]!.uploadAttempts).toBeLessThanOrEqual(5);
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("scheduled rotation delivers a healthy thumbnail while DELETE repeatedly exceeds the deadline", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meals = [];
+      for (let i = 0; i < 2; i++) meals.push(await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() }));
+      vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+      await runMealPhotoMaintenance({ vaultRoot, maxMeals: 2 });
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      const [tombstone, thumbnail] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+      const expected = await readFile(path.join(vaultRoot, thumbnail!.relativePath));
+      await f.store.mediaStore.record!(tombstone!);
+      await f.store.mediaStore.put({ ...tombstone!, bytes: await readFile(path.join(vaultRoot, tombstone!.relativePath)) });
+      const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
+      await deleteEvent({ vaultRoot, eventId: meals.find(meal => meal.event.mealId === owner.id)!.event.id });
+      catalogue.mealUploadCursor = thumbnail!.mediaId;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
+      await f.checkpoint();
+      let deleteAttempts = 0;
+      f.store.hooks.before = async op => {
+        if (op === "delete") {
+          deleteAttempts += 1;
+          vi.setSystemTime(Date.now() + 2_001);
+          throw mediaFailure("Synthetic DELETE timeout");
+        }
+      };
+      for (let wakeNumber = 0; wakeNumber < 3; wakeNumber++) {
+        const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+        expect(wake).not.toBeNull();
+        vi.setSystemTime(new Date(wake!));
+        vaultRoot = await restorePhotoCheckpoint(f.archive());
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+        await f.checkpoint(await runPhotoIdleMaintenance(vaultRoot, f.store));
+      }
+      expect(deleteAttempts).toBeGreaterThanOrEqual(2);
+      expect(await f.store.mediaStore.get(thumbnail!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toContainEqual(expect.objectContaining({
+        mediaId: tombstone!.mediaId, pendingUpload: true,
+      }));
+      expect(f.store.rows.get(tombstone!.mediaId)?.retired).toBe(false);
+      f.store.hooks.before = undefined;
+      const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+      expect(wake).not.toBeNull();
+      vi.setSystemTime(new Date(wake!));
+      vaultRoot = await restorePhotoCheckpoint(f.archive());
+      f = createPhotoCheckpointFixture(vaultRoot, f.store);
+      await f.checkpoint(await runPhotoIdleMaintenance(vaultRoot, f.store));
+      expect(await f.store.mediaStore.get(tombstone!, { purpose: "workspace_media_materialization" })).toBeNull();
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([
+        expect.objectContaining({ mediaId: thumbnail!.mediaId, pendingUpload: false }),
+      ]);
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({
+        inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([false, true])("a cold-restored pending tombstone above the cap settles in rotation despite stalled discovery (mixed=%s)", async mixed => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() });
+      const fullPath = meal.event.attachments![0]!.relativePath;
+      if (mixed) await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath: photoPath }],
+        draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      await runMealPhotoMaintenance({ vaultRoot });
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      const full = catalogue.entries.find(entry => entry.relativePath === fullPath)!;
+      // Model a lost full-photo PUT acknowledgement and an already settled thumbnail.
+      for (const entry of catalogue.entries.filter(entry => entry.relativePath.startsWith("raw/meals/"))) {
+        await f.store.mediaStore.record!(entry);
+        await f.store.mediaStore.put({ ...entry, bytes: await readFile(path.join(vaultRoot, entry.relativePath)) });
+        if (entry !== full) entry.pendingUpload = false;
+      }
+      full.uploadAttempts = 6;
+      // Put the live entry first so stalled discovery must yield to cleanup next wake.
+      catalogue.mealUploadCursor = full.mediaId;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
+      vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+      await runMealPhotoMaintenance({ vaultRoot });
+      expect(await core.canonicalRawArtifactIsPrivacyTombstone({ vaultRoot, relativePath: fullPath })).toBe(true);
+      await f.checkpoint();
+      for (let wakeNumber = 0; wakeNumber < (mixed ? 2 : 1); wakeNumber++) {
+        const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+        expect(wake).not.toBeNull();
+        vi.setSystemTime(new Date(wake!));
+        vaultRoot = await restorePhotoCheckpoint(f.archive());
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.find(entry => entry.mediaId === full.mediaId))
+          .toMatchObject({ pendingUpload: true, uploadAttempts: 6 });
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        const discovery = vi.spyOn(core, "visitEventLedgerShardRecordsInterruptible").mockImplementation(async () => {
+          await vi.advanceTimersByTimeAsync(2_000);
+          return await new Promise(() => {});
+        });
+        f.store.hooks.before = async op => {
+          if (op === "delete") expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(entry => entry.mediaId === full.mediaId)).toBe(true);
+        };
+        const idle = await runPhotoIdleMaintenance(vaultRoot, f.store);
+        expect(discovery).toHaveBeenCalledTimes(mixed ? 1 : 0);
+        discovery.mockRestore();
+        const now = Date.now(); vi.useRealTimers(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
+        await f.checkpoint(idle);
+      }
+      expect(await f.store.mediaStore.get(full, { purpose: "workspace_media_materialization" })).toBeNull();
+      expect(f.store.rows.get(full.mediaId)?.retired).toBe(true);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(entry => entry.mediaId === full.mediaId)).toBe(false);
+      if (mixed) {
+        const restored = await restorePhotoCheckpoint(f.archive());
+        const live = (await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries.find(entry => entry.relativePath.startsWith("raw/measurements/"))!;
+        expect(live.pendingUpload).toBe(true);
+        expect(await readFile(path.join(restored, live.relativePath))).toEqual(await readFile(photoPath));
+        expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.nextWakeReason).toBe("inbox_media_retention");
+      } else expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({
+        inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+      });
+    } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
+  });
+
+  it("a tombstoned thumbnail retains its cleanup wake after a lost PUT acknowledgement and exhausted attempts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() });
+      await runMealPhotoMaintenance({ vaultRoot });
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      f.store.hooks.after = async op => { if (op === "put") throw mediaFailure("Synthetic lost PUT acknowledgement"); };
+      await runPhotoIdleMaintenance(vaultRoot, f.store);
+      expect(f.store.bytes.size).toBe(1);
+      expect(f.store.activeUnlimited()).toBe(1);
+      f.store.hooks.after = undefined;
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      catalogue.entries[0]!.uploadAttempts = 5;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
+      await deleteEvent({ vaultRoot, eventId: meal.event.id });
+      f.store.hooks.before = async op => { if (op === "record") { vi.setSystemTime(Date.now() + 2_000); throw mediaFailure("Synthetic registration outage"); } };
+      for (let pass = 0; pass < 4; pass++) {
+        await f.checkpoint(await runPhotoIdleMaintenance(vaultRoot, f.store));
+        const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+        expect(wake).not.toBeNull();
+        vi.setSystemTime(new Date(wake!));
+        vaultRoot = await restorePhotoCheckpoint(f.archive());
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true, uploadAttempts: 6 + pass });
+      }
+      f.store.sweep(Date.now());
+      expect(f.store.activeUnlimited()).toBe(1); expect(f.store.bytes.size).toBe(1);
+      f.store.hooks.before = undefined;
+      await f.checkpoint(await runPhotoIdleMaintenance(vaultRoot, f.store));
+      expect(f.store.calls.filter(call => call.operation === "put")).toHaveLength(1);
+      expect(f.store.calls.at(-2)).toMatchObject({ operation: "record", expiresAt: new Date(0).toISOString() });
+      expect(f.store.calls.at(-1)?.operation).toBe("delete");
+      expect(f.store.bytes.size).toBe(0);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({ inboxMediaRetentionWakeAt: null, nextWakeAt: null });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["media", "authority"] as const)("retirement DELETE handles %s failures at the checkpoint boundary", async failure => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() });
+      await runMealPhotoMaintenance({ vaultRoot });
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint(); await deliverPendingMealMediaForTest(vaultRoot, f.store.mediaStore);
+      await f.checkpoint();
+      await deleteEvent({ vaultRoot, eventId: meal.event.id });
+      await f.checkpoint();
+      const pointers = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(pointers).toHaveLength(2); expect(pointers.every(entry => entry.retirementPending)).toBe(true);
+      await writeFile(path.join(vaultRoot, "note.md"), "unrelated synthetic change");
+      const error = failure === "media" ? mediaFailure("Synthetic DELETE unavailable")
+        : Object.assign(new Error("Synthetic stale authority"), { code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY" });
+      f.store.hooks.before = async op => { if (op === "delete") throw error; };
+      if (failure === "authority") {
+        const completed = f.calls.completeSnapshotSession.mock.calls.length;
+        await expect(f.checkpoint()).rejects.toBe(error);
+        expect(f.calls.completeSnapshotSession).toHaveBeenCalledTimes(completed);
+        return;
+      }
+      expect((await f.checkpoint()).checkpoint?.checkpointed).toBe(true);
+      expect(f.store.bytes.size).toBe(2);
+      const restored = await restorePhotoCheckpoint(f.archive());
+      expect(await readFile(path.join(restored, "note.md"), "utf8")).toBe("unrelated synthetic change");
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries).toEqual(pointers);
+      f.store.hooks.before = undefined;
+      const retry = createPhotoCheckpointFixture(restored, f.store);
+      await retry.checkpoint();
+      expect(f.store.bytes.size).toBe(0);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["authority", "unexpected", "media"] as const)("idle photo maintenance propagates control failures and records only item failures: %s", async failure => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(path.dirname(vaultRoot), "photo.jpg"); await writeFile(sourcePath, "synthetic photo");
+      await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const f = createPhotoCheckpointFixture(vaultRoot); await f.checkpoint();
+      const error = failure === "media" ? mediaFailure() : failure === "authority"
+        ? Object.assign(new Error("Synthetic stale authority"), { code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY" }) : new Error("Synthetic unexpected failure");
+      f.store.hooks.before = async () => { throw error; };
+      const reportRetentionIssue = vi.fn(async () => {});
+      const laterMaintenance = vi.spyOn(core, "runGeneratedImageCaptureRetention");
+      const running = runPhotoIdleMaintenance(vaultRoot, f.store, { reportRetentionIssue });
+      if (failure === "media") {
+        expect(await running).toMatchObject({ nextWakeReason: "inbox_media_retention" });
+        expect(reportRetentionIssue).toHaveBeenCalledWith(expect.objectContaining({ stage: "meal_photos", outcome: "failed" }));
+      } else {
+        await expect(running).rejects.toBe(error);
+        expect(reportRetentionIssue).not.toHaveBeenCalled();
+      }
+      expect(laterMaintenance).not.toHaveBeenCalled();
+      expect(f.store.calls.map(call => call.operation)).toEqual(["record"]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("fails closed when the mailbox decoder is missing", () => {
     const { platform } = createRuntimePlatform();
 
@@ -278,6 +1019,43 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       .rejects.toThrow("requires a v2 snapshot reference");
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
     expect(artifactGet).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "empty", "directory", "missing-root"])("rejects a replacement with %s canonical vault metadata before archive upload", async (kind) => {
+    const vaultRoot = await createVaultRoot();
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder });
+    const baseline = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    await rm(path.join(vaultRoot, "vault.json"));
+    if (kind === "empty") await writeFile(path.join(vaultRoot, "vault.json"), "");
+    if (kind === "directory") await mkdir(path.join(vaultRoot, "vault.json"));
+    if (kind === "missing-root") await rm(vaultRoot, { recursive: true });
+    vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mockClear();
+    calls.putSnapshotObjectDirect.mockClear();
+    calls.completeSnapshotSession.mockClear();
+
+    await expect(options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"), currentSnapshotRef: baseline.snapshotRef,
+    })).rejects.toMatchObject({ code: "workspace_snapshot_vault_missing" });
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).not.toHaveBeenCalled();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+  });
+
+  it("allows canonical file deletion while retaining vault metadata in a replacement", async () => {
+    const vaultRoot = await createVaultRoot();
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
+    const { calls, platform } = createRuntimePlatform();
+    const options = createBridgeOptions({ platform, vaultRoot });
+    const baseline = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    await rm(path.join(vaultRoot, "note.md"));
+    await expect(options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"), currentSnapshotRef: baseline.snapshotRef,
+    })).resolves.toHaveProperty("snapshotRef");
+    expect(calls.completeSnapshotSession).toHaveBeenCalledTimes(2);
   });
 
   it("waits for assistant background work before snapshot publication", async () => {
@@ -564,12 +1342,154 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   }
 
+  it.each(
+    ([
+      { phase: "session_start_request", stage: "session" },
+      { phase: "session_complete_request", stage: "checkpoint" },
+    ] as const).flatMap(({ phase, stage }) => [
+      ...([
+        ["normal", 6_000, 6_000],
+        ["long", 120_000, 120_000],
+        ["zero", 0, 0],
+        ["largest safe integer", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+        ["absent", undefined, undefined],
+        ["null", null, undefined],
+        ["string", "120000", undefined],
+        ["negative", -1, undefined],
+        ["fractional", 1.5, undefined],
+        ["NaN", Number.NaN, undefined],
+        ["infinite", Number.POSITIVE_INFINITY, undefined],
+        ["negative infinite", Number.NEGATIVE_INFINITY, undefined],
+        ["unsafe integer", Number.MAX_SAFE_INTEGER + 1, undefined],
+      ] as const).map(([label, timeoutMs, expectedTimeoutMs]) => ({
+        label,
+        phase,
+        stage,
+        timeoutMs,
+        expectedPhase: phase,
+        expectedTimeoutMs,
+      })),
+      {
+        label: "unknown phase",
+        phase: `${phase}_unknown`,
+        stage,
+        timeoutMs: 120_000,
+        expectedPhase: undefined,
+        expectedTimeoutMs: undefined,
+      },
+      {
+        label: "non-string phase",
+        phase: 120_000,
+        stage,
+        timeoutMs: 120_000,
+        expectedPhase: undefined,
+        expectedTimeoutMs: undefined,
+      },
+    ]),
+  )("preserves safe snapshot $stage diagnostics with $label metadata", async ({
+    phase,
+    stage,
+    timeoutMs,
+    expectedPhase,
+    expectedTimeoutMs,
+  }) => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const failure = Object.assign(new Error("Synthetic snapshot session failure."), {
+      phase,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+    if (stage === "session") {
+      calls.startSnapshotSession.mockRejectedValueOnce(failure);
+    } else {
+      calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+    }
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          snapshotMode: "workspace_snapshot_v2",
+          snapshotStage: stage,
+        }),
+      }),
+    ]);
+    const redactedJson = lifecycleEntries[0]?.redactedJson;
+    const expectedPrefix = stage === "session"
+      ? "snapshotSessionStart"
+      : "snapshotSessionComplete";
+    for (const prefix of ["snapshotSessionStart", "snapshotSessionComplete"]) {
+      if (prefix === expectedPrefix && expectedPhase !== undefined) {
+        expect(redactedJson).toHaveProperty(`${prefix}FailurePhase`, expectedPhase);
+      } else {
+        expect(redactedJson).not.toHaveProperty(`${prefix}FailurePhase`);
+      }
+      if (prefix === expectedPrefix && expectedTimeoutMs !== undefined) {
+        expect(redactedJson).toHaveProperty(`${prefix}TimeoutMs`, expectedTimeoutMs);
+      } else {
+        expect(redactedJson).not.toHaveProperty(`${prefix}TimeoutMs`);
+      }
+    }
+    expect(redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
+  });
+
+  it.each([
+    { phase: "synthetic-private-upload-phase", shape: "own" },
+    { phase: 42, shape: "own" },
+    { phase: undefined, shape: "own" },
+    { phase: "upload_transfer", shape: "inherited" },
+    { phase: "upload_transfer", shape: "accessor" },
+  ])("omits untrusted upload failure phase metadata: $shape / $phase", async ({ phase, shape }) => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const failure = new Error("Synthetic snapshot upload failure.");
+    const phaseGetter = vi.fn(() => phase);
+    if (shape === "inherited") {
+      Object.setPrototypeOf(failure, Object.assign(new Error(), { phase }));
+    } else {
+      Object.defineProperty(failure, "phase", {
+        enumerable: true,
+        ...(shape === "accessor" ? { get: phaseGetter } : { value: phase }),
+      });
+    }
+    calls.putSnapshotObjectDirect.mockRejectedValueOnce(failure);
+    const options = createBridgeOptions({ platform, vaultRoot });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    const failures = entries.filter((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.redactedJson).toHaveProperty("snapshotStage", "upload");
+    expect(failures[0]?.redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
+    expect(JSON.stringify(entries)).not.toContain("synthetic-private-upload-phase");
+    expect(phaseGetter).not.toHaveBeenCalled();
+  });
+
   it("emits one bounded failure record at each fixed snapshot lifecycle stage", async () => {
     const failureCases = [
       { sessionPhase: "session_start_request", stage: "session" },
       { sessionPhase: "session_start_response_decode", stage: "session" },
       { stage: "archive" },
-      { stage: "upload" },
+      { uploadPhase: "upload_prepare", stage: "upload" },
+      { uploadPhase: "upload_presign", stage: "upload" },
+      { uploadPhase: "upload_transfer", stage: "upload" },
+      { uploadPhase: "upload_receipt", stage: "upload" },
       { stage: "checkpoint" },
     ] as const;
 
@@ -586,6 +1506,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           phase: failureCase.sessionPhase,
           timeoutMs: 6_000,
         });
+      } else if (expectedStage === "upload") {
+        Object.assign(failure, { phase: failureCase.uploadPhase, timeoutMs: 6_000 });
       } else if (expectedStage === "checkpoint") {
         Object.assign(failure, {
           phase: "session_complete_request",
@@ -636,9 +1558,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
                   }
               : {}),
             snapshotStage: expectedStage,
+            ...(expectedStage === "upload"
+              ? { snapshotUploadFailurePhase: failureCase.uploadPhase }
+              : {}),
           }),
         }),
       ]);
+      expect(lifecycleEntries[0]?.redactedJson).not.toHaveProperty("snapshotUploadTimeoutMs");
       expect(lifecycleEntries.some((entry) =>
         entry.eventCode === "checkpoint.snapshot_plan"
         || entry.eventCode === "checkpoint.snapshot_started"
@@ -798,6 +1724,42 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+  });
+
+  it("preserves an exact frozen runtime-wake interruption during snapshot upload", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const controller = new AbortController();
+    const interruption = Object.freeze(new HostedRuntimeCheckpointInterruptedByWakeError());
+    calls.putSnapshotObjectDirect.mockImplementationOnce(async ({ signal }) => {
+      controller.abort(interruption);
+      throw signal?.reason;
+    });
+    const options = createBridgeOptions({ platform, vaultRoot });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+    await drainHostedRuntimeLogWritesBestEffort();
+
+    const entries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(entries).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_preempted",
+        redactedJson: expect.objectContaining({
+          snapshotStage: "upload",
+          snapshotOutcomeKind: "expected_preemption",
+        }),
+      }),
+    ]);
+    expect(entries[0]?.redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
+    expect(interruption).not.toHaveProperty("phase");
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
@@ -1226,6 +2188,14 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(entries).toEqual([
+      expect.objectContaining({ eventCode: "checkpoint.snapshot_finished" }),
+    ]);
+    expect(entries[0]?.redactedJson).not.toHaveProperty("snapshotUploadFailurePhase");
   });
 
   it("excludes unreferenced Codex rollouts without deleting live local state", async () => {
@@ -1525,12 +2495,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
         .archiveEntries ?? [];
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.oldest)).toBe(false);
-    expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === activeOperationPath)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedOperationPath)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(true);
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
-    await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
+    await expectMissing(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
@@ -2061,12 +3031,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     },
   );
 
-  it("consumes retired newsletter rows without decoding or importing them", async () => {
+  it.each(HOSTED_RETIRED_MAILBOX_KINDS)("consumes retired %s rows without decoding or importing them", async (kind) => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();
     const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
       decode: vi.fn(async () => {
-        throw new Error("Retired newsletter payloads must not be decoded.");
+        throw new Error("Retired payloads must not be decoded.");
       }),
     };
     const options = createBridgeOptions({
@@ -2076,10 +3046,77 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.importItem(
-      createRetiredNewsletterMailboxImportItem(),
+      createRetiredMailboxImportItem(kind),
     )).resolves.toEqual({
-      reasonCode: "legacy_group_newsletter_email_needed.retired",
+      reasonCode: "mailbox.kind_retired",
       status: "skipped",
+    });
+    expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
+  });
+
+  it.each(["creative-response", "creative-response-text"] as const)("terminally consumes fresh %s from an old Web and imports the active successor", async (notificationPromptProfile) => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "retired-creative", memberId: TEST_REQUEST.userId,
+      occurredAt: "2026-05-01T00:00:00.000Z",
+      notification: {
+        notificationPromptProfile, instructions: "Retired synthetic creative work.",
+        route: { actorId: null, channel: "telegram", delivery: { kind: "thread", target: "synthetic-group" }, identityId: "synthetic-group", threadId: "synthetic-group", threadIsDirect: false },
+      },
+    });
+    const retired = {
+      ...createSystemMailboxImportItem().item,
+      dedupeKey: wake.eventId, id: "retired-creative", kind: wake.kind,
+      payloadInlineCiphertext: "synthetic-retired-payload", payloadRef: null, payloadSchema: "murph.hosted-mailbox-item.v1",
+    };
+    const active = { ...createSystemMailboxImportItem().item, laneSeq: "2", payloadInlineCiphertext: "synthetic-active-payload", payloadRef: null, payloadSchema: "murph.hosted-mailbox-item.v1" };
+    const decoder = vi.fn(async (input: { payloadCiphertext: string }) => ({
+      status: "decoded" as const,
+      wake: parseHostedExecutionWake(input.payloadCiphertext === "synthetic-retired-payload" ? wake : createMemberChannelsWake()),
+    }));
+    const options = createBridgeOptions({ mailboxPayloadDecoder: { decode: decoder }, platform, vaultRoot });
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_REQUEST.userId,
+      importItem: options.importItem,
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort: {
+        async fetch() { return { fetchedAt: wake.occurredAt, items: [retired, active], maxSeqByLane: [{ lane: "system", maxSeq: "2" }], userId: TEST_REQUEST.userId }; },
+        async fetchPayload() { throw new Error("Inline payloads must not fetch a sidecar."); },
+      },
+      now: () => wake.occurredAt,
+      requestId: "synthetic-retirement-import",
+      state: createEmptyHostedMailboxImportState(),
+    });
+    expect(decoder).toHaveBeenCalledTimes(2);
+    expect(result.blocked).toEqual([]);
+    expect(result.state.watermarks.system).toBe("2");
+    expect(result.importedCount).toBe(1);
+    expect(result.state.recentStatuses.map(({ seq, status, reasonCode }) => ({ seq, status, reasonCode }))).toEqual([
+      { seq: "1", status: "skipped", reasonCode: "mailbox.notification_profile_retired" },
+      { seq: "2", status: "imported", reasonCode: "system_mailbox.queued" },
+    ]);
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId)).toEqual([active.id]);
+  });
+
+  it("rejects active rows mislabeled as retired without decoding them", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+      decode: vi.fn(async () => {
+        throw new Error("Mismatched retired routes must not be decoded.");
+      }),
+    };
+    const options = createBridgeOptions({ mailboxPayloadDecoder, platform, vaultRoot });
+    const item = createRetiredMailboxImportItem(HOSTED_RETIRED_MAILBOX_KINDS[0]);
+    item.item.kind = "member.activated";
+    item.route.itemRef.kind = "member.activated";
+
+    await expect(options.importItem(item)).resolves.toEqual({
+      reasonCode: "mailbox.retired_kind_mismatch",
+      retryable: false,
+      status: "blocked",
     });
     expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
   });
@@ -2812,25 +3849,25 @@ function createRetiredVaultShareMailboxImportItem(input: {
   };
 }
 
-function createRetiredNewsletterMailboxImportItem(): Parameters<
+function createRetiredMailboxImportItem(kind: HostedRetiredMailboxKind): Parameters<
   HostedWorkspaceRuntimeJobOptions["importItem"]
 >[0] {
   const base = createSystemMailboxImportItem();
-  const id = "retired_group_newsletter_email_needed";
+  const id = "retired_mailbox_item";
   return {
     ...base,
     item: {
       ...base.item,
       dedupeKey: id,
       id,
-      kind: "group-newsletter.email-needed",
+      kind,
     },
     route: {
       action: "skip-retired-mailbox-item",
       advanceProgress: true,
       itemRef: {
         id,
-        kind: "group-newsletter.email-needed",
+        kind,
         lane: "system",
         laneSeq: base.item.laneSeq,
       },
@@ -2881,4 +3918,66 @@ async function expectLeaseFailure(
   expect(thrown.code).toBe(expected.code);
   expect(thrown.stage).toBe(expected.stage);
   return thrown;
+}
+
+
+async function deliverPendingMealMediaForTest(vaultRoot: string, mediaStore: NonNullable<HostedRuntimePlatform["mediaStore"]>) {
+  // Baseline-compatible regression: old writers PUT during receipt preparation;
+  // only v2 writers publish pending intent and use the subsequent idle owner.
+  if (!(await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(entry => entry.pendingUpload)) return;
+  const { runHostedMealMediaMaintenance, createHostedMealMediaBudget } = await import("../src/hosted-runtime/meal-media-maintenance.ts");
+  await runHostedMealMediaMaintenance({ vaultRoot, mediaStore,
+    signal: new AbortController().signal, budget: createHostedMealMediaBudget(), persistRetry: async () => {} });
+}
+
+// Exercise the real checkpoint inventory and bytes with a tar transport double;
+// only encryption and the remote snapshot service are replaced in these tests.
+function createPhotoCheckpointFixture(vaultRoot: string, store = createMealMediaStore()) {
+  const { calls, platform } = createRuntimePlatform();
+  platform.mediaStore = store.mediaStore;
+  const start = calls.startSnapshotSession.getMockImplementation()!;
+  calls.startSnapshotSession.mockImplementation(async input => ({ ...await start(input),
+    limits: { maxSinglePartEncryptedBytes: 10_000_000, warnEncryptedBytes: 10_000_000 } }));
+  let archive: Buffer;
+  const builder = createSnapshotArchiveBuilder();
+  const build = vi.mocked(builder.buildEncryptedSnapshot).getMockImplementation()!;
+  vi.mocked(builder.buildEncryptedSnapshot).mockImplementation(async input => {
+    const result = await build(input);
+    const stage = path.join(result.temporaryDirectoryPath, "stage");
+    await mkdir(stage);
+    for (const entry of input.archiveEntries) {
+      const destination = path.join(stage, entry.archivePath);
+      if (entry.kind === "directory") await mkdir(destination, { recursive: true });
+      else { await mkdir(path.dirname(destination), { recursive: true }); await cp(entry.absolutePath, destination); }
+    }
+    await promisify(execFile)("tar", ["-cf", result.encryptedFilePath, "-C", stage, "."]);
+    archive = await readFile(result.encryptedFilePath);
+    return { ...result, encryptedByteSize: archive.length };
+  });
+  const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder: builder });
+  return { calls, store, archive: () => archive,
+    checkpoint: (wake: { nextWakeAt?: string; nextWakeReason?: "inbox_media_retention" } = {}) => options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"), nextWakeAt: wake.nextWakeAt ?? null,
+      nextWakeReason: wake.nextWakeReason ?? null, inboxMediaRetentionWakeAt: wake.nextWakeAt ?? null,
+    }) };
+}
+function runPhotoIdleMaintenance(vaultRoot: string, store: ReturnType<typeof createMealMediaStore>, options: {
+  processingMode?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["processingMode"];
+  persistRetry?: (retryAt: string, signal: AbortSignal) => Promise<void>;
+  reportRetentionIssue?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["reportRetentionIssue"];
+} = {}) {
+  return runHostedIdleCheckpointMaintenance({ vaultRoot, credentialSource: "platform", memberId: "member_synthetic",
+    model: null, providerName: null, pendingWork: false, processingMode: options.processingMode ?? "inbox_media_retention",
+    recordUsage: null, resolveAssistantSessionId: null, shutdownSignal: null, wakeSignal: null,
+    reportRetentionIssue: options.reportRetentionIssue,
+    mealMedia: { mediaStore: store.mediaStore, budget: createHostedMealMediaBudget(), persistRetry: options.persistRetry ?? (async () => {}) } });
+}
+async function restorePhotoCheckpoint(archive: Buffer): Promise<string> {
+  const vaultRoot = await createVaultRoot();
+  const durableRoot = path.dirname(vaultRoot);
+  await rm(durableRoot, { recursive: true }); await mkdir(durableRoot);
+  const archivePath = path.join(path.dirname(durableRoot), "restore.tar"); await writeFile(archivePath, archive);
+  await promisify(execFile)("tar", ["-xf", archivePath, "-C", durableRoot]);
+  resetHostedPhotoIntentsAfterColdRestore(vaultRoot);
+  return vaultRoot;
 }

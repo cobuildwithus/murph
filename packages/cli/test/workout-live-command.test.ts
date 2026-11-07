@@ -1387,3 +1387,44 @@ test('fixed repetitions survive fresh command contexts, close a finite plan, and
   ])).envelope)
   assert.equal(corrected.entity.data.workout.endedAt, extended.entity.data.workout.endedAt)
 })
+
+
+test('exercise removal preserves retained results and rejects stale or ambiguous deletion', async () => {
+  const { vaultRoot } = await createTempVaultContext('workout-exercise-remove-')
+  cleanupPaths.push(vaultRoot)
+  const cli = createWorkoutCli()
+  requireData((await run(cli, ['init', '--vault', vaultRoot, '--timezone', 'UTC'])).envelope)
+  const started = await startLiveWorkout({
+    vault: vaultRoot, name: 'Training', startedAt: '2026-09-01T10:00:00.000Z',
+    exercises: [
+      { name: 'Row', mode: 'weight_reps', unitOverride: 'kg', setCount: 2 },
+      { name: 'Push-up', mode: 'bodyweight', setCount: 2 },
+      { name: 'Row', mode: 'weight_reps', unitOverride: 'kg', setCount: 2 },
+    ],
+  })
+  await logLiveWorkoutSet({ vault: vaultRoot, workoutId: started.eventId,
+    exerciseOrder: 2, setOrder: 1, reps: 8 })
+  const show = async () => requireData((await run<ShowResult>(cli,
+    ['workout', 'show', started.eventId, '--vault', vaultRoot])).envelope)
+  const before = await show()
+  const revision = requireShownRevision(before)
+  const remove = (name: string, expected: number, order?: number) => run<ShowResult>(cli, [
+    'workout', 'exercise', 'remove', name, '--workout-id', started.eventId,
+    '--expected-revision', String(expected), '--vault', vaultRoot,
+    ...(order === undefined ? [] : ['--exercise-order', String(order)]),
+  ])
+  assert.equal((await remove('Row', revision)).envelope.ok, false)
+  assert.equal((await remove('Row', revision, 2)).envelope.ok, false)
+  assert.deepEqual(await show(), before)
+  const removed = requireData((await remove('Row', revision, 1)).envelope)
+  assert.deepEqual(removed.entity.data.workout.exercises,
+    before.entity.data.workout.exercises.slice(1))
+  assert.deepEqual((await show()).entity.data.workout, removed.entity.data.workout)
+  assert.equal((await remove('Row', revision, 3)).envelope.ok, false)
+  assert.equal((await remove('Row', requireShownRevision(removed), 1)).envelope.ok, false)
+  assert.deepEqual((await show()).entity.data.workout, removed.entity.data.workout)
+  const second = requireData((await remove('Row', requireShownRevision(removed), 3)).envelope)
+  const empty = requireData((await remove('Push-up', requireShownRevision(second), 2)).envelope)
+  assert.deepEqual(empty.entity.data.workout.exercises, [])
+  assert.equal(empty.entity.id, started.eventId)
+})

@@ -4,14 +4,16 @@ import { createHash } from 'node:crypto'
 // by thread/start or the original pre-adapter catalog to model a persisted
 // pre-fix thread. No dependency on the production adapter/fingerprint builder.
 export function fingerprintThreadDeclarations(input: {
-  baseInstructions: string | null
-  developerInstructions: string | null
+  baseInstructions?: string | null
+  developerInstructions?: string | null
   dynamicTools: unknown
   routeFingerprint: string
 }): string {
   return createHash('sha256').update(JSON.stringify({
     ...input,
-    developerInstructions: input.developerInstructions?.trim() || null,
+    ...(input.developerInstructions !== undefined
+      ? { developerInstructions: input.developerInstructions?.trim() || null }
+      : {}),
   }, (_key, value: unknown) => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
     const record = value as Record<string, unknown>

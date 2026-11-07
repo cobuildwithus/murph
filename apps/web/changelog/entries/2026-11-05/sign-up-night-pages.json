@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 80,
+  "item": {
+    "id": "sign-up-night-pages",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A shorter way to get started with Murph",
+    "summary": "Signing up now shows one step at a time, with one thing to do on each page.",
+    "details": "Plans are one clear choice, and the setup message and payment wait times now match.",
+    "relevanceTags": ["onboarding"],
+    "sourcePullRequests": [4629]
+  }
+}

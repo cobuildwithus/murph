@@ -2,7 +2,11 @@ name: Linq Production Canary
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    # UTC: nine weekly slots, 18-hour gaps except the 24-hour week boundary.
+    - cron: "17 0 * * 0,3,6"
+    - cron: "17 18 * * 0,3"
+    - cron: "17 12 * * 1,4"
+    - cron: "17 6 * * 2,5"
   workflow_dispatch:
     inputs:
       deployed_sha:
@@ -19,10 +23,11 @@ concurrency:
 
 jobs:
   production-canary:
-    name: Exercise hourly production iMessage journey
+    name: Exercise scheduled production iMessage journey
     runs-on: ubuntu-24.04
     environment: production
-    timeout-minutes: 15
+    # Reset (5m), three checkpoint observations (12m each), replies, and setup/checks.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -48,7 +53,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: 24.14.1
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install deps

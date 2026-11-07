@@ -268,6 +268,7 @@ describe("runtime-state taxonomy and runtime paths", () => {
       "write-operations",
     );
     assert.equal(getVaultLocalStatePortability(".runtime/projections/query.sqlite"), "machine_local");
+    assert.equal(getVaultLocalStatePortability(".runtime/operations/meal-name-repair/v1.json"), "portable");
     assert.equal(isVaultOperationalRelativePath(".runtime/operations/inbox/config.json"), true);
     assert.equal(isVaultProjectionRelativePath(".runtime/projections/query.sqlite"), true);
     assert.equal(isVaultEphemeralRelativePath(".runtime/tmp/socket.sock"), true);

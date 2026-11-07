@@ -46,7 +46,7 @@ const PLANETSCALE_SIGNED_PARAMETER_LIMIT = 16;
 const PLANETSCALE_SIGNED_PARAMETER_NAME_LIMIT = 64;
 const PLANETSCALE_SIGNED_PARAMETER_VALUE_LIMIT = 2_048;
 const PLANETSCALE_SCRAPE_URL_LENGTH_LIMIT = 8_192;
-const MONITORING_FAILURE_ALERT_COUNT = 2;
+const MONITORING_FAILURE_ALERT_COUNT = 6;
 
 const DATABASE_ALERT_OPENINGS = [
   "The database monitor recorded an alerting observation.",
@@ -235,6 +235,8 @@ type DatabaseHealthCollectedSample =
 
 interface DatabaseMetricCollection {
   attempts: number;
+  pgbouncerCurrentConnectionSeries:
+    readonly DatabaseMetricObservation["pgbouncerCurrentConnectionSeries"][];
   postgresStateSeries: readonly DatabaseMetricObservation["postgresStateSeries"][];
   connectionErrorCounterBaseline: Record<string, number>;
   connectionErrorDeltas: DatabaseConnectionErrorDeltas | null;
@@ -308,7 +310,28 @@ export class DatabaseHealthMonitor {
     }
 
     try {
-      const sample = await this.collectSample();
+      const recentSamples = this.store.readRecentSamples(
+        MONITORING_FAILURE_ALERT_COUNT - 1,
+      );
+      const latestSample = recentSamples[0];
+      if (latestSample && observedAtMs <= latestSample.observedAtMs) {
+        return await this.handleAlertState({
+          checkedAtMs: runStartedAtMs,
+          conditions: latestSample.conditions,
+          sampleStatus: latestSample.scrapeStatus,
+        });
+      }
+      let priorFailures = this.store.readAlertState().consecutiveScrapeFailures;
+      if (priorFailures < MONITORING_FAILURE_ALERT_COUNT) {
+        const healthyIndex = recentSamples.findIndex(
+          (sample) => sample.scrapeStatus === "ok",
+        );
+        priorFailures = Math.min(
+          priorFailures,
+          healthyIndex < 0 ? recentSamples.length : healthyIndex,
+        );
+      }
+      const sample = await this.collectSample(priorFailures);
       const checkedAtMs = normalizeObservedAtMs(this.nowImplementation());
       this.transactionSync(() => {
         this.persistSampleAndAlertAdmission({
@@ -338,12 +361,15 @@ export class DatabaseHealthMonitor {
     return this.store.readAlertState();
   }
 
-  private async collectSample(): Promise<DatabaseHealthCollectedSample> {
+  private async collectSample(
+    priorFailures: number,
+  ): Promise<DatabaseHealthCollectedSample> {
     const previousConnectionErrorCounterBaseline =
       this.store.readLatestConnectionErrorCounterBaseline();
     try {
       const {
         attempts,
+        pgbouncerCurrentConnectionSeries,
         postgresStateSeries,
         connectionErrorCounterBaseline,
         connectionErrorDeltas,
@@ -363,8 +389,6 @@ export class DatabaseHealthMonitor {
           observation.snapshot,
           connectionErrorDeltas,
         );
-        const priorFailures =
-          this.store.readAlertState().consecutiveScrapeFailures;
         const failures = priorFailures + 1;
         if (failures >= MONITORING_FAILURE_ALERT_COUNT) {
           conditions.push({
@@ -376,6 +400,9 @@ export class DatabaseHealthMonitor {
         }
         console.warn("Database health metrics collection failed.", {
           attempts,
+          ...(monitoringMissingMetrics.includes("planetscale_pgbouncer_current_connections")
+            ? { pgbouncerCurrentConnectionSeries }
+            : {}),
           ...(monitoringMissingMetrics.includes("planetscale_postgres_connection_state")
             ? { postgresStateSeries }
             : {}),
@@ -425,8 +452,6 @@ export class DatabaseHealthMonitor {
       const missingMetrics = error instanceof DatabaseMetricsParseError
         ? error.missingMetrics
         : [];
-      const priorFailures =
-        this.store.readAlertState().consecutiveScrapeFailures;
       const failures = priorFailures + 1;
       const conditions: DatabaseHealthCondition[] =
         failures >= MONITORING_FAILURE_ALERT_COUNT
@@ -599,6 +624,7 @@ export class DatabaseHealthMonitor {
     const { sample } = input;
     if (sample.status === "ok") {
       this.store.setConsecutiveScrapeFailures(0);
+      this.store.clearUnadmittedMonitoringAlertObligation();
     } else {
       this.store.setConsecutiveScrapeFailures(sample.failures);
     }
@@ -611,8 +637,10 @@ export class DatabaseHealthMonitor {
       && sample.failures === MONITORING_FAILURE_ALERT_COUNT
       && currentMonitoringCondition
     ) {
-      const priorEvidence = this.store.readLatestMonitoringEvidence();
-      if (priorEvidence === null) {
+      const priorEvidence = this.store.readRecentMonitoringEvidence(
+        MONITORING_FAILURE_ALERT_COUNT - 1,
+      );
+      if (priorEvidence.length !== MONITORING_FAILURE_ALERT_COUNT - 1) {
         throw new Error(
           "Database monitoring threshold is missing prior evidence.",
         );
@@ -620,7 +648,7 @@ export class DatabaseHealthMonitor {
       const monitoringAlertObligation = buildMonitoringAlertObligation({
         checkedAtMs: input.checkedAtMs,
         failures: currentMonitoringCondition.failures,
-        observations: [priorEvidence, sample.monitoringEvidence],
+        observations: [...priorEvidence, sample.monitoringEvidence],
       });
       Object.assign(currentMonitoringCondition, {
         connectionErrorEvidence:
@@ -751,7 +779,7 @@ export class DatabaseHealthMonitor {
         && admittedConditions.length > 0
         && !shouldHoldMonitoringForFence
         && (
-          isNewIncident
+          alertState.alertSequence === 0
           || hasConnectionError
           || attemptFenceOpen
           || monitoringAlertObligation !== null
@@ -1524,6 +1552,9 @@ function buildDatabaseMetricCollection(input: {
   });
   return {
     attempts: input.attempts,
+    pgbouncerCurrentConnectionSeries: input.parsedObservations.map(
+      (observation) => observation.pgbouncerCurrentConnectionSeries,
+    ),
     postgresStateSeries: input.parsedObservations.map(
       (observation) => observation.postgresStateSeries,
     ),
@@ -1669,6 +1700,7 @@ function composeRecoveredConnectionErrorObservation(input: {
   }
   return {
     missingMetrics: [],
+    pgbouncerCurrentConnectionSeries: input.observation.pgbouncerCurrentConnectionSeries,
     postgresStateSeries: input.observation.postgresStateSeries,
     snapshot: {
       ...input.observation.snapshot,

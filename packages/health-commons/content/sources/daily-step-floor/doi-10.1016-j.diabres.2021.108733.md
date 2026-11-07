@@ -12,11 +12,8 @@ aliases:
 - doi:10.1016/j.diabres.2021.108733
 categories:
 - daily-step-floor
-relations:
-- type: related_protocol
-  target: protocol_variant:daily-step-floor/daily-step-floor
-- type: parent_family
-  target: experiment_family:daily-step-floor
+relations: []
+
 source:
   kind: review
   title: Should weight-bearing activity be reduced during healing of plantar diabetic foot ulcers, even when using appropriate offloading devices?

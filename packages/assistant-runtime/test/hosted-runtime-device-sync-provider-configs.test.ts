@@ -1,31 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   createConfiguredDeviceSyncProvidersFromConfigs,
   JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
 } from "@murphai/device-syncd/config";
 import { resolveHostedRuntimeDeviceSyncProviderConfigs } from "../src/hosted-runtime/device-sync-provider-configs.ts";
 
-const staticProviderConfigs = {
-  oura: {
-    apiBaseUrl: "https://oura.example.test",
-    clientId: "oura-client",
-    clientSecret: "oura-secret",
-  },
-  strava: {
-    apiBaseUrl: "https://platform-strava.example.test",
-    clientId: "platform-strava-client",
-    clientSecret: "platform-strava-secret",
-    fetchImpl: vi.fn(),
-    webhookSigningSecret: "platform-signing-secret",
-    webhookVerifyToken: "platform-verify-token",
-  },
-};
-
 describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
-  it("retains the configured Strava and Oura providers", () => {
-    expect(resolveHostedRuntimeDeviceSyncProviderConfigs(staticProviderConfigs, {}))
-      .toEqual(staticProviderConfigs);
-  });
 
   it("preserves all 48 code-owned Junction production resources for hosted members", () => {
     const resolved = resolveHostedRuntimeDeviceSyncProviderConfigs(

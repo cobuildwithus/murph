@@ -9,22 +9,15 @@ import type {
   JournalView,
   JournalWeekSummary,
 } from "../journal-view.ts";
-import {
-  parsePersonalPatternIcon,
-  type PersonalPatternIcon,
-} from "../personal-patterns.ts";
-import { experimentOutcomeSchema } from "@murphai/contracts";
+import { experimentOutcomeSchema } from "@murphai/contracts/experiment-outcome";
 import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
+import { memoryDisplayNameSchema, memoryDemographicsSchema, companionMealsProjectionSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
   type BrowserVaultAssistantSummary,
   type BrowserVaultEntity,
   type BrowserVaultEntityLink,
-  type BrowserVaultExperimentRunCard,
-  type BrowserVaultExperimentRunCardMetric,
-  type BrowserVaultExperimentRunCardSummary,
   type BrowserVaultLabResultReferenceRange,
   type BrowserVaultLabResultRow,
   type BrowserVaultLabSpecimenKind,
@@ -64,15 +57,6 @@ import {
 } from "./metric-buckets.ts";
 import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
 import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
-import {
-  type PersonalPatternCell,
-  type PersonalPatternClassification,
-  type PersonalPatternFactor,
-  type PersonalPatternGrade,
-  type PersonalPatternOutcome,
-  type PersonalPatternReport,
-  type PersonalPatternStage,
-} from "../personal-patterns.ts";
 
 export function parseBrowserVaultReplica(value: unknown, label = "Browser vault replica"): BrowserVaultReplica {
   const record = requireRecord(value, label);
@@ -93,12 +77,6 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
       : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
           experimentOutcomeSchema.parse(entry)
         ),
-    experimentRunCards: readOptionalArray(
-      record.experimentRunCards,
-      `${label}.experimentRunCards`,
-    ).map((entry, index) =>
-      parseExperimentRunCard(entry, `${label}.experimentRunCards[${index}]`)
-    ),
     generatedAt,
     ...(record.generation === undefined
       ? {}
@@ -113,20 +91,15 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     ...(record.journal === undefined
       ? {}
       : { journal: parseJournalView(record.journal, `${label}.journal`) }),
+    ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
+    ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
+    ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
     ),
     metricGoalProgressRows: requireArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
     metricRows,
     metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
-    ...(record.personalPatterns === undefined
-      ? {}
-      : {
-          personalPatterns: parsePersonalPatternReport(
-            record.personalPatterns,
-            `${label}.personalPatterns`,
-          ),
-        }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: requireArray(record.searchRows, `${label}.searchRows`).map((entry, index) => parseSearchRow(entry, `${label}.searchRows[${index}]`)),
@@ -149,12 +122,9 @@ export function parseBrowserVaultCoreShard(
     entities: requireArray(record.entities, `${label}.entities`).map((entry, index) =>
       parseEntity(entry, `${label}.entities[${index}]`)
     ),
-    experimentRunCards: requireArray(
-      record.experimentRunCards,
-      `${label}.experimentRunCards`,
-    ).map((entry, index) =>
-      parseExperimentRunCard(entry, `${label}.experimentRunCards[${index}]`)
-    ),
+    // Shards from producers that predate run-card removal may still carry
+    // cards; nothing reads them, so they are dropped without validation.
+    experimentRunCards: [],
     hasLabBiomarkers: requireBoolean(
       record.hasLabBiomarkers,
       `${label}.hasLabBiomarkers`,
@@ -163,14 +133,9 @@ export function parseBrowserVaultCoreShard(
     ...(record.journal === undefined
       ? {}
       : { journal: parseJournalView(record.journal, `${label}.journal`) }),
-    ...(record.personalPatterns === undefined
-      ? {}
-      : {
-          personalPatterns: parsePersonalPatternReport(
-            record.personalPatterns,
-            `${label}.personalPatterns`,
-          ),
-        }),
+    ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
+    ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
+    ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
     timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) =>
@@ -314,147 +279,6 @@ function parseJournalRecord(value: unknown, label: string): JournalRecord {
     summary: readNullableString(record.summary),
     tags: requireStringArray(record.tags, `${label}.tags`),
     timeZone: readNullableString(record.timeZone),
-  };
-}
-
-function parseExperimentRunCard(
-  value: unknown,
-  label: string,
-): BrowserVaultExperimentRunCard {
-  const record = requireRecord(value, label);
-  const schema = requireExpectedSchema(
-    record.schema,
-    BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
-    `${label}.schema`,
-  );
-  const lookupKeys = requireRecord(record.lookupKeys, `${label}.lookupKeys`);
-  const status = requireString(record.status, `${label}.status`);
-  if (
-    status !== "active"
-    && status !== "paused"
-    && status !== "finished"
-    && status !== "stopped"
-  ) {
-    throw new TypeError(`${label}.status must be active, paused, finished, or stopped.`);
-  }
-
-  return {
-    id: requireString(record.id, `${label}.id`),
-    lookupKeys: {
-      experimentIds: requireStringArray(
-        lookupKeys.experimentIds,
-        `${label}.lookupKeys.experimentIds`,
-      ),
-      protocolKeys: requireStringArray(
-        lookupKeys.protocolKeys,
-        `${label}.lookupKeys.protocolKeys`,
-      ),
-      slugs: requireStringArray(lookupKeys.slugs, `${label}.lookupKeys.slugs`),
-    },
-    requiredMetricBuckets: readOptionalArray(
-      record.requiredMetricBuckets,
-      `${label}.requiredMetricBuckets`,
-    ).map((entry, index) => requireBrowserVaultMetricBucketId(
-      entry,
-      `${label}.requiredMetricBuckets[${index}]`,
-    )),
-    runSummary: parseExperimentRunCardSummary(
-      record.runSummary,
-      `${label}.runSummary`,
-    ),
-    schema,
-    slug: readNullableString(record.slug),
-    startedOn: readNullableString(record.startedOn),
-    status,
-    statusLabel: requireString(record.statusLabel, `${label}.statusLabel`),
-    summary: readNullableString(record.summary),
-    summaryDetail: readNullableString(record.summaryDetail),
-    tags: requireStringArray(record.tags, `${label}.tags`),
-    title: requireString(record.title, `${label}.title`),
-  };
-}
-
-function parseExperimentRunCardSummary(
-  value: unknown,
-  label: string,
-): BrowserVaultExperimentRunCardSummary {
-  const record = requireRecord(value, label);
-  return {
-    ...(record.completionPercent === undefined
-      ? {}
-      : {
-          completionPercent: requireNonNegativeInteger(
-            record.completionPercent,
-            `${label}.completionPercent`,
-          ),
-        }),
-    ...(record.dailyCadence === undefined
-      ? {}
-      : {
-          dailyCadence: parseExperimentRunCardDailyCadence(
-            record.dailyCadence,
-            `${label}.dailyCadence`,
-          ),
-        }),
-    ...(record.dateRange === undefined
-      ? {}
-      : { dateRange: requireString(record.dateRange, `${label}.dateRange`) }),
-    ...(record.day === undefined
-      ? {}
-      : { day: requireNonNegativeInteger(record.day, `${label}.day`) }),
-    ...(record.metric === undefined
-      ? {}
-      : { metric: parseExperimentRunCardMetric(record.metric, `${label}.metric`) }),
-    metrics: requireArray(record.metrics, `${label}.metrics`).map((entry, index) =>
-      parseExperimentRunCardMetric(entry, `${label}.metrics[${index}]`)
-    ),
-  };
-}
-
-function parseExperimentRunCardDailyCadence(
-  value: unknown,
-  label: string,
-): NonNullable<BrowserVaultExperimentRunCardSummary["dailyCadence"]> {
-  const record = requireRecord(value, label);
-  return {
-    cadence: requireString(record.cadence, `${label}.cadence`),
-    completed: requireNonNegativeInteger(record.completed, `${label}.completed`),
-    expected: requireNonNegativeInteger(record.expected, `${label}.expected`),
-    ...(record.label === undefined
-      ? {}
-      : { label: requireString(record.label, `${label}.label`) }),
-  };
-}
-
-function parseExperimentRunCardMetric(
-  value: unknown,
-  label: string,
-): BrowserVaultExperimentRunCardMetric {
-  const record = requireRecord(value, label);
-  const direction = record.direction === undefined
-    ? undefined
-    : requireString(record.direction, `${label}.direction`);
-  if (
-    direction !== undefined
-    && direction !== "down"
-    && direction !== "neutral"
-    && direction !== "up"
-  ) {
-    throw new TypeError(`${label}.direction must be down, neutral, or up.`);
-  }
-  return {
-    ...(record.baseline === undefined
-      ? {}
-      : { baseline: requireString(record.baseline, `${label}.baseline`) }),
-    ...(record.biomarkerKey === undefined
-      ? {}
-      : { biomarkerKey: requireString(record.biomarkerKey, `${label}.biomarkerKey`) }),
-    current: requireString(record.current, `${label}.current`),
-    ...(record.delta === undefined
-      ? {}
-      : { delta: requireString(record.delta, `${label}.delta`) }),
-    ...(direction === undefined ? {} : { direction }),
-    label: requireString(record.label, `${label}.label`),
   };
 }
 
@@ -628,192 +452,6 @@ function parseShardIdentity(
     replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   };
-}
-
-function parsePersonalPatternReport(value: unknown, label: string): PersonalPatternReport {
-  const record = requireRecord(value, label);
-  const lagDays = requireNonNegativeInteger(record.lagDays, `${label}.lagDays`);
-  if (lagDays !== 1) throw new TypeError(`${label}.lagDays must be 1.`);
-  return {
-    asOfDate: requireString(record.asOfDate, `${label}.asOfDate`),
-    cells: requireArray(record.cells, `${label}.cells`).map((entry, index) =>
-      parsePersonalPatternCell(entry, `${label}.cells[${index}]`)
-    ),
-    factors: requireArray(record.factors, `${label}.factors`).map((entry, index) =>
-      parsePersonalPatternFactor(entry, `${label}.factors[${index}]`)
-    ),
-    lagDays,
-    notes: requireStringArray(record.notes, `${label}.notes`),
-    outcomes: requireArray(record.outcomes, `${label}.outcomes`).map((entry, index) =>
-      parsePersonalPatternOutcome(entry, `${label}.outcomes[${index}]`)
-    ),
-    repeatableCellCount: requireNonNegativeInteger(record.repeatableCellCount, `${label}.repeatableCellCount`),
-    testedCellCount: requireNonNegativeInteger(record.testedCellCount, `${label}.testedCellCount`),
-    windowDays: requireNonNegativeInteger(record.windowDays, `${label}.windowDays`),
-  };
-}
-
-function parsePersonalPatternFactor(value: unknown, label: string): PersonalPatternFactor {
-  const record = requireRecord(value, label);
-  const kind = requireString(record.kind, `${label}.kind`);
-  if (kind !== "activity" && kind !== "intervention" && kind !== "mixed") {
-    throw new TypeError(`${label}.kind must be activity, intervention, or mixed.`);
-  }
-  return {
-    ...(record.confirmedAbsentDays === undefined
-      ? {}
-      : {
-          confirmedAbsentDays: requireNonNegativeInteger(
-            record.confirmedAbsentDays,
-            `${label}.confirmedAbsentDays`,
-          ),
-        }),
-    ...(record.episodeCount === undefined
-      ? {}
-      : {
-          episodeCount: requireNonNegativeInteger(
-            record.episodeCount,
-            `${label}.episodeCount`,
-          ),
-        }),
-    id: requireString(record.id, `${label}.id`),
-    ...(record.icon === undefined
-      ? {}
-      : {
-          icon: requirePersonalPatternIcon(
-            record.icon,
-            `${label}.icon`,
-          ),
-        }),
-    kind,
-    label: requireString(record.label, `${label}.label`),
-    observedDays: requireNonNegativeInteger(record.observedDays, `${label}.observedDays`),
-  };
-}
-
-function requirePersonalPatternIcon(
-  value: unknown,
-  label: string,
-): PersonalPatternIcon {
-  const icon = parsePersonalPatternIcon(value);
-  if (!icon) throw new TypeError(`${label} must be a supported pattern icon.`);
-  return icon;
-}
-
-function parsePersonalPatternOutcome(value: unknown, label: string): PersonalPatternOutcome {
-  const record = requireRecord(value, label);
-  const lagDays = record.lagDays === undefined
-    ? 1
-    : requireNonNegativeInteger(record.lagDays, `${label}.lagDays`);
-  if (lagDays !== 0 && lagDays !== 1) {
-    throw new TypeError(`${label}.lagDays must be 0 or 1.`);
-  }
-  return {
-    id: requireString(record.id, `${label}.id`),
-    label: requireString(record.label, `${label}.label`),
-    lagDays,
-    unit: requireString(record.unit, `${label}.unit`),
-  };
-}
-
-function parsePersonalPatternCell(value: unknown, label: string): PersonalPatternCell {
-  const record = requireRecord(value, label);
-  const direction = requireString(record.direction, `${label}.direction`);
-  if (direction !== "higher" && direction !== "lower" && direction !== "flat") {
-    throw new TypeError(`${label}.direction must be higher, lower, or flat.`);
-  }
-  const stage = requirePersonalPatternStage(record.stage, `${label}.stage`);
-  const grade = parsePersonalPatternGrade(record.grade, stage, `${label}.grade`);
-  return {
-    classification: parsePersonalPatternClassification(
-      record.classification,
-      grade,
-      `${label}.classification`,
-    ),
-    comparisonBasis: record.comparisonBasis === undefined
-      ? "unobserved_baseline"
-      : requirePersonalPatternComparisonBasis(record.comparisonBasis, `${label}.comparisonBasis`),
-    comparisonDates: record.comparisonDates === undefined
-      ? []
-      : requireStringArray(record.comparisonDates, `${label}.comparisonDates`),
-    comparisonDays: requireNonNegativeInteger(record.comparisonDays, `${label}.comparisonDays`),
-    comparisonMean: readNullableFiniteNumber(record.comparisonMean),
-    delta: readNullableFiniteNumber(record.delta),
-    deltaPercent: readNullableFiniteNumber(record.deltaPercent),
-    direction,
-    exposedDays: requireNonNegativeInteger(record.exposedDays, `${label}.exposedDays`),
-    exposedDates: record.exposedDates === undefined
-      ? []
-      : requireStringArray(record.exposedDates, `${label}.exposedDates`),
-    exposedMean: readNullableFiniteNumber(record.exposedMean),
-    factorId: requireString(record.factorId, `${label}.factorId`),
-    firstExposedDate: readNullableString(record.firstExposedDate),
-    grade,
-    lastExposedDate: readNullableString(record.lastExposedDate),
-    outcomeId: requireString(record.outcomeId, `${label}.outcomeId`),
-    repeatedDirection: requireBoolean(record.repeatedDirection, `${label}.repeatedDirection`),
-    stage,
-  };
-}
-
-function parsePersonalPatternGrade(
-  value: unknown,
-  stage: PersonalPatternStage,
-  label: string,
-): PersonalPatternGrade | null {
-  if (value === null) return null;
-  if (value === undefined) {
-    if (stage === "worth_testing") return "A";
-    if (stage === "seen_again") return "B";
-    if (stage === "new_clue") return "C";
-    return null;
-  }
-  const grade = requireString(value, label);
-  if (grade === "A" || grade === "B" || grade === "C" || grade === "D" || grade === "E") {
-    return grade;
-  }
-  throw new TypeError(`${label} must be A, B, C, D, E, or null.`);
-}
-
-function parsePersonalPatternClassification(
-  value: unknown,
-  grade: PersonalPatternGrade | null,
-  label: string,
-): PersonalPatternClassification | null {
-  if (value === null) return null;
-  if (value === undefined) {
-    if (grade === "E") return "observation";
-    if (grade === "D") return "early_signal";
-    return grade ? "pattern" : null;
-  }
-  const classification = requireString(value, label);
-  if (
-    classification === "observation"
-    || classification === "early_signal"
-    || classification === "pattern"
-  ) return classification;
-  throw new TypeError(`${label} must be observation, early_signal, pattern, or null.`);
-}
-
-function requirePersonalPatternComparisonBasis(
-  value: unknown,
-  label: string,
-): "confirmed_absence" | "unobserved_baseline" {
-  const basis = requireString(value, label);
-  if (basis === "confirmed_absence" || basis === "unobserved_baseline") return basis;
-  throw new TypeError(`${label} must be confirmed_absence or unobserved_baseline.`);
-}
-
-function requirePersonalPatternStage(value: unknown, label: string): PersonalPatternStage {
-  const stage = requireString(value, label);
-  if (
-    stage === "insufficient"
-    || stage === "no_clear_pattern"
-    || stage === "new_clue"
-    || stage === "seen_again"
-    || stage === "worth_testing"
-  ) return stage;
-  throw new TypeError(`${label} must be a Personal Patterns evidence stage.`);
 }
 
 function parsePolicy(value: unknown, label: string): BrowserVaultReplicaPolicy {

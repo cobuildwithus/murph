@@ -19,19 +19,13 @@ categories:
   - vitamin-d
   - supplements
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-38828931
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-37764770
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-12499343
+
 measurementContexts:
   - fasted_or_routine_clinical_lab
   - baseline_and_8_to_12_week_retest

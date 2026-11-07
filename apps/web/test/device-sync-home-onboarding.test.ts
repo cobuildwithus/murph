@@ -215,10 +215,10 @@ describe("shouldShowHomeDeviceSyncStep", () => {
   it("rejects when member access cannot be confirmed", async () => {
     mocks.findUniqueHostedMember.mockResolvedValueOnce({
       accountGroupMemberships: [],
-      billingStatus: "canceled",
+      billingStatus: "incomplete",
       suspendedAt: null,
       threadContainer: null,
-    });
+    }).mockResolvedValueOnce(null); // No activation proof for this incomplete member.
 
     const { shouldShowHomeDeviceSyncStep } = await import(
       "@/src/lib/device-sync/home-onboarding"

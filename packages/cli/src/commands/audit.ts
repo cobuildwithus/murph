@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { AUDIT_STATUSES } from '@murphai/contracts'
+import { AUDIT_STATUSES, integrationIngestRecordSchema } from '@murphai/contracts'
 import {
   emptyArgsSchema,
   withBaseOptions,
@@ -18,6 +18,7 @@ import {
 } from './audit-command-helpers.js'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { assertOrderedDateRange } from './command-factory-primitives.js'
+import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const auditIdSchema = z
   .string()
@@ -53,6 +54,21 @@ export function registerAuditCommands(
 ) {
   const audit = Cli.create('audit', {
     description: 'Audit inspection commands routed through the query read model.',
+  })
+
+  audit.command('receipt', {
+    description: 'Inspect one automatic import receipt, including evidence, outputs and publication counts.',
+    args: z.object({ id: z.string().regex(/^xfm_[0-9A-Za-z]+$/u) }),
+    options: withBaseOptions(),
+    output: z.object({
+      vault: pathSchema,
+      receipt: z.object({ relativePath: pathSchema, record: integrationIngestRecordSchema }).nullable(),
+    }),
+    async run({ args, options }) {
+      await assertInitializedVaultRoot(options.vault)
+      const { readIntegrationIngestById } = await import('@murphai/core')
+      return { vault: options.vault, receipt: await readIntegrationIngestById(options.vault, args.id) }
+    },
   })
 
   audit.command('show', {

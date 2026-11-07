@@ -77,7 +77,7 @@ Completed:
 Blocked:
 
 - `pnpm typecheck` and `pnpm test:diff` stop on a pre-existing raw-log guard
-  finding in `scripts/murph-age/r1609-current-research-age-model-stack.ts`,
+  finding in unrelated code,
   which is outside this task's working set.
 Status: completed
 Updated: 2026-05-23

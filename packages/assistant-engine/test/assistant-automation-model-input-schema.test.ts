@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
-import { automationDeviceActivitySourceValues } from '@murphai/contracts'
+import { automationDeviceActivitySourceValues, automationScheduleCronSchema } from '@murphai/contracts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.js'
+import { buildToolCallValidationFeedback } from '../src/assistant/tool-validation-feedback.js'
 
 import {
   MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
@@ -9,6 +11,57 @@ import {
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 
 type JsonSchemaObject = Record<string, unknown>
+
+describe('assistant cron authoring semantics', () => {
+  const parse = (args: unknown) => readAutomationDynamicToolRequest({
+    arguments: args, tool: MURPH_AUTOMATION_TOOL.name,
+  })
+  const patch = {
+    action: 'patch', lookup: 'automation_stretch',
+    expectedUpdatedAt: '2026-10-09T16:00:00.000Z',
+  }
+  const save = { action: 'save', title: 'Stretch break', instructions: 'Take a stretch break.' }
+
+  it.each([save, patch])('rejects combined calendar-day and weekday restrictions for $action with repair feedback', (args) => {
+    for (const expression of ['0 14 9-15 10 1-5', '0 14 1,15 * 1', '0 14 */2 * 1-5', '0 14 */1 * 1-5', '0 14 1 * */1']) {
+      const schedule = { kind: 'cron', expression, timeZone: 'America/New_York' }
+      // Canonical cron retains its intentional OR semantics, including legacy reads.
+      expect(automationScheduleCronSchema.safeParse(schedule).success).toBe(true)
+      const parsed = parse({ ...args, schedule })
+      expect(parsed?.kind).toBe('invalid-automation-arguments')
+      if (parsed?.kind !== 'invalid-automation-arguments') throw new Error('Expected rejected authoring.')
+      const feedback = buildToolCallValidationFeedback(parsed.validationDigest, 'invalid_automation_arguments')
+      expect(feedback).toContain('expression')
+      expect(feedback).toContain('OR')
+      expect(feedback).toContain('activeUntil')
+      expect(feedback).toContain('day-of-month')
+    }
+  })
+
+  it.each([save, patch])('accepts weekday, monthly, and annual recurrences for $action', (args) => {
+    for (const expression of ['0 14 * * 1-5', '0 14 15 * *', '0 14 15 2 *', '0 14 * * *', '0 14 * 10 1-5']) {
+      expect(parse({ ...args, schedule: { kind: 'cron', expression } })?.kind).toBe('automation')
+    }
+  })
+
+  it('allows inspecting and editing legacy automations without resubmitting their schedule', () => {
+    expect(parse({ action: 'inspect', lookup: patch.lookup })?.kind).toBe('automation')
+    for (const fields of [{ status: 'paused' }, { status: 'archived' }, { instructions: 'Stand up and stretch.' }]) {
+      expect(parse({ ...patch, ...fields })?.kind).toBe('automation')
+    }
+  })
+
+  it('accepts a finite weekday correction whose next occurrence skips the weekend', () => {
+    const schedule = { kind: 'cron' as const, expression: '0 14 * * 1-5', timeZone: 'America/New_York' }
+    const activeUntil = '2026-10-16T00:00:00-04:00'
+    const parsed = parse({ ...patch, schedule, activeUntil })
+    expect(parsed).toMatchObject({ kind: 'automation', request: { schedule, activeUntil } })
+    const after = new Date('2026-10-09T19:00:00.000Z')
+    expect(computeAssistantCronNextRunAt({ ...schedule, expression: '0 14 9-15 10 1-5' }, after))
+      .toBe('2026-10-10T18:00:00.000Z')
+    expect(computeAssistantCronNextRunAt(schedule, after)).toBe('2026-10-12T18:00:00.000Z')
+  })
+})
 
 function asObject(value: unknown): JsonSchemaObject {
   expect(value).toBeTypeOf('object')
@@ -73,6 +126,13 @@ describe('automation model input schema', () => {
   const reference = { entityKind: 'condition', entityId: 'condition_synthetic' }
   const cases: { label: string; args: JsonSchemaObject; accepted: boolean }[] = [
     { label: 'inspect', args: { action: 'inspect', lookup: patch.lookup }, accepted: true },
+    { label: 'full inspection', args: { action: 'inspect', lookup: patch.lookup, view: 'full' }, accepted: true },
+    { label: 'model review inspection', args: { action: 'inspect', lookup: patch.lookup, view: 'model_review' }, accepted: true },
+    { label: 'unknown inspection view', args: { action: 'inspect', lookup: patch.lookup, view: 'summary' }, accepted: false },
+    { label: 'batched model reviews', args: { action: 'inspect_models', lookups: [patch.lookup] }, accepted: true },
+    { label: 'maximum model review batch', args: { action: 'inspect_models', lookups: Array.from({ length: 10 }, (_, i) => `automation_${i}`) }, accepted: true },
+    { label: 'empty model review batch', args: { action: 'inspect_models', lookups: [] }, accepted: false },
+    { label: 'overlong model review batch', args: { action: 'inspect_models', lookups: Array.from({ length: 11 }, (_, i) => `automation_${i}`) }, accepted: false },
     { label: 'save', args: { action: 'save', title: patch.title, instructions: 'Synthetic cue.', schedule: { kind: 'every', everyMs: 3_600_000 } }, accepted: true },
     { label: 'versioned patch', args: patch, accepted: true },
     { label: 'onboarding save', args: { action: 'save_onboarding_first_personal_read' }, accepted: true },
@@ -182,7 +242,7 @@ describe('automation model input schema', () => {
     },
   )
 
-  it('advertises Terra as the reminder default and Luna only for a fixed cue', () => {
+  it('advertises Luna for bounded low-risk reads while preserving stronger reasoning and member preferences', () => {
     const schemaDescriptions = collectKeys(
       MURPH_AUTOMATION_TOOL.inputSchema,
       'description',
@@ -202,25 +262,31 @@ describe('automation model input schema', () => {
       const normalizedGuidance = guidance.toLowerCase()
 
       expect(normalizedGuidance).toContain(
-        'use luna only when the complete future turn is a fixed, fully self-contained cue',
+        'use luna for fixed cues and bounded low-risk workflows',
       )
       expect(normalizedGuidance).toContain(
-        'use terra for all reminders that do not meet that luna exception; when unsure, use terra.',
+        'sensitive health decisions',
       )
       expect(normalizedGuidance).toContain('for a non-reminder automation')
-      expect(normalizedGuidance).not.toContain(
-        'use luna for self-contained cues and reminders',
-      )
+      expect(normalizedGuidance).toContain('preserve explicit member model preferences')
+      expect(normalizedGuidance).not.toContain('must need no reads')
     }
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('Luna and Sol mean GPT-6 Luna and GPT-6.1 Sol')
+    expect(schemaDescriptions.join(' ')).not.toMatch(/Terra|high for Luna/iu)
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('GPT-5.6')
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'when its instructions or context requirements materially change or the member explicitly asks to change its model or reasoning',
+      'only when intentionally changing the task purpose or reasoning burden',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'omit assistantTargetOverride for timing-only or status-only edits to preserve the stored override',
+      'Omit assistantTargetOverride for factual corrections, timing-only or status-only edits to preserve the stored override',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'On a non-reminder patch, assistantTargetOverride replaces the whole stored override: use null to return that automation to conversation inheritance',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('correcting stale instructions or reconciling a plan does not itself authorize a model change')
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('when its instructions or context requirements materially change')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('If a changed field such as instructions is absent from the result, use one exact inspection')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('The authorized weekly usage review may also make model-only optimization patches')
   })
 
   it('advertises the complete canonical runtime schema with self-contained action branches', () => {
@@ -230,10 +296,14 @@ describe('automation model input schema', () => {
     expect(collectKeys(schema, '$ref')).toEqual([])
     const patch = actionContract(schema, 'patch')
     expect(asObject(patch.properties).expectedUpdatedAt).toMatchObject({
-      type: 'string',
+      anyOf: [
+        expect.objectContaining({ type: 'string' }),
+        expect.objectContaining({ type: 'string' }),
+      ],
       description: expect.stringContaining('most recent readback'),
     })
-    expect(MURPH_AUTOMATION_TOOL.description).toMatch(/^To edit an existing automation: inspect it, then patch/u)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('resolve its exact automationId')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('Inspect that id, then patch using lookup=automationId and expectedUpdatedAt=updatedAt')
     expect(MURPH_AUTOMATION_TOOL.description).toContain('for a wording edit, include the new wording')
   })
 

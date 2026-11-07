@@ -91,3 +91,15 @@ describe("hosted member action", () => {
     });
   });
 });
+
+
+it("round-trips the measurement consumer before any Web producer ships", () => {
+  const wake = buildHostedExecutionMemberActionRequestedWake({
+    eventId: `member.action.requested:${request.actionId}`, memberId: "member_synthetic",
+    occurredAt: "2026-11-06T13:00:00.000Z",
+    request: { ...request, action: { kind: "measurement.add", version: 1, metric: "estimated-vo2-max", value: 42.5 } },
+  });
+  expect(parseHostedExecutionWake(wake)).toEqual(wake);
+  expect(parseHostedExecutionEvent({ kind: wake.kind, request: wake.request, userId: wake.userId }))
+    .toEqual({ kind: wake.kind, request: wake.request, userId: wake.userId });
+});

@@ -17,22 +17,15 @@ categories:
   - "photoaging"
   - "self-assessment"
 relations:
+  - type: cites
+    target: source_artifact:pmid-39960921
+  - type: cites
+    target: source_artifact:pmid-36780572
+  - type: cites
+    target: source_artifact:pmid-39133416
+  - type: cites
+    target: source_artifact:pmid-32541484
 
-  -
-    type: "related_protocol"
-    target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39960921"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-36780572"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-39133416"
-  -
-    type: "cites"
-    target: "source_artifact:pmid-32541484"
 measurementContexts:
   - "standardized_photo"
   - "self_rating"

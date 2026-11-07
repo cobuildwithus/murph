@@ -1,0 +1,683 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+interface SentEmail { idempotencyKey: string; subject: string; text: string; to: string[] }
+const mocks = vi.hoisted(() => ({ opsMember: "synthetic-operator", sendEmail: vi.fn<(email: SentEmail) => Promise<{ providerMessageId: string }>>(async () => ({ providerMessageId: "email_1" })) }));
+vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
+vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", () => ({ sendHostedResendPlainTextEmail: mocks.sendEmail }));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32, 7), envelope: { rootKeyId: "synthetic-reply-root" } }),
+  unwrapHostedDomainRootForWebByRootKeyId: async () => ({ rootKey: Buffer.alloc(32, 7) }),
+}));
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest: async () => ({ member: { id: mocks.opsMember } }),
+}));
+import { GET as reportAudioRoute } from "../app/api/ops/game-reports/[reportId]/audio/route";
+import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
+import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/lib/game/account-deletion";
+import { reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
+import { openGameTexts } from "@/src/lib/game/crypto";
+import { readGameReportQueue, reviewGameReport } from "@/src/lib/game/report-review";
+import { canEnterGame, devSettleNow, devStartNow, readGame, readGameChatState, readHome, removeGamePostForReview, runGameCommand } from "@/src/lib/game/service";
+import { getPrisma } from "@/src/lib/prisma";
+
+const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+if (runPostgresProof && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) {
+  throw new Error("The game report and block proof needs an isolated local test database.");
+}
+
+const TERMS: GameTermsInput = {
+  schedule: { days: [0, 1, 2, 3, 4, 5, 6] },
+  stakes: [{ item: "Breakfast in bed", kind: "prize" }],
+  tasks: [{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }],
+};
+const memberIds: string[] = [];
+
+async function member(firstName: string): Promise<string> {
+  const id = `hbm_gamesafe_${firstName.toLowerCase()}_${randomUUID().slice(0, 8)}`;
+  await getPrisma().hostedMember.create({ data: { billingStatus: "active", id } });
+  memberIds.push(id);
+  await ok(id, { firstName, timeZone: "America/New_York", type: "setProfile" });
+  return id;
+}
+
+async function run(actor: string, command: GameCommand) {
+  return runGameCommand({ actorMemberId: actor, command });
+}
+
+async function ok(actor: string, command: GameCommand) {
+  const result = await run(actor, command);
+  if (!result.ok) throw new Error(`${command.type} failed: ${result.error.code} ${result.error.message}`);
+  return result.game;
+}
+
+async function invite(challenger: string, extra: Partial<Extract<GameCommand, { type: "createGame" }>> = {}) {
+  const gameId = randomUUID();
+  const created = await ok(challenger, { gameId, inviteeFirstName: "Bestie", terms: TERMS, type: "createGame", ...extra });
+  return { gameId, token: created!.inviteToken! };
+}
+
+async function live(challenger: string, invitee: string) {
+  const { gameId, token } = await invite(challenger);
+  await ok(invitee, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" });
+  await devStartNow(gameId, challenger).catch(() => undefined);
+  return gameId;
+}
+
+async function words(actor: string, gameId: string, text: string) {
+  const entryId = randomUUID();
+  await ok(actor, { entryId, gameId, kind: "words", mediaKeys: [], text, type: "post" });
+  return entryId;
+}
+
+type ReportCommand = Extract<GameCommand, { type: "report" }>;
+const report = (gameId: string, extra: Partial<ReportCommand> = {}): ReportCommand =>
+  ({ about: "player", gameId, reason: "harassment", reportId: randomUUID(), type: "report", ...extra });
+
+async function deleteMember(memberId: string) {
+  const prepared = await prepareGameAccountDeletion({ memberIds: [memberId], prisma: getPrisma() });
+  await getPrisma().$transaction(async tx => {
+    await applyGameAccountDeletionTx({ memberIds: [memberId], now: new Date(), prepared, tx });
+    await tx.hostedMember.delete({ where: { id: memberId } });
+  });
+}
+
+function expectedEmail(reportId: string, gameId: string, createdAt: Date, content: string, blocked: boolean) {
+  return {
+    config: { apiKey: "re_test", from: "Murph Alerts <alerts@example.test>", timeoutMs: 10_000 },
+    idempotencyKey: `murph/game-report/${reportId}`,
+    subject: "Murph game report: Harassment or bullying",
+    to: ["safety@example.test"],
+    text: [
+      "A weekly game player reported something. Review it within 24 hours:",
+      `https://www.withmurph.ai/ops/game-reports#${reportId}`,
+      "",
+      "Reason: Harassment or bullying",
+      `Content: ${content}`,
+      `They blocked the other player too: ${blocked ? "yes" : "no"}`,
+      "",
+      `Report ID: ${reportId}`,
+      `Game ID: ${gameId}`,
+      `Reported at: ${createdAt.toISOString()}`,
+    ].join("\n"),
+  };
+}
+
+describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
+  beforeEach(() => {
+    mocks.sendEmail.mockClear();
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv("HOSTED_LINQ_ALERT_EMAIL_FROM", "Murph Alerts <alerts@example.test>");
+    vi.stubEnv("HOSTED_GAME_REPORT_ALERT_EMAILS", "safety@example.test");
+  });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    await cleanupGameFixtures(getPrisma(), memberIds);
+    await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+  });
+
+  it("reports an incoming reply on your own post; Ops removes only the reply and leaves score and recap entries intact", async () => {
+    const a = await member("Ava"), b = await member("Sam"), gameId = await live(a, b);
+    const entryId = await words(a, gameId, "My post"); await words(b, gameId, "Other post");
+    const replyId = randomUUID(), reportId = randomUUID();
+    await ok(b, { type: "replyToPost", gameId, entryId, replyId, kind: "text", text: "Reported reply" });
+    await devSettleNow(gameId, a);
+    const postBefore = await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: entryId } });
+    const viewBefore = (await readGame(gameId, a))!;
+    const command = report(gameId, { about: "reply", replyId, reportId });
+    await ok(a, command);
+    await ok(a, { ...command, reportId: randomUUID() });
+    expect(await getPrisma().gameReport.count({ where: { reporterMemberId: a, replyId } })).toBe(1);
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportId } })).toMatchObject({ entryId: null, replyId, reportedMemberId: b, reporterMemberId: a });
+    const queueQuery = vi.spyOn(getPrisma().gameReport, "findMany");
+    expect((await readGameReportQueue()).find(row => row.reportId === reportId)).toMatchObject({ content: "reply", snapshotText: "Reported reply", entryId: null, replyId, postRemoved: false });
+    expect(queueQuery.mock.calls[0][0]?.select).toBeDefined();
+    expect(queueQuery.mock.calls[0][0]?.select).not.toHaveProperty("snapshotAudioEncrypted");
+    await reviewGameReport({ reportId, removePost: true });
+    expect(await getPrisma().gameReply.findUnique({ where: { id: replyId } })).toBeNull();
+    expect(await getPrisma().gameEntry.findUnique({ where: { id: entryId } })).toEqual(postBefore);
+    const viewAfter = (await readGame(gameId, a))!;
+    expect(viewAfter.result).toEqual(viewBefore.result); expect(viewAfter.recap).toEqual(viewBefore.recap);
+    expect(viewAfter.days[0].mine?.text).toBe("My post");
+    expect(viewAfter.days[0].mine).not.toHaveProperty("reply");
+  });
+
+  it("recovers a reply report after alert failure and author deletion, retaining reporter-owned Ops audio", async () => {
+    const a = await member("Ava"), b = await member("Sam"), gameId = await live(a, b);
+    const entryId = await words(a, gameId, "My post"); await words(b, gameId, "Other post");
+    const replyId = randomUUID(), reportId = randomUUID();
+    const audio = readFileSync(new URL("./fixtures/game-reply-audio/apple-aac-1s.m4a", import.meta.url));
+    await ok(b, { type: "replyToPost", gameId, entryId, replyId, kind: "voice", audio: audio.toString("base64"), levels: Array(32).fill(50) });
+    const command = report(gameId, { about: "reply", replyId, reportId });
+    mocks.sendEmail.mockRejectedValueOnce(new Error("synthetic email failure"));
+    await expect(ok(a, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED" });
+    await ok(b, { type: "deleteReply", gameId, replyId });
+    const prepared = await prepareGameAccountDeletion({ memberIds: [b], prisma: getPrisma() });
+    await getPrisma().$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds: [b], now: new Date(), prepared, tx });
+      await tx.hostedMember.delete({ where: { id: b } });
+    });
+    await ok(a, command);
+    expect(mocks.sendEmail.mock.calls[0][0].idempotencyKey).toBe(mocks.sendEmail.mock.calls[1][0].idempotencyKey);
+    expect(await getPrisma().gameReport.count({ where: { id: reportId } })).toBe(1);
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportId } });
+    expect(row).toMatchObject({ replyId: null, entryId: null, reportedMemberId: null, reporterMemberId: a });
+    expect(row.snapshotAudioEncrypted).not.toContain(audio.toString("base64"));
+    vi.stubEnv("HOSTED_OPS_MEMBER_IDS", "synthetic-operator");
+    const request = new Request("https://www.withmurph.ai/api/ops/game-reports/report/audio");
+    const params = { params: Promise.resolve({ reportId }) };
+    mocks.opsMember = "synthetic-operator";
+    const response = await reportAudioRoute(request, params);
+    expect(response.status).toBe(200); expect(Buffer.from(await response.arrayBuffer())).toEqual(audio);
+    mocks.opsMember = a;
+    expect((await reportAudioRoute(request, params)).status).toBe(404);
+    mocks.opsMember = "synthetic-operator";
+  });
+
+  it("calls off a game mid-way the way a player leaving does, and hides each from the other", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const secondGame = await live(leo, ava);
+    await words(leo, gameId, "Leo day one");
+    await words(ava, gameId, "Ava day one");
+
+    expect(await ok(leo, { memberId: ava, type: "block" })).toBeNull();
+
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", result: null });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: secondGame } })).toMatchObject({ status: "void", result: null, chatContainerMemberId: null });
+    expect(await getPrisma().gameTicket.count({ where: { gameId } })).toBe(0);
+    expect(await getPrisma().gameEvent.findFirst({ where: { gameId, type: "blocked" } })).toMatchObject({ actor: leo });
+    // Ava sees exactly what a player leaving looks like: no one told her it was a block.
+    const avas = (await readGame(gameId, ava))!;
+    expect(avas).toMatchObject({ status: "void", result: null, tickets: [] });
+    expect(avas.players.find((player) => !player.isMe)).toMatchObject({ left: true, memberId: null, firstName: "Leo", avatarUrl: null, profileAvatarUrl: null });
+    expect(avas.days[0].mine).toMatchObject({ text: "Ava day one" });
+    expect(avas.days[0].others).toEqual([]);
+    expect(JSON.stringify(avas)).not.toContain(leo);
+    expect((await readHome(ava)).games.map((game) => game.id)).toContain(gameId);
+    expect((await readHome(ava)).blocked).toEqual([]);
+    // Leo's Home drops her and her game; Settings lists her by his own name for her.
+    const leosHome = await readHome(leo);
+    expect(leosHome.games.map((game) => game.id)).not.toContain(gameId);
+    expect(leosHome.blocked).toEqual([{ firstName: "Bestie", memberId: ava }]);
+    expect(JSON.stringify(await readGame(gameId, leo))).not.toContain("Ava day one");
+    expect(await run(ava, { entryId: randomUUID(), gameId, kind: "words", mediaKeys: [], text: "again", type: "post" }))
+      .toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+    // Blocking again changes nothing.
+    expect(await ok(leo, { memberId: ava, type: "block" })).toBeNull();
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: leo } })).toBe(1);
+  });
+
+  it("refuses invites and rematches either way until the blocker unblocks", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const first = await live(leo, ava);
+    await words(leo, first, "Leo only");
+    const settled = (await devSettleNow(first, leo))!;
+    const ticket = settled.tickets[0];
+    await ok(ava, { memberId: leo, type: "block" });
+
+    // The settled game stays for Leo, Ava shown as having left; its ticket can't be marked done.
+    const leos = (await readGame(first, leo))!;
+    expect(leos).toMatchObject({ status: "settled" });
+    expect(leos.players.find((player) => !player.isMe)).toMatchObject({ left: true, memberId: null });
+    expect(leos.tickets).toEqual([expect.objectContaining({ id: ticket.id, left: true, owedByMemberId: "" })]);
+    expect(await run(leo, { ticketId: ticket.id, type: "redeem" })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    // Ava, who blocked, no longer has it or its ticket on Home.
+    const avasHome = await readHome(ava);
+    expect(avasHome.games.map((game) => game.id)).not.toContain(first);
+    expect([...avasHome.wallet.held, ...avasHome.wallet.owed].map((held) => held.id)).not.toContain(ticket.id);
+
+    const fromLeo = await invite(leo);
+    expect(await run(ava, { termsVersion: 1, timeZone: "America/New_York", token: fromLeo.token, type: "join" }))
+      .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE", message: "You blocked them. Unblock them in Settings to play." } });
+    const fromAva = await invite(ava);
+    expect(await run(leo, { termsVersion: 1, timeZone: "America/New_York", token: fromAva.token, type: "join" }))
+      .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE", message: "This invite isn't open anymore." } });
+    expect(await run(leo, { change: { kind: "start_now" }, proposalId: randomUUID(), termsVersion: 1, timeZone: "America/New_York", token: fromAva.token, type: "negotiate" }))
+      .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
+    expect(await run(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: first, terms: TERMS, type: "createGame" }))
+      .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
+
+    await ok(ava, { memberId: leo, type: "unblock" });
+    expect((await readHome(ava)).blocked).toEqual([]);
+    expect(await ok(ava, { termsVersion: 1, timeZone: "America/New_York", token: fromLeo.token, type: "join" })).toMatchObject({ status: "live" });
+    // What the block called off stays called off; the history is back.
+    expect((await readGame(first, leo))!.players.some((player) => player.left)).toBe(false);
+  });
+
+  it("blocks whatever history the pair has: hundreds of cancelled rematches can't stop it", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const settled = await live(leo, ava);
+    await devSettleNow(settled, leo);
+    // Leo addressed rematches to Ava and cancelled each one, far past any bound.
+    const template = await getPrisma().game.findUniqueOrThrow({ where: { id: settled } });
+    const cancelled = Array.from({ length: 201 }, () => randomUUID());
+    await getPrisma().game.createMany({ data: cancelled.map((id) => ({ createdBy: leo, wordsOwnerMemberId: leo, id, lengthDays: 7, previousGameId: settled,
+      round: 2, status: "void", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
+    await getPrisma().gameInvitee.createMany({ data: cancelled.map(gameId => ({ gameId, seat: 1, memberId: ava })) });
+    await getPrisma().gamePlayer.createMany({ data: cancelled.map((gameId) => ({ gameId, memberId: leo, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "America/New_York" })) });
+    // And one more rematch, still open on Ava's Home.
+    const open = (await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: settled, terms: TERMS, type: "createGame" }))!;
+
+    expect(await ok(ava, { memberId: leo, type: "block" })).toBeNull();
+
+    expect(await getPrisma().gameBlock.count({ where: { blockedMemberId: leo, blockerMemberId: ava } })).toBe(1);
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: open.id } })).toMatchObject({ status: "void" });
+    expect((await readHome(ava)).games.map((game) => game.id)).not.toContain(open.id);
+    expect(await run(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: settled, terms: TERMS, type: "createGame" }))
+      .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
+  });
+
+  it("ends every open game between them, however many there are, before it reports success", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    // More open addressed invites than one batch, as overlapping rematch requests could leave.
+    const template = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
+    const invites = Array.from({ length: 55 }, () => randomUUID());
+    await getPrisma().game.createMany({ data: invites.map((id) => ({ createdBy: leo, wordsOwnerMemberId: leo, id, lengthDays: 7, round: 2,
+      inviteExpiresAt: new Date(Date.now() + 86_400_000), status: "invited", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
+    await getPrisma().gameInvitee.createMany({ data: invites.map(gameId => ({ gameId, seat: 1, memberId: ava })) });
+    await getPrisma().gamePlayer.createMany({ data: invites.map((id) => ({ gameId: id, memberId: leo, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "America/New_York" })) });
+
+    await ok(ava, { memberId: leo, type: "block" });
+
+    expect(await getPrisma().game.count({ where: { id: { in: [gameId, ...invites] }, status: { not: "void" } } })).toBe(0);
+    expect(await run(leo, { entryId: randomUUID(), gameId, kind: "words", mediaKeys: [], text: "still here", type: "post" }))
+      .toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+  });
+
+  it("ends the pair's game chat: their games leave it, nothing waiting goes out, and Murph sees no game there", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const room = `hbm_gamesafe_room_${randomUUID().slice(0, 8)}`;
+    await getPrisma().hostedMember.create({ data: { id: room } });
+    memberIds.push(room);
+    await getPrisma().game.update({ data: { chatContainerMemberId: room }, where: { id: gameId } });
+    await getPrisma().$transaction((tx) => reserveGameChatLifecycleTx({ gameId, kind: "started", now: new Date(), tx }));
+    expect((await readGameChatState(room, [leo, ava])).games.map((game) => game.id)).toContain(gameId);
+
+    await ok(ava, { memberId: leo, type: "block" });
+
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ chatContainerMemberId: null, status: "void" });
+    expect(await getPrisma().hostedLinqDelivery.findMany({ where: { source: "game_lifecycle", sourceRef: gameId } }))
+      .toEqual([expect.objectContaining({ skipReason: "game_blocked", status: "skipped" })]);
+    expect(await readGameChatState(room, [leo, ava])).toEqual({ games: [] });
+  });
+
+  it("hides a reported post from its reporter only, keeps a sealed snapshot, and tells the team once", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const rude = await words(ava, gameId, "Some rude words");
+    // Locked until Leo posts that day: nothing he can see yet, so nothing to report.
+    expect(await run(leo, report(gameId, { about: "post", entryId: rude }))).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    await words(leo, gameId, "Leo day one");
+    const before = (await readGame(gameId, leo))!.players.find((player) => !player.isMe)!.score;
+
+    const command = report(gameId, { about: "post", entryId: rude, note: "This was mean" });
+    const reported = (await ok(leo, command))!;
+    expect(reported.days[0].others).toEqual([{ entry: null, hidden: true, seat: 1, status: "posted" }]);
+    expect(reported.players.find((player) => !player.isMe)!.score).toBe(before);
+    expect(JSON.stringify(reported)).not.toContain("Some rude words");
+    // Ava sees nothing different.
+    expect((await readGame(gameId, ava))!.days[0].mine).toMatchObject({ text: "Some rude words" });
+
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    expect(row).toMatchObject({ about: "post", entryId: rude, gameId, reason: "harassment", reportedMemberId: ava, reporterMemberId: leo, snapshotMediaKeys: [], reviewedAt: null });
+    expect(await openGameTexts([
+      { field: "snapshot", memberId: leo, rowId: row.id, table: "game_report", value: row.snapshotTextEncrypted },
+      { field: "note", memberId: leo, rowId: row.id, table: "game_report", value: row.noteEncrypted },
+    ])).toEqual(["Some rude words", "This was mean"]);
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
+    const email = mocks.sendEmail.mock.calls[0]![0];
+    expect(email).toMatchObject({ idempotencyKey: `murph/game-report/${row.id}`, subject: "Murph game report: Harassment or bullying", to: ["safety@example.test"] });
+    expect(email.text).toContain(`Report ID: ${row.id}`);
+    expect(email.text).toContain(`Game ID: ${gameId}`);
+    expect(email.text).toContain("Content: words");
+    for (const secret of ["Some rude words", "This was mean", leo, ava]) expect(email.text).not.toContain(secret);
+
+    // The same report again, by id or by post, is the same report and retries its alert.
+    await ok(leo, command);
+    await ok(leo, report(gameId, { about: "post", entryId: rude, reason: "hate" }));
+    expect(await getPrisma().gameReport.count({ where: { reporterMemberId: leo } })).toBe(1);
+    expect(mocks.sendEmail.mock.calls.map((call) => call[0])).toEqual(Array(3).fill(email));
+    // Nobody else can take its id, and you can't report yourself.
+    expect(await run(ava, report(gameId, { reportId: command.reportId })))
+      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "That report id is taken." } });
+    const mine = await words(leo, gameId, "Leo retake");
+    expect(await run(leo, report(gameId, { about: "post", entryId: mine }))).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+  });
+
+  it("keeps the report when the alert email fails, and sends it on the retry", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const command = report(gameId, { reason: "self_harm" });
+    mocks.sendEmail.mockRejectedValueOnce(new Error("provider down"));
+    await expect(run(leo, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED", retryable: true });
+    expect(await getPrisma().gameReport.count({ where: { id: command.reportId } })).toBe(1);
+    await ok(leo, command);
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("targets pair terms at the most recent applied proposal's author", async () => {
+    const starter = await member("Alex");
+    const proposer = await member("Sam");
+    const gameId = await live(starter, proposer);
+    const proposalId = randomUUID();
+    await ok(proposer, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1,
+      change: { kind: "edit", stakes: [{ kind: "prize", item: "Pick a movie" }] } });
+    expect(await runGameCommand({ actorMemberId: starter, chatContainerMemberId: "synthetic-pair-room",
+      chatPlayerMemberIds: [starter, proposer], beforeMutationTx: async () => {},
+      command: { type: "respondChange", gameId, proposalId, decision: "approve" } })).toMatchObject({ ok: true });
+    const command = report(gameId, { about: "terms" });
+    await ok(starter, command);
+    expect(await getPrisma().gameReport.findUnique({ where: { id: command.reportId } })).toMatchObject({ reportedMemberId: proposer });
+  });
+
+  it("reports a player or their terms, from a game or an invite before accepting, and can block in the same step", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const { gameId, token } = await invite(leo);
+    // Ava holds Leo's link but hasn't accepted: she reports what he wrote, then blocks him.
+    expect(await ok(ava, { about: "terms", reason: "money", reportId: randomUUID(), token, type: "report" })).toBeNull();
+    const terms = await getPrisma().gameReport.findFirstOrThrow({ where: { reporterMemberId: ava } });
+    expect(terms).toMatchObject({ about: "terms", gameId, reportedMemberId: leo });
+    expect((await openGameTexts([{ field: "snapshot", memberId: ava, rowId: terms.id, table: "game_report", value: terms.snapshotTextEncrypted }]))[0])
+      .toBe("Task: 100 pushups\nTask: 10 min abs\nPrize: Breakfast in bed");
+    expect(mocks.sendEmail.mock.calls[0]![0]).toMatchObject({ text: expect.stringContaining("Content: the task and prize or dare they wrote, on an invite") });
+    expect(await ok(ava, { token, type: "block" })).toBeNull();
+    expect(await run(ava, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
+    expect(await run(leo, { about: "player", reason: "other", reportId: randomUUID(), token, type: "report" })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+
+    // In a game: a player report hides their photo from the reporter, and blocks in the same step.
+    const sam = await member("Sam");
+    const gameWithSam = await live(sam, leo);
+    const photoKey = `game/${sam}/${"a".repeat(64)}.jpg`;
+    await getPrisma().gameProfile.update({ data: { photoKey }, where: { memberId: sam } });
+    expect((await readGame(gameWithSam, leo))!.players.find((player) => !player.isMe)!.profileAvatarUrl).not.toBeNull();
+    const reportSam = report(gameWithSam, { block: true, reason: "sexual" });
+    expect(await ok(leo, reportSam)).toMatchObject({ status: "void" });
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportSam.reportId } }))
+      .toMatchObject({ about: "player", reportedMemberId: sam, snapshotMediaKeys: [photoKey] });
+    expect(await getPrisma().gameBlock.count({ where: { blockedMemberId: sam, blockerMemberId: leo } })).toBe(1);
+    expect(mocks.sendEmail.mock.calls.at(-1)![0]).toMatchObject({ text: expect.stringContaining("They blocked the other player too: yes") });
+  });
+
+  it("keeps a report when the reported member deletes their account, and drops their blocks", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const rude = await words(ava, gameId, "Rude words");
+    await words(leo, gameId, "Leo day one");
+    const command = report(gameId, { about: "post", entryId: rude, block: true });
+    await ok(leo, command);
+    const prepared = await prepareGameAccountDeletion({ memberIds: [ava], prisma: getPrisma() });
+    await getPrisma().$transaction(async (tx) => {
+      await applyGameAccountDeletionTx({ memberIds: [ava], now: new Date(), prepared, tx });
+      await tx.hostedMember.delete({ where: { id: ava } });
+    });
+    const kept = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    expect(kept).toMatchObject({ entryId: null, reportedMemberId: null, reporterMemberId: leo });
+    expect((await openGameTexts([{ field: "snapshot", memberId: leo, rowId: kept.id, table: "game_report", value: kept.snapshotTextEncrypted }]))[0]).toBe("Rude words");
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: leo } })).toBe(0);
+  });
+
+  it("recovers an addressed invite report after its block closes the invite and the alert fails", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam");
+    const settled = await live(creator, reporter);
+    await devSettleNow(settled, creator);
+    const { gameId, token } = await invite(creator, { previousGameId: settled });
+    const command = report(gameId, { about: "terms", gameId: undefined, token, block: true });
+    mocks.sendEmail.mockRejectedValueOnce(new Error("synthetic provider failure"));
+    await expect(run(reporter, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED", retryable: true });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void" });
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: reporter, blockedMemberId: creator } })).toBe(1);
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    const email = mocks.sendEmail.mock.calls[0][0];
+    expect(email).toEqual(expectedEmail(row.id, gameId, row.createdAt, "the task and prize or dare they wrote, on an invite", true));
+
+    expect(await ok(reporter, command)).toBeNull();
+    expect(mocks.sendEmail.mock.calls.map(call => call[0])).toEqual([email, email]);
+    expect(await getPrisma().gameReport.count({ where: { reporterMemberId: reporter } })).toBe(1);
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: reporter } })).toBe(1);
+  });
+
+  it("replays the accepted email after a lost response, Ops removal, and changed reason and block inputs", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), gameId = await live(creator, reporter);
+    const entryId = await words(creator, gameId, "Synthetic reported post");
+    await words(reporter, gameId, "Synthetic unlocked post");
+    const command = report(gameId, { about: "post", entryId, note: "Original note", reportedMemberId: reporter });
+    const accepted: SentEmail[] = [];
+    mocks.sendEmail.mockImplementationOnce(async email => {
+      accepted.push(email);
+      throw new Error("synthetic response lost after provider acceptance");
+    });
+    await expect(run(reporter, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED" });
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    const email = accepted[0];
+    expect(email).toEqual(expectedEmail(row.id, gameId, row.createdAt, "words", false));
+    await reviewGameReport({ reportId: row.id, removePost: true });
+
+    await ok(reporter, { ...command, reason: "hate", note: "Changed note", block: true });
+    expect(mocks.sendEmail.mock.calls.map(call => call[0])).toEqual([email, email]);
+    const retried = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: row.id } });
+    expect(retried).toMatchObject({ reason: row.reason, noteEncrypted: row.noteEncrypted, reportedMemberId: creator });
+    expect(await getPrisma().gameBlock.findMany({ where: { blockerMemberId: reporter }, select: { blockedMemberId: true } }))
+      .toEqual([{ blockedMemberId: creator }]);
+  });
+
+  it("recovers a post report after account deletion clears the source and subject", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), gameId = await live(creator, reporter);
+    const entryId = await words(creator, gameId, "Synthetic reported post");
+    await words(reporter, gameId, "Synthetic unlocked post");
+    const command = report(gameId, { about: "post", entryId, block: true });
+    mocks.sendEmail.mockRejectedValueOnce(new Error("synthetic provider failure"));
+    await expect(run(reporter, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED" });
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    const email = mocks.sendEmail.mock.calls[0][0];
+    expect(email).toEqual(expectedEmail(row.id, gameId, row.createdAt, "words", true));
+    await deleteMember(creator);
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: row.id } }))
+      .toMatchObject({ entryId: null, reportedMemberId: null });
+    const beforeMutationTx = vi.fn(async () => {});
+    const result = await runGameCommand({ actorMemberId: reporter, command, beforeMutationTx });
+    if (!result.ok) throw new Error(`Report retry failed: ${result.error.code} ${result.error.message}`);
+    expect(beforeMutationTx).not.toHaveBeenCalled();
+    expect(mocks.sendEmail.mock.calls.map(call => call[0])).toEqual([email, email]);
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: reporter } })).toBe(0);
+  });
+
+  it("recovers an unjoined invite report with the original game id after the creator deletes the game", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), { gameId, token } = await invite(creator);
+    const command = report(gameId, { gameId: undefined, token });
+    mocks.sendEmail.mockRejectedValueOnce(new Error("synthetic provider failure"));
+    await expect(run(reporter, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED" });
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    const email = mocks.sendEmail.mock.calls[0][0];
+    expect(email).toEqual(expectedEmail(row.id, gameId, row.createdAt, "their name and photo, on an invite", false));
+    await deleteMember(creator);
+    expect(await getPrisma().game.findUnique({ where: { id: gameId } })).toBeNull();
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: row.id } }))
+      .toMatchObject({ gameId: null, reportedMemberId: null });
+
+    expect(await ok(reporter, command)).toBeNull();
+    expect(mocks.sendEmail.mock.calls.map(call => call[0])).toEqual([email, email]);
+    // The cleared foreign key can't let a different invite take this report id.
+    const other = await invite(await member("Jo"));
+    expect(await run(reporter, { ...command, token: other.token }))
+      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "That report id is taken." } });
+  });
+
+  it.each(["actor", "about", "entry", "game", "player", "reply as post"] as const)(
+    "refuses mismatched receipt reuse (%s) before blocking or emailing", async mismatch => {
+      const creator = await member("Alex"), reporter = await member("Sam"), outsider = await member("Jo");
+      const gameId = await live(creator, reporter);
+      const entryId = await words(creator, gameId, "Synthetic reported post");
+      const mine = await words(reporter, gameId, "Synthetic unlocked post"), replyId = randomUUID();
+      await ok(creator, { type: "replyToPost", gameId, entryId: mine, replyId, kind: "text", text: "Synthetic reply" });
+      const command = report(gameId, mismatch === "player" ? { reportedMemberId: creator }
+        : mismatch === "reply as post" ? { about: "reply", replyId } : { about: "post", entryId });
+      await ok(reporter, command);
+      const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+      const changed: ReportCommand = { ...command, block: true };
+      if (mismatch === "about") { changed.about = "terms"; changed.entryId = undefined; }
+      if (mismatch === "entry") changed.entryId = randomUUID();
+      if (mismatch === "game") changed.gameId = randomUUID();
+      if (mismatch === "player") changed.reportedMemberId = outsider;
+      if (mismatch === "reply as post") { changed.about = "post"; changed.entryId = entryId; changed.replyId = undefined; }
+      mocks.sendEmail.mockClear();
+
+      expect(await run(mismatch === "actor" ? outsider : reporter, changed))
+        .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "That report id is taken." } });
+      expect(mocks.sendEmail).not.toHaveBeenCalled();
+      expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: { in: [reporter, outsider] } } })).toBe(0);
+      expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: row.id } })).toEqual(row);
+    },
+  );
+
+  it.each(["token", "origin"] as const)("refuses mismatched invite receipt reuse (%s) before side effects", async mismatch => {
+    const creator = await member("Alex"), reporter = await member("Sam"), { gameId, token } = await invite(creator);
+    const other = await invite(creator);
+    const command = report(gameId, { gameId: undefined, token });
+    await ok(reporter, command);
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    mocks.sendEmail.mockClear();
+    const changed = mismatch === "token" ? { ...command, token: other.token, block: true }
+      : { ...command, token: undefined, gameId, block: true };
+    expect(await run(reporter, changed)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "That report id is taken." } });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: reporter } })).toBe(0);
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: row.id } })).toEqual(row);
+  });
+
+  it("recovers a terms receipt even when the identical command names a different subject", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), gameId = await live(creator, reporter);
+    const command = report(gameId, { about: "terms", reportedMemberId: reporter });
+    await ok(reporter, command);
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } });
+    expect(row.reportedMemberId).toBe(creator);
+    const email = mocks.sendEmail.mock.calls[0][0];
+    await ok(reporter, command);
+    expect(mocks.sendEmail.mock.calls.map(call => call[0])).toEqual([email, email]);
+  });
+
+  it("still refuses a new report on a closed invite", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), { gameId, token } = await invite(creator);
+    await ok(creator, { type: "cancelInvite", gameId });
+    expect(await run(reporter, report(gameId, { gameId: undefined, token })))
+      .toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a new report on a removed post", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), gameId = await live(creator, reporter);
+    const entryId = await words(creator, gameId, "Synthetic removed post");
+    await words(reporter, gameId, "Synthetic unlocked post");
+    await removeGamePostForReview(entryId);
+    expect(await run(reporter, report(gameId, { about: "post", entryId })))
+      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("admits an unlisted reporter through the HTTP door after their invite closes", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), outsider = await member("Jo");
+    const { gameId, token } = await invite(creator);
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", creator);
+    try {
+      expect(await canEnterGame(reporter, token)).toBe(true);
+      await ok(reporter, report(gameId, { gameId: undefined, token }));
+      await ok(creator, { type: "cancelInvite", gameId });
+      expect(await canEnterGame(reporter, token)).toBe(true);
+      expect(await canEnterGame(outsider, token)).toBe(false);
+      await deleteMember(creator);
+      expect(await canEnterGame(reporter, token)).toBe(true);
+      expect(await canEnterGame(outsider, token)).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it.each(["post", "player", "terms", "invite", "reply"] as const)("freezes the accepted alert inputs for a %s report", async kind => {
+    const creator = await member("Alex"), reporter = await member("Sam");
+    const { gameId, token } = await invite(creator);
+    let command = report(gameId, { about: "player", block: true });
+    if (kind === "invite") command = { ...command, gameId: undefined, token };
+    else {
+      await ok(reporter, { type: "join", token, termsVersion: 1, timeZone: "America/New_York" });
+      await devStartNow(gameId, creator).catch(() => undefined);
+      command.about = kind;
+      if (kind === "post" || kind === "reply") {
+        const entryId = await words(creator, gameId, "Synthetic reported post");
+        const mine = await words(reporter, gameId, "Synthetic unlocked post");
+        if (kind === "post") command.entryId = entryId;
+        else {
+          command.replyId = randomUUID();
+          await ok(creator, { type: "replyToPost", gameId, entryId: mine, replyId: command.replyId, kind: "text", text: "Synthetic reply" });
+        }
+      }
+    }
+    await ok(reporter, command);
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: command.reportId } })).toMatchObject({
+      alertBlocked: true, alertEntryKind: kind === "post" ? "words" : null,
+      alertFromInvite: kind === "invite", alertGameId: gameId,
+    });
+  });
+
+  it("recovers a legacy receipt without rebuilding its email, and still blocks its stored subject", async () => {
+    const creator = await member("Alex"), reporter = await member("Sam"), { gameId, token } = await invite(creator);
+    const command = report(gameId, { gameId: undefined, token });
+    await ok(reporter, command);
+    await getPrisma().$executeRaw`UPDATE game_report SET alert_blocked = NULL, alert_entry_kind = NULL,
+      alert_from_invite = NULL, alert_game_id = NULL WHERE id = ${command.reportId}`;
+    await ok(creator, { type: "cancelInvite", gameId });
+    mocks.sendEmail.mockClear();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await ok(reporter, { ...command, block: true })).toBeNull();
+      expect(mocks.sendEmail).not.toHaveBeenCalled();
+      expect(warn.mock.calls).toEqual([["Game report alert skipped for a legacy receipt.", { reportId: command.reportId }]]);
+      expect(await getPrisma().gameBlock.findMany({ where: { blockerMemberId: reporter }, select: { blockedMemberId: true } }))
+        .toEqual([{ blockedMemberId: creator }]);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("refuses money in a stake before anything is stored", async () => {
+    const leo = await member("Leo");
+    const gameId = randomUUID();
+    expect(await run(leo, { gameId, inviteeFirstName: "Ava", terms: { ...TERMS, stakes: [{ item: "Venmo me $20", kind: "prize" }] }, type: "createGame" }))
+      .toMatchObject({ ok: false, error: { code: "CONTENT_NOT_ALLOWED", message: "This can't be posted." }, status: 422 });
+    expect(await getPrisma().game.findUnique({ where: { id: gameId } })).toBeNull();
+  });
+
+  it("lets ops take the post down, end the games and suspend the member, then leaves the queue", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const gameId = await live(leo, ava);
+    const rude = await words(ava, gameId, "Rude again");
+    await words(leo, gameId, "Leo day one");
+    const command = report(gameId, { about: "post", entryId: rude, reason: "hate" });
+    await ok(leo, command);
+    const reportId = command.reportId;
+    const queued = (await readGameReportQueue()).find((item) => item.reportId === reportId);
+    expect(queued).toMatchObject({ content: "words", gameId, postRemoved: false, reason: "Hate", reportedSuspended: false, snapshotText: "Rude again" });
+
+    expect(await reviewGameReport({ endGames: true, removePost: true, reportId, suspendMember: true })).toEqual({ found: true });
+    expect(await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: rude } }))
+      .toMatchObject({ mediaKeys: [], textEncrypted: null, withdrawnReason: "removed" });
+    expect((await readGame(gameId, ava))!.days[0].mine).toBeNull();
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void" });
+    expect((await getPrisma().hostedMember.findUniqueOrThrow({ where: { id: ava } })).suspendedAt).not.toBeNull();
+    expect((await readGameReportQueue()).map((item) => item.reportId)).not.toContain(reportId);
+    // The snapshot outlives the post.
+    expect((await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportId } })).snapshotTextEncrypted).not.toBeNull();
+    expect(await reviewGameReport({ reportId, removePost: true })).toEqual({ found: true });
+  });
+});

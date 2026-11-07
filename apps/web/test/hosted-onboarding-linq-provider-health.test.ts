@@ -1192,6 +1192,7 @@ describe("resolveHostedLinqEgressPolicyForRuntime", () => {
       target: "chat-current",
       targetKind: "thread",
     })).resolves.toEqual({
+      service: null,
       policy: {
         code: "line_critical",
         kind: "block",

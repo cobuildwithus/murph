@@ -40,6 +40,6 @@ test('rebuildCliRuntimeArtifacts verifies package shape with node --import=tsx',
     'exec',
     'node',
     '--import=tsx',
-    'packages/cli/scripts/verify-package-shape.ts',
+    'packages/cli/scripts/verify-runtime-artifacts.ts',
   ])
 })

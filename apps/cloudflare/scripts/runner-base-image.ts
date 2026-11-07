@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import {
+  hostedRunnerBaseImageBuildCacheTag,
   hostedRunnerBaseImageFingerprintTag,
   hostedRunnerBaseImageRemoteTag,
   hostedLocalRunnerBaseImageTag,
@@ -25,11 +27,15 @@ export interface RunnerBaseImagePreparationResult {
 }
 
 export async function computeRunnerBaseImageSourceFingerprint(): Promise<string> {
-  const dockerfile = await readFile(runnerBaseDockerfile);
-  return createHash("sha256")
-    .update("Dockerfile.cloudflare-hosted-runner-base\0")
-    .update(dockerfile)
-    .digest("hex");
+  const hash = createHash("sha256");
+  for (const source of [
+    "Dockerfile.cloudflare-hosted-runner-base",
+    "patches/codex-public-live.patch",
+  ]) {
+    const content = await readFile(path.join(repoRoot, source));
+    hash.update(`${source}\0${content.length}\0`).update(content);
+  }
+  return hash.digest("hex");
 }
 
 export function readRunnerBaseImageFingerprint(
@@ -57,6 +63,58 @@ export function readRunnerBaseImageFingerprint(
 
   const fingerprint = (result.stdout ?? "").trim();
   return fingerprint && fingerprint !== "<no value>" ? fingerprint : null;
+}
+
+// Publication waits belong before integration jobs and short-lived credentials.
+// Inspect only config metadata: do not pull layers or compile a missing image.
+export async function waitForPublishedRunnerBaseImage(input: {
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+} = {}): Promise<{ fingerprint: string; imageTag: string }> {
+  const timeoutMs = input.timeoutMs ?? 90 * 60_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("Runner base publication timeout must be a positive integer.");
+  }
+  const fingerprint = await computeRunnerBaseImageSourceFingerprint();
+  const imageTag = hostedRunnerBaseImageFingerprintTag(fingerprint);
+  const deadline = Date.now() + timeoutMs;
+  process.stdout.write(`Waiting for published runner base image: ${imageTag}\n`);
+  while (Date.now() < deadline) {
+    const result = spawnSync("docker", [
+      "buildx", "imagetools", "inspect", imageTag, "--format", "{{json .Image}}",
+    ], {
+      env: input.env ?? process.env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: Math.min(30_000, Math.max(1, deadline - Date.now())),
+      maxBuffer: 1024 * 1024,
+    });
+    if (result.status === 0 && publishedImageMatches(result.stdout, fingerprint)) {
+      process.stdout.write(`Published runner base image ready: ${imageTag}\n`);
+      return { fingerprint, imageTag };
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs > 0) await sleep(Math.min(30_000, remainingMs));
+  }
+  throw new Error(`Timed out waiting for published runner base image: ${imageTag}`);
+}
+
+function publishedImageMatches(configJson: string, fingerprint: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(configJson);
+    if (!isRecord(parsed)) return false;
+    // Buildx returns one config for a single platform, or a platform-keyed map.
+    const image = parsed[runnerBaseImagePlatform] ?? parsed;
+    if (!isRecord(image) || image.os !== "linux" || image.architecture !== "amd64") return false;
+    if (!isRecord(image.config) || !isRecord(image.config.Labels)) return false;
+    return image.config.Labels[runnerBaseImageSourceFingerprintLabel] === fingerprint;
+  } catch {
+    return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function prepareRunnerBaseImage(input: {
@@ -107,11 +165,21 @@ async function buildRunnerBaseImage(input: {
       "buildx",
       "build",
       input.push ? "--push" : "--load",
+      "--cache-from",
+      `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag}`,
+      ...(input.push ? [
+        "--cache-to",
+        `type=registry,ref=${hostedRunnerBaseImageBuildCacheTag},mode=max`,
+      ] : []),
       "--platform",
       runnerBaseImagePlatform,
       "-f",
       runnerBaseDockerfile,
       ...tags.flatMap((tag) => ["-t", tag]),
+      // Without a value, Docker forwards CODEX_CARGO_JOBS from the environment
+      // only when it is set, so the Dockerfile default applies otherwise.
+      "--build-arg",
+      "CODEX_CARGO_JOBS",
       "--label",
       `${runnerBaseImageSourceFingerprintLabel}=${input.fingerprint}`,
       "--label",
@@ -208,17 +276,22 @@ function shouldRunMain(): boolean {
 
 function parseForceArg(argv: readonly string[]): boolean {
   const normalized = argv[0] === "--" ? argv.slice(1) : argv;
-  const unknown = normalized.filter((arg) => arg !== "--force" && arg !== "--push");
+  const unknown = normalized.filter((arg) => arg !== "--force" && arg !== "--push" && arg !== "--wait-published");
   if (unknown.length > 0) {
     throw new Error(`Unsupported runner base image argument: ${unknown.join(" ")}`);
+  }
+  if (normalized.includes("--wait-published") && normalized.some((arg) => arg === "--force" || arg === "--push")) {
+    throw new Error("Publication waiting cannot build or push an image.");
   }
   return normalized.includes("--force");
 }
 
 if (shouldRunMain()) {
   const argv = process.argv.slice(2);
-  await prepareRunnerBaseImage({
-    force: parseForceArg(argv),
-    push: (argv[0] === "--" ? argv.slice(1) : argv).includes("--push"),
-  });
+  const force = parseForceArg(argv);
+  if (argv.includes("--wait-published")) {
+    await waitForPublishedRunnerBaseImage();
+  } else {
+    await prepareRunnerBaseImage({ force, push: argv.includes("--push") });
+  }
 }

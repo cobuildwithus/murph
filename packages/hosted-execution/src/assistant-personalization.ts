@@ -1,9 +1,8 @@
 import {
-  assistantBasePersonaIdValues,
+  assistantPersonaIdSchema,
   assistantPersonalityScoreSchema,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
-  type AssistantBasePersonaId,
   type AssistantPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -25,8 +24,6 @@ export type HostedRuntimeAssistantPersonalizationModelToolRequest =
   | { action: "read" }
   | {
       action: "update";
-      mainPersona?: AssistantBasePersonaId;
-      supportingPersona?: AssistantBasePersonaId | null;
       tone?: AssistantTonePreference;
       voice?: AssistantVoiceOptionId;
     };
@@ -49,7 +46,7 @@ const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.union([
   }).strict(),
   z.object({
     automationId: z.string().trim().min(1).max(256),
-    occurrenceAt: z.string().datetime({ offset: true }),
+    occurrenceAt: z.isoDateTime({ offset: true }),
     toolCallId: z.string().trim().min(1).max(256).optional(),
   }).strict(),
 ]);
@@ -60,10 +57,10 @@ export type HostedRuntimeAssistantPersonalizationToolAuthority = z.infer<
 
 
 export interface HostedRuntimeAssistantPersonalizationSnapshot {
-  mainPersona: AssistantBasePersonaId;
+  mainPersona: "classic";
+  supportingPersona: null;
   model: HostedAssistantProductModel;
   solAvailable: boolean;
-  supportingPersona: AssistantBasePersonaId | null;
   tone: AssistantTonePreference;
   voice: AssistantVoiceOptionId;
 }
@@ -121,8 +118,6 @@ const hostedRuntimeAssistantPersonalizationReadRequestSchema = z
 
 const hostedRuntimeAssistantPersonalizationUpdateRequestSchema = z.object({
   action: z.literal("update"),
-  mainPersona: z.enum(assistantBasePersonaIdValues).optional(),
-  supportingPersona: z.enum(assistantBasePersonaIdValues).nullable().optional(),
   tone: z.enum(assistantTonePreferenceValues).optional(),
   voice: z.enum(assistantVoiceOptionIdValues).optional(),
 }).strict();
@@ -130,49 +125,23 @@ const hostedRuntimeAssistantPersonalizationUpdateRequestSchema = z.object({
 function requireValidAssistantPersonalizationUpdate(
   request: {
     action: string;
-    mainPersona?: unknown;
-    supportingPersona?: unknown;
     tone?: unknown;
     voice?: unknown;
   },
   context: z.RefinementCtx,
 ): void {
-  const mainPersonaRequested = request.mainPersona !== undefined;
-  const supportingPersonaRequested = request.supportingPersona !== undefined;
   if (
     request.action === "update"
-    && request.mainPersona === undefined
-    && request.supportingPersona === undefined
     && request.tone === undefined
     && request.voice === undefined
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message:
-        "Assistant personalization update requires a main persona, supporting persona, tone, or voice.",
+        "Assistant personalization update requires a tone or voice.",
     });
   }
-  if (
-    request.action === "update"
-    && mainPersonaRequested !== supportingPersonaRequested
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message:
-        "Assistant persona updates require both main and supporting persona fields.",
-    });
-  }
-  if (
-    request.action === "update"
-    && request.mainPersona !== undefined
-    && request.supportingPersona === request.mainPersona
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Supporting persona must differ from the main persona.",
-      path: ["supportingPersona"],
-    });
-  }
+
 }
 
 export const hostedRuntimeAssistantPersonalizationModelToolRequestSchema = z
@@ -202,19 +171,30 @@ const hostedRuntimeAssistantPersonalityUpdateSchema = z
 export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
   .discriminatedUnion("action", [
     hostedRuntimeAssistantPersonalizationReadRequestSchema,
-    hostedRuntimeAssistantPersonalizationUpdateRequestSchema,
+    hostedRuntimeAssistantPersonalizationUpdateRequestSchema.extend({
+      mainPersona: assistantPersonaIdSchema.optional(),
+      supportingPersona: assistantPersonaIdSchema.nullable().optional(),
+    }),
     z.object({
       action: z.literal(HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION),
       personality: hostedRuntimeAssistantPersonalityUpdateSchema,
     }).strict(),
   ])
-  .superRefine(requireValidAssistantPersonalizationUpdate);
+  .superRefine(requireValidAssistantPersonalizationUpdate)
+  .transform((request): HostedRuntimeAssistantPersonalizationToolRequest => {
+    if (request.action !== "update") return request;
+    return {
+      action: request.action,
+      ...(request.tone === undefined ? {} : { tone: request.tone }),
+      ...(request.voice === undefined ? {} : { voice: request.voice }),
+    };
+  });
 
 const hostedRuntimeAssistantPersonalizationSnapshotSchema = z.object({
-  mainPersona: z.enum(assistantBasePersonaIdValues),
+  mainPersona: assistantPersonaIdSchema.transform(() => "classic" as const),
+  supportingPersona: assistantPersonaIdSchema.nullable().transform(() => null),
   model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
   solAvailable: z.boolean(),
-  supportingPersona: z.enum(assistantBasePersonaIdValues).nullable(),
   tone: z.enum(assistantTonePreferenceValues),
   voice: z.enum(assistantVoiceOptionIdValues),
 }).strict();

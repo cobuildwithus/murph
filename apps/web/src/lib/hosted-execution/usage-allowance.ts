@@ -26,19 +26,16 @@ import {
   normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowanceOpenAiImageModelId,
-  normalizeHostedAiUsageAllowancePricedModelId,
+  normalizeHostedAiUsageLedgerModelId,
   type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
   type HostedAiUsageAllowanceElevenLabsTtsPricedModel,
   type HostedAiUsageAllowanceOpenAiImagePricedModel,
-  type HostedAiUsageAllowancePricedModel,
+  type HostedAiUsageLedgerModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
-  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
-} from "@murphai/hosted-execution/assistant-model";
 
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
@@ -55,14 +52,10 @@ import {
   buildHostedStarterUsageLifetimePeriod,
 } from "../hosted-onboarding/starter-usage";
 import {
-  HOSTED_FAMILY_BILLING_PLAN_CODE,
-  readHostedFamilyAccessForMember,
-} from "../hosted-onboarding/family-plan";
-import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
   hasActiveHostedThreadContainerAccessWithParticipants,
-  readActiveHostedMemberAccess,
+  readGameChatAllowanceBeneficiary,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import {
@@ -72,7 +65,12 @@ import {
   classifyHostedGroupUsageCapacity,
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
-import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import { settleHostedUsageCreditForUsageTx } from "./usage-credit-usage-settlement";
+import {
+  HOSTED_LIVE_PRICING_SOURCE,
+  HOSTED_LIVE_PRICING_VERSION,
+  priceHostedLiveUsage,
+} from "./usage-live";
 import {
   HOSTED_LOB_USAGE_PRICING_SOURCE,
   HOSTED_LOB_USAGE_PRICING_VERSION,
@@ -203,7 +201,7 @@ type HostedAiUsageAllowancePricingModelSource =
   | "served";
 
 interface HostedAiUsageAllowancePricingModelResolution {
-  model: HostedAiUsageAllowancePricedModel | null;
+  model: HostedAiUsageLedgerModel | null;
   requestedModel: string | null;
   servedModel: string | null;
   source: HostedAiUsageAllowancePricingModelSource | null;
@@ -220,11 +218,11 @@ interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierNumerator: bigint;
   pricingSource: string;
   pricingVersion: string;
-  requiredProviderKind: "openai" | "venice" | null;
+  requiredProviderKind: "openai" | null;
 }
 
 type HostedAiUsageAllowanceTokenPricingBasesByModel = Record<
-  HostedAiUsageAllowancePricedModel,
+  HostedAiUsageLedgerModel,
   Partial<Record<AssistantUsageTokenPricingBasis, HostedAiUsageAllowanceTokenPricingBasisConfig>>
   & {
     standard: HostedAiUsageAllowanceTokenPricingBasisConfig;
@@ -370,9 +368,33 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
-  const familyAccess = await readHostedFamilyAccessForMember({
-    memberId: input.memberId,
-    prisma: input.tx,
+  const familyAccess = await input.tx.hostedAccountGroupMembership.findFirst({
+    relationLoadStrategy: "join",
+    orderBy: { createdAt: "asc" },
+    where: {
+      memberId: input.memberId,
+      status: "active",
+      group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+    },
+    select: {
+      planCode: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+      group: {
+        select: {
+          billingRef: {
+            select: {
+              currentBillingPlanCode: true,
+              currentBillingPhase: true,
+              currentPeriodEnd: true,
+              currentPeriodStart: true,
+            },
+          },
+        },
+      },
+    },
   });
   if (!familyAccess) {
     return null;
@@ -382,17 +404,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     return null;
   }
 
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      currentBillingPlanCode: true,
-      currentBillingPhase: true,
-      currentPeriodEnd: true,
-      currentPeriodStart: true,
-    },
-    where: {
-      groupId: familyAccess.groupId,
-    },
-  });
+  const billingRef = familyAccess.group.billingRef;
   const periodBillingRef =
     billingRef?.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE &&
     billingRef.currentBillingPhase === "paid"
@@ -443,8 +455,10 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
     return null;
   }
 
-  return await readActiveHostedMemberAccess({
-    memberId: input.containerMemberId,
+  return hasActiveHostedThreadContainerAccessWithParticipants({
+    container: input.container,
+    containerMemberId: input.containerMemberId,
+    owner: input.threadContainer.owner,
     now: input.now,
     prisma: input.tx,
   });
@@ -457,14 +471,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_PRIORITY_PRICING_VERSION =
   "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority";
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
-  "venice-api-pricing-2026-08-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
   "https://developers.openai.com/api/docs/pricing";
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE =
-  "https://docs.venice.ai/overview/pricing";
 const HOSTED_AI_USAGE_RECOVERY_URL =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
@@ -503,10 +513,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE = 510n;
 const MS_PER_PRICING_MINUTE = 60_000n;
 
 // ElevenLabs TTS is character-priced rather than token-priced.
-// Rates are the public ElevenAPI pay-as-you-go rates for Text to Speech:
-// Flash/Turbo: $0.05 per 1K characters; Multilingual v2/v3: $0.10 per 1K.
+// Preserve the existing legacy-model accounting rates from June 18.
+// Eleven v4 uses its September 28 regular public API rate, without promotions.
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION =
-  "elevenlabs-tts-pricing-2026-06-18";
+  "elevenlabs-tts-pricing-2026-09-28";
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE =
   "https://elevenlabs.io/pricing/api";
 const CHARACTERS_PER_TTS_PRICING_UNIT = 1_000n;
@@ -517,6 +527,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
   eleven_turbo_v2: 50_000n,
   eleven_turbo_v2_5: 50_000n,
   eleven_v3: 100_000n,
+  // Regular v4 rate; exclude the launch discount that expires October 12.
+  eleven_v4: 80_000n,
 } as const satisfies Record<HostedAiUsageAllowanceElevenLabsTtsPricedModel, bigint>;
 
 // ElevenLabs Music is priced by generated duration.
@@ -583,18 +595,12 @@ const hostedGeminiVideoAnalysisRolloutModels = new Set<string>(
   HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
 );
 
+// Historical ledger pricing only: old runners and retries can report after rollout.
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 400_000n,
   cacheWriteUsdMicrosPerMillionTokens: 5_000_000n,
   inputUsdMicrosPerMillionTokens: 4_000_000n,
   outputUsdMicrosPerMillionTokens: 20_000_000n,
-} as const;
-
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 200_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
-  inputUsdMicrosPerMillionTokens: 2_000_000n,
-  outputUsdMicrosPerMillionTokens: 12_000_000n,
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
@@ -605,9 +611,33 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
-  HostedAiUsageAllowancePricedModel,
+  HostedAiUsageLedgerModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6.1-terra": {
+    cachedInputUsdMicrosPerMillionTokens: 50_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 1_250_000n,
+    inputUsdMicrosPerMillionTokens: 1_000_000n,
+    outputUsdMicrosPerMillionTokens: 5_000_000n,
+  },
+  "gpt-6.1-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 100_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
+  "gpt-6-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 200_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
+  "gpt-6-luna": {
+    cachedInputUsdMicrosPerMillionTokens: 10_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 125_000n,
+    inputUsdMicrosPerMillionTokens: 100_000n,
+    outputUsdMicrosPerMillionTokens: 500_000n,
+  },
   "gpt-6-astra": {
     cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
     cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
@@ -615,42 +645,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
     outputUsdMicrosPerMillionTokens: 50_000_000n,
   },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
-  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
-
-const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Partial<Record<
-  HostedAiUsageAllowancePricedModel,
-  HostedAiUsageAllowanceModelPrice
->> = {
-  "gpt-5.6-sol": {
-    cachedInputUsdMicrosPerMillionTokens: 630_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 7_810_000n,
-    inputUsdMicrosPerMillionTokens: 6_250_000n,
-    outputUsdMicrosPerMillionTokens: 37_500_000n,
-  },
-  "gpt-5.6-terra": {
-    cachedInputUsdMicrosPerMillionTokens: 310_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 3_910_000n,
-    inputUsdMicrosPerMillionTokens: 3_130_000n,
-    outputUsdMicrosPerMillionTokens: 18_750_000n,
-  },
-  // The hosted provider maps Luna to regular openai-gpt-56-luna, not Luna Pro.
-  "gpt-5.6-luna": {
-    cachedInputUsdMicrosPerMillionTokens: 30_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 330_000n,
-    inputUsdMicrosPerMillionTokens: 270_000n,
-    outputUsdMicrosPerMillionTokens: 1_600_000n,
-  },
-};
-
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS = {
-  multiplierDenominator: 1n,
-  multiplierNumerator: 1n,
-  pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE,
-  pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION,
-  requiredProviderKind: "venice",
-} as const satisfies HostedAiUsageAllowanceTokenPricingBasisConfig;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   "openai-flex": {
@@ -677,7 +673,56 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   },
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
+  standard: {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+    requiredProviderKind: "openai",
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-standard",
+  },
+  "openai-flex": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-flex",
+  },
+  "openai-priority": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-priority"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-priority",
+  },
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6.1-terra": {
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES.standard,
+      pricingVersion: "openai-api-pricing-2026-10-26-gpt-6.1-terra-standard",
+    },
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-flex"],
+      pricingVersion: "openai-api-pricing-2026-10-26-gpt-6.1-terra-openai-flex",
+    },
+    "openai-priority": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-priority"],
+      pricingVersion: "openai-api-pricing-2026-10-26-gpt-6.1-terra-openai-priority",
+    },
+  },
+  "gpt-6.1-sol": {
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES.standard,
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-standard",
+    },
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-flex"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-flex",
+    },
+    "openai-priority": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-priority"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-priority",
+    },
+  },
+  "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
+  "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-astra": {
     "openai-flex": {
       ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
@@ -691,9 +736,28 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
     },
   },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
-  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
 } as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
+
+// Informational rates share the exact allowance-pricing owner. Historical
+// diagnostics always use recorded ledger cost, never reprice old usage.
+export function readHostedUsageDiagnosticModelRates() {
+  return (["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-luna"] as const).flatMap((model) =>
+    (["standard", "openai-flex", "openai-priority"] as const).map((pricingBasis) => {
+      const price = HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[model];
+      const basis = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[model][pricingBasis];
+      const rate = (value: bigint) => Number(value * basis.multiplierNumerator)
+        / Number(basis.multiplierDenominator) / 1_000_000;
+      return {
+        model, pricingBasis, pricingVersion: basis.pricingVersion,
+        inputUsdPerMillion: rate(price.inputUsdMicrosPerMillionTokens),
+        cachedInputUsdPerMillion: rate(price.cachedInputUsdMicrosPerMillionTokens),
+        cacheWriteUsdPerMillion: rate(price.cacheWriteUsdMicrosPerMillionTokens ?? 0n),
+        outputUsdPerMillion: rate(price.outputUsdMicrosPerMillionTokens),
+      };
+    }),
+  );
+}
 
 export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,
@@ -715,6 +779,11 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const counted = credentialSource !== "member";
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  const audioPricing = resolveHostedAiUsageAudioPricingDecision({
+    record, counted, credentialSource, tokenPricingBasis,
+  });
+  if (audioPricing) return audioPricing;
 
   const lobPhysicalNote = matchHostedLobPhysicalNoteUsageRecord(record);
   if (lobPhysicalNote !== null) {
@@ -802,18 +871,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
     };
   }
 
-  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
-    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageAudioForAllowance({
-        counted,
-        credentialSource,
-        record,
-      }),
-    };
-  }
-
   const imageMatch = matchHostedAiUsageOpenAiImageRecord(record);
   if (imageMatch !== null) {
     assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
@@ -839,34 +896,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
     };
   }
 
-  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
-  if (ttsMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
-        counted,
-        credentialSource,
-        match: ttsMatch,
-        record,
-      }),
-    };
-  }
-
-  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
-  if (musicMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
-        counted,
-        credentialSource,
-        match: musicMatch,
-        record,
-      }),
-    };
-  }
-
   const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
   const tokenSnapshot = buildHostedAiUsageAllowanceTokenSnapshot(record);
   const tokenPricing = modelResolution.model || tokenPricingBasis !== "standard"
@@ -884,7 +913,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
         counted: false,
         pricingSnapshot: {
           credentialSource,
-          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution, record),
+          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
           pricingSource: tokenPricing?.pricingSource ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
           schema: "murph.hosted-ai-usage-allowance-pricing.v1",
           tokenPricingBasis,
@@ -908,6 +937,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const cacheWriteTokens = normalizeTokenCount(record.cacheWriteTokens);
   const cacheWriteUsdMicrosPerMillionTokens =
     prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n;
+  const twelveHourWrites = readTwelveHourCacheWrites(record, cacheWriteTokens, cacheWriteUsdMicrosPerMillionTokens);
   const inputTokens = normalizeTokenCount(record.inputTokens);
   const outputTokens = normalizeTokenCount(record.outputTokens);
   const inputTokenSubsetTokens = cachedInputTokens + (
@@ -926,7 +956,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
       prices.cachedInputUsdMicrosPerMillionTokens,
     )
     + priceTokenBucketUsdMicros(
-      cacheWriteTokens,
+      cacheWriteTokens + twelveHourWrites.tokens,
       cacheWriteUsdMicrosPerMillionTokens,
     )
     + priceTokenBucketUsdMicros(
@@ -945,13 +975,14 @@ function resolveHostedAiUsageAllowancePricingDecision(
       counted: true,
       pricingSnapshot: {
         credentialSource,
-        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution, record),
+        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
         pricingSource: resolvedTokenPricing.pricingSource,
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
           ...(cacheWriteUsdMicrosPerMillionTokens > 0n
             ? { cacheWrite: cacheWriteUsdMicrosPerMillionTokens.toString() }
             : {}),
+          ...twelveHourWrites.rateSnapshot,
           input: prices.inputUsdMicrosPerMillionTokens.toString(),
           output: prices.outputUsdMicrosPerMillionTokens.toString(),
         },
@@ -965,10 +996,28 @@ function resolveHostedAiUsageAllowancePricingDecision(
         tokens: {
           ...tokenSnapshot,
           billableInput: billableInputTokens.toString(),
+          ...twelveHourWrites.tokenSnapshot,
         },
       },
       pricingVersion: resolvedTokenPricing.pricingVersion,
     },
+  };
+}
+
+// A 12h write replaces the 30m write at twice its rate. Keep its subset
+// evidence in the existing raw usage and pricing snapshot for replay/skew.
+function readTwelveHourCacheWrites(record: AssistantUsageRecord, totalWrites: bigint, shortWriteRate: bigint) {
+  const tokens = normalizeTokenCount(
+    typeof record.rawUsageJson?.cacheWrite12hInputTokens === "number"
+      ? record.rawUsageJson.cacheWrite12hInputTokens : null,
+  );
+  if (tokens > totalWrites) {
+    throw new TypeError("Twelve-hour cache writes exceed total cache writes.");
+  }
+  return {
+    tokens,
+    rateSnapshot: tokens > 0n ? { cacheWrite12h: (shortWriteRate * 2n).toString() } : {},
+    tokenSnapshot: tokens > 0n ? { cacheWrite12h: tokens.toString() } : {},
   };
 }
 
@@ -1041,6 +1090,8 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
 }
 
 export async function settleHostedAiUsageForAllowanceTx(input: {
+  /** Server-owned admission snapshot; never taken from the usage record. */
+  allowanceBeneficiaryMemberId?: string | null;
   memberId: string;
   now?: Date;
   record: AssistantUsageRecord;
@@ -1049,6 +1100,9 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
   const operatorFunded = await isVerifiedOperatorTaskUsage(input);
+  const sourceMemberId = input.memberId;
+  const beneficiaryMemberId = input.allowanceBeneficiaryMemberId ?? sourceMemberId;
+  input = { ...input, memberId: beneficiaryMemberId };
   await lockHostedAiUsageAllowanceBeneficiaryTx({
     memberId: input.memberId,
     tx: input.tx,
@@ -1101,7 +1155,9 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
         billingRef: memberState.billingRef,
         familyAccessActive: false,
       };
-  const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+  const threadContainerAccessActive = input.allowanceBeneficiaryMemberId && memberState.threadContainer
+    ? true // Charge already-admitted work even if its game or room changed.
+    : await hasHostedAiUsageThreadContainerAccess({
     container: memberState,
     containerMemberId: input.memberId,
     now,
@@ -1147,7 +1203,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
   if (pricingDecision.kind === "unpriceable_openai_image") {
-    return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
+    const settlement = await accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
       decision: pricingDecision,
       memberId: input.memberId,
       now,
@@ -1155,6 +1211,8 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
+    return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
+      ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
   }
   const priced = operatorFunded
     ? {
@@ -1189,7 +1247,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
 
-  return accountHostedAiUsageAllowancePeriodSpendTx({
+  const settlement = await accountHostedAiUsageAllowancePeriodSpendTx({
     costUsdMicros: priced.costUsdMicros,
     memberId: input.memberId,
     now,
@@ -1198,6 +1256,8 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     sourceUsageId: input.record.usageId,
     tx: input.tx,
   });
+  return { ...settlement, limitNoticeCandidate: settlement.limitNoticeCandidate
+    ? { ...settlement.limitNoticeCandidate, memberId: sourceMemberId } : null };
 }
 
 async function markHostedAiUsageForgivenByPlanResetTx(input: {
@@ -1369,6 +1429,7 @@ export async function reconcileHostedAiUsageGateForBillingModeChangeTx(input: {
 }
 
 async function resolveHostedAiUsageGateWithPolicy(input: {
+  gameFundingResolved?: true;
   memberId: string;
   now?: Date | string;
   preserveExistingLegacyPaidPeriodLimit: boolean;
@@ -1378,10 +1439,12 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
   return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    await lockHostedAiUsageAllowanceBeneficiaryTx({
-      memberId: input.memberId,
-      tx,
-    });
+    const projectedBeneficiary = input.gameFundingResolved ? null
+      : await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now, prisma: tx });
+    const lockedMemberIds = [...new Set([input.memberId, projectedBeneficiary ?? input.memberId])].sort();
+    for (const memberId of lockedMemberIds) {
+      await lockHostedAiUsageAllowanceBeneficiaryTx({ memberId, tx });
+    }
     const memberState = await tx.hostedMember.findUnique({
       where: {
         id: input.memberId,
@@ -1419,6 +1482,16 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
     if (!memberState) {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
+    if (!input.gameFundingResolved && memberState.threadContainer && memberState.suspendedAt === null) {
+      const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now, prisma: tx });
+      if (beneficiaryMemberId && beneficiaryMemberId !== input.memberId) {
+        if (!lockedMemberIds.includes(beneficiaryMemberId)) {
+          throw new Error("Game room funding changed during allowance admission; retry the admission.");
+        }
+        const decision = await resolveHostedAiUsageGateWithPolicy({ ...input, memberId: beneficiaryMemberId, now, prisma: tx, gameFundingResolved: true });
+        return { ...decision, memberId: input.memberId };
+      }
+    }
     const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
     const allowanceAccess = memberState.suspendedAt === null
@@ -1434,7 +1507,9 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
         };
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+    const threadContainerAccessActive = input.gameFundingResolved && memberState.threadContainer
+      ? true
+      : await hasHostedAiUsageThreadContainerAccess({
       container: memberState,
       containerMemberId: input.memberId,
       now,
@@ -1544,89 +1619,112 @@ export type HostedAiUsageMemberState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedAiUsageMemberSelect;
 }>;
 
-export async function readHostedAiUsageGate(input: {
+export async function readHostedAiUsageGate(input: Parameters<typeof readHostedAiUsageGateForMember>[0]): Promise<HostedAiUsageGateDecisionWithSource> {
+  return readHostedAiUsageGateForMember(input);
+}
+
+/** Server-only invocation check. The caller must supply the beneficiary from
+ * its locked, exact runtime owner; current game bindings must not remap it. */
+export async function readHostedAiUsageGateForFrozenBeneficiary(input: {
+  beneficiaryMemberId: string;
+  now?: Date | string;
+  prisma: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageGateDecisionWithSource> {
+  return readHostedAiUsageGateForMember({ memberId: input.beneficiaryMemberId, now: input.now, prisma: input.prisma }, true);
+}
+
+async function readHostedAiUsageGateForMember(input: {
   memberId: string;
   memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecisionWithSource> {
+}, gameFundingResolved = false): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
-  return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    const memberState = input.memberState ?? await tx.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: hostedAiUsageMemberSelect,
-    });
+  // A read-committed wrapper adds no shared snapshot or lock to these reads.
+  // Caller-owned transactions remain intact; denial confirmation owns writes.
+  const memberState = input.memberState ?? await prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: hostedAiUsageMemberSelect,
+  });
 
-    if (!memberState) {
-      throw new TypeError("Hosted AI usage allowance member does not exist.");
+  if (!memberState) {
+    throw new TypeError("Hosted AI usage allowance member does not exist.");
+  }
+  if (!gameFundingResolved && memberState.threadContainer && memberState.suspendedAt === null) {
+    const beneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: input.memberId, now, prisma });
+    if (beneficiaryMemberId && beneficiaryMemberId !== input.memberId) {
+      const decision = await readHostedAiUsageGateForMember({ memberId: beneficiaryMemberId, now, prisma }, true);
+      return { ...decision, memberId: input.memberId };
     }
-    const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
+  }
+  const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
-    const allowanceAccess = memberState.suspendedAt === null
-      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          billingRef: memberState.billingRef,
-          billingStatus: memberState.billingStatus,
-          memberId: input.memberId,
-          tx,
-        })
-      : {
-          billingRef: memberState.billingRef,
-          familyAccessActive: false,
-        };
-    const allowanceBillingRef = allowanceAccess.billingRef;
-    const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = memberState.threadContainer
-      ? await hasActiveHostedThreadContainerAccessWithParticipants({
-          container: memberState,
-          containerMemberId: input.memberId,
-          now,
-          owner: memberState.threadContainer.owner,
-          prisma: tx,
-        })
-      : null;
-
-    // Thread-container members are synthetic (`not_started` own billing):
-    // their access is decided by the container branch of the allowance-period
-    // resolver below. Only non-container members are denied on their own
-    // billing here; suspension always fails closed.
-    if (
-      memberState.suspendedAt !== null ||
-      (
-        !memberState.threadContainer &&
-        memberState.billingStatus !== HostedBillingStatus.active &&
-        !familyAccessActive
-      )
-    ) {
-      return resolveHostedAiUsageInactiveGateDecision({
-        at: now,
-        billingRef: allowanceBillingRef,
+  const allowanceAccess = memberState.suspendedAt === null
+    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+        billingRef: memberState.billingRef,
         billingStatus: memberState.billingStatus,
         memberId: input.memberId,
-        suspendedAt: memberState.suspendedAt,
-        threadContainer: memberState.threadContainer,
-        threadContainerAccessActive,
-        ...usageCreditProjection,
-      });
-    }
+        tx: prisma,
+      })
+    : {
+        billingRef: memberState.billingRef,
+        familyAccessActive: false,
+      };
+  const allowanceBillingRef = allowanceAccess.billingRef;
+  const familyAccessActive = allowanceAccess.familyAccessActive;
+  const threadContainerAccessActive = gameFundingResolved && memberState.threadContainer
+    ? true
+    : memberState.threadContainer
+    ? await hasActiveHostedThreadContainerAccessWithParticipants({
+        container: memberState,
+        containerMemberId: input.memberId,
+        now,
+        owner: memberState.threadContainer.owner,
+        prisma,
+      })
+    : null;
 
-    const period = await readHostedAiUsageAllowancePeriodTx({
+  // Thread-container members are synthetic (`not_started` own billing):
+  // their access is decided by the container branch of the allowance-period
+  // resolver below. Only non-container members are denied on their own
+  // billing here; suspension always fails closed.
+  if (
+    memberState.suspendedAt !== null ||
+    (
+      !memberState.threadContainer &&
+      memberState.billingStatus !== HostedBillingStatus.active &&
+      !familyAccessActive
+    )
+  ) {
+    return resolveHostedAiUsageInactiveGateDecision({
       at: now,
       billingRef: allowanceBillingRef,
+      billingStatus: memberState.billingStatus,
       memberId: input.memberId,
+      suspendedAt: memberState.suspendedAt,
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
-      tx,
       ...usageCreditProjection,
     });
+  }
 
-    return buildHostedAiUsageGateDecision({
-      memberId: input.memberId,
-      period,
-    });
+  const period = await readHostedAiUsageAllowancePeriodTx({
+    at: now,
+    billingRef: allowanceBillingRef,
+    memberId: input.memberId,
+    threadContainer: memberState.threadContainer,
+    threadContainerAccessActive,
+    tx: prisma,
+    ...usageCreditProjection,
+  });
+
+  return buildHostedAiUsageGateDecision({
+    memberId: input.memberId,
+    period,
   });
 }
 
@@ -1658,13 +1756,16 @@ export async function readHostedAiUsageGateSnapshots(input: {
           now,
           prisma: tx,
         });
+        const periodMemberId = decision.allowanceSource === "thread_container"
+          ? await readGameChatAllowanceBeneficiary({ memberId, now, prisma: tx }) ?? memberId
+          : memberId;
         const persisted = decision.allowed
           || decision.reason === "ai_usage_limit_exceeded"
           ? await tx.hostedAiUsagePeriod.findUnique({
               select: { updatedAt: true },
               where: {
                 memberId_periodStart: {
-                  memberId,
+                  memberId: periodMemberId,
                   periodStart: decision.periodStart,
                 },
               },
@@ -2676,7 +2777,7 @@ function applyTokenPricingAdjustmentUsdMicros(
 }
 
 function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
-  model: HostedAiUsageAllowancePricedModel | null;
+  model: HostedAiUsageLedgerModel | null;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceTokenPricingBasisResolution {
   const basis = normalizeAssistantUsageTokenPricingBasis(
@@ -2690,10 +2791,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
     AssistantUsageTokenPricingBasis,
     HostedAiUsageAllowanceTokenPricingBasisConfig
   >> = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[input.model];
-  const config = basis === "standard"
-      && isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-    ? HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS
-    : modelPricingBases[basis];
+  const config = modelPricingBases[basis];
 
   if (!config) {
     throw new TypeError(
@@ -2707,14 +2805,6 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
         "OpenAI token pricing adjustments require OpenAI provider evidence.",
       );
     }
-  }
-  if (
-    config.requiredProviderKind === "venice"
-    && !isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-  ) {
-    throw new TypeError(
-      "Venice token pricing requires Venice provider evidence.",
-    );
   }
 
   return {
@@ -3298,6 +3388,79 @@ function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {
     : null;
 }
 
+function resolveHostedAiUsageAudioPricingDecision(input: {
+  record: AssistantUsageRecord;
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  tokenPricingBasis: AssistantUsageTokenPricingBasis;
+}): HostedAiUsageAllowancePricingDecision | null {
+  const { record, counted, credentialSource, tokenPricingBasis } = input;
+  const liveCost = priceHostedLiveUsage(record);
+  if (liveCost !== null) {
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? liveCost : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          audio: {
+            startDurationMs: String(record.rawUsageJson?.startDurationMs),
+            endDurationMs: String(record.rawUsageJson?.endDurationMs),
+            usdMicrosPerAudioMinute: "50000",
+          },
+          pricingSource: HOSTED_LIVE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_LIVE_PRICING_VERSION,
+      },
+    };
+  }
+
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageAudioForAllowance({
+        counted,
+        credentialSource,
+        record,
+      }),
+    };
+  }
+
+  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
+  if (ttsMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
+        counted,
+        credentialSource,
+        match: ttsMatch,
+        record,
+      }),
+    };
+  }
+
+  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
+  if (musicMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
+        counted,
+        credentialSource,
+        match: musicMatch,
+        record,
+      }),
+    };
+  }
+
+  return null;
+}
+
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
 // branch. A malformed row that merely claims the whisper id must fall through
 // to token-model pricing and fail closed instead of being accounted as free.
@@ -3639,12 +3802,12 @@ function normalizeAssistantUsageCredentialSource(
 
 function normalizeHostedAiUsageAllowanceModel(
   value: string | null,
-): HostedAiUsageAllowancePricedModel | null {
+): HostedAiUsageLedgerModel | null {
   if (typeof value !== "string") {
     return null;
   }
 
-  return normalizeHostedAiUsageAllowancePricedModelId(value);
+  return normalizeHostedAiUsageLedgerModelId(value);
 }
 
 function resolveHostedAiUsageAllowancePricingModel(
@@ -3682,39 +3845,29 @@ function resolveHostedAiUsageAllowancePricingModel(
 
 function buildHostedAiUsageAllowanceModelSnapshot(
   resolution: HostedAiUsageAllowancePricingModelResolution,
-  record: AssistantUsageRecord,
 ): Prisma.InputJsonObject {
   return {
     model: resolution.model,
     modelSource: resolution.source,
-    ...(resolution.model
-        && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
-      ? {
-        providerModel:
-          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model] ?? null,
-      }
-      : {}),
     requestedModel: resolution.requestedModel,
     servedModel: resolution.servedModel,
   };
 }
 
 function resolveHostedAiUsageAllowanceModelPrices(input: {
-  model: HostedAiUsageAllowancePricedModel;
+  model: HostedAiUsageLedgerModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
-  const prices = isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-    ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
-    : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+  const prices = HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
   if (!prices) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
   }
-  // Hosted Codex caps Astra context at 272K (validated in the runner catalog).
+  // Hosted Codex caps GPT-6 context at 272K (validated in the runner catalog).
   // Its turn deltas sum multiple requests; cumulative input is not context size.
   const cumulativeCodexUsage = input.record.usageExtractionSourcePath
     ?.endsWith("tokenUsage.total.delta") === true;
   // Exact individual requests above 272K pay long-context rates in every bucket.
-  if (input.model === "gpt-6-astra" && !cumulativeCodexUsage
+  if ((input.model.startsWith("gpt-6-") || input.model === "gpt-6.1-sol" || input.model === "gpt-6.1-terra") && !cumulativeCodexUsage
       && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
     return {
       cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,
@@ -3724,13 +3877,6 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
     };
   }
   return prices;
-}
-
-function isHostedAiUsageVeniceTokenPricingProviderName(
-  value: unknown,
-): boolean {
-  return typeof value === "string"
-    && value.trim().toLowerCase() === HOSTED_ASSISTANT_VENICE_PROVIDER;
 }
 
 function buildHostedAiUsageGateLimitNotice(input: {

@@ -8,6 +8,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
@@ -28,6 +29,7 @@ import {
 import {
   runHostedWorkspaceInvocation,
 } from "./hosted-workspace-invocation.ts";
+import { warmHostedContainerCodexBinary } from "./container-codex-binary-warmup.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
@@ -36,7 +38,7 @@ import {
 } from "./runner-container-ca-env.ts";
 
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
-const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.6-terra";
+const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-6.1-sol";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS = 512;
@@ -54,7 +56,6 @@ export interface HostedContainerCodexShellSmokeResult {
   cliSurfaceContractBytes: number;
   cliSurfaceHotPathProofCount: number;
   healthCommonsCliGoalProofCount: number;
-  murphPathBytes: number;
   noteAddBytes: number;
   stderrBytes: number;
   vaultCliLlmsBytes: number;
@@ -100,6 +101,8 @@ export interface HostedContainerHeavyRuntimeCore {
     signal: AbortSignal;
   }): Promise<HostedContainerLiveModelTurnSmokeResult>;
   runWorkspaceInvocation: typeof runHostedWorkspaceInvocation;
+  // Best-effort and never rejects; optional so entrypoint test doubles opt in.
+  warmCodexBinary?(input: { signal: AbortSignal }): Promise<void>;
 }
 
 export interface HostedContainerHeavyRuntime extends HostedContainerHeavyRuntimeCore {
@@ -555,8 +558,10 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     'wire_api = "responses"',
     'requires_openai_auth = false',
     "supports_websockets = false",
-    "request_max_retries = 4",
-    "stream_max_retries = 5",
+    // The deploy-smoke egress fence admits exactly one provider request, so a
+    // retry could only be refused and would hide the original failure.
+    "request_max_retries = 0",
+    "stream_max_retries = 0",
     "",
     "[skills]",
     "include_instructions = false",
@@ -636,7 +641,6 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         cliSurfaceContractBytes: 0,
         cliSurfaceHotPathProofCount: 0,
         healthCommonsCliGoalProofCount: 0,
-        murphPathBytes: 0,
         noteAddBytes: 0,
         stderrBytes,
         vaultCliLlmsBytes: 0,
@@ -803,7 +807,6 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         cliSurfaceContractBytes: cliSurface.contractBytes,
         cliSurfaceHotPathProofCount: cliSurface.hotPathProofCount,
         healthCommonsCliGoalProofCount: goalCli.proofCount,
-        murphPathBytes: environmentProbe.murphPathBytes,
         noteAddBytes: Buffer.byteLength(noteAdd.stdout, "utf8"),
         stderrBytes,
         vaultCliLlmsBytes: Buffer.byteLength(vaultCliLlms.stdout, "utf8"),
@@ -925,7 +928,6 @@ function findExecutable(name) {
   return "";
 }
 process.stdout.write(JSON.stringify({
-  murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
   providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY),
   vaultCliPathBytes: Buffer.byteLength(findExecutable("vault-cli"), "utf8"),
   vaultRootInherited: process.env.VAULT === expectedVaultRoot,
@@ -934,14 +936,9 @@ process.stdout.write(JSON.stringify({
 }
 
 function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
-  murphPathBytes: number;
   vaultCliPathBytes: number;
 } {
   const record = readHostedContainerJsonObject(stdout, "Hosted Codex shell environment probe");
-  const murphPathBytes = readHostedContainerPositiveNumber(
-    record.murphPathBytes,
-    "Hosted Codex shell environment probe.murphPathBytes",
-  );
   const vaultCliPathBytes = readHostedContainerPositiveNumber(
     record.vaultCliPathBytes,
     "Hosted Codex shell environment probe.vaultCliPathBytes",
@@ -953,7 +950,6 @@ function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
     throw new Error("Hosted Codex shell smoke leaked provider credentials into command env.");
   }
   return {
-    murphPathBytes,
     vaultCliPathBytes,
   };
 }
@@ -1047,4 +1043,27 @@ export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntimeCore = {
   runDirectR2PresignedPutSmoke: runHostedContainerDirectR2PresignedPutSmoke,
   runLiveModelTurnSmoke: runHostedContainerLiveModelTurnSmoke,
   runWorkspaceInvocation: runHostedWorkspaceInvocation,
+  async warmCodexBinary(input) {
+    // Only the runner image bakes this catalog beside the pinned Codex binary.
+    // Without it (unit tests, local dev runtimes) there is no binary to warm.
+    const modelCatalogJsonPath = readHostedCodexModelCatalogJsonPath();
+    if (!modelCatalogJsonPath) {
+      return;
+    }
+    const result = await warmHostedContainerCodexBinary({
+      executablePath: buildHostedRunnerExecutablePath(process.env.PATH),
+      modelCatalogJsonPath,
+      signal: input.signal,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        codexBinaryWarmupElapsedMs: result.elapsedMs,
+        codexBinaryWarmupOutcome: result.outcome,
+      },
+      level: result.outcome === "ready" || result.outcome === "aborted" ? "info" : "warn",
+      message: "Hosted container Codex binary warmup finished.",
+      phase: "wake.running",
+    });
+  },
 };

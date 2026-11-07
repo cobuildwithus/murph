@@ -4,3 +4,5 @@
 !.deploy/runner-bundle/**
 !.deploy/runner-smoke-bundle/
 !.deploy/runner-smoke-bundle/**
+
+!codex-model-catalog.terra.json

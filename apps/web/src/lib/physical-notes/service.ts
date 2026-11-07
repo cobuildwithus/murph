@@ -25,7 +25,7 @@ import {
 import { assertHostedGroupParticipantActionOriginHasOwnMurph } from "../hosted-groups/participant-action-authority";
 import {
   assertActiveHostedMemberAccessAllowed,
-  readActiveHostedMemberAccess,
+  readStrictHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -162,7 +162,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
         ...guarded,
       };
     }
-    await assertHostedPhysicalNoteMemberAccess({
+    const runtimeAccess = await assertHostedPhysicalNoteMemberAccess({
       memberId: input.memberId,
       prisma: tx,
     });
@@ -188,7 +188,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
       },
     });
     const complimentary = priorComplimentary === null;
-    if (!complimentary) {
+    // Product access alone never pays for mail: a lapsed member needs usage
+    // even for the complimentary note.
+    if (!complimentary || !runtimeAccess) {
       const gate = await readHostedAiUsageGate({
         memberId: input.memberId,
         prisma: tx,
@@ -1158,10 +1160,10 @@ async function resolvePhysicalNoteEffectGuard(input: {
 async function assertHostedPhysicalNoteMemberAccess(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  if (!await readActiveHostedMemberAccess(input)) {
-    await assertActiveHostedMemberAccessAllowed(input);
-  }
+}): Promise<boolean> {
+  if (await readStrictHostedMemberAccess(input)) return true;
+  await assertActiveHostedMemberAccessAllowed(input);
+  return false;
 }
 
 async function finalizeLegacyPhysicalNoteAcceptance(input: {

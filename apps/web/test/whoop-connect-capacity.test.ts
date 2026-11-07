@@ -33,7 +33,7 @@ describe("WHOOP connect capacity", () => {
     await expect(assertHostedWhoopConnectCapacityAvailable({
       memberId: "member_existing",
       prisma: prisma as never,
-      target: { provider: "whoop" } as never,
+      target: { provider: "junction", sourceProviderSlug: "whoop_v2" } as never,
     })).resolves.toBeUndefined();
 
     expect(prisma.deviceConnection.findFirst).toHaveBeenCalledWith(expect.objectContaining({
@@ -48,7 +48,7 @@ describe("WHOOP connect capacity", () => {
     await expect(assertHostedWhoopConnectCapacityAvailable({
       memberId: "member_new",
       prisma: prisma as never,
-      target: { provider: "whoop" } as never,
+      target: { provider: "junction", sourceProviderSlug: "whoop_v2" } as never,
     })).resolves.toBeUndefined();
 
     const query = (prisma.$queryRaw.mock.calls as unknown[][])[0]?.[0] as {
@@ -74,7 +74,7 @@ describe("WHOOP connect capacity", () => {
     await expect(assertHostedWhoopConnectCapacityAvailable({
       memberId: "member_98",
       prisma: prisma as never,
-      target: { provider: "whoop" } as never,
+      target: { provider: "junction", sourceProviderSlug: "whoop_v2" } as never,
     })).resolves.toBeUndefined();
 
     expect(prisma.deviceConnection.findFirst).toHaveBeenCalledTimes(1);
@@ -123,7 +123,7 @@ describe("WHOOP connect capacity", () => {
     await expect(assertHostedWhoopConnectCapacityAvailable({
       memberId: "member_racing",
       prisma: prisma as never,
-      target: { provider: "whoop" } as never,
+      target: { provider: "junction", sourceProviderSlug: "whoop_v2" } as never,
     })).resolves.toBeUndefined();
 
     expect(prisma.deviceConnection.findFirst).toHaveBeenCalledTimes(2);

@@ -71,26 +71,6 @@ function requireAssistantProviderUserPrompt(
   )
 }
 
-function hasAssistantProviderUsableNativeResume(
-  input: AssistantProviderTurnExecutionInput,
-): boolean {
-  return normalizeNullableString(input.resume?.codexThreadId) !== null
-}
-
-export type AssistantProviderHistoryMode =
-  | 'none'
-  | 'structured-messages'
-
-export function resolveAssistantProviderHistoryMode(
-  input: AssistantProviderTurnExecutionInput,
-): AssistantProviderHistoryMode {
-  if (hasAssistantProviderUsableNativeResume(input)) {
-    return 'none'
-  }
-
-  return 'structured-messages'
-}
-
 function resolveAssistantProviderContextSections(
   input: AssistantProviderTurnExecutionInput,
 ): string[] {
@@ -481,6 +461,7 @@ function sanitizeCodexUsage(
 ): Record<string, unknown> {
   return {
     cacheWriteInputTokens: usage.cacheWriteInputTokens,
+    ...(usage.cacheWrite12hInputTokens ? { cacheWrite12hInputTokens: usage.cacheWrite12hInputTokens } : {}),
     cachedInputTokens: usage.cachedInputTokens,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
@@ -729,18 +710,19 @@ function readAssistantTurnProfileBatchToolAggregates(
       return null
     }
 
+    const label = resolveCodexCommandFamily({ argv, source: 'batch_argv' })
     aggregates.push({
       calls: 1,
       durationKnownCalls: 1,
       durationMs,
       failedCalls: ok ? 0 : 1,
       kind: 'command',
-      label: resolveCodexCommandFamily({
-        argv,
-        source: 'batch_argv',
-      }),
+      label,
       outputBytesMax: outputBytes,
       outputBytesTotal: outputBytes,
+      ...(label === 'vault-cli knowledge' ? {
+        knowledgeCounts: readAssistantKnowledgeCounts(argv[1], !ok, command.error?.code),
+      } : {}),
     })
   }
 
@@ -1010,6 +992,9 @@ function subtractCodexTokenUsage(
   subtrahend: CodexTokenUsageBreakdown,
 ): CodexTokenUsageBreakdown {
   return {
+    ...((minuend.cacheWrite12hInputTokens ?? 0) > (subtrahend.cacheWrite12hInputTokens ?? 0)
+      ? { cacheWrite12hInputTokens: (minuend.cacheWrite12hInputTokens ?? 0) - (subtrahend.cacheWrite12hInputTokens ?? 0) }
+      : {}),
     cacheWriteInputTokens: Math.max(
       0,
       minuend.cacheWriteInputTokens - subtrahend.cacheWriteInputTokens,

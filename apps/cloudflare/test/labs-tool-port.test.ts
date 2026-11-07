@@ -4,9 +4,6 @@ import {
   HOSTED_RUNTIME_LABS_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
-  readHostedRunnerWebControlPolicy,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
-import {
   createHostedRuntimeLabsToolPort,
 } from "../src/runtime-platform/labs-tool-port.ts";
 import {
@@ -22,23 +19,6 @@ afterEach(async () => {
 });
 
 describe("hosted labs tool port", () => {
-  it("allows only the bounded POST web-control route", () => {
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: HOSTED_RUNTIME_LABS_TOOL_PATH,
-    })).toEqual({
-      allowed: true,
-      operation: "labs_tool",
-    });
-    expect(readHostedRunnerWebControlPolicy({
-      method: "GET",
-      path: HOSTED_RUNTIME_LABS_TOOL_PATH,
-    }).allowed).toBe(false);
-    expect(readHostedRunnerWebControlPolicy({
-      method: "POST",
-      path: `${HOSTED_RUNTIME_LABS_TOOL_PATH}/arbitrary`,
-    }).allowed).toBe(false);
-  });
 
   it("posts the exact signed request with caller cancellation and parses the bounded response", async () => {
     webControl = await startHostedWebControlStub({

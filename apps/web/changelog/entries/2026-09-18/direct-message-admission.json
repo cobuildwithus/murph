@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "direct-message-admission",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A shorter path to your next reply",
+    "summary": "Murph removes a network round trip before waking up to process your message.",
+    "details": "The same account checks run before processing begins. Reply time still depends on the work your message needs.",
+    "relevanceTags": [
+      "messaging"
+    ],
+    "sourcePullRequests": []
+  }
+}

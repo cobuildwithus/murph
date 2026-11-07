@@ -5,12 +5,12 @@ import {
   type AssistantProviderSessionOptions,
   type AssistantSandbox,
 } from '../assistant-cli-contracts.js'
-import { splitAssistantHeadersForPersistence } from './redaction.js'
+
 import { normalizeNullableString } from './shared.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import {
   buildCodexAssistantContinuityFingerprint,
   createUnsupportedAssistantRuntimeTargetError,
-  normalizeAssistantCodexModelProvider,
   resolveStrictAssistantCodexModelProvider,
 } from './target-runtime.js'
 
@@ -84,6 +84,16 @@ export function normalizeAssistantProviderConfig(
     ? assistantProviderConfigToInput(input)
     : input
   assertSupportedAssistantRuntimeIdentifier(providerConfigInput?.provider)
+  if (providerConfigInput?.oss === true) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Assistant models must use OpenAI. Local model execution is no longer supported.',
+    )
+  }
+
+  if (normalizeNullableString(providerConfigInput?.model)?.toLowerCase() === 'gpt-5.6-sol') {
+    throw new VaultCliError('invalid_option', 'GPT-5.6 Sol is retired; use gpt-6.1-sol.')
+  }
 
   return {
     policy: {
@@ -97,10 +107,10 @@ export function normalizeAssistantProviderConfig(
       codexCommand: normalizeNullableString(providerConfigInput?.codexCommand),
       codexHome: normalizeNullableString(providerConfigInput?.codexHome),
       model: normalizeNullableString(providerConfigInput?.model),
-      modelProvider: normalizeAssistantCodexModelProvider(
+      modelProvider: resolveStrictAssistantCodexModelProvider(
         providerConfigInput?.modelProvider,
-      ),
-      oss: providerConfigInput?.oss === true,
+      ).id,
+      oss: false,
       profile: normalizeNullableString(providerConfigInput?.profile),
     },
   }
@@ -207,53 +217,6 @@ export function serializeAssistantProviderOperatorDefaults(
   }
 }
 
-export function normalizeAssistantPersistedHeaders(
-  headers: Record<string, string> | null | undefined,
-): Record<string, string> | null {
-  const normalizedHeaders = normalizeAssistantHeaders(headers)
-
-  return splitAssistantHeadersForPersistence(normalizedHeaders).persistedHeaders
-}
-
-export function assistantProviderConfigsEqual(
-  left: AssistantProviderConfigLike | null | undefined,
-  right: AssistantProviderConfigLike | null | undefined,
-): boolean {
-  const normalizedLeft = normalizeAssistantProviderConfig(left)
-  const normalizedRight = normalizeAssistantProviderConfig(right)
-
-  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight)
-}
-
-export function normalizeAssistantHeaders(
-  headers: Record<string, string> | null | undefined,
-): Record<string, string> | null {
-  if (!headers || typeof headers !== 'object') {
-    return null
-  }
-
-  const dedupedEntries = new Map<string, readonly [string, string]>()
-
-  for (const [rawKey, rawValue] of Object.entries(headers)) {
-    const key = normalizeNullableString(rawKey)
-    const value = normalizeNullableString(rawValue)
-    if (!key || !value) {
-      continue
-    }
-
-    const normalizedKey = canonicalizeAssistantHeaderName(key)
-    dedupedEntries.set(normalizedKey.toLowerCase(), [normalizedKey, value])
-  }
-
-  const normalizedEntries = [...dedupedEntries.values()].sort(([left], [right]) =>
-    left.localeCompare(right),
-  )
-
-  return normalizedEntries.length > 0
-    ? Object.fromEntries(normalizedEntries)
-    : null
-}
-
 function assistantProviderConfigToInput(
   config: AssistantProviderConfig,
 ): AssistantProviderConfigInput {
@@ -309,19 +272,4 @@ function assertSupportedAssistantRuntimeIdentifier(
   if (provider && provider !== 'codex-cli') {
     throw createUnsupportedAssistantRuntimeTargetError()
   }
-}
-
-function canonicalizeAssistantHeaderName(key: string): string {
-  return key
-    .split('-')
-    .map((part) => {
-      const normalizedPart = part.trim().toLowerCase()
-      if (normalizedPart.length === 0) {
-        return ''
-      }
-
-      return `${normalizedPart[0]?.toUpperCase() ?? ''}${normalizedPart.slice(1)}`
-    })
-    .filter((part) => part.length > 0)
-    .join('-')
 }

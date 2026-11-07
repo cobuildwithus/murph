@@ -35,15 +35,21 @@ export interface BrowserVaultReplicaShardIdentity {
 
 export interface BrowserVaultCoreShard extends Pick<
   BrowserVaultReplica,
+  | "demographics"
+  | "displayName"
   | "assistantSummary"
   | "entities"
   | "journal"
-  | "personalPatterns"
+  | "meals"
   | "policy"
   | "timelineRows"
   | "weeklySampleSummaries"
 > {
-  experimentRunCards: NonNullable<BrowserVaultReplica["experimentRunCards"]>;
+  /**
+   * Always empty. Web builds from before experiment run cards were removed
+   * still require this core-shard array; drop it once they cannot be served.
+   */
+  experimentRunCards: [];
   hasLabBiomarkers: NonNullable<BrowserVaultReplica["hasLabBiomarkers"]>;
   identity: BrowserVaultReplicaShardIdentity;
   schema: typeof BROWSER_VAULT_CORE_SHARD_SCHEMA;
@@ -160,11 +166,13 @@ export async function splitBrowserVaultReplica(
     core: {
       assistantSummary: replica.assistantSummary,
       entities: replica.entities,
-      experimentRunCards: replica.experimentRunCards ?? [],
+      experimentRunCards: [],
       hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
       identity,
       ...(replica.journal === undefined ? {} : { journal: replica.journal }),
-      ...(replica.personalPatterns === undefined ? {} : { personalPatterns: replica.personalPatterns }),
+      ...(replica.demographics === undefined ? {} : { demographics: replica.demographics }),
+      ...(replica.displayName === undefined ? {} : { displayName: replica.displayName }),
+      ...(replica.meals === undefined ? {} : { meals: replica.meals }),
       policy: replica.policy,
       schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
       timelineRows: replica.timelineRows,
@@ -201,12 +209,13 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
   return {
     assistantSummary: core.assistantSummary,
     entities: core.entities,
-    experimentRunCards: core.experimentRunCards,
     generatedAt: identity.generatedAt,
     ...(identity.generation === undefined ? {} : { generation: identity.generation }),
     hasLabBiomarkers: core.hasLabBiomarkers,
     ...(core.journal === undefined ? {} : { journal: core.journal }),
-    ...(core.personalPatterns === undefined ? {} : { personalPatterns: core.personalPatterns }),
+    ...(core.demographics === undefined ? {} : { demographics: core.demographics }),
+    ...(core.displayName === undefined ? {} : { displayName: core.displayName }),
+    ...(core.meals === undefined ? {} : { meals: core.meals }),
     policy: core.policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: core.entities.map(projectBrowserVaultSearchRow),

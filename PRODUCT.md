@@ -18,12 +18,9 @@ deeper review and control. Friend and group conversations are optional support
 Murph can suggest when they fit the member's need and the member explicitly
 chooses them.
 Group funding remains private by default: participants may learn that Murph is
-sponsored in the chat. For a signed-in group participant, the funding page may
-recognize a settled funding moment by a newly disclosed, opted-in public alias
-or as Anonymous; historical aliases and moments whose sponsor lost group
-authority before settlement remain Anonymous. That presentation label is not
-verified payer identity. Charges, caps, balances,
-percentages, and automatic refill events stay with the authenticated sponsor.
+sponsored in the chat. Funding collects no public alias or creative request and
+shows no supporters list. Charges, caps, balances, percentages, and automatic
+refill events stay with the authenticated sponsor.
 Dollar-denominated usage credit represents variable AI capacity, never a
 promised bundle of messages.
 
@@ -89,27 +86,8 @@ If the referee reads dry and clinical, it's failing; if the private write-ups st
 
 ## First-run onboarding
 
-New members see one onboarding journey whether they begin on the website or in
-the iOS companion: optionally add Murph to Contacts, choose a main and optional
-supporting personality, preview and choose a voice, choose formal or casual
-tone, then see the welcome action. Saving those choices or explicitly skipping
-the personality setup completes onboarding for the account. Completing it on
-one surface suppresses it on the other; existing members do not receive it
-retroactively. Contact-card skip alone advances to personality setup and does
-not count as completion.
-
-## Murph Safe
-
-Murph Safe is the public product-evidence register. The recurring question is
-“Is it Murph Safe?”, but the answer is never a binary certification. The
-experience shows the exact supplement or branded-food record, linked product
-tests, label contents, nutrition, provenance, and known gaps with the same warm
-precision as the private product. Search terms remain private and the public
-surface does not require an account.
-
-The `/food` view turns branded-food records into a fast, scan-first comparison.
-It marks one quiet winner per complete visible nutrition row and states the row
-rule, then keeps exact test results and evidence gaps in one separate evidence
-drawer behind a coverage meter. It never names a universal healthy or safe
-winner. Bounded evidence states how many results are shown, and gaps keep the
-public product record's own meaning.
+New web members can optionally add Murph to Contacts. Adding, skipping or
+dismissing the card completes the existing account onboarding marker; members
+without a text contact complete directly. No personality setup or welcome
+dialog follows. Tone, voice and style levels remain optional Settings controls.
+Installed companion clients retain their existing completion response shape.

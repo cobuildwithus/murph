@@ -2,7 +2,6 @@ export {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
 } from "./browser-replica/shared.ts";
 export {
   assembleBrowserVaultCoreReplica,
@@ -44,13 +43,6 @@ export type {
   BrowserVaultEntityFamily,
   BrowserVaultEntityFilters,
   BrowserVaultEntityLink,
-  BrowserVaultExperimentRunCard,
-  BrowserVaultExperimentRunCardDailyCadence,
-  BrowserVaultExperimentRunCardLookup,
-  BrowserVaultExperimentRunCardLookupKeys,
-  BrowserVaultExperimentRunCardMetric,
-  BrowserVaultExperimentRunCardStatus,
-  BrowserVaultExperimentRunCardSummary,
   BrowserVaultLabResultFilters,
   BrowserVaultLabResultReferenceRange,
   BrowserVaultLabResultRow,
@@ -87,7 +79,6 @@ export {
   createBrowserVaultReplica,
   hashBrowserVaultReplicaData,
 } from "./browser-replica/build.ts";
-export { buildBrowserVaultExperimentRunCards } from "./browser-replica/experiment-run-cards.ts";
 export {
   parseBrowserVaultCoreShard,
   parseBrowserVaultLabsShard,
@@ -122,20 +113,7 @@ export {
   toBrowserVaultLabResultRows,
 } from "./browser-replica/lab-results.ts";
 export {
-  selectBrowserVaultLabBiomarkerDetail,
-  selectBrowserVaultMeasuredBiomarkers,
-} from "./browser-replica/lab-result-status.ts";
-export type {
-  BrowserVaultLabBiomarkerDetail,
-  BrowserVaultLabBiomarkerSeriesPoint,
-  BrowserVaultMeasuredBiomarker,
-  BrowserVaultNormalizedLabReferenceRange,
-  BrowserVaultPresentedLabResultRow,
-} from "./browser-replica/lab-results.ts";
-export {
   selectBrowserVaultJournal,
-  selectBrowserVaultExperimentSummary,
-  selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/views.ts";
 export { buildJournalView, emptyJournalView } from "./journal-view.ts";
 export type {
@@ -145,63 +123,12 @@ export type {
   JournalView,
 } from "./journal-view.ts";
 export {
-  BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
-  selectBrowserVaultBiomarkerPanel,
-} from "./browser-replica/biomarker-panel.ts";
-export {
   BROWSER_VAULT_METRIC_ROW_SCHEMA,
   BROWSER_VAULT_METRIC_SELECTION_SCHEMA,
   createBrowserVaultMetricSelectionRows,
   metricRowMatchesFilters,
   toBrowserVaultMetricRows,
 } from "./browser-replica/metric-points.ts";
-export type {
-  BrowserVaultBiomarkerMetricBinding,
-  BrowserVaultBiomarkerMetricPanel,
-  BrowserVaultBiomarkerPanel,
-  BrowserVaultBiomarkerPanelEmptyState,
-  BrowserVaultBiomarkerPanelSource,
-  BrowserVaultBiomarkerPanelStatus,
-  BrowserVaultBiomarkerPanelWarning,
-  BrowserVaultBiomarkerPanelWarningCode,
-  BrowserVaultBiomarkerSeriesPoint,
-  BrowserVaultBiomarkerTrend,
-  BrowserVaultBiomarkerTrendDefaults,
-  SelectBrowserVaultBiomarkerPanelInput,
-} from "./browser-replica/biomarker-panel.ts";
-export type {
-  BrowserVaultExperimentBiomarkerResult,
-  BrowserVaultExperimentBiomarkerStatus,
-  BrowserVaultExperimentAdherenceResult,
-  BrowserVaultExperimentContextEntry,
-  BrowserVaultExperimentCoverageStatus,
-  BrowserVaultExperimentExpectedDirection,
-  BrowserVaultExperimentExpectedEffect,
-  BrowserVaultExperimentExpectedRange,
-  BrowserVaultExperimentMetricPoint,
-  BrowserVaultExperimentMetricSource,
-  BrowserVaultExperimentMetricWindowSummary,
-  BrowserVaultExperimentOutcomeResult,
-  BrowserVaultExperimentSavedOutcomeStatus,
-  BrowserVaultExperimentOutcomeStatus,
-  BrowserVaultExperimentProgressPhase,
-  BrowserVaultExperimentProgressResult,
-  BrowserVaultExperimentResultDiagnostic,
-  BrowserVaultExperimentResultDiagnosticCode,
-  BrowserVaultExperimentResultRun,
-  BrowserVaultExperimentResultsLookup,
-  BrowserVaultExperimentResultsOptions,
-  BrowserVaultExperimentResultsView,
-  BrowserVaultExperimentRunWindows,
-  BrowserVaultExperimentScheduleCell,
-  BrowserVaultExperimentScheduleCellKind,
-  BrowserVaultExperimentScheduleResult,
-} from "./browser-replica/experiments.ts";
-export {
-  resolveBrowserVaultExperimentEntityMetricKeys,
-  selectBrowserVaultExperimentMetricKeys,
-  selectBrowserVaultExperimentResults,
-} from "./browser-replica/experiments.ts";
 export {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   isCompletedOverviewExperimentStatus,

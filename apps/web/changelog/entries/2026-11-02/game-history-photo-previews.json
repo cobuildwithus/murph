@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "game-history-photo-previews",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More photos in past games",
+    "summary": "Game history gives photos priority when choosing previews from a past game.",
+    "details": "Each game can contribute up to six photo previews, kept in day order. Older app versions can still show other posts when fewer photos are available.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -54,16 +54,6 @@ function assistantAsk(laneSeq: string): PendingItem {
   } as PendingItem;
 }
 
-function environmentInterview(laneSeq: string): PendingItem {
-  return {
-    itemId: `environment_${laneSeq}`,
-    mailboxDedupeKey: `environment-interview.completed:${laneSeq}`,
-    mailboxLaneSeq: laneSeq,
-    routeAction: "run-environment-interview",
-    wake: { kind: "environment-interview.completed" },
-  } as PendingItem;
-}
-
 describe("model-free mailbox admission", () => {
   it("admits an exact group join and independent maintenance", () => {
     const notification = exactNotification({ laneSeq: "1" });
@@ -104,15 +94,15 @@ describe("model-free mailbox admission", () => {
     }).pending).toEqual([notification]);
   });
 
-  it("admits environment work independently of an assistant item", () => {
+  it("admits maintenance independently of an assistant item", () => {
     const earlier = assistantAsk("1");
-    const environment = environmentInterview("2");
+    const independent = maintenance("2");
 
     expect(selectHostedModelFreeSystemMailboxItems({
-      pending: [environment, earlier],
-    }).pending).toEqual([environment]);
+      pending: [independent, earlier],
+    }).pending).toEqual([independent]);
     expect(selectHostedModelFreeSystemMailboxItems({
-      pending: [environment],
-    }).pending).toEqual([environment]);
+      pending: [independent],
+    }).pending).toEqual([independent]);
   });
 });

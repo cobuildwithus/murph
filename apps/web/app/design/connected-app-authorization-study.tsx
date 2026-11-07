@@ -1,51 +1,73 @@
-import { Link2 } from "lucide-react";
+import {
+  IntegrationsConnectLauncherView,
+  IntegrationsConnectUnavailableScreen,
+} from "@/src/components/connected-apps/integrations-connect-launcher";
+import { LinkPageFailureScreen } from "@/src/components/link-page/link-page-failure";
 
-import { IntegrationsConnectLauncherView } from "@/src/components/connected-apps/integrations-connect-launcher";
+import { LinkPageStudyState } from "./link-page-study-state";
 
 const launcherStates = [
-  { autoContinueEnabled: true, label: "Waiting", state: "waiting" },
+  { autoContinueEnabled: true, label: "Ready", state: "waiting" },
   { autoContinueEnabled: false, label: "Paused", state: "waiting" },
   { autoContinueEnabled: true, label: "Connecting", state: "connecting" },
-  { autoContinueEnabled: true, label: "Failed", state: "failed" },
+  { autoContinueEnabled: true, label: "Didn’t start", state: "failed" },
 ] as const;
+
+const STUDY_CONTACT = {
+  href: "sms:+15550100000",
+  kind: "text",
+  label: "Messages",
+} as const;
 
 export function ConnectedAppAuthorizationStudy() {
   return (
     <div
-      className="overflow-hidden rounded-2xl border border-border bg-background"
+      className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3"
       data-design-section="connected-app-authorization-handoff"
       id="connected-app-authorization-handoff"
-      inert
     >
-      <div className="grid gap-px bg-border lg:grid-cols-2">
-        {launcherStates.map(({ autoContinueEnabled, label, state }) => (
-          <article className="bg-background text-foreground" key={label}>
-            <p className="border-b border-border px-4 py-3 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-              {label}
-            </p>
-            <div className="min-h-[680px] px-4 py-8 sm:px-6">
-              <section className="mx-auto flex min-h-[620px] max-w-xl flex-col items-center justify-center text-center">
-                <span className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-card">
-                  <Link2 className="h-6 w-6 text-primary" aria-hidden="true" />
-                </span>
-                <p className="mt-6 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                  Connected apps
-                </p>
-                <h2 className="mt-3 font-serif text-3xl leading-tight text-balance break-words sm:text-4xl">
-                  Connect Gmail
-                </h2>
-                <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground text-pretty break-words">
-                  Murph uses Composio to securely connect Gmail. On the next screen, you’ll review and approve access.
-                </p>
-                <IntegrationsConnectLauncherView
-                  autoContinueEnabled={autoContinueEnabled}
-                  state={state}
-                />
-              </section>
-            </div>
-          </article>
-        ))}
-      </div>
+      {launcherStates.map(({ autoContinueEnabled, label, state }) => (
+        <LinkPageStudyState key={label} label={label}>
+          <IntegrationsConnectLauncherView
+            accountLabel="Gmail"
+            autoContinueEnabled={autoContinueEnabled}
+            logoSrc="/brand-logos/connect/gmail.svg"
+            state={state}
+          />
+        </LinkPageStudyState>
+      ))}
+      <LinkPageStudyState label="No logo on file">
+        <IntegrationsConnectLauncherView
+          accountLabel="Outlook"
+          autoContinueEnabled
+          logoSrc={null}
+          state="waiting"
+        />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Link doesn’t work">
+        <IntegrationsConnectUnavailableScreen
+          contactOption={STUDY_CONTACT}
+          detail="Ask Murph for a new one."
+          title="This link isn’t working."
+        />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Link expired">
+        <IntegrationsConnectUnavailableScreen
+          contactOption={STUDY_CONTACT}
+          detail="Nothing changed. Ask Murph for a new one."
+          title="This link expired."
+        />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Another account">
+        <IntegrationsConnectUnavailableScreen
+          contactOption={STUDY_CONTACT}
+          detail="This link is expired, already used, or belongs to another Murph account."
+          title="This link isn’t working."
+        />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Something broke">
+        <LinkPageFailureScreen />
+      </LinkPageStudyState>
     </div>
   );
 }

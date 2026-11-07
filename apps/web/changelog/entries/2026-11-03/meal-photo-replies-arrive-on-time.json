@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "meal-photo-replies-arrive-on-time",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Meal photo replies don't get held back",
+    "summary": "If you text Murph while it's looking at a meal photo you sent from the app, its reply about that photo still arrives as soon as it's ready.",
+    "details": "When Murph can't tell what's in a drink or dish, or how much you had, it asks. If you check whether your photo arrived while that's still unclear, Murph confirms it and asks the same question instead of just saying the contents are unknown.",
+    "relevanceTags": [
+      "nutrition",
+      "meals",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4510
+    ]
+  }
+}

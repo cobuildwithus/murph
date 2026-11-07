@@ -1,3 +1,4 @@
+import { getHostedSystemMailboxModelFreeKinds } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedMailboxItem,
   HostedMailboxKind,
@@ -21,8 +22,6 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "run-clinical-records-sync",
   "apply-clinical-enrichment",
   "run-device-sync-wake",
-  "run-environment-interview",
-  "run-environment-voice",
   "import-group-journal-fact",
   "import-reported-daily-metric",
   "import-meal-photo",
@@ -77,11 +76,11 @@ const ACTION_BY_KIND = {
   "clinical-records.enrichment-requested": "apply-clinical-enrichment",
   "conversation.message": "import-conversation-message",
   "device-sync.wake": "run-device-sync-wake",
-  "environment-interview.completed": "run-environment-interview",
-  "environment-voice.captured": "run-environment-voice",
   "journal.group-fact.recorded": "import-group-journal-fact",
   "health.daily-metric.reported": "import-reported-daily-metric",
   "group-newsletter.email-needed": "skip-retired-mailbox-item",
+  "environment-interview.completed": "skip-retired-mailbox-item",
+  "environment-voice.captured": "skip-retired-mailbox-item",
   "meal-photo.captured": "import-meal-photo",
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",
@@ -89,7 +88,7 @@ const ACTION_BY_KIND = {
   "member.action.requested": "apply-member-action",
   "member.action.completed": "apply-member-action",
   "runtime.browser-vault-refresh-requested": "apply-runtime-control-request",
-  "runtime.codex-auth-requested": "apply-runtime-control-request",
+  "runtime.codex-auth-requested": "skip-retired-mailbox-item",
   "runtime.device-sync-recovery-requested": "apply-runtime-control-request",
   "runtime.mailbox-lag-observed": "apply-runtime-control-request",
   "runtime.maintenance-requested": "apply-runtime-control-request",
@@ -98,6 +97,11 @@ const ACTION_BY_KIND = {
   "vault-share.delivery": "import-vault-share-delivery",
   "vault-share.revoke": "import-vault-share-revoke",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;
+
+export function getHostedSystemMailboxModelFreeRouteActions(assistantExecutionBlocked = false) {
+  return [...new Set(getHostedSystemMailboxModelFreeKinds(assistantExecutionBlocked)
+    .map((kind) => ACTION_BY_KIND[kind]))];
+}
 
 export function createHostedMailboxRoutingPlan(
   item: HostedMailboxItem,

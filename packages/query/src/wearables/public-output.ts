@@ -3,7 +3,7 @@ import {
   summarizeBodyStateNotes,
   summarizeRecoveryNotes,
 } from "./summaries.ts";
-import { summarizeMetricsConfidence } from "./confidence.ts";
+import { qualifySleepSummaryConfidence, summarizeMetricsConfidence } from "./confidence.ts";
 import { resolveWearablePublicSourceProvider } from "./origin.ts";
 import {
   formatMetricLabel,
@@ -186,11 +186,11 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     ["spo2", spo2],
   ];
   const projectedMetrics = metrics.map(([, metric]) => metric);
-  const rawSummaryConfidence = rebuildPublicSummaryConfidence(
+  const rawSummaryConfidence = qualifySleepSummaryConfidence(rebuildPublicSummaryConfidence(
     metrics,
     night.summaryConfidence,
     "No sleep metrics were available for this date.",
-  );
+  ), night);
   const sleepProviderTextEntries = buildMetricProviderTextProjectionEntries(sourceMetrics);
   const summaryConfidence = {
     ...rawSummaryConfidence,
@@ -372,7 +372,6 @@ function projectWearableResolvedMetricPublicSources(
     selectedCandidate,
     selectionProvider,
   );
-  const publicAgreeingProviders = collectPublicAgreeingProviders(resolved, confidenceCandidates);
   const conflictingProviders = uniqueStrings([
     ...publicConflictingProviders,
     ...(sameSourceDisagreement && selectionProvider ? [selectionProvider] : []),
@@ -397,14 +396,6 @@ function projectWearableResolvedMetricPublicSources(
       ...resolved.confidence,
       conflictingProviders,
       level: projectPublicMetricConfidenceLevel(resolved.confidence.level, conflictingProviders.length > 0),
-      reasons: projectMetricConfidenceReasons({
-        candidates: resolved.candidates,
-        publicAgreeingProviders,
-        publicConflictingProviders,
-        sameSourceDisagreement,
-        selectedPublicProvider: selectionProvider,
-        sourceReasons: resolved.confidence.reasons,
-      }),
     },
     selection: {
       ...resolved.selection,
@@ -641,21 +632,6 @@ function hasSamePublicSourceDisagreement(
     );
 }
 
-function collectPublicAgreeingProviders(
-  resolved: WearableResolvedMetric,
-  candidates: readonly WearableMetricCandidate[],
-): string[] {
-  if (resolved.selection.value === null) {
-    return [];
-  }
-
-  const selectedValue = resolved.selection.value;
-  return uniqueStrings(
-    candidates
-      .filter((candidate) => isWithinMetricTolerance(resolved.metric, selectedValue, candidate.value))
-      .map(resolvePublicSourceProvider),
-  ).sort();
-}
 
 function selectPublicConfidenceCandidates(
   resolved: WearableResolvedMetric,
@@ -680,55 +656,6 @@ function isActivitySessionRollupCandidate(candidate: WearableMetricCandidate): b
     || candidate.sourceKind === "activity-session-day-rollup";
 }
 
-function projectMetricConfidenceReasons(input: {
-  candidates: readonly WearableMetricCandidate[];
-  publicAgreeingProviders: readonly string[];
-  publicConflictingProviders: readonly string[];
-  sameSourceDisagreement: boolean;
-  selectedPublicProvider: string | null;
-  sourceReasons: readonly string[];
-}): string[] {
-  const reasons = input.sourceReasons.flatMap((reason): string[] => {
-    if (reason.startsWith("Conflicting values remained from ")) {
-      const projectedConflictReasons: string[] = [];
-
-      if (input.publicConflictingProviders.length > 0) {
-        projectedConflictReasons.push(
-          `Conflicting values remained from ${input.publicConflictingProviders.map(formatProviderName).join(", ")}.`,
-        );
-      }
-
-      if (input.sameSourceDisagreement && input.selectedPublicProvider) {
-        projectedConflictReasons.push(
-          `Duplicate evidence from ${formatProviderName(input.selectedPublicProvider)} disagreed after source reconciliation.`,
-        );
-      }
-
-      return projectedConflictReasons;
-    }
-
-    if (reason.startsWith("Providers agreed within tolerance: ")) {
-      return input.publicAgreeingProviders.length > 1
-        ? [`Providers agreed within tolerance: ${input.publicAgreeingProviders.map(formatProviderName).join(", ")}.`]
-        : [];
-    }
-
-    return [projectMetricEvidenceReasonPublicProviders(reason, input.candidates)];
-  });
-
-  if (input.publicConflictingProviders.length > 0) {
-    reasons.push(`Conflicting values remained from ${input.publicConflictingProviders.map(formatProviderName).join(", ")}.`);
-  }
-
-  if (input.sameSourceDisagreement && input.selectedPublicProvider) {
-    reasons.push(
-      `Duplicate evidence from ${formatProviderName(input.selectedPublicProvider)} disagreed after source reconciliation.`,
-    );
-  }
-
-  return uniqueStrings(reasons);
-}
-
 function projectPublicMetricConfidenceLevel(
   level: WearableResolvedMetric["confidence"]["level"],
   hasPublicConflict: boolean,
@@ -738,72 +665,6 @@ function projectPublicMetricConfidenceLevel(
   }
 
   return "medium";
-}
-
-function projectMetricEvidenceReasonPublicProviders(
-  reason: string,
-  candidates: readonly WearableMetricCandidate[],
-): string {
-  let projected = reason;
-  const replacements = buildMetricEvidenceLabelReplacements(candidates);
-
-  for (const replacement of replacements) {
-    if (replacement.sourceLabel !== replacement.publicLabel) {
-      projected = projected.replaceAll(replacement.sourceLabel, replacement.publicLabel);
-    }
-  }
-
-  return projected;
-}
-
-function buildMetricEvidenceLabelReplacements(
-  candidates: readonly WearableMetricCandidate[],
-): Array<{ publicLabel: string; sourceLabel: string }> {
-  const replacementGroups = new Map<string, {
-    candidate: WearableMetricCandidate;
-    publicProviders: Set<string>;
-  }>();
-
-  for (const candidate of candidates) {
-    const sourceLabel = formatMetricEvidenceLabel(candidate, candidate.provider);
-    const publicProvider = resolvePublicSourceProvider(candidate);
-    const group = replacementGroups.get(sourceLabel);
-    if (group) {
-      group.publicProviders.add(publicProvider);
-      continue;
-    }
-
-    replacementGroups.set(sourceLabel, {
-      candidate,
-      publicProviders: new Set([publicProvider]),
-    });
-  }
-
-  return [...replacementGroups.entries()].map(([sourceLabel, group]) => {
-    const publicProviders = [...group.publicProviders].sort();
-    const publicLabel = publicProviders.length === 1
-      ? formatMetricEvidenceLabel(group.candidate, publicProviders[0]!)
-      : formatAmbiguousMetricEvidenceLabel(group.candidate, publicProviders);
-
-    return {
-      publicLabel,
-      sourceLabel,
-    };
-  });
-}
-
-function formatMetricEvidenceLabel(candidate: WearableMetricCandidate, provider: string): string {
-  const timestamp = candidate.recordedAt ?? candidate.occurredAt ?? "unknown time";
-  return `${formatProviderName(provider)} ${candidate.sourceKind} recorded ${timestamp}`;
-}
-
-function formatAmbiguousMetricEvidenceLabel(
-  candidate: WearableMetricCandidate,
-  publicProviders: readonly string[],
-): string {
-  const timestamp = candidate.recordedAt ?? candidate.occurredAt ?? "unknown time";
-  const providerLabel = publicProviders.map(formatProviderName).join("/");
-  return `${providerLabel} ${candidate.sourceKind} recorded ${timestamp}`;
 }
 
 function selectMetricSelectionCandidate(resolved: WearableResolvedMetric): WearableMetricCandidate | null {

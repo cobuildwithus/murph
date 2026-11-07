@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from '@murphai/contracts'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
@@ -6,7 +7,6 @@ import {
 import {
   assistantBackendTargetSchema,
   assistantBackendTargetToProviderConfigInput,
-  createAssistantBackendTarget,
   normalizeAssistantBackendTarget,
   sanitizeAssistantBackendTargetForPersistence,
   type AssistantBackendTarget,
@@ -14,27 +14,24 @@ import {
 import { readEnvValue } from './env-values.js'
 import {
   type AssistantProviderDefaultsConfig,
-  type AssistantProviderConfigInput,
   serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
 import {
   parseHostedAssistantConfig,
+  prepareHostedAssistantConfigForWrite,
   type HostedAssistantConfig,
 } from './hosted-assistant-config.js'
 import {
   applyAssistantSelfDeliveryTargetDefaults as applyAssistantSelfDeliveryTargetDefaultsFromModule,
   assistantSelfDeliveryTargetMapSchema,
-  clearAssistantSelfDeliveryTargets as clearAssistantSelfDeliveryTargetsFromModule,
-  listAssistantSelfDeliveryTargets as listAssistantSelfDeliveryTargetsFromModule,
   normalizeAssistantSelfDeliveryTargetMap,
+  listAssistantSelfDeliveryTargets as listAssistantSelfDeliveryTargetsFromModule,
   normalizeUnknownAssistantSelfDeliveryTargets as normalizeUnknownAssistantSelfDeliveryTargetsFromModule,
   resolveAssistantSelfDeliveryTarget as resolveAssistantSelfDeliveryTargetFromModule,
-  saveAssistantSelfDeliveryTarget as saveAssistantSelfDeliveryTargetFromModule,
   type AssistantSelfDeliveryTargetLookupInput,
 } from './operator-config/self-delivery-targets.js'
 import {
   expandConfiguredVaultPath,
-  normalizeVaultForConfig,
   pathExists,
   readOperatorConfigFile,
   resolveOperatorConfigPath,
@@ -44,11 +41,9 @@ import {
 import { VaultCliError } from './vault-cli-errors.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
-  resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 export {
   expandConfiguredVaultPath,
-  normalizeVaultForConfig,
   resolveOperatorConfigPath,
   resolveOperatorHomeDirectory,
 } from './operator-config/storage.js'
@@ -75,7 +70,7 @@ const assistantOperatorSharedFields = {
               usedPercent: z.number().min(0).max(100),
               remainingPercent: z.number().min(0).max(100),
               windowMinutes: z.number().int().positive().nullable(),
-              resetsAt: z.string().datetime({ offset: true }).nullable(),
+              resetsAt: z.isoDateTime({ offset: true }).nullable(),
             })
             .strict()
             .nullable(),
@@ -84,7 +79,7 @@ const assistantOperatorSharedFields = {
               usedPercent: z.number().min(0).max(100),
               remainingPercent: z.number().min(0).max(100),
               windowMinutes: z.number().int().positive().nullable(),
-              resetsAt: z.string().datetime({ offset: true }).nullable(),
+              resetsAt: z.isoDateTime({ offset: true }).nullable(),
             })
             .strict()
             .nullable(),
@@ -108,7 +103,7 @@ const operatorConfigSchema = z.object({
   defaultVault: z.string().min(1).nullable(),
   assistant: z.unknown().nullable().default(null),
   hostedAssistant: z.unknown().nullable().optional(),
-  updatedAt: z.string().datetime({ offset: true }),
+  updatedAt: z.isoDateTime({ offset: true }),
 })
 
 type RawOperatorConfig = z.infer<typeof operatorConfigSchema>
@@ -125,7 +120,6 @@ export type AssistantOperatorDefaults = z.infer<
 const assistantSelfDeliveryTargetDependencies = {
   normalizeString: normalizeOperatorConfigString,
   resolveDefaults: resolveAssistantOperatorDefaultsForPatch,
-  saveDefaultsPatch: saveAssistantOperatorDefaultsPatch,
 }
 
 export async function readOperatorConfig(
@@ -147,48 +141,6 @@ export async function readOperatorConfig(
 
     throw error
   }
-}
-
-export async function saveDefaultVaultConfig(
-  vault: string,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<OperatorConfig> {
-  const existing = await readOperatorConfigForPatch(homeDirectory)
-  const config = buildOperatorConfig(
-    {
-      defaultVault: normalizeVaultForConfig(vault, homeDirectory),
-    },
-    existing,
-  )
-  const configPath = resolveOperatorConfigPath(homeDirectory)
-
-  await writeOperatorConfigFile(
-    configPath,
-    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
-  )
-
-  return config
-}
-
-export async function saveAssistantOperatorDefaultsPatch(
-  patch: Partial<AssistantOperatorDefaults>,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<OperatorConfig> {
-  const existing = await readOperatorConfigForPatch(homeDirectory)
-  const config = buildOperatorConfig(
-    {
-      assistant: mergeAssistantOperatorDefaults(existing?.assistant ?? null, patch),
-    },
-    existing,
-  )
-  const configPath = resolveOperatorConfigPath(homeDirectory)
-
-  await writeOperatorConfigFile(
-    configPath,
-    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
-  )
-
-  return config
 }
 
 async function readOperatorConfigForPatch(
@@ -343,6 +295,8 @@ function buildOperatorConfig(
   },
   existing: OperatorConfig | null,
 ): OperatorConfig {
+  if (patch.assistant?.backend) normalizeAssistantBackendTargetForPersistence(patch.assistant.backend)
+  if (patch.hostedAssistant) prepareHostedAssistantConfigForWrite(patch.hostedAssistant)
   return normalizeParsedOperatorConfig(
     operatorConfigSchema.parse({
       schema: OPERATOR_CONFIG_SCHEMA,
@@ -434,24 +388,6 @@ export async function resolveDefaultVault(
   return null
 }
 
-export async function resolveConfiguredDefaultVault(
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<string | null> {
-  const config = await readStrictRawOperatorConfig(homeDirectory)
-  if (!config?.defaultVault) {
-    return null
-  }
-
-  const configuredDefaultVault = expandConfiguredVaultPath(
-    config.defaultVault,
-    homeDirectory,
-  )
-  if (!(await pathExists(configuredDefaultVault))) {
-    return null
-  }
-
-  return configuredDefaultVault
-}
 export async function resolveAssistantOperatorDefaults(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantOperatorDefaults | null> {
@@ -492,23 +428,6 @@ export function resolveAssistantBackendTarget(
   return normalizeAssistantBackendTargetForPersistence(defaults?.backend ?? null)
 }
 
-export function buildAssistantProviderDefaultsPatch(input: {
-  defaults: AssistantOperatorDefaults | null | undefined
-  providerConfig: AssistantProviderConfigInput
-}): Partial<AssistantOperatorDefaults> {
-  const savedProviderDefaults = resolveAssistantProviderDefaults(input.defaults)
-  const nextBackend = normalizeAssistantBackendTargetForPersistence(
-    createAssistantBackendTarget({
-      ...(savedProviderDefaults ? savedProviderDefaults : {}),
-      ...input.providerConfig,
-    }),
-  )
-
-  return {
-    backend: nextBackend,
-  }
-}
-
 export async function listAssistantSelfDeliveryTargets(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTarget[]> {
@@ -523,28 +442,6 @@ export async function resolveAssistantSelfDeliveryTarget(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTarget | null> {
   return resolveAssistantSelfDeliveryTargetFromModule(
-    channel,
-    assistantSelfDeliveryTargetDependencies,
-    homeDirectory,
-  )
-}
-
-export async function saveAssistantSelfDeliveryTarget(
-  target: AssistantSelfDeliveryTarget,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<AssistantSelfDeliveryTarget> {
-  return saveAssistantSelfDeliveryTargetFromModule(
-    target,
-    assistantSelfDeliveryTargetDependencies,
-    homeDirectory,
-  )
-}
-
-export async function clearAssistantSelfDeliveryTargets(
-  channel?: string | null,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<string[]> {
-  return clearAssistantSelfDeliveryTargetsFromModule(
     channel,
     assistantSelfDeliveryTargetDependencies,
     homeDirectory,
@@ -566,28 +463,6 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
   )
 }
 
-function mergeAssistantOperatorDefaults(
-  existing: AssistantOperatorDefaults | null,
-  patch: Partial<AssistantOperatorDefaults>,
-): AssistantOperatorDefaults {
-  return assistantOperatorDefaultsSchema.parse({
-    backend:
-      'backend' in patch
-        ? normalizeAssistantBackendTargetForPersistence(patch.backend ?? null)
-        : normalizeAssistantBackendTargetForPersistence(existing?.backend ?? null),
-    identityId:
-      'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
-    account: 'account' in patch ? patch.account : existing?.account ?? null,
-    selfDeliveryTargets:
-      'selfDeliveryTargets' in patch
-        ? normalizeAssistantSelfDeliveryTargetMap(
-            patch.selfDeliveryTargets ?? null,
-            normalizeOperatorConfigString,
-          )
-        : existing?.selfDeliveryTargets ?? null,
-  })
-}
-
 function normalizeAssistantOperatorDefaults(
   defaults: unknown,
 ): AssistantOperatorDefaults | null {
@@ -597,7 +472,11 @@ function normalizeAssistantOperatorDefaults(
 
   const currentParsed = assistantOperatorDefaultsSchema.safeParse(defaults)
   if (currentParsed.success) {
-    return compactAssistantOperatorDefaults(currentParsed.data)
+    return compactAssistantOperatorDefaults({ ...currentParsed.data,
+      backend: currentParsed.data.backend ? { ...currentParsed.data.backend,
+        model: normalizeStoredAssistantModel(currentParsed.data.backend.model),
+      } : null,
+    })
   }
 
   if (typeof defaults !== 'object' || defaults === null) {

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "chat-startup-latency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster starts to chat replies",
+    "summary": "Murph can get to work on your message sooner after a break in the conversation.",
+    "details": "This improvement applies to private conversations and group chats.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": [3453]
+  }
+}

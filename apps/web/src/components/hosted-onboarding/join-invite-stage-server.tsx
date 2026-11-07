@@ -1,171 +1,75 @@
-import Link from "next/link";
-import type { ReactNode } from "react";
-import {
-  CheckCircleIcon,
-  CheckIcon,
-  DiamondIcon,
-  LockIcon,
-  RefreshCwIcon,
-  ShieldCheckIcon,
-  SparkleIcon,
-} from "lucide-react";
+import { MessageCircleIcon } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
-import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
+import { LinkPageDots } from "@/src/components/link-page/link-page-dots";
+import {
+  LINK_PAGE_LINK_CLASS,
+  LINK_PAGE_NIGHT_TOKENS,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
 import { MurphAddToContactsButton } from "@/src/components/murph/murph-contact-card-picker";
-import { HostedFamilyStartButton } from "@/src/components/settings/hosted-family-start-button";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
-import { ContactSupportAction } from "@/src/components/support/contact-support-action";
-import {
-  HOSTED_FAMILY_PLAN_DISPLAY,
-} from "@/src/lib/hosted-onboarding/billing-plans";
-import {
-  JOIN_EDGE_FEATURES,
-  JOIN_FAMILY_FEATURES,
-  JOIN_PULSE_FEATURES,
-} from "@/src/lib/hosted-onboarding/plan-features";
+import { HostedFamilyStartButton } from "@/src/components/settings/hosted-family-start-button";
+import { buildContactSupportMailto } from "@/src/components/support/contact-support-action";
+import { HOSTED_FAMILY_PLAN_DISPLAY } from "@/src/lib/hosted-onboarding/billing-plans";
+import { JOIN_FAMILY_FEATURES } from "@/src/lib/hosted-onboarding/plan-features";
 import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
-import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
+import { cn } from "@/src/lib/utils";
 
-import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JoinInviteStarterUsageIsland } from "./join-invite-starter-usage-island";
-import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type {
   JoinInvitePageModel,
-  JoinInviteTelegramAccountSeed,
 } from "./join-invite-page-model";
 import {
-  JoinInviteCheckoutPlanButtonIsland,
   JoinInviteLegalConsentIsland,
   JoinInviteMessagingSetupIsland,
   JoinInvitePhoneVerificationIsland,
   JoinInviteRefreshButtonIsland,
   JoinInviteSignOutButtonIsland,
 } from "./join-invite-islands";
+import { JoinInvitePlanChoice } from "./join-invite-plan-choice";
+import {
+  resolveJoinInviteSubtitle,
+  resolveJoinInviteTitle,
+} from "./join-invite-state";
 
-const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
+// The billing buttons carry their own variant's hover color, which the pill replaces.
+const JOIN_INVITE_BILLING_PILL_CLASS = cn(LINK_PAGE_PILL_CLASS, "hover:bg-[#FFFCF6]");
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
-  const starterUsageReady = isJoinInviteStarterUsageReady(
-    status,
-    model.familyBillingRecovery,
-  );
 
-  return (
-    <>
-      {status.session.authenticated && !status.session.matchesInvite ? (
-        <JoinInviteSignedInMismatchAlert />
-      ) : null}
+  if (model.launchConsent.gateActive) {
+    return <JoinInviteLaunchLegalConsentScreen model={model} />;
+  }
 
-      {model.launchConsent.gateActive ? (
-        <JoinInviteLaunchLegalConsentPanel model={model} />
-      ) : null}
-
-      {!model.launchConsent.gateActive && status.stage === "verify" ? (
-        <JoinInvitePhoneVerificationPanel
-          awaitingInviteSessionResolution={model.awaitingInviteSessionResolution}
-          emailAuthTarget={status.invite?.emailAuthTarget ?? null}
-          inviteCode={model.inviteCode}
-          phoneAuthTarget={status.invite?.phoneAuthTarget ?? null}
-          phoneHint={status.invite?.phoneHint ?? null}
-          verificationMode={status.invite?.verificationMode ?? "manual_phone"}
-        />
-      ) : null}
-
-      {!model.launchConsent.gateActive && status.stage === "blocked" ? (
-        <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
-          <p>
-            Email support to restore access.
-          </p>
-          <ContactSupportAction
-            body={[
-              "Hi Murph support,",
-              "",
-              "I need help restoring access to my Murph account.",
-              "",
-              "Context: Invite or hosted account is blocked.",
-            ].join("\n")}
-            className="w-full sm:w-fit"
-            subject="Murph account support"
-          />
-        </div>
-      ) : null}
-
-      {!model.launchConsent.gateActive
-      && status.stage === "checkout"
-      && model.familyBillingRecovery === "checkout" ? (
-        <JoinInviteFamilyCheckoutContinuationPanel />
-      ) : null}
-
-      {!model.launchConsent.gateActive
-      && status.stage === "checkout"
-      && model.familyBillingRecovery === "syncing" ? (
-        <JoinInviteFamilyBillingSyncPanel />
-      ) : null}
-
-      {!model.launchConsent.gateActive
-      && status.stage === "checkout"
-      && model.familyBillingRecovery === "manage" ? (
-        <JoinInviteFamilyBillingManagementPanel />
-      ) : null}
-
-      {!model.launchConsent.gateActive && status.stage === "checkout" && starterUsageReady ? (
-        <JoinInviteStarterUsageIsland inviteCode={model.inviteCode} />
-      ) : null}
-
-      {!model.launchConsent.gateActive
-      && status.stage === "checkout"
-      && model.familyBillingRecovery !== "checkout"
-      && model.familyBillingRecovery !== "manage"
-      && model.familyBillingRecovery !== "syncing"
-      && !starterUsageReady
-      && status.messagingSetupRequired ? (
-        <JoinInviteMessagingSetupPanel
-          authenticated={status.session.authenticated}
-          expectedPrivyUserId={model.expectedPrivyUserId}
-          initialTelegramAccount={model.telegramAccountForMessagingSetup}
-          privySessionMatchesAppSession={model.privySessionMatchesAppSession}
-        />
-      ) : null}
-
-      {!model.launchConsent.gateActive
-      && status.stage === "checkout"
-      && model.familyBillingRecovery !== "checkout"
-      && model.familyBillingRecovery !== "manage"
-      && model.familyBillingRecovery !== "syncing"
-      && !starterUsageReady
-      && !status.messagingSetupRequired ? (
-        <JoinInviteCheckoutPanel
-          billingReady={status.capabilities.billingReady}
-          billingPlans={status.billing.plans}
-          familyBillingRecovery={model.familyBillingRecovery}
-          inviteCode={model.inviteCode}
-        />
-      ) : null}
-
-      {!model.launchConsent.gateActive && isHostedOnboardingAccessibleStage(status.stage) ? (
-        <JoinInviteActivePanel
+  switch (status.stage) {
+    case "invalid":
+    case "expired":
+      return <JoinInviteDeadLinkScreen status={status} />;
+    case "verify":
+      return <JoinInviteVerifyScreen model={model} />;
+    case "blocked":
+      return <JoinInviteBlockedScreen status={status} />;
+    case "checkout":
+      return <JoinInviteCheckoutStage model={model} />;
+    case "activating":
+    case "active":
+      return (
+        <JoinInviteActiveScreen
           launchLegalConsentSatisfied={model.launchConsent.status === "granted" || model.preview}
-          murphPhoneNumber={status.murphPhoneNumber ?? null}
-          stage={status.stage}
-          telegramStartLink={
-            status.telegramStartRequired ? buildHostedTelegramBotLink() : null
-          }
+          status={status}
         />
-      ) : null}
-    </>
-  );
+      );
+  }
 }
 
-export function isJoinInviteStarterUsageReady(
+function isJoinInviteStarterUsageReady(
   status: HostedInviteStatusPayload,
-  familyBillingRecovery: HostedFamilyBillingRecoveryState | null = null,
+  familyBillingRecovery: HostedFamilyBillingRecoveryState | null,
 ): boolean {
   return familyBillingRecovery === null
     && status.session.authenticated
@@ -173,514 +77,307 @@ export function isJoinInviteStarterUsageReady(
     && !status.messagingSetupRequired;
 }
 
-function JoinInviteSignedInMismatchAlert() {
-  return (
-    <Alert className="border-sienna/20 bg-sienna/5 text-sienna">
-      <AlertTitle>
-        This browser is signed in with a different Murph account.
-      </AlertTitle>
-      <AlertDescription>
-        This browser is already signed in with a different Murph account. Sign
-        out first to continue with this invite.
-      </AlertDescription>
-      <div className="mt-3">
-        <JoinInviteSignOutButtonIsland />
-      </div>
-    </Alert>
-  );
-}
+function JoinInviteCheckoutStage({ model }: { model: JoinInvitePageModel }) {
+  const { familyBillingRecovery, inviteCode, status } = model;
 
-function JoinInvitePanelCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="rounded-2xl border border-border bg-card/80 p-6">
-        {children}
-      </div>
-    </div>
-  );
-}
+  switch (familyBillingRecovery) {
+    case "checkout":
+      return <JoinInviteFamilyCheckoutScreen />;
+    case "manage":
+      return <JoinInviteFamilyManagementScreen />;
+    case "syncing":
+      return <JoinInviteFamilySyncScreen />;
+  }
 
-function JoinInvitePhoneVerificationPanel({
-  awaitingInviteSessionResolution,
-  emailAuthTarget,
-  inviteCode,
-  phoneAuthTarget,
-  phoneHint,
-  verificationMode,
-}: {
-  awaitingInviteSessionResolution: boolean;
-  emailAuthTarget: NonNullable<HostedInviteStatusPayload["invite"]>["emailAuthTarget"] | null;
-  inviteCode: string;
-  phoneAuthTarget: NonNullable<HostedInviteStatusPayload["invite"]>["phoneAuthTarget"] | null;
-  phoneHint: string | null;
-  verificationMode: NonNullable<HostedInviteStatusPayload["invite"]>["verificationMode"];
-}) {
-  if (awaitingInviteSessionResolution) {
+  if (isJoinInviteStarterUsageReady(status, familyBillingRecovery)) {
+    return <JoinInviteStarterUsageIsland inviteCode={inviteCode} />;
+  }
+
+  if (status.messagingSetupRequired) {
     return (
-      <div
-        aria-busy="true"
-        aria-live="polite"
-        role="status"
-        className="rounded-2xl border border-border bg-card p-6"
-      >
-        <ConsentSkeleton />
-      </div>
+      <LinkPageScreen
+        actions={<JoinInviteMessagingSetupIsland />}
+        announceDetail={false}
+        detail={resolveJoinInviteSubtitle(status)}
+        title={resolveJoinInviteTitle(status)}
+      />
     );
   }
 
   return (
-    <JoinInvitePanelCard>
-      <JoinInvitePhoneVerificationIsland
-        emailAuthTarget={emailAuthTarget}
-        inviteCode={inviteCode}
-        phoneAuthTarget={phoneAuthTarget}
-        phoneHint={phoneHint}
-        verificationMode={verificationMode}
-      />
-    </JoinInvitePanelCard>
+    <JoinInvitePlanScreen
+      familyBillingRecovery={familyBillingRecovery}
+      inviteCode={inviteCode}
+      status={status}
+    />
   );
 }
 
-function JoinInviteLaunchLegalConsentPanel({
+function JoinInviteDeadLinkScreen({
+  status,
+}: {
+  status: HostedInviteStatusPayload;
+}) {
+  // Every other stage needs a session that matches the invite, so this is the
+  // only screen a member of another account can reach without the mismatch view.
+  const signedInElsewhere = status.session.authenticated && !status.session.matchesInvite;
+
+  return (
+    <LinkPageScreen
+      actions={signedInElsewhere ? (
+        <JoinInviteSignOutButtonIsland appearance="link" idleLabel="Sign out" />
+      ) : undefined}
+      announceDetail={false}
+      detail={resolveJoinInviteSubtitle(status)}
+      title={resolveJoinInviteTitle(status)}
+    />
+  );
+}
+
+function JoinInviteVerifyScreen({ model }: { model: JoinInvitePageModel }) {
+  const { status } = model;
+  const title = resolveJoinInviteTitle(status);
+  const detail = resolveJoinInviteSubtitle(status);
+
+  if (model.awaitingInviteSessionResolution) {
+    return (
+      <LinkPageScreen
+        actions={
+          <div
+            aria-busy="true"
+            aria-live="polite"
+            className="w-full"
+            role="status"
+            style={LINK_PAGE_NIGHT_TOKENS}
+          >
+            <ConsentSkeleton />
+          </div>
+        }
+        announceDetail={false}
+        detail={detail}
+        title={title}
+      />
+    );
+  }
+
+  return (
+    <JoinInvitePhoneVerificationIsland
+      detail={detail}
+      emailAuthTarget={status.invite?.emailAuthTarget ?? null}
+      inviteCode={model.inviteCode}
+      phoneAuthTarget={status.invite?.phoneAuthTarget ?? null}
+      phoneHint={status.invite?.phoneHint ?? null}
+      title={title}
+      verificationMode={status.invite?.verificationMode ?? "manual_phone"}
+    />
+  );
+}
+
+function JoinInviteBlockedScreen({
+  status,
+}: {
+  status: HostedInviteStatusPayload;
+}) {
+  return (
+    <LinkPageScreen
+      actions={
+        <a
+          className={LINK_PAGE_PILL_CLASS}
+          href={buildContactSupportMailto({
+            body: [
+              "Hi Murph support,",
+              "",
+              "I need help restoring access to my Murph account.",
+              "",
+              "Context: Invite or hosted account is blocked.",
+            ].join("\n"),
+            subject: "Murph account support",
+          })}
+        >
+          Contact support
+        </a>
+      }
+      announceDetail={false}
+      detail={resolveJoinInviteSubtitle(status)}
+      title={resolveJoinInviteTitle(status)}
+    />
+  );
+}
+
+function JoinInviteLaunchLegalConsentScreen({
   model,
 }: {
   model: JoinInvitePageModel;
 }) {
   if (model.launchConsent.status === "error") {
     return (
-      <div className="space-y-4">
-        <Alert variant="destructive">
-          <AlertTitle>Unable to load Murph legal consent</AlertTitle>
-          <AlertDescription>
-            {model.launchConsent.errorMessage ?? "Could not load Murph legal consent right now."}
-          </AlertDescription>
-        </Alert>
-        <JoinInviteRefreshButtonIsland />
-      </div>
+      <LinkPageScreen
+        actions={<JoinInviteRefreshButtonIsland />}
+        detail={model.launchConsent.errorMessage ?? "Could not load Murph legal consent right now."}
+        title="Unable to load Murph legal consent."
+      />
     );
   }
 
   return (
-    <JoinInviteLegalConsentIsland
-      initialStatus={model.launchConsent.initialStatus}
-      inviteCode={model.inviteCode}
+    <LinkPageScreen
+      actions={
+        <JoinInviteLegalConsentIsland
+          initialStatus={model.launchConsent.initialStatus}
+          inviteCode={model.inviteCode}
+        />
+      }
+      title="One quick step."
     />
   );
 }
 
-function JoinInviteMessagingSetupPanel({
-  authenticated,
-  expectedPrivyUserId,
-  initialTelegramAccount,
-  privySessionMatchesAppSession,
-}: {
-  authenticated: boolean;
-  expectedPrivyUserId: string | null;
-  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
-  privySessionMatchesAppSession: boolean;
-}) {
-  return (
-    <JoinInvitePanelCard>
-      <JoinInviteMessagingSetupIsland
-        authenticated={authenticated}
-        expectedPrivyUserId={expectedPrivyUserId}
-        initialTelegramAccount={initialTelegramAccount}
-        privySessionMatchesAppSession={privySessionMatchesAppSession}
-      />
-    </JoinInvitePanelCard>
-  );
-}
-
-export function JoinInviteCheckoutPanel({
-  billingReady,
-  billingPlans,
-  familyBillingRecovery = null,
+function JoinInvitePlanScreen({
+  familyBillingRecovery,
   inviteCode,
+  status,
 }: {
-  billingReady: boolean;
-  billingPlans: HostedInviteStatusPayload["billing"]["plans"];
-  familyBillingRecovery?: HostedFamilyBillingRecoveryState | null;
+  familyBillingRecovery: HostedFamilyBillingRecoveryState | null;
   inviteCode: string;
+  status: HostedInviteStatusPayload;
 }) {
-  const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
-  const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly") ?? null;
-  const buttonClassName =
-    "h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90";
+  const billingPlans = status.billing.plans;
+  const pulsePlan = billingPlans.find((plan) => plan.code === "launch_monthly") ?? null;
+  const edgePlan = billingPlans.find((plan) => plan.code === "launch_edge_monthly") ?? null;
+  const familyAvailable = familyBillingRecovery === "available";
 
   return (
-    <div className="space-y-6">
-      <div
-        className={
-          familyBillingRecovery === "available"
-            ? "grid gap-4 sm:grid-cols-2"
-            : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4"
-        }
-      >
-        <PricingTierCard
-          tier="go"
-          name="Pulse"
-          description="Your private personal health assistant."
-          price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
-          priceUnit="/ month"
-          features={JOIN_PULSE_FEATURES}
-          cta={
-            <JoinInviteCheckoutPlanButtonIsland
-              billingReady={billingReady}
-              className={buttonClassName}
-              idleLabel="Get Pulse"
-              inviteCode={inviteCode}
-              planCode={pulsePlan?.code ?? null}
-            />
-          }
+    <LinkPageScreen
+      actions={
+        <JoinInvitePlanChoice
+          billingReady={status.capabilities.billingReady}
+          family={familyAvailable ? {
+            description: JOIN_FAMILY_FEATURES[0],
+            features: JOIN_FAMILY_FEATURES.slice(1),
+            price: formatPlanPrice(HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat),
+          } : null}
+          inviteCode={inviteCode}
+          plans={[
+            {
+              description: "Questions, decisions, plans, and follow-through.",
+              idleLabel: "Get Pulse",
+              name: "Pulse",
+              planCode: pulsePlan?.code ?? null,
+              price: pulsePlan ? formatPlanPrice(pulsePlan.recurringAmountUsdCents) : "$8",
+            },
+            {
+              description: "More guidance and deeper research.",
+              disabledLabel: "Coming soon",
+              idleLabel: "Get Edge",
+              name: "Edge",
+              planCode: edgePlan?.code ?? null,
+              price: edgePlan ? formatPlanPrice(edgePlan.recurringAmountUsdCents) : "$20",
+            },
+          ]}
         />
-
-        <PricingTierCard
-          tier="plus"
-          name="Edge"
-          description="More guidance and deeper research."
-          price={edgePlan ? `$${Math.round(edgePlan.recurringAmountUsdCents / 100)}` : "$20"}
-          priceUnit="/ month"
-          features={JOIN_EDGE_FEATURES}
-          cta={
-            <JoinInviteCheckoutPlanButtonIsland
-              billingReady={billingReady}
-              className={buttonClassName}
-              disabledLabel="Coming soon"
-              idleLabel="Get Edge"
-              inviteCode={inviteCode}
-              planCode={edgePlan?.code ?? null}
-            />
-          }
-        />
-
-        {familyBillingRecovery === "available" ? (
-          <PricingTierCard
-            tier="family"
-            name="Family"
-            description="Private Murph accounts for the people closest to you."
-            price={`$${Math.round(
-              HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
-            )}`}
-            priceUnit="/ person / month"
-            features={JOIN_FAMILY_FEATURES}
-            cta={
-              <HostedFamilyStartButton
-                block
-                label="Restart Family"
-              />
-            }
-          />
-        ) : null}
-      </div>
-
-      <div className="text-center text-sm text-muted-foreground">
-        Want to self-host?{" "}
-        <Link
-          href={MURPH_GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-foreground underline-offset-4 hover:underline"
-        >
-          View Murph on GitHub.
-        </Link>
-      </div>
-
-      <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-0">
-          <CheckoutTrustItem
-            icon={LockIcon}
-            label="Private by default"
-            sublabel="Your data stays yours."
-          />
-          <CheckoutTrustItem
-            icon={ShieldCheckIcon}
-            label="No data sold"
-            sublabel="Ever. That’s our promise."
-            divider
-          />
-          <CheckoutTrustItem
-            icon={RefreshCwIcon}
-            label="Full data access"
-            sublabel="Export or delete anytime."
-            divider
-          />
-        </div>
-      </div>
-    </div>
+      }
+      announceDetail={false}
+      detail={familyAvailable
+        ? "Restart Family or choose an individual plan."
+        : resolveJoinInviteSubtitle(status)}
+      title={familyAvailable ? "Choose how to continue." : resolveJoinInviteTitle(status)}
+    />
   );
 }
 
-export function JoinInviteFamilyBillingSyncPanel() {
+function formatPlanPrice(recurringAmountUsdCents: number): string {
+  return `$${Math.round(recurringAmountUsdCents / 100)}`;
+}
+
+function JoinInviteFamilySyncScreen() {
   return (
-    <div
-      aria-busy="true"
-      aria-live="polite"
-      className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8"
-      role="status"
+    <LinkPageScreen
+      detail="This page checks automatically and will continue when Family access is ready."
+      title="Family billing is in progress."
     >
-      <div className="flex items-start gap-4">
-        <span
-          aria-hidden
-          className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-        >
-          <RefreshCwIcon className="size-4" />
-        </span>
-        <div className="max-w-xl">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Family billing
-          </p>
-          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Your Family plan is syncing
-          </h3>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Stripe is confirming the plan. This page checks automatically and
-            will continue when Family access is ready.
-          </p>
-        </div>
-      </div>
-    </div>
+      <LinkPageDots />
+    </LinkPageScreen>
   );
 }
 
-export function JoinInviteFamilyBillingManagementPanel() {
+function JoinInviteFamilyManagementScreen() {
   return (
-    <div className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8">
-      <div className="flex items-start gap-4">
-        <PlanVisual tier="pulse" />
-        <div className="min-w-0 flex-1">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Family billing
-          </p>
-          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Open Family billing
-          </h3>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Stripe has an issue with this subscription. Open Family billing to
-            update payment details, review invoices, or cancel the plan.
-          </p>
-          <div className="mt-5">
-            <BillingPortalButton
-              billingScope="family"
-              block
-              label="Open Family billing"
-              variant="secondary"
-            />
-          </div>
+    <LinkPageScreen
+      actions={
+        <div className="w-full" style={LINK_PAGE_NIGHT_TOKENS}>
+          <BillingPortalButton
+            billingScope="family"
+            block
+            className={JOIN_INVITE_BILLING_PILL_CLASS}
+            label="Open Family billing"
+            variant="secondary"
+          />
         </div>
-      </div>
-    </div>
+      }
+      announceDetail={false}
+      detail="Update payment details, review invoices, or cancel the plan."
+      title="Resolve Family billing."
+    />
   );
 }
 
-export function JoinInviteFamilyCheckoutContinuationPanel() {
+function JoinInviteFamilyCheckoutScreen() {
   return (
-    <div className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8">
-      <div className="flex items-start gap-4">
-        <PlanVisual tier="pulse" />
-        <div className="min-w-0 flex-1">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Family checkout
-          </p>
-          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Your Family checkout is still open
-          </h3>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Continue to Stripe using the same secure checkout. Individual plans
-            stay unavailable while this Family checkout is open.
-          </p>
-          <div className="mt-5">
-            <HostedFamilyStartButton
-              block
-              label="Continue Family checkout"
-            />
-          </div>
+    <LinkPageScreen
+      actions={
+        <div className="w-full" style={LINK_PAGE_NIGHT_TOKENS}>
+          <HostedFamilyStartButton
+            block
+            className={JOIN_INVITE_BILLING_PILL_CLASS}
+            label="Continue Family checkout"
+          />
         </div>
-      </div>
-    </div>
+      }
+      announceDetail={false}
+      detail="Individual plans stay unavailable while this Family checkout is open."
+      title="Continue Family checkout."
+    />
   );
 }
 
-function PricingTierCard({
-  name,
-  description,
-  price,
-  priceUnit,
-  features,
-  cta,
-  tier,
-}: {
-  name: string;
-  description: string;
-  price: string;
-  priceUnit: string;
-  features: readonly string[];
-  cta: ReactNode;
-  tier: "family" | "free" | "go" | "plus";
-}) {
-  return (
-    <div className="flex min-w-0 flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
-      <div className="flex items-center gap-3">
-        <PlanVisual
-          tier={tier === "plus" ? "edge" : tier === "free" ? "free" : "pulse"}
-        />
-        <h3 className="font-serif text-3xl font-normal tracking-tight text-foreground">
-          {name}
-        </h3>
-      </div>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        {description}
-      </p>
-
-      <div className="mt-6 border-t border-border pt-6">
-        <div className="flex items-baseline gap-1">
-          <span className="font-serif text-5xl font-normal leading-none tracking-tight text-foreground">
-            {price}
-          </span>
-          <span className="text-sm text-muted-foreground">{priceUnit}</span>
-        </div>
-      </div>
-
-      <div className="mt-6">{cta}</div>
-
-      <ul className="mt-6 flex flex-col gap-3">
-        {features.map((feature, i) => (
-          <li key={feature} className="text-sm">
-            {i === 0 && feature.endsWith(":") ? (
-              <div className="flex flex-col gap-3">
-                <span className="flex items-center gap-2 font-semibold text-foreground">
-                  {tier === "plus" ? (
-                    <DiamondIcon className="size-4 text-olive" />
-                  ) : (
-                    <SparkleIcon className="size-4 text-olive" />
-                  )}
-                  {feature}
-                </span>
-                <hr className="border-border" />
-              </div>
-            ) : (
-              <div className="flex items-start gap-3">
-                <span aria-hidden className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-olive/15">
-                  <CheckIcon className="size-3 text-olive" strokeWidth={2.5} />
-                </span>
-                <span className="text-foreground">{feature}</span>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function CheckoutTrustItem({
-  icon: Icon,
-  label,
-  sublabel,
-  divider,
-}: {
-  icon: typeof LockIcon;
-  label: string;
-  sublabel: string;
-  divider?: boolean;
-}) {
-  return (
-    <div
-      className={[
-        "flex items-center gap-3 py-1",
-        divider ? "lg:border-l lg:border-border lg:pl-6" : "",
-      ].join(" ")}
-    >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40">
-        <Icon className="size-[18px] text-muted-foreground" />
-      </span>
-      <div>
-        <p className="text-sm font-semibold text-foreground">{label}</p>
-        <p className="text-xs text-muted-foreground">{sublabel}</p>
-      </div>
-    </div>
-  );
-}
-
-function JoinInviteActivePanel({
+function JoinInviteActiveScreen({
   launchLegalConsentSatisfied,
-  murphPhoneNumber,
-  stage,
-  telegramStartLink,
+  status,
 }: {
   launchLegalConsentSatisfied: boolean;
-  murphPhoneNumber: string | null;
-  stage: HostedAccessibleOnboardingStage;
-  telegramStartLink: string | null;
+  status: HostedInviteStatusPayload;
 }) {
-  const activationPending = stage === "activating";
+  const telegramStartLink = status.telegramStartRequired ? buildHostedTelegramBotLink() : null;
+  const murphPhoneNumber = status.murphPhoneNumber ?? null;
+  const canContactMurph = launchLegalConsentSatisfied
+    && (telegramStartLink !== null || murphPhoneNumber !== null);
 
   return (
-    <div className="flex flex-col gap-8">
-      {activationPending ? (
-        <div className="space-y-1 text-sm text-olive">
-          <p className="font-semibold">
-            {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
-          </p>
-          <p className="leading-relaxed text-olive/85">
-            {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
-          </p>
-        </div>
-      ) : telegramStartLink ? (
-        <div className="space-y-1 text-sm text-olive">
-          <p className="font-semibold">One last step</p>
-          <p className="leading-relaxed text-olive/85">
-            Your Telegram is linked. Open Murph in Telegram and send a message
-            so Murph can reply. Telegram only lets Murph message you after you
-            go first.
-          </p>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2.5 text-sm text-olive">
-          <CheckCircleIcon className="size-4 shrink-0" />
-          <p className="leading-relaxed">
-            Murph is ready whenever you are.
-          </p>
-        </div>
-      )}
-
-      {launchLegalConsentSatisfied ? (
+    <LinkPageScreen
+      actions={canContactMurph ? (
         <JoinInviteMurphContactActions
           murphPhoneNumber={murphPhoneNumber}
           telegramStartLink={telegramStartLink}
         />
-      ) : null}
+      ) : undefined}
+      announceDetail={status.stage === "activating"}
+      detail={resolveJoinInviteSubtitle(status)}
+      title={resolveJoinInviteTitle(status)}
+    >
+      {status.stage === "activating" ? <LinkPageDots /> : null}
+      {status.stage === "active" && canContactMurph ? <JoinInviteFirstMessage /> : null}
+    </LinkPageScreen>
+  );
+}
 
-      <div className="border-t border-amber/25 pt-6">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          What Murph can help with
-        </p>
-        <div className="mt-4 grid gap-x-6 gap-y-5 sm:grid-cols-2">
-          {JOIN_INVITE_ACTIVE_FEATURE_CARDS.map((item) => (
-            <div key={item.title} className="flex gap-3">
-              <item.icon className="mt-0.5 size-4 shrink-0 text-olive-light" />
-              <div>
-                <p className="text-sm font-semibold text-foreground">
-                  {item.title}
-                </p>
-                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
-                  {item.body}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <Button
-        render={<Link href="/experiments" />}
-        nativeButton={false}
-        variant="link"
-        size="sm"
-        className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
-      >
-        View experiments
-      </Button>
-    </div>
+function JoinInviteFirstMessage() {
+  return (
+    <p
+      aria-hidden="true"
+      className="max-w-[280px] self-end rounded-[22px] bg-[#FFFCF6] px-[18px] py-3 text-lg font-medium leading-6 text-[#2D3436]"
+    >
+      Hey Murph
+    </p>
   );
 }
 
@@ -693,17 +390,14 @@ function JoinInviteMurphContactActions({
 }) {
   if (telegramStartLink) {
     return (
-      <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
-        <Button
-          render={
-            <a href={telegramStartLink} rel="noreferrer" target="_blank" />
-          }
-          nativeButton={false}
-          size="lg"
-        >
-          Message Murph on Telegram
-        </Button>
-      </div>
+      <a
+        className={LINK_PAGE_PILL_CLASS}
+        href={telegramStartLink}
+        rel="noreferrer"
+        target="_blank"
+      >
+        Message Murph on Telegram
+      </a>
     );
   }
 
@@ -712,16 +406,17 @@ function JoinInviteMurphContactActions({
   }
 
   return (
-    <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
-      <Button
-        render={<a href={buildMurphSmsHref(murphPhoneNumber)} />}
-        nativeButton={false}
-        size="lg"
-      >
+    <>
+      <a className={LINK_PAGE_PILL_CLASS} href={buildMurphSmsHref(murphPhoneNumber)}>
+        <MessageCircleIcon aria-hidden="true" className="size-5" />
         Text Murph
-      </Button>
-      <MurphAddToContactsButton />
-    </div>
+      </a>
+      <MurphAddToContactsButton
+        className={LINK_PAGE_LINK_CLASS}
+        size="unstyled"
+        variant="unstyled"
+      />
+    </>
   );
 }
 

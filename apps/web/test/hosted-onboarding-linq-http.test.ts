@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { createServer, type Server } from "node:http";
 
 import type { Chat } from "@linqapp/sdk/resources/chats";
@@ -29,6 +30,7 @@ import {
   sendHostedLinqReactionBoundChatMessage,
   shareHostedLinqContactCard,
   startHostedLinqChatTypingIndicator,
+  addHostedLinqMessageReaction,
 } from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
@@ -198,6 +200,7 @@ describe("getHostedLinqChatSummary", () => {
       ],
       handlesComplete: true,
       isGroup: true,
+      observedAt: expect.any(Date),
     });
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"),
@@ -247,6 +250,7 @@ describe("getHostedLinqChatSummary", () => {
       handles: [],
       handlesComplete: false,
       isGroup: null,
+      observedAt: expect.any(Date),
     });
   });
 
@@ -317,19 +321,19 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
   ];
 
   it("keeps a real group title", () => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
       handles,
       isGroup: true,
-    })).toBe("Weekend Warriors");
+    }))).toBe("Weekend Warriors");
   });
 
   it("sanitizes control characters in a real group title", () => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: " Weekend\u0000   Warriors ",
       handles,
       isGroup: true,
-    })).toBe("Weekend Warriors");
+    }))).toBe("Weekend Warriors");
   });
 
   it.each([
@@ -338,20 +342,20 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
     "Call +1 (415) 555-9876",
     "Email friend@example.test",
   ])("rejects Linq's synthesized handle-list title", (displayName) => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName,
       handles,
       isGroup: true,
-    })).toBeNull();
+    }))).toBeNull();
   });
 
   it("rejects provider titles when the roster was not parsed completely", () => {
-    expect(readHostedLinqExplicitGroupDisplayName({
+    expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
       handles,
       handlesComplete: false,
       isGroup: true,
-    })).toBeNull();
+    }))).toBeNull();
   });
 });
 
@@ -1548,6 +1552,41 @@ describe("sendHostedLinqReadReceipt", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+});
+
+describe("addHostedLinqMessageReaction", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("sends 👍 as the native Like tapback and other emoji as custom tapbacks", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({ is_me: true, message_id: "msg_1", status: "accepted" }, 202);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(addHostedLinqMessageReaction({ emoji: "👍", messageId: "msg_1" }))
+      .resolves.toMatchObject({ ok: true });
+    await expect(addHostedLinqMessageReaction({ emoji: "⏰", messageId: "msg_1" }))
+      .resolves.toMatchObject({ ok: true });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://linq.example.test/api/partner/v3/messages/msg_1/reactions",
+    );
+    expect(readJsonRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual({ operation: "add", type: "like" });
+    expect(readJsonRequestBody(fetchMock.mock.calls[1]?.[1])).toEqual({
+      custom_emoji: "⏰",
+      operation: "add",
+      type: "custom",
+    });
   });
 });
 

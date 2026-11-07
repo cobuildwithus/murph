@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-10-26",
+  "order": 100,
+  "item": {
+    "id": "terra-chat-default",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Terra for personal chats, Sol for groups",
+    "summary": "Personal chats now start with GPT-6.1 Terra. Every group keeps GPT-6.1 Sol. Terra is available in Settings.",
+    "details": "Existing model preferences reset to these defaults. Sol in personal chats requires a paid subscription; Sol in groups is available to everyone. Astra remains available on paid Edge and Max plans. Your reasoning setting stays the same.",
+    "relevanceTags": [
+      "settings",
+      "models",
+      "groups"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Choose your model",
+      "href": "/settings"
+    }
+  }
+}

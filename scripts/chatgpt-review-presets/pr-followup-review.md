@@ -1,7 +1,11 @@
 Continue the PR review in this conversation using the same serious-bug and
 Complexity Collapse finding bars, evidence rules, and output contract.
-Read the new `codebase.zip` and
-`review-gpt-pr-context/review-round.json` first.
+Read the current review snapshot and
+`review-gpt-pr-context/review-round.json` first. The snapshot may be a checkout
+at the reviewed head, an extracted snapshot, or `codebase.zip`; no ZIP is
+required when the same source and round evidence are directly accessible.
+Keep evidence scoped to the supplied revisions, excluding unrelated
+working-tree changes.
 
 - `reviewScope: full` with `contextMode: full_snapshot`: use the new complete
   snapshot for a full review of the current PR.

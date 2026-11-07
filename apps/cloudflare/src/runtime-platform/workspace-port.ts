@@ -1,7 +1,5 @@
-import {
-  HostedRuntimeCanonicalCheckpointError,
-  type HostedRuntimePlatform,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
+import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   checkpointHostedRuntimeBridgeWebWorkspace,
   HostedRuntimeBridgeCheckpointLeaseError,
@@ -21,7 +19,6 @@ import {
   isHostedRuntimeInternalAuthorityRejectedError,
   requireHostedRuntimeWriteFenceHeaders,
 } from "./authority-headers.ts";
-import { readHostedRuntimeControlPlaneFetchFailureDiagnostics } from "./control-plane-fetch.ts";
 import {
   fetchHostedWebControlPlaneJson,
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
@@ -116,16 +113,8 @@ export function createHostedWebWorkspacePort(input: {
         let retried: HostedWorkspaceCheckpointResponse;
         try {
           retried = await checkpointThroughBridge();
-        } catch (retryError) {
-          if (
-            isTransientHostedWorkspaceCheckpointError(error)
-            && isTransientHostedWorkspaceCheckpointError(retryError)
-          ) {
-            throw new HostedRuntimeCanonicalCheckpointError({
-              cause: error,
-            });
-          }
-          throw error;
+        } catch {
+          throw new HostedCanonicalWriteOutcomeUnknownError({ cause: error });
         }
         if (retried.checkpointed) {
           response = retried;
@@ -139,7 +128,7 @@ export function createHostedWebWorkspacePort(input: {
             workspace: retried.workspace,
           };
         } else {
-          throw error;
+          throw new HostedCanonicalWriteOutcomeUnknownError({ cause: error });
         }
       }
       if (response.checkpointed) {
@@ -152,51 +141,11 @@ export function createHostedWebWorkspacePort(input: {
   };
 }
 
-function isTransientHostedWorkspaceCheckpointError(error: unknown): boolean {
-  if (
-    error instanceof HostedRuntimeBridgeCheckpointLeaseError
-    || isHostedRuntimeInternalAuthorityRejectedError(error)
-  ) {
-    return false;
-  }
-  if (error instanceof HostedWebControlPlaneResponseError) {
-    return error.status === 408 || error.status >= 500;
-  }
-
-  const diagnostics = readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
-  if (diagnostics) {
-    if (diagnostics.fetchCallerSignalAborted) {
-      return false;
-    }
-    return diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
-      || diagnostics.fetchCauseKind === "fetch_failed"
-      || diagnostics.fetchCauseKind === "network"
-      || diagnostics.fetchCauseKind === "timeout";
-  }
-
-  return hasErrorName(error, "TimeoutError");
-}
-
-function hasErrorName(error: unknown, name: string): boolean {
-  let current: unknown = error;
-  const seen = new Set<unknown>();
-  while (current && typeof current === "object" && !seen.has(current)) {
-    seen.add(current);
-    if (current instanceof Error && current.name === name) {
-      return true;
-    }
-    current = "cause" in current
-      ? (current as { cause?: unknown }).cause
-      : null;
-  }
-  return false;
-}
-
 function isAmbiguousHostedWorkspaceCheckpointError(error: unknown): boolean {
-  if (
-    error instanceof HostedRuntimeBridgeCheckpointLeaseError
-    || isHostedRuntimeInternalAuthorityRejectedError(error)
-  ) {
+  if (error instanceof HostedRuntimeBridgeCheckpointLeaseError) {
+    return error.stage === "after_web_checkpoint";
+  }
+  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
     return false;
   }
   if (error instanceof HostedWebControlPlaneResponseError) {

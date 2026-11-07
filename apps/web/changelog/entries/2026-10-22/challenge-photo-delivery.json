@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-22",
+  "order": 100,
+  "item": {
+    "id": "challenge-photo-delivery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Lighter challenge photos",
+    "summary": "Profile pictures and challenge photos load in smaller sizes suited to the app.",
+    "details": "Photo access still follows the challenge’s visibility rules. This update starts a new private image store; photos uploaded before the update need to be replaced.",
+    "relevanceTags": [
+      "challenges",
+      "photos"
+    ],
+    "sourcePullRequests": [
+      4298
+    ]
+  }
+}

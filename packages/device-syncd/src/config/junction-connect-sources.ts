@@ -14,7 +14,7 @@ import type {
   DeviceConnectRoute,
 } from "./connect-routes.ts";
 
-export type JunctionConnectMode = "junction_link" | "junction_sdk" | "direct" | "unavailable";
+export type JunctionConnectMode = "junction_link" | "junction_sdk" | "unavailable";
 
 export interface JunctionConnectSourceTarget {
   readonly connectSourceId: string;

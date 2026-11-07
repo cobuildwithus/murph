@@ -142,6 +142,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
   const mealResult = await runCli<{ mealId: string }>([
     'meal',
     'add',
+    '--name', 'Sample meal',
     '--photo',
     sampleDocumentPath,
     '--note',
@@ -249,6 +250,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
   const mealResult = await runSourceCli<{ mealId: string }>([
     'meal',
     'add',
+    '--name', 'Sample meal',
     '--photo',
     sampleDocumentPath,
     '--note',

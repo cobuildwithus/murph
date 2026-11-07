@@ -28,10 +28,10 @@ const browserRunner = readFileSync(
 describe("live Junction wearable canary workflow", () => {
   it("admits the private controller only for protected-main provider proof", () => {
     expect(workflow).toContain("permissions:\n  contents: read");
-    expect(workflow).toContain("      - main");
+    expect(workflow).toContain('cron: "43 5 * * 1,4"');
     expect(workflow).toContain("  schedule:");
     expect(workflow).toContain("  workflow_dispatch:");
-    expect(workflow).not.toMatch(/^\s*(pull_request|pull_request_target|repository_dispatch):/mu);
+    expect(workflow).not.toMatch(/^\s*(push|pull_request|pull_request_target|repository_dispatch):/mu);
     expect(workflow).toContain("if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}");
     expect(workflow).toContain("environment: temporal-compatibility");
     expect(workflow).toContain("group: live-junction-wearable-canary");
@@ -42,9 +42,9 @@ describe("live Junction wearable canary workflow", () => {
     const secretNames = [...workflow.matchAll(/\$\{\{ secrets\.([A-Z0-9_]+) \}\}/gu)]
       .map((match) => match[1]);
     expect(secretNames).toEqual(["TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY"]);
-    expect(workflow).toContain("repositories: murph-cloud");
-    expect(workflow).toContain("permission-actions: write");
-    expect(workflow).toContain("permission-contents: read");
+    expect(workflow).toContain("WEARABLE_CANARY_GITHUB_APP_ID: ${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}");
+    expect(workflow).toContain("WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: ${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}");
+    expect(workflow).not.toContain("WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN");
     expect(workflow).not.toMatch(/JUNCTION_API_KEY|GARMIN_CANARY_PASSWORD|KERNEL_API_KEY|actions\/(?:upload|download)-artifact/u);
     expect(workflow).not.toContain("pnpm install");
     expect(workflow).not.toContain("repository: cobuildwithus/murph-cloud");
@@ -61,9 +61,9 @@ describe("live Junction wearable canary workflow", () => {
 
   it("confirms the required Vital disclosure before waiting for provider authorization", () => {
     const disclosureOffset = browserRunner.indexOf(
-      'stage = "murph_vital_disclosure";',
+      'setStage("murph_vital_disclosure");',
     );
-    const connectOffset = browserRunner.indexOf('stage = "murph_connect_start";');
+    const connectOffset = browserRunner.indexOf('setStage("murph_connect_start");');
 
     expect(disclosureOffset).toBeGreaterThan(0);
     expect(connectOffset).toBeGreaterThan(disclosureOffset);

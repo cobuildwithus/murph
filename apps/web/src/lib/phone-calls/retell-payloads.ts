@@ -42,10 +42,6 @@ export interface RetellWebhookPayload {
 const USD_MICROS_PER_CENT = 10_000;
 const MAX_RETELL_COMBINED_COST_CENTS = Number.MAX_SAFE_INTEGER / USD_MICROS_PER_CENT;
 
-export const retellCallPayloadSchema = {
-  parse: parseRetellCallPayload,
-} as const;
-
 export const retellAskMurphPayloadSchema = {
   parse: parseRetellAskMurphPayload,
 } as const;

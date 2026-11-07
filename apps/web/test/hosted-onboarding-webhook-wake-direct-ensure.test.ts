@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import {
   beforeEach,
   describe,
@@ -8,6 +9,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   ensureRuntimeProcessing: vi.fn(),
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(async () => ({ matchedCount: 1, recorded: true })),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
   recordHostedIngressDirectEnsureTiming: vi.fn(async () => ({
@@ -19,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
+  readHostedRuntimeDirectWakeOwner: async () => null,
+}));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
@@ -29,6 +35,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
   recordHostedIngressAcceptedFromMailboxItem:
     mocks.recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressDirectEnsureTiming:
@@ -87,6 +94,13 @@ function buildWakeHandoff(
   };
 }
 
+function buildTransportTypeError(cause?: unknown): TypeError {
+  return new TypeError(
+    "synthetic private failure mentioning UND_ERR_CONNECT_TIMEOUT",
+    cause === undefined ? undefined : { cause },
+  );
+}
+
 describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,6 +122,114 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
     });
+  });
+
+  it.each((["linq", "telegram"] as const).flatMap(source =>
+    [false, true].flatMap(wakeFails =>
+      [false, true].flatMap(conversationIsGroup =>
+        [false, true].map(traceFails => ({ source, wakeFails, conversationIsGroup, traceFails })),
+      ),
+    ),
+  ))("defers $source receipt and group=$conversationIsGroup without blocking handoff (wakeFails=$wakeFails, traceFails=$traceFails)", async ({ source, wakeFails, conversationIsGroup, traceFails }) => {
+    const tasks: Array<() => Promise<void>> = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const traceWrite = wakeFails
+      ? mocks.recordHostedIngressAcceptedFromMailboxItem
+      : mocks.recordHostedIngressTemporalSignalAccepted;
+    let settle!: () => void;
+    traceWrite.mockImplementationOnce(() => new Promise<undefined>((resolve, reject) => {
+      settle = () => traceFails ? reject(new Error("synthetic trace failure")) : resolve(undefined);
+    }));
+    if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+    const webhookReceivedAt = new Date("2026-09-01T00:00:00.000Z");
+    try {
+      const handoff = maybeHandoffHostedExecutionWebhookWake({
+        response, webhookReceivedAt,
+        scheduleAfterResponse: task => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff({ source, conversationIsGroup, originalInboundMailboxItemId: "mailbox_original" }),
+      });
+      if (wakeFails) await expect(handoff).rejects.toThrow("synthetic signal failure");
+      else await expect(handoff).resolves.toMatchObject({ signalAccepted: true });
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+      expect(mocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+      expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+      expect(tasks).toHaveLength(wakeFails ? 1 : 2);
+      const deferredWrite = Promise.all(tasks.map(task => task()));
+      await vi.waitFor(() => expect(traceWrite).toHaveBeenCalledWith(expect.objectContaining({
+        conversationIsGroup, webhookReceivedAt, mailboxItemId: "mailbox_123", source,
+      })));
+      // Even a pending or failed trace cannot change the already-settled handoff.
+      settle();
+      await expect(deferredWrite).resolves.toEqual(tasks.map(() => undefined));
+      expect(warn).toHaveBeenCalledTimes(traceFails ? 1 : 0);
+    } finally {
+      settle?.();
+      warn.mockRestore();
+    }
+  });
+
+  for (const wakeFails of [false, true]) {
+    it.each([
+      { originalInboundMailboxItemId: undefined, answeredMailboxItemIds: ["mailbox_123"] },
+      { originalInboundMailboxItemId: "mailbox_inbound", answeredMailboxItemIds: ["mailbox_123", "mailbox_inbound"] },
+      { originalInboundMailboxItemId: "mailbox_123", answeredMailboxItemIds: ["mailbox_123"] },
+    ])(`links instant replies after response with $originalInboundMailboxItemId and wake failure=${wakeFails}`, async ({ originalInboundMailboxItemId, answeredMailboxItemIds }) => {
+      const tasks: Array<() => Promise<void>> = [];
+      if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+      const result = maybeHandoffHostedExecutionWebhookWake({
+        response,
+        webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
+        scheduleAfterResponse: (task) => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant", originalInboundMailboxItemId }),
+      });
+      if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
+      else await result;
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: "member_123",
+        knownCheckpoint: { lane: "conversation", laneSeq: "42", userId: "member_123" },
+        mailboxItemId: "mailbox_123",
+        onSignalStarted: expect.any(Function),
+      });
+      if (wakeFails) expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+      else expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledExactlyOnceWith({
+        commandTimeoutMs: 25_000,
+        onTiming: expect.any(Function),
+        orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
+        signal: expect.any(AbortSignal),
+        userId: "member_123",
+      });
+      expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+      for (const task of tasks) await task();
+      expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+        authenticatedUserId: "member_123",
+        answeredMailboxItemIds,
+        linqDeliveryId: "delivery_instant",
+        replyRuntimeAttemptId: null,
+      });
+    });
+  }
+
+  it("retains ingress timing when optional instant-reply linking fails", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery.mockRejectedValueOnce(new Error("synthetic telemetry failure"));
+    await maybeHandoffHostedExecutionWebhookWake({
+      response,
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant", originalInboundMailboxItemId: "mailbox_inbound" }),
+    });
+    for (const task of tasks) await expect(task()).resolves.toBeUndefined();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("Hosted instant reply latency delivery link failed.", { errorName: "Error", source: "linq" });
+    warn.mockRestore();
+  });
+
+  it("does not link ordinary inbound wakes as answered", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    await maybeHandoffHostedExecutionWebhookWake({ response, scheduleAfterResponse: (task) => { tasks.push(task); }, wakeHandoff: buildWakeHandoff() });
+    for (const task of tasks) await task();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
   it.each(["linq", "telegram"] as const)("starts the authorized %s direct ensure while Temporal acknowledgement is pending", async (source) => {
@@ -167,7 +289,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     });
     expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1));
     expect(afterResponseTasks).toHaveLength(0);
     expect(handoffSettled).toBe(false);
 
@@ -210,6 +332,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -274,6 +399,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -289,14 +417,20 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleInfo.mockRestore();
   });
 
-  it("logs only aggregate metadata when direct timing no longer matches", async () => {
+  it.each(["unmatched", "prisma", "unknown"])("keeps direct timing failure diagnostics private: %s", async (failure) => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const afterResponseTasks: Array<() => Promise<void>> = [];
-    mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
-      matchedCount: 0,
-      recorded: false,
-      unmatchedCount: 1,
-    });
+    if (failure === "unmatched") {
+      mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
+        matchedCount: 0, recorded: false, unmatchedCount: 1,
+      });
+    } else {
+      mocks.recordHostedIngressDirectEnsureTiming.mockRejectedValueOnce(failure === "prisma"
+        ? new Prisma.PrismaClientKnownRequestError("synthetic private SQL detail", {
+          clientVersion: "test", code: "P2028", meta: { privateField: "synthetic private value" },
+        })
+        : new Error("synthetic private detail"));
+    }
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       input.onTiming({
         directEnsureAction: "woken",
@@ -330,13 +464,18 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       await Promise.all(afterResponseTasks.map((task) => task()));
 
       expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted direct ensure wake timing record did not match.",
-        {
+        failure === "unmatched" ? "Hosted direct ensure wake timing record did not match." : "Hosted direct ensure wake timing record failed.",
+        failure === "unmatched" ? {
           matchedCount: 0,
           source: "linq",
           unmatchedCount: 1,
+        } : {
+          errorName: failure === "prisma" ? "PrismaClientKnownRequestError" : "Error",
+          ...(failure === "prisma" ? { prismaCode: "P2028" } : {}),
+          source: "linq",
         },
       );
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic private");
     } finally {
       consoleWarn.mockRestore();
     }
@@ -419,6 +558,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           schemaVersion: 1,
           orchestration: expect.objectContaining({
             directEnsureAction: "woken",
+            directWakeStartedAtEpochMs: Date.parse("2026-07-02T00:00:00.000Z"),
+            directWakeAttemptCount: 2,
+            directWakeRetryWaitMs: 3000,
             directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
             directEnsureResponseReceivedAtEpochMs: 1_777_000_003_120,
             directEnsureResultKind: "runtime_processing_accepted",
@@ -533,50 +675,172 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
-  it("keeps the Temporal signal and handoff result intact when the direct ensure fails", async () => {
+  it.each<{
+    name: string;
+    buildError: (unsafeRead: () => never) => TypeError;
+    transportErrorCode: string;
+    synchronous?: boolean;
+  }>([
+    ...[
+      "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT",
+      "UND_ERR_SOCKET", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT",
+    ].map((transportErrorCode) => ({
+      name: transportErrorCode,
+      buildError: () => buildTransportTypeError(Object.assign(new Error("synthetic private cause"), {
+        code: transportErrorCode,
+        url: "https://synthetic-private.invalid/transport",
+        address: "synthetic private address",
+        socket: { remoteAddress: "synthetic private socket" },
+        headers: { authorization: "synthetic private header" },
+        body: "synthetic private body",
+      })),
+      transportErrorCode,
+    })),
+    {
+      name: "synchronous own code",
+      buildError: () => Object.assign(buildTransportTypeError(), { code: "ECONNRESET" }),
+      transportErrorCode: "ECONNRESET",
+      synchronous: true,
+    },
+    { name: "missing cause", buildError: () => buildTransportTypeError(), transportErrorCode: "unknown" },
+    { name: "null cause", buildError: () => buildTransportTypeError(null), transportErrorCode: "unknown" },
+    { name: "string cause", buildError: () => buildTransportTypeError("ECONNRESET"), transportErrorCode: "unknown" },
+    {
+      name: "private code stops classification",
+      buildError: () => buildTransportTypeError({ code: "synthetic private code", cause: { code: "ECONNRESET" } }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "numeric code",
+      buildError: () => buildTransportTypeError({ code: 123 }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "code is never coerced",
+      buildError: (unsafeRead) => buildTransportTypeError({ code: { toString: unsafeRead, [Symbol.toPrimitive]: unsafeRead } }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "code at the fourth node",
+      buildError: () => buildTransportTypeError({ cause: { cause: { code: "ETIMEDOUT" } } }),
+      transportErrorCode: "ETIMEDOUT",
+    },
+    {
+      name: "fifth node is never inspected",
+      buildError: (unsafeRead) => buildTransportTypeError({ cause: { cause: { cause:
+        new Proxy({ code: "ETIMEDOUT" }, { getOwnPropertyDescriptor: unsafeRead }),
+      } } }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "cyclic cause",
+      buildError: () => {
+        const cause: { cause?: unknown } = {};
+        cause.cause = cause;
+        return buildTransportTypeError(cause);
+      },
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "inherited code and cause",
+      buildError: () => buildTransportTypeError(Object.setPrototypeOf({}, { code: "ECONNRESET", cause: { code: "ENOTFOUND" } })),
+      transportErrorCode: "unknown",
+    },
+    ...(["code", "cause"] as const).flatMap((property) => [
+      {
+        name: `outer ${property} accessor`,
+        buildError: (unsafeRead: () => never) => Object.defineProperty(buildTransportTypeError(), property, { get: unsafeRead }),
+        transportErrorCode: "unknown",
+      },
+      {
+        name: `nested ${property} accessor`,
+        buildError: (unsafeRead: () => never) => buildTransportTypeError(Object.defineProperty({}, property, { get: unsafeRead })),
+        transportErrorCode: "unknown",
+      },
+      {
+        name: `${property} reflection failure`,
+        buildError: () => buildTransportTypeError(new Proxy({}, {
+          getOwnPropertyDescriptor(_target, key) {
+            if (key === property) throw new Error("synthetic private reflection failure");
+            return undefined;
+          },
+        })),
+        transportErrorCode: "unknown",
+      },
+    ]),
+    {
+      name: "no property reads, enumeration, or prototype traversal",
+      buildError: (unsafeRead) => buildTransportTypeError(new Proxy({ code: "UND_ERR_SOCKET" }, {
+        get: unsafeRead, getPrototypeOf: unsafeRead, ownKeys: unsafeRead,
+      })),
+      transportErrorCode: "UND_ERR_SOCKET",
+    },
+    {
+      name: "revoked cause",
+      buildError: () => {
+        const { proxy, revoke } = Proxy.revocable({}, {});
+        revoke();
+        return buildTransportTypeError(proxy);
+      },
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "array cause",
+      buildError: () => buildTransportTypeError(Object.assign([], { code: "ECONNRESET" })),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "function cause",
+      buildError: (unsafeRead) => buildTransportTypeError(Object.assign(unsafeRead, { code: "ECONNRESET" })),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "aggregate members are not traversed",
+      buildError: () => buildTransportTypeError(new AggregateError([{ code: "ECONNRESET" }], "synthetic private aggregate")),
+      transportErrorCode: "unknown",
+    },
+  ])("keeps the Temporal handoff intact and classifies only transport codes: $name", async ({ buildError, transportErrorCode, synchronous = false }) => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.ensureRuntimeProcessing.mockRejectedValue(new Error("cloudflare unreachable"));
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      response,
-      wakeHandoff: buildWakeHandoff(),
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      signalAccepted: true,
+    const tasks: Array<() => Promise<void>> = [];
+    const unsafeRead = vi.fn((): never => { throw new Error("synthetic private accessor or coercion"); });
+    const error = buildError(unsafeRead);
+    let orchestrationAttemptId: string | undefined;
+    mocks.ensureRuntimeProcessing.mockImplementationOnce((input: DirectEnsureInput) => {
+      orchestrationAttemptId = input.orchestrationAttemptId;
+      if (synchronous) throw error;
+      return Promise.reject(error);
     });
 
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => {
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted direct ensure wake failed.",
-        expect.objectContaining({ source: "linq" }),
-      );
-    });
-    consoleWarn.mockRestore();
-  });
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        scheduleAfterResponse: (task) => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toEqual({
+        reason: "temporal-signaled",
+        signalAccepted: true,
+        started: true,
+        workflowId: "hosted-user-runtime:member_123",
+      });
+      expect(tasks).toHaveLength(2);
+      await expect(Promise.all(tasks.map((task) => task()))).resolves.toEqual([undefined, undefined]);
 
-  it("keeps the Temporal signal authoritative when the direct ensure throws synchronously", async () => {
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.ensureRuntimeProcessing.mockImplementationOnce(() => {
-      throw new Error("control client failed before returning a promise");
-    });
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      response,
-      wakeHandoff: buildWakeHandoff(),
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      signalAccepted: true,
-    });
-
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    expect(consoleWarn).toHaveBeenCalledWith(
-      "Hosted direct ensure wake failed.",
-      expect.objectContaining({ source: "linq" }),
-    );
-    consoleWarn.mockRestore();
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledOnce();
+      expect(mocks.recordHostedIngressDirectEnsureTiming).not.toHaveBeenCalled();
+      expect(orchestrationAttemptId).toEqual(expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u));
+      expect(consoleWarn).toHaveBeenCalledExactlyOnceWith("Hosted direct ensure wake failed.", {
+        errorName: "TypeError",
+        orchestrationAttemptId,
+        source: "linq",
+        transportErrorCode,
+      });
+      expect(unsafeRead).not.toHaveBeenCalled();
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic private");
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic-private.invalid");
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 
   it("never puts the direct ensure on the webhook response path, even with no scheduler", async () => {

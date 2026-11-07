@@ -3,13 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
-  BookOpen,
-  ChartSpline,
   ChevronsUpDown,
-  FlaskConical,
   Home,
-  Leaf,
+  Settings,
+  Watch,
 } from "lucide-react";
 import {
   useEffect,
@@ -22,7 +19,6 @@ import {
 import { BrandMark } from "@/src/components/ui/brand-mark";
 
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
-import type { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
@@ -32,7 +28,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
 import {
@@ -67,31 +62,8 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
-  {
-    label: "Journal",
-    href: "/journal",
-    matchPrefix: "/journal",
-    icon: BookOpen,
-  },
-  {
-    label: "Patterns",
-    href: "/patterns",
-    matchPrefix: "/patterns",
-    icon: ChartSpline,
-  },
-  {
-    label: "Environment",
-    href: "/environment",
-    matchPrefix: "/environment",
-    icon: Leaf,
-  },
-  {
-    label: "Biomarkers",
-    href: "/biomarkers",
-    matchPrefix: "/biomarkers",
-    icon: Activity,
-  },
-  { label: "Experiments", href: "/experiments", icon: FlaskConical },
+  { label: "Devices", href: "/connect", icon: Watch },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 const sidebarThemeStyle = {
@@ -139,7 +111,6 @@ function AccountMenu({
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
   const [signOutPending, setSignOutPending] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
-  const [PrivyLogout, setPrivyLogout] = useState<typeof HostedPrivyLogout | null>(null);
   const hasAccount = initialAuth.authenticated;
   const userKey = hasAccount ? "app-session" : null;
 
@@ -194,23 +165,13 @@ function AccountMenu({
     setSignOutPending(true);
 
     try {
-      // Resolve the cleanup code before clearing the app session so a failed
-      // chunk download leaves the existing sign-out retry available.
-      const { HostedPrivyLogout } = await import(
-        "@/src/components/hosted-onboarding/hosted-privy-logout"
-      );
       await logoutHostedAppSession();
-      setPrivyLogout(() => HostedPrivyLogout);
+      router.refresh();
     } catch {
       setSignOutError("Sign out did not finish. Try again.");
+    } finally {
       setSignOutPending(false);
     }
-  }
-
-  function handlePrivyLogoutDone() {
-    setPrivyLogout(null);
-    setSignOutPending(false);
-    router.refresh();
   }
 
   return (
@@ -249,15 +210,6 @@ function AccountMenu({
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="end" className="min-w-56">
               <DropdownMenuGroup>
-                <DropdownMenuItem render={<Link href="/connect" />}>
-                  Devices
-                </DropdownMenuItem>
-                <DropdownMenuItem render={<Link href="/settings" />}>
-                  Settings
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
                 <DropdownMenuItem
                   disabled={signOutPending}
                   onClick={() => void handleSignOut()}
@@ -269,7 +221,6 @@ function AccountMenu({
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
-      {PrivyLogout ? <PrivyLogout onDone={handlePrivyLogoutDone} /> : null}
       {signOutError ? (
         <p
           className="mt-2 px-2 text-[0.6875rem] leading-snug text-[#f0c6b0]"

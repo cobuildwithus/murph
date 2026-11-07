@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -55,11 +54,11 @@ describe('operator config Codex-only hard-cut contracts', () => {
     ).toThrow()
   })
 
-  it('serializes Vercel AI Gateway through Codex modelProvider config', () => {
+  it('serializes OpenAI through Codex modelProvider config', () => {
     const sessionOptions = serializeAssistantProviderSessionOptions({
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
@@ -67,8 +66,8 @@ describe('operator config Codex-only hard-cut contracts', () => {
 
     expect(assistantProviderSessionOptionsSchema.parse(sessionOptions)).toMatchObject({
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       provider: 'codex-cli',
       resumeKind: 'codex-thread',
     })
@@ -83,15 +82,4 @@ describe('operator config Codex-only hard-cut contracts', () => {
     ).toThrow(/Assistant runtime targets must use Codex App Server/u)
   })
 
-  it('does not publish legacy provider presets', async () => {
-    const packageJson = JSON.parse(
-      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
-    ) as { exports?: Record<string, unknown> }
-
-    expect(
-      Object.keys(packageJson.exports ?? {}).filter((key) =>
-        key.includes('provider-presets'),
-      ),
-    ).toEqual([])
-  })
 })

@@ -1,6 +1,8 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
@@ -9,6 +11,7 @@ import {
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
+  HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
   type HostedVaultShareProjectionMode,
@@ -49,7 +52,10 @@ export function createHostedWebVaultSharePort(input: {
           fetchImpl: input.fetchImpl,
           route: bindHostedRunnerWebControlRoutePath(
             HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareActiveKinds,
-            buildHostedVaultShareActiveKindsPath(request.projectionMode),
+            buildHostedVaultShareActiveKindsPath(
+              request.projectionMode,
+              request.sourceWorkspaceVersion,
+            ),
           ),
           signal,
           timeoutMs: input.timeoutMs,
@@ -195,6 +201,7 @@ async function runWithExactCallerAbort<T>(
 
 function buildHostedVaultShareActiveKindsPath(
   projectionMode?: HostedVaultShareProjectionMode,
+  sourceWorkspaceVersion?: string,
 ): string {
   const params = new URLSearchParams();
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
@@ -207,8 +214,15 @@ function buildHostedVaultShareActiveKindsPath(
     HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
     HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   );
+  params.set(
+    HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+    HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
+  );
   if (projectionMode) {
     params.set(HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM, projectionMode);
+  }
+  if (sourceWorkspaceVersion !== undefined) {
+    params.set(HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM, sourceWorkspaceVersion);
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;

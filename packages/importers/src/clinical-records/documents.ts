@@ -1,3 +1,4 @@
+import { readClinicalRtfText } from "./rtf.ts";
 import {
   CLINICAL_DOCUMENTS_MAX_TOTAL_BYTES,
   clinicalDocumentAttachmentKey,
@@ -91,7 +92,9 @@ export function readClinicalDocumentText(input: {
     const bytes = file?.bytes ?? (attachment.data ? decodeClinicalDocumentBase64(attachment.data) : null);
     if (!bytes) return { status: "unavailable" };
     const mediaType = evidence?.status === "downloaded" ? evidence.mediaType : attachment.contentType ?? "";
-    const text = readClinicalAttachmentText(bytes, mediaType) ?? file?.extractedText?.trim();
+    // Keep versioned parent prose stable across the new RTF enrichment reader.
+    // RTF text is recovered as derived facts, not a rewrite at the same revision.
+    const text = (isClinicalRtfType(mediaType) ? undefined : readClinicalAttachmentText(bytes, mediaType)) ?? file?.extractedText?.trim();
     if (!text) return { status: "unavailable" };
     parts.push(attachments.length === 1 ? text : `Attachment ${attachment.attachmentIndex + 1}${attachment.title ? `: ${attachment.title}` : ""}\n\n${text}`);
   }
@@ -101,6 +104,7 @@ export function readClinicalDocumentText(input: {
 /** Decode source prose only; never resolve XML entities or execute embedded markup. */
 export function readClinicalAttachmentText(bytes: Uint8Array, mediaType: string): string | undefined {
   const type = mediaType.split(";", 1)[0]?.trim().toLowerCase();
+  if (isClinicalRtfType(mediaType)) return readClinicalRtfText(bytes);
   if (!isSupportedClinicalTextType(type)) return undefined;
   const text = decodeClinicalText(bytes, mediaType, type);
   return text === undefined ? undefined : type === "text/plain" ? text.trim() || undefined : stripClinicalMarkup(text);
@@ -138,4 +142,8 @@ function stripClinicalMarkup(text: string): string {
       const value = code.toLowerCase().startsWith("#x") ? Number.parseInt(code.slice(2), 16) : Number.parseInt(code.slice(1), 10);
       return value > 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : entity;
     }).replace(/\s+/gu, " ").trim() || "";
+}
+
+function isClinicalRtfType(mediaType: string): boolean {
+  return ["application/rtf", "text/rtf", "application/x-rtf"].includes(mediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "");
 }

@@ -19,6 +19,7 @@ import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
   HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -47,6 +48,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedVaultShareProjectionContentDigest,
   captureHostedVaultShareProjectionBestEffort,
   HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
@@ -108,6 +110,7 @@ function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
 async function offerHostedVaultShareProjectionBestEffort(input: {
   projectionMode?: HostedVaultShareProjectionMode;
   shouldStop?: () => boolean;
+  sourceWorkspaceVersion?: string;
   vaultRoot: string;
   vaultSharePort:
     | Parameters<
@@ -120,6 +123,8 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   const scopeResolution = await resolveHostedVaultShareProjectionScopesBestEffort({
     ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
+    sourceWorkspaceVersion:
+      input.sourceWorkspaceVersion ?? TEST_SOURCE_WORKSPACE_VERSION,
     vaultSharePort: input.vaultSharePort,
   });
   if (scopeResolution.outcome !== "active-scopes") {
@@ -129,11 +134,14 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
     generationTokensByProjectionScopeKey:
       scopeResolution.generationTokensByProjectionScopeKey,
     hasDeferredProjectionWork: scopeResolution.hasDeferredProjectionWork,
+    publishedSourceWorkspaceVersionByProjectionScopeKey:
+      scopeResolution.publishedSourceWorkspaceVersionByProjectionScopeKey,
     ...(scopeResolution.projectionMode
       ? { projectionMode: scopeResolution.projectionMode }
       : {}),
     projectionScopes: scopeResolution.projectionScopes,
-    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    sourceWorkspaceVersion:
+      input.sourceWorkspaceVersion ?? TEST_SOURCE_WORKSPACE_VERSION,
     vaultRoot: input.vaultRoot,
   });
   if (capture.outcome !== "captured") {
@@ -141,6 +149,7 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   return await offerCapturedHostedVaultShareProjectionBestEffort({
     capture: capture.capture,
+    publicationStateVaultRoot: input.vaultRoot,
     ...(input.shouldStop ? { shouldStop: input.shouldStop } : {}),
     vaultSharePort: input.vaultSharePort,
   });
@@ -422,11 +431,20 @@ async function createActivitySessionVault(
     })}\n`,
     "utf8",
   );
-  await writeFile(
-    join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
-    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
-    "utf8",
-  );
+  const recordsByMonth = new Map<string, Record<string, unknown>[]>();
+  for (const record of records) {
+    const month = String(record.occurredAt).slice(0, 7);
+    const group = recordsByMonth.get(month) ?? [];
+    group.push(record);
+    recordsByMonth.set(month, group);
+  }
+  for (const [month, group] of recordsByMonth) {
+    await writeFile(
+      join(vaultRoot, "ledger", "events", "2026", `${month}.jsonl`),
+      `${group.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      "utf8",
+    );
+  }
   return vaultRoot;
 }
 
@@ -497,7 +515,14 @@ async function createMemoryDisplayNameVault(displayName: string | null): Promise
   if (!displayName) {
     return vaultRoot;
   }
+  await writeMemoryDisplayName(vaultRoot, displayName);
+  return vaultRoot;
+}
 
+async function writeMemoryDisplayName(
+  vaultRoot: string,
+  displayName: string,
+): Promise<void> {
   const document = setMemoryDisplayName(
     createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z")),
     {
@@ -511,8 +536,6 @@ async function createMemoryDisplayNameVault(displayName: string | null): Promise
     renderMemoryDocument({ document }),
     "utf8",
   );
-
-  return vaultRoot;
 }
 
 async function createProfileAndTimeZoneVault(
@@ -520,6 +543,14 @@ async function createProfileAndTimeZoneVault(
   timeZone: string,
 ): Promise<string> {
   const vaultRoot = await createMemoryDisplayNameVault(displayName);
+  await writeVaultTimeZone(vaultRoot, timeZone);
+  return vaultRoot;
+}
+
+async function writeVaultTimeZone(
+  vaultRoot: string,
+  timeZone: string,
+): Promise<void> {
   await writeFile(
     join(vaultRoot, "vault.json"),
     `${JSON.stringify({
@@ -531,7 +562,6 @@ async function createProfileAndTimeZoneVault(
     })}\n`,
     "utf8",
   );
-  return vaultRoot;
 }
 
 async function createLegacyMemoryDisplayNameVault(...texts: string[]): Promise<string> {
@@ -681,7 +711,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result.outcome).toBe("delivered");
+    expect(result).toEqual({ outcome: "delivered" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({
       expectedGenerationToken: GENERATION_TOKEN,
@@ -694,6 +724,397 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }],
       sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+  });
+
+  it("skips delivery when captured content matches local state and Web published version", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const deliveries: HostedVaultShareDeliverRequest[] = [];
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver(request) {
+          deliveries.push(request);
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+    const published = deliveries[0];
+    if (!published) throw new Error("Expected initial projection delivery.");
+    const deliver = vi.fn();
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("delivers when captured content differs from local publication state", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    await writeMemoryDisplayName(vaultRoot, "Mina");
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(deliver.mock.calls[0]?.[0]?.records)).toContain("Mina");
+  });
+
+  it("delivers when the generation token changes despite unchanged materialized content", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+          generationTokensByProjectionScopeKey: {
+            [profileScopeKey]: "b".repeat(43),
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers when Web omits the published source version for a partial scope", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers when local publication state is missing", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers when Web published source version differs from local state", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: "6",
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers first materialization without updating ordinary publication state", async () => {
+    const records: HostedVaultShareDeliveryRecord[] = [{
+      data: { displayName: "Theo" },
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      recordKey: "profile-name",
+      sourceRevision: "b".repeat(32),
+    }];
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const contentDigest = buildHostedVaultShareProjectionContentDigest({
+      projectionScope: PROFILE_SCOPE,
+      records,
+    });
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {
+          [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+        },
+        snapshots: [{
+          contentDigest,
+          generationToken: GENERATION_TOKEN,
+          projectionScope: PROFILE_SCOPE,
+          records,
+        }],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      publicationStateVaultRoot: vaultRoot,
+      vaultSharePort: {
+        deliver: vi.fn().mockResolvedValue({ status: "delivered" }),
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {
+          [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+        },
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        snapshots: [{
+          contentDigest,
+          generationToken: GENERATION_TOKEN,
+          projectionScope: PROFILE_SCOPE,
+          records,
+        }],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      publicationStateVaultRoot: vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    }));
+  });
+
+  it("delivers stale destinations after first materializing a new destination", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const destinations = [
+      { deliveredNames: ["Old"], id: "share_a", version: "6" },
+      { deliveredNames: [] as string[], id: "share_b", version: null as string | null },
+    ];
+    const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
+      const deliveredData = request.records[0]?.data;
+      if (
+        request.projectionKind !== "profile-name.v0"
+        || !deliveredData
+        || !("displayName" in deliveredData)
+        || typeof deliveredData.displayName !== "string"
+      ) {
+        throw new Error("Expected profile-name projection content.");
+      }
+      const deliveredName = deliveredData.displayName;
+      const updatedDestinations = request.projectionMode
+        === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+        ? destinations.filter((destination) => destination.version === null)
+        : destinations;
+      for (const destination of updatedDestinations) {
+        destination.deliveredNames.push(deliveredName);
+        destination.version = request.sourceWorkspaceVersion;
+      }
+      return { status: "delivered" as const };
+    });
+    const activeResponse = (projectionMode?: HostedVaultShareProjectionMode) => {
+      const versions = new Set(
+        destinations
+          .map((destination) => destination.version)
+          .filter((version): version is string => version !== null),
+      );
+      const publishedVersion =
+        destinations.every((destination) => destination.version !== null)
+        && versions.size === 1
+          ? [...versions][0]
+          : undefined;
+      return {
+        ...activeProjectionResponse(PROFILE_SCOPE),
+        ...(projectionMode ? { projectionMode } : {}),
+        ...(publishedVersion
+          ? {
+              publishedSourceWorkspaceVersionByProjectionScopeKey: {
+                [profileScopeKey]: publishedVersion,
+              },
+            }
+          : {}),
+      };
+    };
+
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      sourceWorkspaceVersion: "7",
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async (request = {}) =>
+          activeResponse(request.projectionMode),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "8",
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeResponse(),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "9",
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeResponse(),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(destinations).toEqual([
+      { deliveredNames: ["Old", "Theo"], id: "share_a", version: "8" },
+      { deliveredNames: ["Theo", "Theo"], id: "share_b", version: "8" },
+    ]);
+  });
+
+  it("delivers after a lost committed response even when content reverts", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const timeZoneScopeKey = buildHostedVaultShareProjectionScopeKey(TIME_ZONE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "7",
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(TIME_ZONE_SCOPE),
+      },
+    });
+
+    let webPublishedSourceWorkspaceVersion = "7";
+    await writeVaultTimeZone(vaultRoot, "America/Chicago");
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "8",
+      vaultRoot,
+      vaultSharePort: {
+        async deliver(request) {
+          webPublishedSourceWorkspaceVersion = request.sourceWorkspaceVersion;
+          throw new Error("synthetic lost response");
+        },
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(TIME_ZONE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [timeZoneScopeKey]: webPublishedSourceWorkspaceVersion,
+          },
+        }),
+      },
+    })).resolves.toEqual({ failureReason: "delivery_exception", outcome: "error" });
+
+    await writeVaultTimeZone(vaultRoot, "UTC");
+    const retryDeliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
+      webPublishedSourceWorkspaceVersion = request.sourceWorkspaceVersion;
+      return { status: "delivered" as const };
+    });
+
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "9",
+      vaultRoot,
+      vaultSharePort: {
+        deliver: retryDeliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(TIME_ZONE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [timeZoneScopeKey]: webPublishedSourceWorkspaceVersion,
+          },
+        }),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+
+    expect(retryDeliver).toHaveBeenCalledTimes(1);
+    expect(retryDeliver.mock.calls[0]?.[0]).toMatchObject({
+      projectionKind: "time-zone.v0",
+      records: [{ data: { timeZone: "UTC" } }],
+      sourceWorkspaceVersion: "9",
     });
   });
 
@@ -751,7 +1172,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result).toEqual({ outcome: "error" });
+    expect(result).toEqual({ failureReason: "scope_failed", outcome: "error" });
     expect(deliver).toHaveBeenCalledTimes(3);
     expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual([
       "profile-name.v0",
@@ -773,7 +1194,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result).toEqual({ outcome: "error" });
+    expect(result).toEqual({ failureReason: "delivery_exception", outcome: "error" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",
@@ -803,6 +1224,94 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",
     });
+  });
+
+  it.each([
+    { failureReason: "serialized_projection_too_large", earlierScopeFailed: false },
+    { failureReason: "delivery_exception", earlierScopeFailed: false },
+    { failureReason: "serialized_projection_too_large", earlierScopeFailed: true },
+    { failureReason: "delivery_exception", earlierScopeFailed: true },
+  ] as const)("reports $failureReason and stops the suffix (earlierScopeFailed=$earlierScopeFailed)", async ({
+    failureReason,
+    earlierScopeFailed,
+  }) => {
+    const scopes = [TIME_ZONE_SCOPE, SLEEP_SCOPE, PROFILE_SCOPE, WORKOUTS_SCOPE];
+    const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
+      if (request.projectionKind === TIME_ZONE_SCOPE.projectionKind && earlierScopeFailed) {
+        return { status: "scope-failed" as const };
+      }
+      if (request.projectionKind === PROFILE_SCOPE.projectionKind) {
+        throw new Error(
+          "Synthetic response-contract rejection: member=synthetic-private-member "
+            + "vault=/private/synthetic-vault health=synthetic-private-record",
+        );
+      }
+      return { status: "delivered" as const };
+    });
+    const shouldStop = vi.fn(() => false);
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: true,
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        snapshots: scopes.map((projectionScope) => ({
+          generationToken: GENERATION_TOKEN,
+          projectionScope,
+          // Exercise the captured-offer byte gate directly with synthetic UTF-8 padding.
+          records: projectionScope === PROFILE_SCOPE
+            && failureReason === "serialized_projection_too_large"
+            ? [{
+              data: { displayName: "é".repeat(HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES / 2) },
+              occurredAt: "2026-07-01T00:00:00.000Z",
+              recordKey: "profile-name",
+            }]
+            : [],
+        })),
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      shouldStop,
+      vaultSharePort: {
+        deliver,
+        async listActiveProjectionScopes() {
+          throw new Error("Immutable delivery must not resolve scopes again.");
+        },
+      },
+    });
+
+    expect(result).toEqual({ failureReason, outcome: "error" });
+    expect(shouldStop).toHaveBeenCalledTimes(3);
+    expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual(
+      scopes.slice(0, failureReason === "serialized_projection_too_large" ? 2 : 3)
+        .map((scope) => scope.projectionKind),
+    );
+    for (const [request] of deliver.mock.calls) {
+      expect(request).toMatchObject({
+        expectedGenerationToken: GENERATION_TOKEN,
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        records: [],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      });
+    }
+  });
+
+  it("omits an earlier scope failure reason when the remaining scopes are preempted", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    let stopped = false;
+    const deliver = vi.fn(async () => {
+      stopped = true;
+      return { status: "scope-failed" as const };
+    });
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      shouldStop: () => stopped,
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () =>
+          activeProjectionResponse(PROFILE_SCOPE, TIME_ZONE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "preempted" });
+    expect(deliver).toHaveBeenCalledTimes(1);
   });
 
   it("starts no delivery when its owner ended before the first scope", async () => {
@@ -882,15 +1391,19 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 
   it("does not read or deliver payloads when the control plane reports no active kinds", async () => {
     const deliver = vi.fn();
+    const listActiveProjectionScopes = vi.fn(async () => activeProjectionResponse());
     const result = await offerHostedVaultShareProjectionBestEffort({
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => activeProjectionResponse(),
+        listActiveProjectionScopes,
       },
     });
 
     expect(result.outcome).toBe("no-active-share");
+    expect(listActiveProjectionScopes).toHaveBeenCalledWith({
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -909,7 +1422,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("deferred");
+    expect(result).toEqual({ outcome: "deferred" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -948,7 +1461,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("continued");
+    expect(result).toEqual({ outcome: "continued" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -966,7 +1479,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("error");
+    expect(result).toEqual({ outcome: "error" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -983,7 +1496,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result.outcome).toBe("error");
+    expect(result).toEqual({ outcome: "error" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -1034,7 +1547,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result.outcome).toBe("error");
+    expect(result).toEqual({ outcome: "error" });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -1100,7 +1613,7 @@ describe("selectProjectableDailyMetricDays", () => {
     ).toEqual(sleepDurations);
   });
 
-  it("limits eight sleep-duration dates to the seven dates disclosed by consent", () => {
+  it("retains all eight available sleep-duration dates within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-01",
@@ -1135,6 +1648,7 @@ describe("selectProjectableDailyMetricDays", () => {
       "2026-07-04",
       "2026-07-03",
       "2026-07-02",
+      "2026-07-01",
     ]);
   });
 
@@ -1265,6 +1779,7 @@ describe("selectProjectableDailyMetricDays", () => {
           data: {
             date: ACTIVITY_DAY.date,
             metricKey,
+            sleepType: "unknown",
             recordedAt: metricKey === "deep-sleep-minutes"
               ? "2026-07-03T07:01:00.000Z"
               : "2026-07-03T07:02:00.000Z",
@@ -2096,12 +2611,10 @@ describe("selectProjectableDailyMetricDays", () => {
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
     try {
-      const selected = await readProjectableDailyMetricDays(
+      await expect(readProjectableDailyMetricDays(
         vaultRoot,
         requireDailyMetricSpec("deep-sleep-sources-days.v1"),
-      );
-
-      expect(selected).toEqual([]);
+      )).rejects.toThrow("sources exceed");
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -2408,60 +2921,26 @@ describe("selectProjectableDailyMetricDays", () => {
       label: "UTC+14 Monday",
       currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
-      expectedDates: [
-        "2026-07-27",
-        "2026-07-26",
-        "2026-07-25",
-        "2026-07-24",
-        "2026-07-23",
-        "2026-07-22",
-        "2026-07-21",
-      ],
     },
     {
       label: "UTC-12 Monday",
       currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-28T11:45:00.000Z"),
-      expectedDates: [
-        "2026-07-27",
-        "2026-07-26",
-        "2026-07-25",
-        "2026-07-24",
-        "2026-07-23",
-        "2026-07-22",
-        "2026-07-21",
-      ],
     },
     {
       label: "Chicago before UTC midnight",
       currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-28T04:30:00.000Z"),
-      expectedDates: [
-        "2026-07-27",
-        "2026-07-26",
-        "2026-07-25",
-        "2026-07-24",
-        "2026-07-23",
-        "2026-07-22",
-        "2026-07-21",
-      ],
     },
-  ])("keeps the member-local seven-date disclosure window on $label", ({
+  ])("keeps the member-local 90-date retention window on $label", ({
     currentDate,
-    expectedDates,
     nowMs: boundaryNowMs,
   }) => {
-    const dates = [
-      "2026-07-19",
-      "2026-07-20",
-      "2026-07-21",
-      "2026-07-22",
-      "2026-07-23",
-      "2026-07-24",
-      "2026-07-25",
-      "2026-07-26",
-      "2026-07-27",
-    ];
+    const dates = Array.from({ length: 92 }, (_, index) =>
+      new Date(Date.parse(`${currentDate}T00:00:00Z`) - (index - 1) * 86_400_000)
+        .toISOString().slice(0, 10)
+    );
+    const expectedDates = dates.slice(1, 91);
     const selected = selectProjectableDailyMetricDays(
       dates.map((date, index) => ({
         date,
@@ -2481,7 +2960,7 @@ describe("selectProjectableDailyMetricDays", () => {
 
   it("excludes sparse dates outside the member-local window", () => {
     const selected = selectProjectableDailyMetricDays(
-      ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-22", "2026-07-20"]
+      ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-22", "2026-04-28"]
         .map((date, index) => ({
           date,
           grain: "day" as const,
@@ -2503,7 +2982,7 @@ describe("selectProjectableDailyMetricDays", () => {
     ]);
   });
 
-  it("keeps seven civil dates across daylight-saving changes", () => {
+  it("retains available civil dates across daylight-saving changes", () => {
     const selected = selectProjectableDailyMetricDays(
       [
         "2026-03-08",
@@ -2535,6 +3014,7 @@ describe("selectProjectableDailyMetricDays", () => {
       "2026-03-04",
       "2026-03-03",
       "2026-03-02",
+      "2026-03-01",
     ]);
   });
 
@@ -2734,13 +3214,13 @@ describe("selectProjectableMealNutritionDays", () => {
     ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
-  it("skips protein days older than the seven-date cutoff", () => {
+  it("skips protein days older than the 90-date cutoff", () => {
     expect(selectProjectableMealNutritionDays([
-      mealNutritionDay({ date: "2026-06-25", proteinTotal: 55 }),
+      mealNutritionDay({ date: "2026-04-01", proteinTotal: 55 }),
     ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
-  it("keeps at most the seven newest complete protein days", () => {
+  it("retains all eight available complete protein days within the 90-date window", () => {
     const selected = selectProjectableMealNutritionDays([
       "2026-07-04",
       "2026-06-30",
@@ -2755,7 +3235,7 @@ describe("selectProjectableMealNutritionDays", () => {
       proteinTotal: 40 + index,
     })), proteinSpec, utcDateKey(nowMs));
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
     expect(selected.map((record) => record.recordKey)).toEqual([
       "2026-07-04.murph",
       "2026-07-03.murph",
@@ -2764,6 +3244,7 @@ describe("selectProjectableMealNutritionDays", () => {
       "2026-06-30.murph",
       "2026-06-29.murph",
       "2026-06-28.murph",
+      "2026-06-27.murph",
     ]);
   });
 
@@ -2983,6 +3464,7 @@ describe("selectProjectableMealNutritionDays", () => {
       expect(deliver).toHaveBeenCalledTimes(1);
       expect(deliver).toHaveBeenCalledWith({
         expectedGenerationToken: GENERATION_TOKEN,
+        memberTimeZone: "America/Los_Angeles",
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         records: selected,
@@ -3044,6 +3526,7 @@ describe("selectProjectableWorkoutDays", () => {
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledWith({
         expectedGenerationToken: GENERATION_TOKEN,
+        memberTimeZone: "UTC",
         projectionKind: "workout-days.v0",
         projectionScope: WORKOUT_DAYS_SCOPE,
         records: selected,
@@ -3198,7 +3681,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(90);
     expect(findWorkoutsRecord(selected, "2026-07-03")).toEqual({
       data: {
         calendarClosedThroughDate: "2026-07-03",
@@ -3477,7 +3960,8 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "Pacific/Kiritimati",
     });
 
-    expect(afterChange).toEqual(beforeChange);
+    expect(findWorkoutsRecord(afterChange, "2026-07-03"))
+      .toEqual(findWorkoutsRecord(beforeChange, "2026-07-03"));
     expect(scoreSettledWorkoutsDate(
       afterChange,
       "2026-07-03",
@@ -3485,7 +3969,7 @@ describe("selectProjectableWorkoutsDays", () => {
     )).toMatchObject({ status: "settled" });
   });
 
-  it("does not require a declared timezone when the event timezone is valid", () => {
+  it("requires canonical member timezone for retention even with a valid event timezone", () => {
     const rows = [activitySessionRow({
       activityKind: "running",
       date: "2026-07-03",
@@ -3499,11 +3983,12 @@ describe("selectProjectableWorkoutsDays", () => {
       nowMs,
       rows,
       vaultTimeZone: null,
-    })).toEqual(selectProjectableWorkoutsDays({
+    })).toEqual([]);
+    expect(selectProjectableWorkoutsDays({
       nowMs,
       rows,
       vaultTimeZone: "Pacific/Kiritimati",
-    }));
+    })).toHaveLength(90);
   });
 
   it("defers a valid date-line workout outside the window without erasing it", () => {
@@ -3530,7 +4015,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(90);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data.workouts)
       .toHaveLength(1);
     expect(findWorkoutsRecord(selected, "2026-07-05")).toBeUndefined();
@@ -3784,11 +4269,11 @@ describe("selectProjectableWorkoutsDays", () => {
       }),
     );
 
-    expect(selectProjectableWorkoutsDays({
+    expect(() => selectProjectableWorkoutsDays({
       nowMs,
       rows,
       vaultTimeZone: "UTC",
-    })).toEqual([]);
+    })).toThrow(/bound/);
   });
 
   it("keeps thirteen workouts per public source and fails on a source's fourteenth", () => {
@@ -3836,7 +4321,7 @@ describe("selectProjectableWorkoutsDays", () => {
       throw new Error("Missing bounded public source fixture.");
     }
 
-    expect(selectProjectableWorkoutsDays({
+    expect(() => selectProjectableWorkoutsDays({
       nowMs,
       rows: [
         ...rows,
@@ -3851,20 +4336,13 @@ describe("selectProjectableWorkoutsDays", () => {
         }),
       ],
       vaultTimeZone: "UTC",
-    })).toEqual([]);
+    })).toThrow(/bound/);
   });
 
-  it("reads the complete source-tagged workout capacity across its eight-date source window", async () => {
-    const sourceDates = [
-      "2026-06-27",
-      "2026-06-28",
-      "2026-06-29",
-      "2026-06-30",
-      "2026-07-01",
-      "2026-07-02",
-      "2026-07-03",
-      "2026-07-04",
-    ];
+  it("reads the complete source-tagged workout capacity across its 90-date member window plus date-line margins", async () => {
+    const sourceDates = Array.from({ length: 92 }, (_, index) =>
+      new Date(nowMs - (index - 1) * 86_400_000).toISOString().slice(0, 10)
+    );
     const providers = [
       "coros",
       "fitbit",
@@ -3908,13 +4386,15 @@ describe("selectProjectableWorkoutsDays", () => {
     );
     expect(records).toHaveLength(
       HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
-        * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1),
+        * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 2),
     );
     const vaultRoot = await createActivitySessionVault(records);
     const overBoundVaultRoot = await createActivitySessionVault([
       ...records,
       {
-        ...records[records.length - 1],
+        ...records[records.length - 105],
+        occurredAt: "2026-07-03T13:00:00.000Z",
+        startAt: "2026-07-03T13:00:00.000Z",
         id: "evt_capacity_overflow",
         externalRef: {
           system: "whoop",
@@ -3952,7 +4432,7 @@ describe("selectProjectableWorkoutsDays", () => {
         );
       }
       await expect(readProjectableWorkoutsDays(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow(/bound/);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -3992,7 +4472,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(90);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data).toEqual({
       calendarClosedThroughDate: "2026-07-03",
       date: "2026-07-03",
@@ -4036,7 +4516,7 @@ describe("selectProjectableWorkoutsDays", () => {
     });
     expect(scoreSettledWorkoutsDate(
       selected,
-      "2026-06-26",
+      "2026-04-05",
       18 * 60 * 60 * 1_000,
     )).toEqual({ status: "missing" });
   });
@@ -4243,7 +4723,7 @@ describe("selectProjectableWorkoutsDays", () => {
       expect(findWorkoutsRecord(exactBound, ACTIVITY_DAY.date)?.data.workouts)
         .toHaveLength(8);
       await expect(readProjectableWorkoutsDays(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(exactBoundVaultRoot, { recursive: true, force: true });
@@ -4390,7 +4870,7 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
-  it("keeps the oldest UTC-12 workout stable across UTC midnight", async () => {
+  it("ages out date 89 at canonical member midnight without advancing global completion", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_rederived_date_cutoff",
@@ -4403,15 +4883,15 @@ describe("selectProjectableWorkoutsDays", () => {
       durationMinutes: 30,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(
-      Date.parse("2026-07-08T23:59:59.999Z"),
+      Date.parse("2026-09-29T23:59:59.999Z"),
     );
 
     try {
-      const assertStableOldestDate = async () => {
+      const assertOldestDate = async () => {
         const selected = await readProjectableWorkoutsDays(vaultRoot);
         expect(findWorkoutsRecord(selected, "2026-07-02")).toMatchObject({
           data: {
-            calendarClosedThroughDate: "2026-07-07",
+            calendarClosedThroughDate: "2026-09-28",
             workouts: [{
               kind: "running",
               minutes: 30,
@@ -4422,25 +4902,25 @@ describe("selectProjectableWorkoutsDays", () => {
         });
       };
 
-      await assertStableOldestDate();
-      dateNow.mockReturnValue(Date.parse("2026-07-09T00:00:00.000Z"));
-      await assertStableOldestDate();
+      await assertOldestDate();
+      dateNow.mockReturnValue(Date.parse("2026-09-30T00:00:00.000Z"));
+      const midnight = await readProjectableWorkoutsDays(vaultRoot);
+      expect(midnight).toHaveLength(90);
+      expect(findWorkoutsRecord(midnight, "2026-07-02")).toBeUndefined();
+      expect(midnight.every((record) =>
+        "calendarClosedThroughDate" in record.data
+        && record.data.calendarClosedThroughDate === "2026-09-28"
+      )).toBe(true);
 
-      dateNow.mockReturnValue(Date.parse("2026-07-09T12:00:00.000Z"));
+      dateNow.mockReturnValue(Date.parse("2026-09-30T12:00:00.000Z"));
       const advanced = await readProjectableWorkoutsDays(vaultRoot);
-      expect(advanced.map((record) => record.recordKey)).toEqual([
-        "2026-07-09",
-        "2026-07-08",
-        "2026-07-07",
-        "2026-07-06",
-        "2026-07-05",
-        "2026-07-04",
-        "2026-07-03",
-      ]);
+      expect(advanced).toHaveLength(90);
+      expect(advanced[0]?.recordKey).toBe("2026-09-30");
+      expect(advanced.at(-1)?.recordKey).toBe("2026-07-03");
       expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeUndefined();
       expect(advanced.every((record) =>
         "calendarClosedThroughDate" in record.data
-        && record.data.calendarClosedThroughDate === "2026-07-08"
+        && record.data.calendarClosedThroughDate === "2026-09-29"
       )).toBe(true);
     } finally {
       dateNow.mockRestore();
@@ -4928,7 +5408,7 @@ describe("selectProjectableActivityMinutesDays", () => {
       await expect(readProjectableActivityMinutesDays(
         overBoundVaultRoot,
         runningSpec,
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(unrelatedVaultRoot, { recursive: true, force: true });
@@ -4947,15 +5427,15 @@ describe("selectProjectableActivityMinutesDays", () => {
 
     try {
       await expect(readProjectableActivityMinutesDays(vaultRoot, runningSpec))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
       await expect(readProjectableActivityDistanceDays(
         vaultRoot,
         requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
       await expect(readProjectableActivitySessionCountDays(
         vaultRoot,
         requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -4977,8 +5457,8 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).toContain("listCanonicalEntities");
     expect(activitySessionReader).toContain('family: "event"');
     expect(activitySessionReader).toContain('from: cutoffDate');
-    expect(activitySessionReader).toContain("ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT");
-    expect(activitySessionReader).toContain("entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT");
+    expect(activitySessionReader).toContain("ACTIVITY_SESSION_SOURCE_ROW_LIMIT");
+    expect(activitySessionReader).toContain("entities.length > rowLimit");
     expect(activitySessionReader).toContain(
       "return { complete: false, rows: [] }",
     );
@@ -4993,7 +5473,7 @@ describe("selectProjectableActivityMinutesDays", () => {
     const vaultRoot = await createActivitySessionVault(Array.from(
       {
         length: HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
-          * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1)
+          * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 2)
           + 1,
       },
       (_, index) => ({
@@ -5016,16 +5496,16 @@ describe("selectProjectableActivityMinutesDays", () => {
       await expect(readProjectableActivityMinutesDays(
         vaultRoot,
         runningSpec,
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
       await expect(readProjectableActivityDistanceDays(
         vaultRoot,
         requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
       await expect(readProjectableActivitySessionCountDays(
         vaultRoot,
         requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
-      )).resolves.toEqual([]);
-      await expect(readProjectableWorkoutsDays(vaultRoot)).resolves.toEqual([]);
+      )).rejects.toThrow();
+      await expect(readProjectableWorkoutsDays(vaultRoot)).rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -5138,7 +5618,7 @@ describe("selectProjectableActivityDistanceDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
   const runningDistanceSpec = requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE);
 
-  it("limits an eight-date source set to the seven dates disclosed by consent", () => {
+  it("retains all eight available dates within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-01",
@@ -5172,13 +5652,14 @@ describe("selectProjectableActivityDistanceDays", () => {
       "2026-07-04",
       "2026-07-03",
       "2026-07-02",
+      "2026-07-01",
     ]);
   });
 
   it.each([
     {
       expectedDates: ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21"],
-      label: "UTC+14 excludes a sparse eighth local date",
+      label: "UTC+14 excludes a sparse date outside the 90-date window",
       nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
       timeZone: "Pacific/Kiritimati",
     },
@@ -5199,7 +5680,7 @@ describe("selectProjectableActivityDistanceDays", () => {
     nowMs: boundaryNowMs,
     timeZone,
   }) => {
-    const dates = ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21", "2026-07-20"];
+    const dates = ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21", "2026-04-28"];
     const vaultRoot = await createActivitySessionVault(
       dates.map((date, index) => ({
         activityType: "running",
@@ -5422,7 +5903,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
   const runningSessionCountSpec =
     requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE);
 
-  it("limits an eight-date source set to the seven dates disclosed by consent", () => {
+  it("retains all eight available dates within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-01",
@@ -5455,6 +5936,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
       "2026-07-04",
       "2026-07-03",
       "2026-07-02",
+      "2026-07-01",
     ]);
   });
 
@@ -5693,7 +6175,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
 
     expect(selectProjectableHeartRateZoneDays(points, utcDateKey(nowMs)))
       .toHaveLength(1);
-    expect(selectProjectableHeartRateZoneDays([
+    expect(() => selectProjectableHeartRateZoneDays([
       ...points,
       {
         ...points[0]!,
@@ -5701,7 +6183,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
         pointIds: ["point_zone_over_bound"],
         recordIds: ["evt_zone_over_bound"],
       },
-    ], utcDateKey(nowMs))).toEqual([]);
+    ], utcDateKey(nowMs))).toThrow();
     expect(selectProjectableHeartRateZoneDays([{
       ...points[0]!,
       context: {
@@ -5733,7 +6215,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
       expect(new Set(exactBound.map((record) => record.source?.source)).size)
         .toBe(8);
       await expect(readProjectableHeartRateZoneDays(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(exactBoundVaultRoot, { recursive: true, force: true });
@@ -5863,7 +6345,7 @@ describe("selectProjectableSleepNights", () => {
       await expect(readProjectableSleepNights(exactBoundVaultRoot))
         .resolves.toHaveLength(8);
       await expect(readProjectableSleepNights(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(exactBoundVaultRoot, { recursive: true, force: true });
@@ -5872,14 +6354,14 @@ describe("selectProjectableSleepNights", () => {
   });
 
   it("maps recent fully-timed nights to records keyed by night date and drops stale or partial ones", () => {
-    const staleDate = "2026-05-01";
+    const staleDate = "2026-02-01";
     const summaries = [
       { date: NIGHT.date, sleepEndAt: NIGHT.sleepEndAt, sleepStartAt: NIGHT.sleepStartAt },
       { date: "2026-06-08", sleepEndAt: null, sleepStartAt: "2026-06-08T22:00:00.000Z" },
       {
         date: staleDate,
-        sleepEndAt: "2026-05-02T06:00:00.000Z",
-        sleepStartAt: "2026-05-01T22:00:00.000Z",
+        sleepEndAt: "2026-02-02T06:00:00.000Z",
+        sleepStartAt: "2026-02-01T22:00:00.000Z",
       },
     ];
 
@@ -5893,7 +6375,7 @@ describe("selectProjectableSleepNights", () => {
     expect(selected[0]?.occurredAt).toBe(`${NIGHT.date}T00:00:00.000Z`);
   });
 
-  it("limits an eight-night source set to the seven nights disclosed by consent", () => {
+  it("retains all eight available sleep nights within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-08",
@@ -5915,7 +6397,7 @@ describe("selectProjectableSleepNights", () => {
       utcDateKey(boundaryNowMs),
     );
 
-    expect(selected.map((record) => record.recordKey)).toEqual(dates.slice(0, 7));
+    expect(selected.map((record) => record.recordKey)).toEqual(dates);
   });
 
   it("emits records the hosted-execution deliver-request parser accepts unchanged", () => {
@@ -6121,5 +6603,57 @@ describe("readProjectableProfileName", () => {
       records: [],
       sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
+  });
+});
+
+
+describe("canonical history capture", () => {
+  it("queries and captures all 90 dates and eight sources under an already-active plain grant without regrant", async () => {
+    const nowMs = Date.parse("2026-09-17T23:00:00.000Z");
+    const providers = ["coros", "fitbit", "garmin", "oura", "polar", "strava", "suunto", "whoop"];
+    const records = Array.from({ length: 92 }, (_, index) => {
+      const date = new Date(nowMs - (index - 1) * 86_400_000).toISOString().slice(0, 10);
+      return providers.map((provider) => ({
+        schemaVersion: "murph.event.v1",
+        id: `evt_history_${date}_${provider}`,
+        kind: "activity_session",
+        occurredAt: `${date}T10:00:00.000Z`,
+        dayKey: date,
+        recordedAt: `${date}T11:00:00.000Z`,
+        startAt: `${date}T10:00:00.000Z`,
+        timeZone: "UTC",
+        source: "device",
+        externalRef: { system: provider, resourceType: "workout", resourceId: `history-${date}-${provider}` },
+        activityType: "running",
+        durationMinutes: 30,
+      }));
+    }).flat();
+    const vaultRoot = await createActivitySessionVault(records);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    const scope = hostedVaultShareProjectionKindToScope("workout-days.v0");
+    try {
+      const result = await captureHostedVaultShareProjectionBestEffort({
+        generationTokensByProjectionScopeKey: {
+          [buildHostedVaultShareProjectionScopeKey(scope)]: GENERATION_TOKEN,
+        },
+        hasDeferredProjectionWork: false,
+        projectionScopes: [scope],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+        vaultRoot,
+      });
+      expect(result.outcome).toBe("captured");
+      if (result.outcome !== "captured") throw new Error("Expected complete canonical capture.");
+      expect(result.capture.snapshots.map((snapshot) => snapshot.records.length)).toEqual([720]);
+      for (const snapshot of result.capture.snapshots) {
+        expect(snapshot.memberTimeZone).toBe("UTC");
+        expect(new Set(snapshot.records.map((record) => record.source?.source))).toEqual(new Set(providers));
+        expect(snapshot.records.some((record) => record.occurredAt.startsWith("2026-09-18"))).toBe(false);
+        expect(snapshot.records.some((record) => record.occurredAt.startsWith("2026-06-19"))).toBe(false);
+      }
+      expect(result.capture.snapshots[0]?.records.some((record) => record.occurredAt.startsWith("2026-06-20"))).toBe(true);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
 });

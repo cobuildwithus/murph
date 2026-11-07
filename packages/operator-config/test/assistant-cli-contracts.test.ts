@@ -115,7 +115,7 @@ describe('assistant CLI delivery contracts', () => {
   })
 
   it('keeps the supported messaging channels explicit after the hard cut', () => {
-    expect(assistantChannelNameValues).toEqual(['telegram', 'linq', 'email'])
+    expect(assistantChannelNameValues).toEqual(['telegram', 'linq', 'email', 'voice'])
     expect(() => assistantChannelNameSchema.parse('whatsapp')).toThrow()
   })
 

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 
+import { assertHostedLocalVitestSelection } from "./e2e-test-selection.ts";
+
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
   sanitizeHostedLocalGenericEnvironment,
@@ -86,6 +88,7 @@ export type HostedLocalE2eScenarioName =
   | "group-sleep-source-sharing"
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
+  | "native-voice"
   | "idle-checkpoint-deferred-progress"
   | "idle-checkpoint-runtime-handoff"
   | "imessage-member-action-timestamp"
@@ -111,12 +114,15 @@ export type HostedLocalE2eScenarioName =
   | "linq-reminder-device-sync-non-starvation"
   | "linq-scheduled-reminder"
   | "linq-same-wake-batching"
+  | "linq-first-turn-held"
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
+  | "postgres-runtime-warm-reuse"
   | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stripe-billing-browser-matrix"
+  | "stale-deferred-replay"
   | "stuck-invocation-recovery"
   | "timezone-injection"
   | "usage-limit-ambiguous-send"
@@ -204,6 +210,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
     manualOnly: true,
     name: "hosted-web-browser-smoke",
+  },
+  {
+    dedicatedVitestProcess: true,
+    file: "apps/cloudflare/test/hosted-local-native-voice-e2e.test.ts",
+    manualOnly: true,
+    name: "native-voice",
   },
   {
     file: "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
@@ -386,6 +398,17 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "linq-same-wake-batching",
   },
   {
+    file: "apps/cloudflare/test/hosted-local-linq-first-turn-held-e2e.test.ts",
+    manualOnly: true,
+    name: "linq-first-turn-held",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts",
+    manualOnly: true,
+    name: "postgres-runtime-warm-reuse",
+    vitestProcessTestNamePatterns: ["empty Postgres: cold reply and warm typing", "rolling migration: cold reply and warm typing"],
+  },
+  {
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",
     manualOnly: true,
     name: "runner-warm-reuse",
@@ -477,6 +500,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
       "^hosted local foreground reply priority e2e",
       "^hosted local foreground checkpoint ordering e2e",
     ],
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-stale-deferred-replay-e2e.test.ts",
+    name: "stale-deferred-replay",
+    testControls: true,
   },
 ] as const;
 
@@ -675,6 +703,18 @@ export async function runHostedLocalE2eSuite(
           scenarios,
         });
       });
+      if (liveWearableEnvironment.vitestEnvOverlay[JUNCTION_WEARABLE_LIVE_ENV] === "1") {
+        suiteEnv.NEXT_DIST_DIR_MODE = "smoke";
+        await runAdmittedStep(async () => {
+          await runForegroundCommand({
+            args: ["--dir", "apps/web", "build:hosted-local"],
+            command: "pnpm",
+            cwd: hostedLocalHarnessRepoRoot,
+            env: suiteEnv,
+            label: "Hosted local wearable production Web preparation",
+          });
+        });
+      }
       await runAdmittedStep(async () => {
         await runHostedLocalVitest({
           assertWorkAdmission,
@@ -946,6 +986,19 @@ async function runHostedLocalVitestForScenarios(input: {
     ? input.scenarios[0]?.vitestProcessTestNamePatterns ?? [null]
     : [null];
 
+  const scenario = input.scenarios.length === 1 ? input.scenarios[0] : undefined;
+  if (scenario?.vitestProcessTestNamePatterns) {
+    await assertHostedLocalVitestSelection({
+      config: "apps/cloudflare/vitest.e2e.config.ts",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: buildHostedLocalVitestScenarioEnv(input),
+      files: [scenario.file],
+      // Shard admission still validates the complete registry partition.
+      patterns: resolveHostedLocalE2eScenarios(scenario.name)[0]?.vitestProcessTestNamePatterns
+        ?? scenario.vitestProcessTestNamePatterns,
+    });
+  }
+
   for (let index = 0; index < testNamePatterns.length; index += 1) {
     const testNamePattern = testNamePatterns[index] ?? null;
     await runForegroundCommand({
@@ -1092,7 +1145,6 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
     await import("./dev-hosted-local/runtime.ts");
   const {
     cleanupHostedLocalMinioBuildContainersBestEffort,
-    cleanupHostedLocalMinioE2eContainersBestEffort,
   } =
     await import("./dev-hosted-local/minio.ts");
 
@@ -1115,5 +1167,4 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
   if (buildId) {
     await cleanupHostedLocalMinioBuildContainersBestEffort(env, buildId);
   }
-  await cleanupHostedLocalMinioE2eContainersBestEffort(env);
 }

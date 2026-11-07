@@ -9,42 +9,63 @@ import {
 import { requestHostedOnboardingJson } from "./client-api";
 import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 
-export async function logoutHostedAppSession(input: {
-  logoutPrivy?: () => Promise<void> | void;
-} = {}): Promise<void> {
-  return endHostedAppSession({
+// Cookie responses share authority across tabs. Wait for older writers before
+// dispatching a replacement; discarding a late JS result cannot undo Set-Cookie.
+export async function withHostedSessionCookieWrite<T>(write: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  return navigator.locks
+    ? navigator.locks.request("murph-auth-session-cookie", { signal }, write)
+    : write();
+}
+
+/** A 2xx verification response may already have replaced the browser cookie. */
+export async function verifyHostedAppSession(input: {
+  url: "/api/auth/otp/verify" | "/api/auth/telegram/verify";
+  payload: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const signal = AbortSignal.any([AbortSignal.timeout(30_000), ...(input.signal ? [input.signal] : [])]);
+  const result = await withHostedSessionCookieWrite(() => requestHostedOnboardingJson<{ ok?: unknown; memberId?: unknown }>({
     ...input,
+    signal,
+    onSuccessfulResponseHeaders: publishBrowserVaultSessionInvalidation,
+    onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
+  }), signal);
+  if (result.ok !== true || typeof result.memberId !== "string" || !result.memberId) {
+    reloadCurrentHostedAuthDocument();
+    throw new Error("Sign-in could not be confirmed. Reload to check your session.");
+  }
+}
+
+export async function logoutHostedAppSession(): Promise<void> {
+  return endHostedAppSession({
     url: "/api/hosted-onboarding/session/logout",
   });
 }
 
-export async function declineHostedLaunchConsent(input: {
-  logoutPrivy?: () => Promise<void> | void;
-} = {}): Promise<void> {
+export async function declineHostedLaunchConsent(): Promise<void> {
   return endHostedAppSession({
-    ...input,
     url: "/api/legal/consent/decline",
   });
 }
 
 async function endHostedAppSession(input: {
-  logoutPrivy?: () => Promise<void> | void;
   url: string;
 }): Promise<void> {
   publishBrowserVaultSessionEnding();
   let receivedReplacementHeaders = false;
 
   try {
-    await requestHostedOnboardingJson<{ ok: true }>({
+    const signal = AbortSignal.timeout(BROWSER_VAULT_SESSION_ENDING_LEASE_MS);
+    await withHostedSessionCookieWrite(() => requestHostedOnboardingJson<{ ok: true }>({
       method: "POST",
       onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
       onSuccessfulResponseHeaders: () => {
         receivedReplacementHeaders = true;
         publishBrowserVaultSessionInvalidation();
       },
-      signal: AbortSignal.timeout(BROWSER_VAULT_SESSION_ENDING_LEASE_MS),
+      signal,
       url: input.url,
-    });
+    }), signal);
   } catch (error) {
     if (!receivedReplacementHeaders) {
       publishBrowserVaultSessionInvalidation();
@@ -53,14 +74,4 @@ async function endHostedAppSession(input: {
     throw error;
   }
 
-  if (!input.logoutPrivy) {
-    return;
-  }
-
-  try {
-    await input.logoutPrivy();
-  } catch {
-    // Server-side Murph app-session logout is authoritative. Privy logout is
-    // best-effort cleanup for client SDK state after the app session is gone.
-  }
 }

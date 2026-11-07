@@ -103,6 +103,17 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
     ),
 }));
 
+const desktopMatchMedia: typeof window.matchMedia = (query) => ({
+  addEventListener: () => {},
+  addListener: () => {},
+  dispatchEvent: () => false,
+  matches: false,
+  media: query,
+  onchange: null,
+  removeEventListener: () => {},
+  removeListener: () => {},
+});
+
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as { open?: boolean } | null,
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
@@ -197,11 +208,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />33 of 33 sources</);
+  assert.match(markup, />32 of 32 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.match(markup, /data-connect-source="fitbit"/u);
   assert.match(markup, /data-connect-source="oura"/u);
-  assert.equal(markup.match(/data-connect-source=/gu)?.length, 33);
+  assert.equal(markup.match(/data-connect-source=/gu)?.length, 32);
   assert.doesNotMatch(markup, /scroll-mt-24/gu);
   assert.doesNotMatch(markup, /target:ring/gu);
   assert.doesNotMatch(markup, /data-priority list/);
@@ -389,12 +400,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Withings",
     },
     {
-      assetPath: "/brand-logos/connect/google-fit.svg",
-      description:
-        "Android activity, steps, heart points, workouts, and wellness record context.",
-      name: "Google Fit",
-    },
-    {
       assetPath: "/brand-logos/connect/zwift.png",
       description:
         "Indoor rides, runs, power, distance, elevation, and virtual training sessions.",
@@ -432,7 +437,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 33);
+  assert.equal(sources.length, 32);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
     sources.length - 6,
@@ -489,6 +494,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />OneTouch</u);
   assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, />Strava</u);
+  assert.doesNotMatch(markup, />Google Fit</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(
     sourceHeadingIndex(markup, "Apple Health") <
@@ -499,10 +505,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.ok(
     sourceHeadingIndex(markup, "Fitbit") <
-      sourceHeadingIndex(markup, "Google Fit"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Google Fit") <
       sourceHeadingIndex(markup, "Huawei Health"),
   );
   assert.ok(
@@ -1533,9 +1535,7 @@ test("ConnectPage enables Garmin when Junction exposes Garmin as a connect targe
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
 });
 
-test("ConnectPage hides Strava when direct and Junction connection routes are configured", async () => {
-  vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-  vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
+test("ConnectPage hides Strava when Junction connection routes are configured", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv(
     "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -1555,8 +1555,6 @@ test("ConnectPage hides Strava when direct and Junction connection routes are co
 });
 
 test("ConnectPage preserves an existing Strava connection for status and disconnect only", async () => {
-  vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-  vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -1582,8 +1580,6 @@ test("ConnectPage preserves an existing Strava connection for status and disconn
 });
 
 test("ConnectPage does not offer Strava reconnection for an existing account needing access", async () => {
-  vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-  vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -1633,37 +1629,17 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.equal(
     markup.match(/>Connect<\/button>/gu)?.length,
     JUNCTION_DEFAULT_PROVIDER_FILTER.filter(
-      (providerSlug) => providerSlug !== "strava" && providerSlug !== "dexcom_v3",
+      (providerSlug) =>
+        providerSlug !== "strava"
+        && providerSlug !== "dexcom_v3"
+        && providerSlug !== "google_fit",
     ).length,
   );
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
+  assert.doesNotMatch(markup, /data-connect-source="google-fit"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
-
-  const { listVisibleConnectSources } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const visibleSourceIds = new Set(
-    listVisibleConnectSources().map((source) => source.id),
-  );
-  const configuredSourceIds = new Set<string>(
-    (
-      await import("@murphai/device-syncd/config")
-    ).DEVICE_CONNECT_SOURCES.filter((source) =>
-      visibleSourceIds.has(source.connectSourceId),
-    ).map((source) => source.connectSourceId),
-  );
-  assert.deepEqual(
-    [...visibleSourceIds].sort(),
-    [...configuredSourceIds].sort(),
-  );
-  assert.equal(visibleSourceIds.has("mobvoi-health"), false);
-  assert.equal(
-    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
-      .some((source) => source.id === "mobvoi-health"),
-    true,
-  );
 
   const logo = {
     className: "size-11 object-contain",
@@ -1839,7 +1815,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   await rendered.cleanup();
 });
 
-test("ConnectPage marks direct and Junction upstream sources connected from hosted state", async () => {
+test("ConnectPage marks explicit and upstream Junction sources connected from hosted state", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv(
     "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -1848,8 +1824,6 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
   vi.stubEnv("JUNCTION_ENV", "sandbox");
   vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura,strava");
   vi.stubEnv("JUNCTION_REGION", "us");
-  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
 
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
@@ -1870,7 +1844,8 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
       },
       {
         connectionId: "dsc_whoop_123",
-        provider: "whoop",
+        provider: "junction",
+        connectSourceId: "whoop",
         state: "active",
         upstreamSources: [],
       },
@@ -2254,8 +2229,13 @@ test("ConnectPage ignores disconnected Junction upstream projections on active c
 });
 
 test("ConnectPage surfaces reauthorization-required sources as reconnectable", async () => {
-  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv(
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "junction-client-user-id-secret",
+  );
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_REGION", "us");
 
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
@@ -2263,7 +2243,8 @@ test("ConnectPage surfaces reauthorization-required sources as reconnectable", a
     sources: [
       {
         connectionId: "dsc_whoop_123",
-        provider: "whoop",
+        provider: "junction",
+        connectSourceId: "whoop",
         state: "reauthorization_required",
         upstreamSources: [],
       },
@@ -2284,8 +2265,13 @@ test("ConnectPage surfaces reauthorization-required sources as reconnectable", a
 });
 
 test("ConnectPage keeps disconnected sources quiet and connectable", async () => {
-  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv(
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "junction-client-user-id-secret",
+  );
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_REGION", "us");
 
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
@@ -2293,7 +2279,8 @@ test("ConnectPage keeps disconnected sources quiet and connectable", async () =>
     sources: [
       {
         connectionId: "dsc_whoop_123",
-        provider: "whoop",
+        provider: "junction",
+        connectSourceId: "whoop",
         state: "disconnected",
         upstreamSources: [],
       },
@@ -2314,8 +2301,13 @@ test("ConnectPage keeps disconnected sources quiet and connectable", async () =>
 });
 
 test("ConnectPage surfaces active sources with reconnect action as reconnectable", async () => {
-  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv(
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "junction-client-user-id-secret",
+  );
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_REGION", "us");
 
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
@@ -2327,7 +2319,8 @@ test("ConnectPage surfaces active sources with reconnect action as reconnectable
           kind: "reconnect",
           label: "Reconnect",
         },
-        provider: "whoop",
+        provider: "junction",
+        connectSourceId: "whoop",
         state: "active",
         upstreamSources: [],
       },
@@ -2399,19 +2392,22 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
       [
         {
           connectionId: "dsc_whoop_reauth",
-          provider: "whoop",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "reauthorization_required",
           upstreamSources: [],
         },
         {
           connectionId: "dsc_whoop_disconnected",
-          provider: "whoop",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "disconnected",
           upstreamSources: [],
         },
         {
           connectionId: "dsc_whoop_active",
-          provider: "whoop",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "active",
           upstreamSources: [],
         },
@@ -2420,7 +2416,7 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
     [
       {
         connectionId: "dsc_whoop_active",
-        connectProvider: "whoop",
+        connectProvider: "junction",
         connectTarget: null,
         requiresReconnect: false,
         sourceId: "whoop",
@@ -2538,7 +2534,8 @@ test("ConnectPage preserves reconnect action on active source matches", async ()
             kind: "reconnect",
             label: "Reconnect",
           },
-          provider: "whoop",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "active",
           upstreamSources: [],
         },
@@ -2547,7 +2544,7 @@ test("ConnectPage preserves reconnect action on active source matches", async ()
     [
       {
         connectionId: "dsc_whoop_active_error",
-        connectProvider: "whoop",
+        connectProvider: "junction",
         connectTarget: null,
         requiresReconnect: true,
         sourceId: "whoop",
@@ -2557,7 +2554,7 @@ test("ConnectPage preserves reconnect action on active source matches", async ()
   );
 });
 
-test("ConnectPage lets Junction source reconnect win over healthy duplicate direct source", async () => {
+test("ConnectPage lets Junction source reconnect win over healthy duplicate explicit source", async () => {
   const { resolveConnectSourceConnectionStates } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -2567,8 +2564,9 @@ test("ConnectPage lets Junction source reconnect win over healthy duplicate dire
       [{ id: "whoop" }],
       [
         {
-          connectionId: "dsc_direct_whoop",
-          provider: "whoop",
+          connectionId: "dsc_junction_whoop_healthy",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "active",
           upstreamSources: [],
         },
@@ -3371,7 +3369,8 @@ test("ConnectPage lets active reconnect rows win over stale reconnectable rows",
       [
         {
           connectionId: "dsc_whoop_reauth",
-          provider: "whoop",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "reauthorization_required",
           upstreamSources: [],
         },
@@ -3381,7 +3380,8 @@ test("ConnectPage lets active reconnect rows win over stale reconnectable rows",
             kind: "reconnect",
             label: "Reconnect",
           },
-          provider: "whoop",
+          provider: "junction",
+          connectSourceId: "whoop",
           state: "active",
           upstreamSources: [],
         },
@@ -3390,7 +3390,7 @@ test("ConnectPage lets active reconnect rows win over stale reconnectable rows",
     [
       {
         connectionId: "dsc_whoop_active_error",
-        connectProvider: "whoop",
+        connectProvider: "junction",
         connectTarget: null,
         requiresReconnect: true,
         sourceId: "whoop",
@@ -3439,7 +3439,7 @@ test("ConnectPage treats Junction reauthorization as reconnectable even when ups
   assert.match(markup, /aria-label="Reconnect Oura"/u);
 });
 
-test("resolveConnectedConnectSourceConnections carries connection ids for direct and Junction matches", async () => {
+test("resolveConnectedConnectSourceConnections carries connection ids for explicit and upstream Junction matches", async () => {
   const { resolveConnectedConnectSourceConnections } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -3468,7 +3468,8 @@ test("resolveConnectedConnectSourceConnections carries connection ids for direct
       },
       {
         connectionId: "dsc_whoop_123",
-        provider: "whoop",
+        provider: "junction",
+        connectSourceId: "whoop",
         state: "active",
         upstreamSources: [],
       },
@@ -3571,7 +3572,7 @@ test("ConnectPage keeps unfinished-reset guidance visible on disconnected Juncti
   assert.doesNotMatch(markup, /aria-label="Disconnect account"/u);
 });
 
-test("resolveHistoricalResetIncompleteConnectSourceIds maps direct and Junction disconnected sources", async () => {
+test("resolveHistoricalResetIncompleteConnectSourceIds maps explicit and upstream Junction disconnected sources", async () => {
   const { resolveHistoricalResetIncompleteConnectSourceIds } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -3580,9 +3581,10 @@ test("resolveHistoricalResetIncompleteConnectSourceIds maps direct and Junction 
     [{ id: "whoop" }, { id: "garmin" }],
     [
       {
-        connectionId: "dsc_whoop_direct",
+        connectionId: "dsc_junction_whoop",
         historicalResetIncomplete: true,
-        provider: "whoop",
+        provider: "junction",
+        connectSourceId: "whoop",
         state: "disconnected",
         upstreamSources: [],
       },
@@ -3639,7 +3641,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   expectSettingResponseNotLoaded();
 });
 
-test("ConnectSourcesGrid opens auth for a pending device connect intent while signed out without a pre-auth source target", async () => {
+test("ConnectSourcesGrid signs in on the page for a pending device connect intent while signed out without a pre-auth source target", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -3678,15 +3680,17 @@ test("ConnectSourcesGrid opens auth for a pending device connect intent while si
         pathname: "/connect",
         search: "",
       },
+      matchMedia: desktopMatchMedia,
       requireButton: false,
     },
   );
 
   await vi.waitFor(() => {
-    assert.equal(mocks.authDialogProps?.open, true);
-    assert.match(rendered.container.textContent ?? "", /Auth dialog/);
+    assert.match(rendered.container.textContent ?? "", /Sign in to connect Whoop\./u);
   });
 
+  assert.equal(mocks.authDialogProps?.open, false);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Auth dialog/);
   assert.equal(fetch.mock.calls.length, 0);
 
   await rendered.cleanup();
@@ -3742,7 +3746,7 @@ test("ConnectSourcesGrid ignores malformed pending device connect intents while 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid ignores unmatched pending device connect intents while signed out", async () => {
+test("ConnectSourcesGrid keeps sign-in on the page for unmatched device connect intents", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -3782,12 +3786,14 @@ test("ConnectSourcesGrid ignores unmatched pending device connect intents while 
         pathname: "/connect",
         search: "",
       },
+      matchMedia: desktopMatchMedia,
       requireButton: false,
     },
   );
 
   assert.equal(mocks.authDialogProps?.open, false);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Auth dialog/);
+  assert.match(rendered.container.textContent ?? "", /Sign in to connect your device\./u);
   assert.equal(fetch.mock.calls.length, 0);
 
   await rendered.cleanup();
@@ -3910,23 +3916,23 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
+          description: "Activity, sleep, and heart rate.",
+          id: "fitbit",
           logo: {
             className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
             height: 15,
-            src: "/brand-logos/connect/whoop.svg",
+            src: "/brand-logos/connect/fitbit.svg",
             width: 96,
           },
-          name: "Whoop",
-          requiresVitalDisclosure: true,
+          name: "Fitbit",
+          requiresVitalDisclosure: false,
         },
       ],
     }),
     {
       location: {
-        hash: `#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=whoop`,
-        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=whoop`,
+        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
       },
     },
   );
@@ -3952,7 +3958,7 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   });
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
-    /Connect Whoop to Murph/u,
+    /Connect Fitbit to Murph/u,
   );
 
   await rendered.cleanup();
@@ -4005,7 +4011,7 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connect Whoop to Murph/u,
+      /Connect Whoop\./u,
     );
   });
   assert.equal(fetch.mock.calls.length, 0);
@@ -4104,7 +4110,7 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
   );
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Connect Oura to Murph/u);
+    assert.match(rendered.container.textContent ?? "", /Connect Oura\./u);
   });
   const continueButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Continue to Oura");
@@ -4118,7 +4124,7 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/u,
+      /This link isn’t working\./u,
     );
   });
   assert.equal(fetch.mock.calls.length, 1);
@@ -4181,7 +4187,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/,
+      /This link isn’t working\./,
     );
     assert.match(
       rendered.container.textContent ?? "",
@@ -4191,12 +4197,178 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
 
   const contactLink = rendered.container.querySelector("a[href^='sms:']");
   assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
-  assert.equal(contactLink.textContent, "Text Murph");
+  assert.equal(contactLink.textContent, "Open Messages");
   assert.match(
     contactLink.getAttribute("aria-label") ?? "",
     /fresh Whoop connection link/,
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid offers a retry of the same link when an intent cannot start", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    void _input;
+    void _init;
+    return Response.json(
+      {
+        error: {
+          code: "DEVICE_PROVIDER_UNAVAILABLE",
+          message: "Connection could not be started.",
+          retryable: true,
+        },
+      },
+      { status: 503 },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
+          logo: {
+            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+            height: 15,
+            src: "/brand-logos/connect/whoop.svg",
+            width: 96,
+          },
+          name: "Whoop",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Whoop didn’t connect\./u);
+  });
+  assert.match(rendered.container.textContent ?? "", /Nothing changed\. Try again\./u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/u);
+
+  const retryButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Try again");
+  assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    retryButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 2);
+  });
+  assert.equal(fetch.mock.calls[1]?.[0], `/device/connect/${claim}`);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid settles an intent for a source that is already connected", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connected: true,
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
+          logo: {
+            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+            height: 15,
+            src: "/brand-logos/connect/whoop.svg",
+            width: 96,
+          },
+          name: "Whoop",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Whoop is connected\./u);
+  });
+  assert.equal(fetch.mock.calls.length, 0);
+
+  const exploreButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue exploring");
+  assert.ok(exploreButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    exploreButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Whoop is connected\./u);
+  assert.ok(
+    rendered.container.querySelector("input[aria-label='Search sources']"),
+  );
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps the Garmin Historical Data reminder on a link's Ready page", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  vi.stubGlobal("fetch", vi.fn());
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          description: "Workouts, sleep, stress, heart rate, and body battery.",
+          id: "garmin",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/garmin.png",
+            width: 44,
+          },
+          name: "Garmin",
+          requiresVitalDisclosure: true,
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=garmin&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=garmin&connectProvider=junction`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /When Garmin opens, turn on Historical Data before approving\./u,
+    );
+  });
+  assert.match(rendered.container.textContent ?? "", /Connect Garmin\./u);
 
   await rendered.cleanup();
 });
@@ -4256,7 +4428,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
-    /Connection link unavailable/,
+    /This link isn’t working\./,
   );
   assert.ok(
     rendered.container.querySelector("input[aria-label='Search sources']"),
@@ -4551,7 +4723,7 @@ test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () =>
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/,
+      /This link isn’t working\./,
     );
   });
 
@@ -4615,7 +4787,7 @@ test("ConnectSourcesGrid falls back to email when no preferred recovery contact 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/,
+      /This link isn’t working\./,
     );
   });
 
@@ -6041,7 +6213,7 @@ test("ConnectPage ignores connected callback status when callback source metadat
   assert.doesNotMatch(markup, /Junction/u);
 });
 
-test("ConnectPage shows callback errors with the original source label", async () => {
+test("ConnectPage keeps unavailable callback state neutral without asserting connection", async () => {
   const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -6056,11 +6228,10 @@ test("ConnectPage shows callback errors with the original source label", async (
     }),
   );
 
-  assert.match(markup, /Unable to finish connection/);
-  assert.match(
-    markup,
-    /Oura gave us an expired or invalid return from the last attempt\./,
-  );
+  assert.match(markup, /Check your connections/);
+  assert.match(markup, /Your current connections are shown below/);
+  assert.doesNotMatch(markup, /Unable to finish connection/);
+  assert.doesNotMatch(markup, /Connected Oura\./);
 });
 
 test("ConnectPage shows rejected callback errors with the original source label", async () => {
@@ -6072,7 +6243,7 @@ test("ConnectPage shows rejected callback errors with the original source label"
       searchParams: Promise.resolve({
         connectSource: "whoop",
         deviceSyncError: "OAUTH_CALLBACK_REJECTED",
-        deviceSyncProvider: "whoop",
+        deviceSyncProvider: "junction",
         deviceSyncStatus: "error",
       }),
     }),
@@ -6155,9 +6326,17 @@ test("ConnectPage keeps unverified callback query text out of the support draft"
   assert.match(body, /Reference: unknown$/);
 });
 
-test.each([false, true])("ConnectPage shows neutral review guidance without changing connected=%s", async (connected) => {
-  vi.stubEnv("OURA_CLIENT_ID", "oura-client-id");
-  vi.stubEnv("OURA_CLIENT_SECRET", "oura-client-secret");
+test.each([
+  [false, "CALLBACK_PROOF_INVALID"], [true, "CALLBACK_PROOF_INVALID"],
+  [false, "OAUTH_STATE_INVALID"], [true, "OAUTH_STATE_INVALID"],
+] as const)("ConnectPage preserves connected=%s for neutral %s recovery", async (connected, errorCode) => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv(
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "junction-client-user-id-secret",
+  );
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_REGION", "us");
   if (connected) {
     mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
       generatedAt: "2026-05-01T00:00:00.000Z",
@@ -6176,8 +6355,8 @@ test.each([false, true])("ConnectPage shows neutral review guidance without chan
     await ConnectPage({
       searchParams: Promise.resolve({
         connectSource: "oura",
-        deviceSyncError: "CALLBACK_PROOF_INVALID",
-        deviceSyncProvider: "oura",
+        deviceSyncError: errorCode,
+        deviceSyncProvider: "junction",
         deviceSyncStatus: "error",
       }),
     }),
@@ -6215,7 +6394,7 @@ test("ConnectPage offers sign-in recovery when the callback arrived signed out",
       searchParams: Promise.resolve({
         connectSource: "oura",
         deviceSyncError: "CALLBACK_SESSION_REQUIRED",
-        deviceSyncProvider: "oura",
+        deviceSyncProvider: "junction",
         deviceSyncStatus: "error",
       }),
     }),
@@ -6238,7 +6417,7 @@ test("ConnectPage omits sign-in recovery when the member is already signed in", 
       searchParams: Promise.resolve({
         connectSource: "oura",
         deviceSyncError: "CALLBACK_PROOF_INVALID",
-        deviceSyncProvider: "oura",
+        deviceSyncProvider: "junction",
         deviceSyncStatus: "error",
       }),
     }),
@@ -6256,7 +6435,7 @@ test("ConnectPage keeps successful callbacks free of failure recovery actions", 
     await ConnectPage({
       searchParams: Promise.resolve({
         connectSource: "oura",
-        deviceSyncProvider: "oura",
+        deviceSyncProvider: "junction",
         deviceSyncStatus: "connected",
       }),
     }),
@@ -6267,16 +6446,14 @@ test("ConnectPage keeps successful callbacks free of failure recovery actions", 
 });
 
 test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction disclosure", async () => {
-  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv(
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "junction-client-user-id-secret",
   );
   vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit");
   vi.stubEnv("JUNCTION_REGION", "us");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit");
 
   const { resolveConfiguredConnectSources } = await import(
     "../app/(dashboard)/connect/connect-page-content"
@@ -6304,18 +6481,14 @@ test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction dis
 });
 
 test("Vital disclosure follows reconnect and fresh providers across local disconnects", async () => {
-  vi.stubEnv("OURA_CLIENT_ID", "oura-client-id");
-  vi.stubEnv("OURA_CLIENT_SECRET", "oura-client-secret");
-  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv(
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "junction-client-user-id-secret",
   );
   vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura,whoop_v2");
   vi.stubEnv("JUNCTION_REGION", "us");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura,whoop_v2");
 
   const { resolveConfiguredConnectSources } = await import(
     "../app/(dashboard)/connect/connect-page-content"
@@ -6340,7 +6513,7 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
     {
       reconnectProviderBySourceId: new Map([
         ["oura", "junction"],
-        ["whoop", "whoop"],
+        ["whoop", "junction"],
       ]),
       reconnectSourceIds: new Set(["oura", "whoop"]),
       reconnectTargetBySourceId: new Map([
@@ -6355,11 +6528,11 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
   assert.ok(whoop);
 
   assert.equal(oura.connectProvider, "junction");
-  assert.equal(oura.requiresVitalDisclosure, undefined);
+  assert.equal(oura.requiresVitalDisclosure, true);
   assert.equal(requiresVitalConnectionPreflight(oura), true);
-  assert.equal(whoop.connectProvider, "whoop");
+  assert.equal(whoop.connectProvider, "junction");
   assert.equal(whoop.requiresVitalDisclosure, true);
-  assert.equal(requiresVitalConnectionPreflight(whoop), false);
+  assert.equal(requiresVitalConnectionPreflight(whoop), true);
 
   const locallyDisconnected = markLocallyDisconnectedSources(
     resolved,
@@ -6374,7 +6547,7 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
   );
   assert.ok(disconnectedOura);
   assert.ok(disconnectedWhoop);
-  assert.equal(requiresVitalConnectionPreflight(disconnectedOura), false);
+  assert.equal(requiresVitalConnectionPreflight(disconnectedOura), true);
   assert.equal(requiresVitalConnectionPreflight(disconnectedWhoop), true);
 });
 
@@ -6524,10 +6697,10 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid keeps a direct integration one-click", async () => {
+test("ConnectSourcesGrid keeps Fitbit on its dedicated connection flow", async () => {
   const fetch = vi.fn(async () =>
     Response.json({
-      authorizationUrl: "https://whoop.example.test/oauth",
+      authorizationUrl: "https://junction.example.test/link/fitbit",
     }),
   );
   vi.stubGlobal("fetch", fetch);
@@ -6539,23 +6712,23 @@ test("ConnectSourcesGrid keeps a direct integration one-click", async () => {
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "whoop",
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
+          connectTarget: "fitbit",
+          description: "Activity, sleep, and heart rate.",
+          id: "fitbit",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/whoop.svg",
+            src: "/brand-logos/connect/fitbit.svg",
             width: 44,
           },
-          name: "Whoop",
+          name: "Fitbit",
         },
       ],
     }),
   );
 
   const connectButton = rendered.container.querySelector(
-    "button[aria-label='Connect Whoop']",
+    "button[aria-label='Connect Fitbit']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
@@ -6568,7 +6741,7 @@ test("ConnectSourcesGrid keeps a direct integration one-click", async () => {
     assert.equal(fetch.mock.calls.length, 1);
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
-      "https://whoop.example.test/oauth",
+      "https://junction.example.test/link/fitbit",
     );
   });
   assert.doesNotMatch(rendered.container.textContent ?? "", /We use Vital/u);

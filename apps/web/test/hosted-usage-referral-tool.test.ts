@@ -4,7 +4,7 @@ const ORDINARY_POLICY_VERSION = "hosted-usage-referral-2026-07-v1";
 
 const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
-  readActiveHostedMemberAccess: vi.fn(),
+  readStrictHostedPersonAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
-  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+  readStrictHostedPersonAccess: mocks.readStrictHostedPersonAccess,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -114,7 +114,7 @@ describe("hosted usage referral tool", () => {
     vi.clearAllMocks();
     mocks.useRealUsageStatus = false;
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readStrictHostedPersonAccess.mockResolvedValue(true);
     mocks.readHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       allowanceSource: "direct_starter",
@@ -724,7 +724,7 @@ describe("hosted usage referral tool", () => {
   it("builds snapshots after commit with one root-client query at a time", async () => {
     const { prisma, referrals, runQuery, transactionState } = buildPrisma();
     const projectionTransactionStates: boolean[] = [];
-    mocks.readActiveHostedMemberAccess.mockImplementation(
+    mocks.readStrictHostedPersonAccess.mockImplementation(
       () => runQuery(() => true),
     );
     mocks.readHostedPersonalAiUsageStatus.mockImplementation(

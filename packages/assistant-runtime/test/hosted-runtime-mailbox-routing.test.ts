@@ -9,6 +9,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedMailboxRoutingPlan,
+  getHostedSystemMailboxModelFreeRouteActions,
   resolveExpectedLaneForHostedMailboxKind,
   type HostedMailboxImportAction,
 } from "../src/hosted-runtime/mailbox-routing.ts";
@@ -16,6 +17,18 @@ import {
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 
 describe("hosted mailbox routing", () => {
+  test("preserves default system routes and expands only for blocked assistant execution", () => {
+    const defaultRoutes = [
+      "apply-member-channels-update", "apply-runtime-control-request", "dispatch-assistant-notification",
+      "import-group-journal-fact", "import-reported-daily-metric", "run-device-sync-wake",
+    ];
+    assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions().sort(), defaultRoutes);
+    assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions(false).sort(), defaultRoutes);
+    assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions(true).sort(), [
+      ...defaultRoutes, "apply-member-action", "apply-member-preferences", "run-clinical-records-sync",
+    ].sort());
+  });
+
   test("classifies every current hosted mailbox kind into a semantic import action", () => {
     const cases: Array<{
       action: HostedMailboxImportAction;
@@ -78,11 +91,6 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
-        action: "run-environment-voice",
-        kind: "environment-voice.captured",
-        lane: "system",
-      },
-      {
         action: "import-group-journal-fact",
         kind: "journal.group-fact.recorded",
         lane: "system",
@@ -99,7 +107,22 @@ describe("hosted mailbox routing", () => {
       },
       {
         action: "skip-retired-mailbox-item",
+        kind: "environment-interview.completed",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
+        kind: "environment-voice.captured",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
         kind: "group-newsletter.email-needed",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
+        kind: "runtime.codex-auth-requested",
         lane: "system",
       },
       {
@@ -165,7 +188,6 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.completed"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("clinical-records.sync-requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
-    assert.equal(resolveExpectedLaneForHostedMailboxKind("environment-voice.captured"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("meal-photo.captured"), "system");
     assert.equal(
       resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"),

@@ -7,7 +7,7 @@ import { parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecords
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   hashClinicalFhirPageUrl,
@@ -22,7 +22,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
-  readHostedRuntimeAiAccessDecision: vi.fn(),
+  readClinicalTransportAccess: vi.fn(),
   openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   openClinicalDocumentTicket: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision }));
+vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.readClinicalTransportAccess }));
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
@@ -64,7 +64,55 @@ describe("Clinical Records retrieval control plane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
+    mocks.readClinicalTransportAccess.mockResolvedValue(true);
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([false, true])("gates a frozen restricted query before provider egress (approved=%s)", async (approved) => {
+    const harness = createHarness(["Patient"]);
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
+      frozenAt: new Date("2026-09-15T12:00:00Z"), pageCount: "100", resourceTypes: ["FamilyMemberHistory"] });
+    harness.state.run.retrievalPlanJson = plan;
+    harness.state.run.grantedScopesJson = ["patient/FamilyMemberHistory.s"];
+    const slice = plan.slices[0]!;
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", approved ? "epic-test" : "epic-other");
+    const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [] }));
+    const result = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "approved-family", resourceType: slice.resourceType, runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    expect(result.status).toBe(approved ? "page" : "unavailable");
+    expect(fetchImpl).toHaveBeenCalledTimes(approved ? 1 : 0);
+    if (!approved) expect(result).toEqual({ status: "unavailable", errorCode: "hospital-approval-required", retryable: false });
+  });
+
+  it("revokes an issued restricted document ticket when the provider flag is removed", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
+      frozenAt: new Date("2026-09-15T12:00:00Z"), pageCount: "100", resourceTypes: ["DocumentReference"] });
+    harness.state.run.retrievalPlanJson = plan;
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.s", "patient/Binary.r"];
+    const slice = plan.slices.find((entry) => entry.queryScopeId === "document-references-imaging")!;
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "epic-test");
+    const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "DocumentReference", id: "report-1", status: "current",
+      meta: { lastUpdated: "2026-09-15T12:00:00Z" },
+      subject: { reference: "Patient/patient-1" }, content: [{ attachment: {
+        url: "Binary/document-1", contentType: "text/plain", size: 13,
+      } }],
+    } }] }));
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "restricted-document", resourceType: "DocumentReference", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    if (page.status !== "page" || !page.documents?.[0]?.ticket) throw new Error("Expected document ticket.");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: page.documents[0].ticket } });
+    expect(result).toEqual({ status: "unavailable", errorCode: "hospital-approval-required", retryable: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("downloads linked Binary bytes with a run-bound ticket without altering raw pages or FHIR page counts", async () => {
@@ -236,7 +284,7 @@ describe("Clinical Records retrieval control plane", () => {
 
   it("fences egress when consent is withdrawn after initial admission", async () => {
     const harness = createHarness(["Observation"]);
-    harness.hooks.afterRequestUpsert = async () => { mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: false }); };
+    harness.hooks.afterRequestUpsert = async () => { mocks.readClinicalTransportAccess.mockResolvedValue(false); };
     const fetchImpl = vi.fn();
     await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: queryObservationPageRequest("revoked") }))
       .resolves.toMatchObject({ status: "unavailable", errorCode: "member-processing-inactive", retryable: false });
@@ -1289,6 +1337,18 @@ describe("Clinical Records retrieval control plane", () => {
       status: "needs_reauth",
     });
     expect(harness.state.run.status).toBe("needs_reauth");
+  });
+
+  it.each(["completed", "partial"] as const)("retains renewable patient access after a %s check", async (status) => {
+    const harness = createHarness(["Patient", "Observation"]);
+    Object.assign(harness.state.run.connection, { refreshTokenEncrypted: "sealed-refresh" });
+    const access = harness.state.run.connection.accessTokenEncrypted;
+    const patient = harness.state.run.connection.patientIdEncrypted;
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      ...outcomeIdentity(), counts: outcomeCounts(), generation: 1, runId: RUN_ID, status,
+    } });
+    expect(harness.state.run.connection).toMatchObject({ accessTokenEncrypted: access,
+      patientIdEncrypted: patient, refreshTokenEncrypted: "sealed-refresh", nextSyncAt: expect.any(Date), lastCheckedAt: expect.any(Date) });
   });
 
   it("requeues a preempted run and accepts a reordered idempotent completion", async () => {

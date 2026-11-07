@@ -159,7 +159,7 @@ async function readRequestBodyText(
 }
 
 export async function readRawBodyBuffer(
-  request: Request,
+  request: Pick<Request, "body" | "headers">,
   options: { limitBytes?: number } = {},
 ): Promise<Buffer> {
   const limitBytes = options.limitBytes ?? DEFAULT_RAW_BODY_LIMIT_BYTES;
@@ -382,19 +382,6 @@ export function createJsonRouteHelpers(
         }
       };
     },
-  };
-}
-
-export function withJsonErrorHandling<TArgs extends unknown[], TResponse extends Response>(
-  handler: (...args: TArgs) => Promise<TResponse>,
-  mapError: (error: unknown) => TResponse,
-): (...args: TArgs) => Promise<TResponse> {
-  return async (...args) => {
-    try {
-      return await handler(...args);
-    } catch (error) {
-      return mapError(error);
-    }
   };
 }
 

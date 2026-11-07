@@ -51,7 +51,8 @@ export function isAllowedElevenLabsRequest(
 }
 
 function requiredOutputFormatFor(pathnameSuffix: string): string | null {
-  if (/^\/v1\/text-to-speech\/[^/]+$/u.test(pathnameSuffix)) {
+  if (pathnameSuffix === "/v1/text-to-dialogue"
+    || /^\/v1\/text-to-speech\/[^/]+$/u.test(pathnameSuffix)) {
     return "mp3_44100_128";
   }
   if (pathnameSuffix === "/v1/music") {
@@ -79,6 +80,9 @@ export function parseHostedElevenLabsRequestBody(input: {
       pathnameSuffix: input.pathnameSuffix,
       record,
     });
+  }
+  if (input.pathnameSuffix === "/v1/text-to-dialogue") {
+    return parseHostedElevenLabsDialogueRequestBody(record);
   }
   if (input.pathnameSuffix === "/v1/music") {
     return parseHostedElevenLabsMusicRequestBody(record);
@@ -116,6 +120,40 @@ function parseHostedElevenLabsTtsRequestBody(input: {
     upstreamBody: JSON.stringify({
       model_id: modelId,
       text,
+    }),
+  };
+}
+
+function parseHostedElevenLabsDialogueRequestBody(
+  record: Record<string, unknown>,
+): HostedElevenLabsTtsRequestBody | null {
+  if (!hasExactKeys(record, ["inputs", "model_id"])
+    || record.model_id !== "eleven_v4"
+    || !Array.isArray(record.inputs)
+    || record.inputs.length !== 1) {
+    return null;
+  }
+  const input: unknown = record.inputs[0];
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return null;
+  }
+  const entry = input as Record<string, unknown>;
+  if (!hasExactKeys(entry, ["text", "voice_id"])) {
+    return null;
+  }
+  // One voice memo, below the dialogue API's 2,000-character guidance.
+  const text = normalizeHostedElevenLabsString(entry.text, 1_000);
+  const voiceId = normalizeHostedElevenLabsString(entry.voice_id, HOSTED_ELEVENLABS_MAX_ID_CHARS);
+  if (!text || !voiceId) {
+    return null;
+  }
+  return {
+    characterCount: text.length,
+    kind: "tts",
+    modelId: "eleven_v4",
+    upstreamBody: JSON.stringify({
+      inputs: [{ text, voice_id: voiceId }],
+      model_id: "eleven_v4",
     }),
   };
 }

@@ -13,7 +13,6 @@ import {
   assertTelegramWebhookSecretToken,
   minimizeTelegramUpdate,
   parseTelegramWebhookUpdate,
-  readTelegramWebhookHeader,
   readTelegramWebhookSecretToken,
   verifyAndParseTelegramWebhookRequest,
 } from "../src/telegram-webhook-payload.ts";
@@ -86,13 +85,6 @@ test("verifyAndParseTelegramWebhookRequest validates the Telegram secret-token h
   assert.equal(readTelegramWebhookSecretToken({
     "x-telegram-bot-api-secret-token": ["telegram-secret"],
   }), "telegram-secret");
-  assert.equal(
-    readTelegramWebhookHeader(
-      { "X-Telegram-Bot-Api-Secret-Token": "telegram-secret" },
-      "x-telegram-bot-api-secret-token",
-    ),
-    "telegram-secret",
-  );
 });
 
 test("verifyAndParseTelegramWebhookRequest rejects missing or mismatched secret tokens", () => {

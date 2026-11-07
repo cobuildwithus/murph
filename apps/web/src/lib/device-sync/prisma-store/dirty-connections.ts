@@ -182,6 +182,7 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
       processedRevision: existing.dirtyRevision,
       resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
       sourceProviderCountsJson: toNullablePrismaJsonValue({}),
+      wakeDeferredUntil: null,
       windowEnd: null,
       windowStart: null,
     },
@@ -223,6 +224,17 @@ type StagedDirtyAckOverlay = Map<string, StagedDirtyAckOverlayEntry>;
 interface DirtyConnectionHydrationResult {
   hasMorePayloads: boolean;
   items: HostedDeviceSyncDirtyConnectionRecord[];
+}
+
+export interface HostedDeviceSyncDeferredDirtyWakeRecord {
+  connectedAt: Date;
+  connectionStatus: string;
+  dirtyRevision: bigint;
+  latestDirtyAt: Date;
+  latestEventType: string | null;
+  latestResourceCategory: string | null;
+  processedRevision: bigint;
+  provider: string;
 }
 
 export class PrismaHostedDirtyConnectionStore {
@@ -785,6 +797,115 @@ export class PrismaHostedDirtyConnectionStore {
     return !existing || existing.processedRevision >= existing.dirtyRevision;
   }
 
+  // A deferred wake deadline is batching bookkeeping beside dirty content. Raw
+  // writes leave updatedAt, the preparation fence for content, untouched.
+  async deferDirtyConnectionWakeTx(input: {
+    connectionId: string;
+    deferredUntil: Date;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<void> {
+    await input.tx.$executeRaw(Prisma.sql`
+      UPDATE "device_sync_dirty_connection"
+      SET "wake_deferred_until" = ${input.deferredUntil}
+      WHERE "connection_id" = ${input.connectionId}
+        AND "user_id" = ${input.userId}
+    `);
+  }
+
+  /** Claim the pending batch in the same transaction that appends its wake. */
+  async claimDeferredDirtyConnectionWakeTx(input: {
+    connectionId: string;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const claimed = await input.tx.$executeRaw(Prisma.sql`
+      UPDATE "device_sync_dirty_connection"
+      SET "wake_deferred_until" = NULL
+      WHERE "connection_id" = ${input.connectionId}
+        AND "user_id" = ${input.userId}
+        AND "wake_deferred_until" IS NOT NULL
+    `);
+    return claimed > 0;
+  }
+
+  async listDueDeferredDirtyConnectionWakes(input: {
+    dueAt: Date;
+    limit: number;
+  }): Promise<Array<{ connectionId: string; userId: string }>> {
+    return this.prisma.$queryRaw<Array<{ connectionId: string; userId: string }>>(Prisma.sql`
+      SELECT "connection_id" AS "connectionId", "user_id" AS "userId"
+      FROM "device_sync_dirty_connection"
+      WHERE "wake_deferred_until" <= ${input.dueAt}
+      ORDER BY "wake_deferred_until" ASC, "connection_id" ASC
+      LIMIT ${input.limit}
+    `);
+  }
+
+  async readDueDeferredDirtyConnectionWake(input: {
+    connectionId: string;
+    dueAt: Date;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<HostedDeviceSyncDeferredDirtyWakeRecord | null> {
+    const prisma = input.tx ?? this.prisma;
+    const [row] = await prisma.$queryRaw<HostedDeviceSyncDeferredDirtyWakeRecord[]>(Prisma.sql`
+      SELECT
+        "dirty"."dirty_revision" AS "dirtyRevision",
+        "dirty"."processed_revision" AS "processedRevision",
+        "dirty"."provider" AS "provider",
+        "dirty"."latest_dirty_at" AS "latestDirtyAt",
+        "dirty"."latest_event_type" AS "latestEventType",
+        "dirty"."latest_resource_category" AS "latestResourceCategory",
+        "connection"."connected_at" AS "connectedAt",
+        "connection"."status" AS "connectionStatus"
+      FROM "device_sync_dirty_connection" AS "dirty"
+      JOIN "device_connection" AS "connection"
+        ON "connection"."id" = "dirty"."connection_id"
+        AND "connection"."user_id" = "dirty"."user_id"
+      WHERE "dirty"."connection_id" = ${input.connectionId}
+        AND "dirty"."user_id" = ${input.userId}
+        AND "dirty"."wake_deferred_until" <= ${input.dueAt}
+      ${input.tx ? Prisma.sql`FOR UPDATE OF "dirty"` : Prisma.empty}
+    `);
+    return row ?? null;
+  }
+
+  // A failed release retries later instead of holding the oldest sweep slots.
+  async postponeDeferredDirtyConnectionWake(input: {
+    connectionId: string;
+    dueAt: Date;
+    retryAt: Date;
+    userId: string;
+  }): Promise<void> {
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE "device_sync_dirty_connection"
+      SET "wake_deferred_until" = ${input.retryAt}
+      WHERE "connection_id" = ${input.connectionId}
+        AND "user_id" = ${input.userId}
+        AND "wake_deferred_until" <= ${input.dueAt}
+    `);
+  }
+
+  // Clears only the exact observed batch. Dirty revisions only advance, so a
+  // newer batch admitted after that observation keeps its own deadline.
+  async clearDeferredDirtyConnectionWake(input: {
+    connectionId: string;
+    dirtyRevision: bigint;
+    dueAt: Date;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<void> {
+    await (input.tx ?? this.prisma).$executeRaw(Prisma.sql`
+      UPDATE "device_sync_dirty_connection"
+      SET "wake_deferred_until" = NULL
+      WHERE "connection_id" = ${input.connectionId}
+        AND "user_id" = ${input.userId}
+        AND "dirty_revision" = ${input.dirtyRevision}
+        AND "wake_deferred_until" <= ${input.dueAt}
+    `);
+  }
+
   async hasPendingDirtyConnectionForUser(
     userId: string,
     tx?: HostedPrismaTransactionClient,
@@ -967,6 +1088,7 @@ export class PrismaHostedDirtyConnectionStore {
               firstDirtyAt: existing.latestDirtyAt,
               resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
               sourceProviderCountsJson: toNullablePrismaJsonValue({}),
+              wakeDeferredUntil: null,
               windowEnd: null,
               windowStart: null,
             }
@@ -2068,6 +2190,9 @@ function mergeDirtyResourceInto(
   const previous = merged[key] ?? null;
   merged[key] = withDirtyResourceWindowPayload(previous
       ? {
+        ...(previous.providerDedupeKey === undefined
+          ? {}
+          : { providerDedupeKey: previous.providerDedupeKey }),
         ...normalized,
         count: previous.count + normalized.count,
         ...mergeDirtyResourceTiming(previous, normalized),
@@ -2097,6 +2222,9 @@ function normalizeDirtyResource(
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
     payload: readDirtyResourcePayload(resource.payload),
+    ...(normalizeNullableString(resource.providerDedupeKey)
+      ? { providerDedupeKey: normalizeNullableString(resource.providerDedupeKey) ?? undefined }
+      : {}),
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
     sourceProviderSlug: truncateDirtyKey(normalizeNullableString(resource.sourceProviderSlug)),
@@ -2219,6 +2347,14 @@ function incrementCounter(
   counters[key] = (counters[key] ?? 0) + increment;
 }
 
+function readDirtyResourceProviderDedupeKeyField(
+  record: Record<string, unknown>,
+): Pick<HostedDeviceSyncDirtyResource, "providerDedupeKey"> | Record<string, never> {
+  return typeof record.providerDedupeKey === "string"
+    ? { providerDedupeKey: record.providerDedupeKey }
+    : {};
+}
+
 function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedDeviceSyncDirtyResource> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -2244,6 +2380,7 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
       providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
+      ...readDirtyResourceProviderDedupeKeyField(record),
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
       sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
@@ -2296,6 +2433,7 @@ async function readDirtyPayloadResourceJson(input: {
     providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
+    ...readDirtyResourceProviderDedupeKeyField(record),
     resource: typeof record.resource === "string" ? record.resource : null,
     resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
     sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,

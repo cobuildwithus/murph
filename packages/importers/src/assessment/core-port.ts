@@ -5,6 +5,9 @@ export interface AssessmentResponseImportPayload {
   recordedAt?: string;
   importedAt?: string;
   source?: string;
+  assessmentType?: string;
+  questionnaireSlug?: string;
+  relatedIds?: string[];
 }
 
 export interface AssessmentImportPort {

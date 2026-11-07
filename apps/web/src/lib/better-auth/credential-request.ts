@@ -1,0 +1,102 @@
+import "server-only";
+import * as z from "@murphai/contracts/zod-runtime";
+import { runWithFreshHostedDomainRootUnwrapCache, runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/domain-root-unwrap-cache";
+import { requireHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
+import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { jsonOk, readOptionalJsonObject } from "../hosted-onboarding/http";
+import { createSensitiveActionChallenge } from "../sensitive-actions/server";
+import { getPrisma } from "../prisma";
+import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
+import { assertHostedBetterAuthIssuanceEnabled } from "./config";
+import { hostedAuthRequestIp, type HostedAuthTransport } from "./admission";
+import { requireNativeMessagingSession, nativeMessagingApprovalRequired } from "./native-messaging-session";
+import { HOSTED_CREDENTIAL_CHANGE_KIND, parseHostedCredentialChange, prepareHostedCredentialChange, readHostedInitialMessagingSetupAllowed, readHostedLoginMethods } from "./credential-change";
+import { commitHostedCredentialOtp, sendHostedCredentialOtp } from "./credential-otp";
+import { hostedAuthDelivery } from "./delivery";
+import { hostedAuthRateLimitStorage } from "./rate-limit";
+
+const bodySchema = z.object({ change: z.unknown(), authorization: z.unknown().optional(), code: z.string().regex(/^\d{6}$/u).optional() }).strict();
+type Operation = "challenge" | "send" | "verify" | "remove";
+
+async function readCredentialMutation(request: Request, operation: Operation, transport: HostedAuthTransport) {
+  const parsed = bodySchema.safeParse(await readOptionalJsonObject(request, { limitBytes: 32_768 }));
+  if (!parsed.success) throw invalidRequest();
+  const body = parsed.data;
+  const change = parseHostedCredentialChange(body.change);
+  if (transport === "native") assertNativeMutation(change, operation, body.authorization);
+  if ((operation === "send" || operation === "verify") && (change.operation !== "set" || change.method === "telegram")) throw invalidRequest();
+  if (operation === "remove" && change.operation !== "remove") throw invalidRequest();
+  if (operation === "verify" && !body.code) throw invalidRequest();
+  if (operation === "remove" && body.authorization === undefined) throw invalidRequest();
+  return { ...body, change };
+}
+
+export async function readHostedLoginMethodsRequest(request: Request): Promise<Response> {
+  const session = await requireHostedAppSessionFromRequest(request);
+  if (!session.authProof) return jsonOk({ ok: true, requiresLogin: true });
+  const prisma = getPrisma();
+  const current = await readHostedLoginMethods(prisma, session.member.id);
+  const initialMessagingSetupAllowed = await readHostedInitialMessagingSetupAllowed(prisma, session, current);
+  return jsonOk({ ok: true, methods: current.methods, initialMessagingSetupAllowed });
+}
+
+export async function changeHostedLoginMethodRequest(request: Request, operation: Operation, transport: HostedAuthTransport = "browser"): Promise<Response> {
+  assertHostedBetterAuthIssuanceEnabled();
+  if (transport === "browser") assertHostedOnboardingMutationOrigin(request);
+  return runWithFreshHostedDomainRootUnwrapCache(async () => {
+    const session = transport === "native" ? await requireNativeMessagingSession(request) : await requireHostedAppSessionFromRequest(request);
+    const prisma = getPrisma();
+    const body = await readCredentialMutation(request, operation, transport);
+    const change = body.change;
+    const limits = hostedAuthRateLimitStorage(prisma);
+    const value = change.value ?? change.expectedIdentity;
+    const send = operation === "send";
+    const consume = async (key: string, max: number, window: number) => {
+      if (!(await limits.consume(key, { max, window })).allowed) throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429, message: "Too many attempts. Wait a moment and try again.", retryable: true });
+    };
+    for (const [key, max, window] of [
+      [`credential:${operation}:member:${session.member.id}`, send ? 5 : 30, 600],
+      [`${operation}:ip:${hostedAuthRequestIp(request)}`, send ? 20 : 100, 600],
+      [`${operation}:contact:${change.method}:${value}`, send ? 5 : 20, 600],
+    ] as const) await consume(key, max, window);
+    const prepared = await prepareHostedCredentialChange({ change, session, request, prisma, transport,
+      ...((operation === "verify" || operation === "remove") ? { authorization: body.authorization } : {}),
+    });
+    assertCredentialAuthorization({ transport, operation, authorization: body.authorization, initialMessagingSetup: prepared.initialMessagingSetup });
+    if (operation === "challenge") return jsonOk(await createSensitiveActionChallenge({
+      bindingHash: prepared.bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND, memberId: session.member.id, prisma,
+    }));
+    if (operation === "send") {
+      // The cooldown paces codes actually sent to a contact. A request rejected
+      // above (stale session, conflict, approval) sent nothing, so it must not
+      // make the member's immediate retry wait.
+      await consume(`send:cooldown:${change.method}:${value}`, 2, 60);
+      await sendHostedCredentialOtp({ change, prepared, request, prisma, delivery: hostedAuthDelivery(request.signal) });
+    }
+    let dispatch: Awaited<ReturnType<typeof prepared.commit>> = null;
+    if (operation === "verify") dispatch = await commitHostedCredentialOtp({ change, prepared, request, prisma, code: body.code! });
+    if (operation === "remove") dispatch = await prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
+      await prepared.lockAndRevalidate(tx);
+      return prepared.commit(tx);
+    }), { maxWait: 5_000, timeout: 10_000 });
+    if (dispatch) await signalHostedMailboxAppendRuntime({ expectedUserId: session.member.id, mailboxItemId: dispatch.mailboxItemId }).catch(() => {
+      // The existing durable mailbox owns retry; a missed latency-only wake
+      // must not turn a completed credential change into a false failure.
+    });
+    return jsonOk({ ok: true });
+  });
+}
+
+function invalidRequest() { return hostedOnboardingError({ code: "AUTH_CREDENTIAL_REQUEST_INVALID", httpStatus: 400, message: "The account change was invalid. Refresh Settings and try again." }); }
+
+function assertNativeMutation(change: ReturnType<typeof parseHostedCredentialChange>, operation: Operation, authorization: unknown) {
+  if ((operation !== "send" && operation !== "verify") || change.method !== "phone"
+    || change.operation !== "set" || change.expectedIdentity !== null || authorization !== undefined) throw invalidRequest();
+}
+
+function assertCredentialAuthorization(input: { transport: HostedAuthTransport; operation: Operation; authorization: unknown; initialMessagingSetup: boolean }) {
+  if (input.initialMessagingSetup) return;
+  if (input.transport === "native") throw nativeMessagingApprovalRequired();
+  if (input.operation === "verify" && input.authorization === undefined) throw invalidRequest();
+}

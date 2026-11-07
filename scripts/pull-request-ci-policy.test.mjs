@@ -216,7 +216,7 @@ function inspectHostSupportReleaseGraph(source) {
   assert.match(packageCoverage, /if \[\[ -z "\$package_dirs" \]\]/u);
   assert.match(
     packageCoverage,
-    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-package-shape\.ts/u,
+    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-runtime-artifacts\.ts/u,
   );
   assert.equal(
     countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' }}"),
@@ -278,7 +278,7 @@ function inspectHostSupportReleaseGraph(source) {
     webTests,
     /^      matrix: \$\{\{ fromJSON\(needs\.release-verification-plan-linux\.outputs\.hosted_web_test_matrix\) \}\}$/mu,
   );
-  assert.match(webTests, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webTests, /^        image: postgres:17$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_TEST_SHARD: \$\{\{ matrix\.shard \}\}$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_LANE: test-shard$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"$/mu);
@@ -302,7 +302,7 @@ function inspectHostSupportReleaseGraph(source) {
   assert.match(webPostgres, /^      fail-fast: false$/mu);
   assert.match(webPostgres, /^      max-parallel: 4$/mu);
   assert.match(webPostgres, /^      matrix:\n        shard: \[1, 2, 3, 4\]$/mu);
-  assert.match(webPostgres, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webPostgres, /^        image: postgres:17$/mu);
   assert.match(webPostgres, /^          POSTGRES_DB: murph_test_gate$/mu);
   assert.match(webPostgres, /--health-cmd "pg_isready -U postgres -d murph_test_gate"/u);
   assert.match(webPostgres, /^          - 5432:5432$/mu);
@@ -490,6 +490,35 @@ test("Host Support consumes one exhaustive plan and isolates app owners", async 
   inspectHostSupportReleaseGraph(host);
 });
 
+function inspectForegroundPriorityGate(source) {
+  const build = jobBlock(source, "release-build-typecheck-linux");
+  const step = build.match(
+    /      - name: Gate foreground priority across runtime transitions\n(?<body>(?:(?!      - (?:name|uses):)[\s\S])*)/u,
+  )?.groups?.body;
+  assert.ok(step, "The required build must run the foreground transition contract.");
+  assert.doesNotMatch(step, /^        (?:if|continue-on-error):/mu,
+    "The transition contract cannot be skipped or allowed to fail.");
+  assert.match(step, /^        timeout-minutes: 5$/mu);
+  assert.match(step,
+    /run: >-\n          pnpm --dir packages\/assistant-runtime test\n          test\/hosted-runtime-promoted-foreground-priority\.test\.ts\n/u);
+  assert.ok(build.indexOf("Gate foreground priority") < build.indexOf("name: Clean workspace build"),
+    "Detect priority inversions before the broad build.");
+}
+
+test("required release proof rejects a missing or softened foreground transition gate", async () => {
+  const host = await workflow("host-support.yml");
+  inspectForegroundPriorityGate(host);
+  for (const replacement of [
+    "Removed foreground transition gate",
+    "Gate foreground priority across runtime transitions\n        if: false",
+    "Gate foreground priority across runtime transitions\n        continue-on-error: true",
+  ]) {
+    assert.throws(() => inspectForegroundPriorityGate(host.replace(
+      "Gate foreground priority across runtime transitions", replacement,
+    )));
+  }
+});
+
 test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate an owner", async () => {
   const host = await workflow("host-support.yml");
   const mutations = [
@@ -501,11 +530,11 @@ test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate 
       "run: pnpm build:test-runtime:prepared",
       "run: swapped-runtime-command",
     ).replace(
-      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts",
       "run: pnpm build:test-runtime:prepared",
     ).replace(
       "run: swapped-runtime-command",
-      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts",
     ),
     host.replace(
       "needs.release-verification-plan-linux.outputs.package_matrix",
@@ -742,6 +771,13 @@ test("Release checks accepts exactly docs-proof or full-shard receipts", async (
 
 test("required Stripe boundary accepts docs-only skipped and full proof modes", async () => {
   const source = await workflow("hosted-stripe-billing.yml");
+  const live = jobBlock(source, "live-stripe-browser");
+  assert.match(live, /^    runs-on: ubuntu-24.04$/mu);
+  assert.match(live, /^        image: postgres:17$/mu);
+  assert.match(live, /^          POSTGRES_DB: murph_hosted_stripe_billing$/mu);
+  assert.match(live, /--health-cmd "pg_isready -U postgres -d murph_hosted_stripe_billing"/u);
+  assert.match(live, /^          - 5432:5432$/mu);
+  assert.doesNotMatch(live, /^\s+credentials:|docker login/mu);
   const base = {
     EVENT_NAME: "pull_request",
     HERMETIC_RESULT: "skipped",
@@ -763,6 +799,14 @@ test("required Stripe boundary accepts docs-only skipped and full proof modes", 
   assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
     ...base,
     EVENT_NAME: "push",
+    HERMETIC_RESULT: "success",
+    LIVE_RESULT: "skipped",
+    MARKDOWN_ONLY: "",
+    SCOPE_RESULT: "skipped",
+  }).status, 0);
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    EVENT_NAME: "schedule",
     HERMETIC_RESULT: "success",
     LIVE_RESULT: "success",
     MARKDOWN_ONLY: "",
@@ -810,13 +854,24 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
   }
   assert.deepEqual(
     pullRequestWorkflows.sort(),
-    [...EXPENSIVE_WORKFLOWS.keys(), "pr-evidence.yml", "pr-head-change.yml"].sort(),
+    [...EXPENSIVE_WORKFLOWS.keys(), "compiler-benchmark.yml", "pr-evidence.yml", "pr-head-change.yml"].sort(),
   );
   assert.deepEqual(triggerTypes(await workflow("pr-evidence.yml")), ["opened", "synchronize", "reopened", "edited"]);
   assert.deepEqual(triggerTypes(await workflow("pr-head-change.yml")), ["synchronize"]);
+  const benchmark = await workflow("compiler-benchmark.yml");
+  assert.deepEqual(triggerTypes(benchmark), READY_ONLY_TYPES);
+  assert.match(benchmark, /^  workflow_dispatch:$/mu);
+  assert.match(benchmark, /^permissions:\n  contents: read$/mu);
+  assert.doesNotMatch(benchmark, /pull_request_target|secrets\.|^\s+environment:/mu);
+  // This diagnostic is not required release proof. Drafts can skip it without
+  // changing any required owner's fail-closed draft admission above.
+  assert.match(
+    jobBlock(benchmark, "paired"),
+    /^    if: \$\{\{ github\.event_name != 'pull_request' \|\| !github\.event\.pull_request\.draft \}\}$/mu,
+  );
 });
 
-test("complexity evidence and exact-candidate regression guards remain required", async () => {
+test("exact-candidate complexity regression guard remains required", async () => {
   const host = await workflow("host-support.yml");
   const build = jobBlock(host, "release-build-typecheck-linux");
   assert.match(
@@ -827,25 +882,6 @@ test("complexity evidence and exact-candidate regression guards remain required"
     build,
     /- name: Guard cyclomatic complexity regressions\n        if: \$\{\{ github\.event_name == 'pull_request' \}\}\n        env:\n          MURPH_COMPLEXITY_BASE_SHA: \$\{\{ github\.sha \}\}\^1\n          MURPH_COMPLEXITY_HEAD_SHA: \$\{\{ github\.sha \}\}\n        run: pnpm complexity:diff/u,
   );
-
-  const evidence = await workflow("pr-evidence.yml");
-  assert.match(
-    evidence,
-    /node --test[\s\S]*scripts\/check-pr-complexity-summary\.test\.mjs/u,
-  );
-  assert.match(
-    evidence,
-    /- name: Require complexity impact summary\n        run: node scripts\/check-pr-complexity-summary\.mjs\n        env:\n          MURPH_GITHUB_TOKEN: \$\{\{ github\.token \}\}\n          MURPH_PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}\n          MURPH_PR_BODY: \$\{\{ github\.event\.pull_request\.body \}\}\n          MURPH_PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u,
-  );
-
-  const template = await readFile(
-    path.join(REPO_ROOT, ".github", "pull_request_template.md"),
-    "utf8",
-  );
-  assert.match(template, /^## Complexity impact$/mu);
-  for (const label of ["Guard", "Hotspots", "Agent judgment"]) {
-    assert.match(template, new RegExp(`^- ${escapeRegExp(label)}:`, "mu"));
-  }
 });
 
 test("synchronize observer is read-only and never checks out candidate code", async () => {
@@ -1047,42 +1083,6 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
   }
 });
 
-test("operator docs preserve the bounded Host Support release graph", async () => {
-  const [runtimeOperations, testingMap] = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of [runtimeOperations, testingMap]) {
-    assert.match(document, /scripts\/release-verification-plan\.mjs/u);
-    assert.match(document, /six(?:-shard package| package)/u);
-    assert.match(document, /four(?:-shard Web-test| release-plan-owned Web| Web test)/u);
-    assert.match(document, /package-boundary[\s\S]{0,160}(?:exactly once|sole owner)/u);
-    assert.match(document, /organization-level/u);
-    assert.match(document, /Release checks \(ubuntu\)/u);
-  }
-  assert.match(testingMap, /separate runners[\s\S]{0,160}Frog #2656/u);
-  assert.match(runtimeOperations, /Web and Cloudflare never execute in the same job or runner/u);
-});
-
-test("operator docs preserve the ready-only exact-head lifecycle and native canary cadence", async () => {
-  const documents = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of documents) {
-    assert.match(document, /draft-first|start as drafts/u);
-    assert.match(document, /ready_for_review|ready for review/u);
-    assert.match(document, /synchronize[\s\S]{0,240}draft/u);
-    assert.match(document, /exact head|exact-head/u);
-    assert.match(document, /production canar/u);
-    assert.match(document, /six-hour/u);
-    assert.doesNotMatch(
-      document,
-      /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,
-    );
-  }
-});
-
 function workflowJobNames(source) {
   const jobsStart = source.indexOf("\njobs:\n");
   assert.ok(jobsStart >= 0, "workflow jobs block must exist");
@@ -1225,3 +1225,18 @@ function listedPullRequest({
     state: "open",
   };
 }
+
+test("required main proof survives later merges while PR proof still supersedes", async () => {
+  for (const name of REQUIRED_OWNER_JOBS.keys()) {
+    const source = await workflow(name);
+    assert.match(source, /group: .*github\.event\.pull_request\.number \|\| github\.sha/u,
+      `${name} must bind main proof to the candidate SHA`);
+  }
+  const stripe = await workflow("hosted-stripe-billing.yml");
+  assert.match(jobBlock(stripe, "live-stripe-browser"), /queue: max/u,
+    "shared sandbox serialization must not discard pending candidate proof");
+  const admission = await workflow("temporal-web-deployment-admission.yml");
+  assert.match(admission, /group: temporal-web-deployment-admission/u);
+  assert.match(admission, /cancel-in-progress: false/u);
+  assert.doesNotMatch(admission, /queue: max/u, "retain only the latest pending candidate");
+});

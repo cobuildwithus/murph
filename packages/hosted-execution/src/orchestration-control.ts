@@ -1,9 +1,10 @@
 import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
-  type HostedMailboxKind,
   type HostedMailboxLane,
   type HostedWorkspaceInvocationProcessingMode,
-} from "./runtime-control.ts";
+} from "./runtime-control-values.ts";
+import type { HostedMailboxKind } from "./runtime-control.ts";
+export { isHostedMailboxLane } from "./runtime-control-values.ts";
 
 import type {
   HostedRuntimeReconciliationBlockedReason,
@@ -78,16 +79,27 @@ export const HOSTED_RUNTIME_PROCESSING_MODES =
 
 export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
-export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
-  "assistant.notification.requested",
-  "device-sync.wake",
-  "environment-interview.completed",
-  "health.daily-metric.reported",
-  "journal.group-fact.recorded",
-  "member.channels.updated",
-  "runtime.browser-vault-refresh-requested",
-  "runtime.maintenance-requested",
-] as const satisfies readonly HostedMailboxKind[];
+// One policy owns both admission kinds and derived runner route actions.
+const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_POLICY = [
+  ["assistant.notification.requested", "always"],
+  ["clinical-records.sync-requested", "assistant_blocked"],
+  ["device-sync.wake", "always"],
+  ["health.daily-metric.reported", "always"],
+  ["journal.group-fact.recorded", "always"],
+  ["member.action.requested", "assistant_blocked"],
+  ["member.channels.updated", "always"],
+  ["member.preferences.updated", "assistant_blocked"],
+  ["runtime.browser-vault-refresh-requested", "always"],
+  ["runtime.maintenance-requested", "always"],
+] as const satisfies readonly (readonly [HostedMailboxKind, "always" | "assistant_blocked"])[];
+
+export function getHostedSystemMailboxModelFreeKinds(assistantExecutionBlocked = false) {
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_POLICY
+    .filter(([, admission]) => admission === "always" || assistantExecutionBlocked)
+    .map(([kind]) => kind);
+}
+
+export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = getHostedSystemMailboxModelFreeKinds();
 
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
   [
@@ -110,6 +122,7 @@ export function isHostedSystemMailboxModelFreeNotification(input: {
 }
 
 export function classifyHostedSystemMailboxExecutionClass(input: {
+  assistantExecutionBlocked?: boolean;
   dedupeKey: string | null | undefined;
   kind: string;
 }): HostedRuntimeSystemMailboxFrontierClass {
@@ -122,7 +135,7 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
     return "model_free";
   }
 
-  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.some((kind) =>
+  return getHostedSystemMailboxModelFreeKinds(input.assistantExecutionBlocked).some((kind) =>
     kind === input.kind && kind !== "assistant.notification.requested"
   )
     ? "model_free"
@@ -130,8 +143,12 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
+  admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
   conversationWorkPending?: true;
+  mailboxWakeHighWater?: import("./runtime-control.ts").HostedMailboxWakeHighWater;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

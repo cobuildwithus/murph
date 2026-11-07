@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-26",
+  "order": 110,
+  "item": {
+    "id": "clinical-observations-missing-units",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep clinical observations with missing units",
+    "summary": "Clinical imports can preserve a recorded value even when the source leaves its unit unspecified.",
+    "details": "Murph keeps it as an observation without guessing a unit or turning it into a standardized measurement.",
+    "relevanceTags": [
+      "health-records"
+    ],
+    "sourcePullRequests": []
+  }
+}

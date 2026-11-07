@@ -1,7 +1,8 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -18,6 +19,7 @@ import {
   appendKnowledgePageSection,
   assertKnowledgeSourcePathAllowed,
   getKnowledgePage,
+  getKnowledgePageIfExists,
   lintKnowledgePages,
   listKnowledgePages,
   requireUniqueKnowledgePageBySlug,
@@ -445,6 +447,118 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('## [2026-06-17T13:30:00.000Z] append-section | Weekly health insights')
     expect(savedLog).toContain('## [2026-06-24T13:30:00.000Z] append-section | Weekly health insights')
   })
+
+  it.each([
+    { suffix: '.gz', compress: gzipSync },
+    { suffix: '.br', compress: brotliCompressSync },
+  ])('keeps knowledge sources usable after $suffix ledger compression', async ({ suffix, compress }) => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-compressed-')
+    const sourcePath = 'ledger/events/2024/2024-01.jsonl'
+    const sourceText = '{"synthetic":true}\n'
+    await writeVaultFile(vaultRoot, sourcePath, sourceText)
+    await writeVaultFile(vaultRoot, 'journal/new.md', 'New evidence.\n')
+    const dependencies = {
+      saveText: async ({ relativePath, content }: { relativePath: string; content: string }) => {
+        await writeVaultFile(vaultRoot, relativePath, content)
+      },
+    }
+    const created = await appendKnowledgePageSection({
+      vault: vaultRoot,
+      slug: 'research-history',
+      title: 'Research history',
+      heading: 'First finding',
+      body: 'Original finding.',
+      sourcePaths: [sourcePath],
+    }, dependencies)
+
+    await writeFile(path.join(vaultRoot, `${sourcePath}${suffix}`), compress(sourceText))
+    await unlink(path.join(vaultRoot, sourcePath))
+
+    expect((await lintKnowledgePages({ vault: vaultRoot })).problems).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'missing_source_path' })]),
+    )
+    const appended = await appendKnowledgePageSection({
+      vault: vaultRoot,
+      slug: created.page.slug,
+      heading: 'Second finding',
+      body: 'New finding.',
+      sourcePaths: ['journal/new.md'],
+    }, dependencies)
+    expect(appended.page.sourcePaths).toEqual([sourcePath, 'journal/new.md'])
+    const shown = await getKnowledgePage({ vault: vaultRoot, slug: created.page.slug })
+    expect(shown.page.body).toContain('Original finding.')
+    expect(shown.page.body).toContain('New finding.')
+
+    const updated = await upsertKnowledgePage({
+      vault: vaultRoot,
+      slug: created.page.slug,
+      body: 'Revised findings.',
+      sourcePaths: ['journal/new.md'],
+    }, dependencies)
+    expect(updated.page.sourcePaths).toEqual([sourcePath, 'journal/new.md'])
+    const newPage = await upsertKnowledgePage({
+      vault: vaultRoot,
+      slug: 'new-research',
+      body: 'Another finding from the archived evidence.',
+      sourcePaths: [sourcePath],
+    }, dependencies)
+    expect(newPage.page.sourcePaths).toEqual([sourcePath])
+    await expect(readFile(path.join(vaultRoot, sourcePath))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(path.join(vaultRoot, `${sourcePath}${suffix}`))).toEqual(compress(sourceText))
+  })
+
+  it.each(['missing', 'directory', 'symlink', 'ambiguous', 'non-ledger'] as const)(
+    'rejects a %s source without changing the knowledge page',
+    async (invalidSource) => {
+      const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-invalid-source-')
+      const sourcePath = invalidSource === 'non-ledger'
+        ? 'journal/notes.jsonl'
+        : 'ledger/events/2024/2024-01.jsonl'
+      await writeVaultFile(vaultRoot, sourcePath, '{"synthetic":true}\n')
+      const dependencies = {
+        saveText: async ({ relativePath, content }: { relativePath: string; content: string }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      }
+      const created = await upsertKnowledgePage({
+        vault: vaultRoot,
+        slug: 'research-history',
+        body: 'Original finding.',
+        sourcePaths: [sourcePath],
+      }, dependencies)
+      const before = await readFile(path.join(vaultRoot, created.page.pagePath), 'utf8')
+      await unlink(path.join(vaultRoot, sourcePath))
+      const archivedPath = path.join(vaultRoot, `${sourcePath}.br`)
+      if (invalidSource === 'directory') {
+        await mkdir(archivedPath)
+      } else if (invalidSource === 'symlink') {
+        const outside = await createTempDirectory('murph-knowledge-outside-')
+        await writeFile(path.join(outside, 'source.br'), brotliCompressSync('{"synthetic":true}\n'))
+        await symlink(path.join(outside, 'source.br'), archivedPath)
+      } else if (invalidSource === 'ambiguous') {
+        await writeFile(archivedPath, brotliCompressSync('{"synthetic":true}\n'))
+        await writeVaultFile(vaultRoot, sourcePath, '{"synthetic":true}\n')
+      } else if (invalidSource === 'non-ledger') {
+        await writeFile(archivedPath, brotliCompressSync('{"synthetic":true}\n'))
+      }
+
+      expect((await lintKnowledgePages({ vault: vaultRoot })).problems).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'missing_source_path' })]),
+      )
+      await expect(appendKnowledgePageSection({
+        vault: vaultRoot,
+        slug: created.page.slug,
+        heading: 'Blocked finding',
+        body: 'Must not persist.',
+      }, dependencies)).rejects.toMatchObject({ code: 'knowledge_source_unreadable' })
+      await expect(upsertKnowledgePage({
+        vault: vaultRoot,
+        slug: created.page.slug,
+        body: 'Must not persist.',
+      }, dependencies)).rejects.toMatchObject({ code: 'knowledge_source_unreadable' })
+      expect(await readFile(path.join(vaultRoot, created.page.pagePath), 'utf8')).toBe(before)
+    },
+  )
 
   it('does not overwrite an existing slug path that cannot be loaded for append-section', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-append-unloadable-')
@@ -932,6 +1046,103 @@ describe('knowledge service helpers', () => {
     })
   })
 
+  it('returns an absent optional page only from a fully valid graph without writing', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-optional-read-')
+    await writeKnowledgePage(vaultRoot, 'present-ledger', syntheticLedgerPage('present-ledger'))
+    await writeKnowledgePage(vaultRoot, 'duplicate-ledger', syntheticLedgerPage('duplicate-ledger'))
+    await writeKnowledgePageAt(vaultRoot, 'nested/duplicate-ledger', syntheticLedgerPage('duplicate-ledger'))
+    await writeKnowledgePage(vaultRoot, 'group-room-model', syntheticLedgerPage('group-room-model'))
+    const before = await readFile(path.join(vaultRoot, DERIVED_KNOWLEDGE_PAGES_ROOT, 'present-ledger.md'), 'utf8')
+
+    await expect(getKnowledgePageIfExists({ vault: vaultRoot, slug: 'absent-ledger' })).resolves.toEqual({
+      degradation: null,
+      page: null,
+      slug: 'absent-ledger',
+      vault: vaultRoot,
+    })
+    await expect(getKnowledgePage({ vault: vaultRoot, slug: 'absent-ledger' })).rejects.toMatchObject({
+      code: 'knowledge_page_not_found',
+      context: { retryable: false, stage: 'read', hint: expect.stringContaining('Do not retry the same missing slug.') },
+    })
+
+    const optionalPresent = await getKnowledgePageIfExists({ vault: vaultRoot, slug: 'present-ledger' })
+    expect(optionalPresent).toEqual(await getKnowledgePage({ vault: vaultRoot, slug: 'present-ledger' }))
+    expect(optionalPresent).toMatchObject({ degradation: null, page: { markdown: before, slug: 'present-ledger' } })
+
+    await expect(getKnowledgePageIfExists({ vault: vaultRoot, slug: 'duplicate-ledger' }))
+      .rejects.toMatchObject({ code: 'knowledge_duplicate_slug' })
+    await expect(getKnowledgePageIfExists({ vault: vaultRoot, slug: 'group-room-model' }))
+      .rejects.toMatchObject({ code: 'knowledge_page_reserved' })
+    await expect(getKnowledgePageIfExists(
+      { vault: vaultRoot, slug: 'present-ledger' },
+      { readTextFile: async () => { throw new VaultCliError('synthetic_unreadable', 'Synthetic unreadable page.') } },
+    )).rejects.toMatchObject({ code: 'synthetic_unreadable' })
+    // A page that changes identity between graph and exact reads is not proven absent.
+    await expect(getKnowledgePageIfExists(
+      { vault: vaultRoot, slug: 'present-ledger' },
+      { readTextFile: async () => syntheticLedgerPage('renamed-ledger') },
+    )).rejects.toMatchObject({ code: 'knowledge_page_not_found' })
+
+    await expectNoDerivedKnowledgeWrites(vaultRoot, 'absent-ledger')
+  })
+
+  it('does not report optional absence while an invalid page could declare the slug', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-optional-uncertain-')
+    await writeKnowledgePage(vaultRoot, 'present-ledger', syntheticLedgerPage('present-ledger'))
+    // The basename differs from the declared slug, so only a full parse could match it.
+    await writeKnowledgePage(
+      vaultRoot,
+      'legacy-name',
+      ['---', 'slug: synthetic-ledger', 'invalid-frontmatter-line', '---', '# Synthetic ledger', ''].join('\n'),
+    )
+    const degradation = { issueCodes: ['parse_frontmatter'], issueCount: 1, recoveryAction: 'knowledge lint' }
+    const integrity = {
+      hint: 'Run `knowledge lint` for bounded repair details, then retry `knowledge show`.',
+      retryable: false,
+      stage: 'integrity',
+    }
+
+    for (const slug of ['synthetic-ledger', 'unrelated-ledger']) {
+      await expect(getKnowledgePageIfExists({ vault: vaultRoot, slug })).rejects.toMatchObject({
+        code: 'knowledge_page_invalid',
+        context: integrity,
+        message: `No valid derived knowledge page has slug "${slug}", but an invalid page could still declare it, so its absence is unconfirmed.`,
+      })
+      // Strict reads keep their existing not-found contract.
+      await expect(getKnowledgePage({ vault: vaultRoot, slug })).rejects.toMatchObject({
+        code: 'knowledge_page_not_found',
+        context: { retryable: false, stage: 'read' },
+      })
+    }
+    await expect(getKnowledgePageIfExists({ vault: vaultRoot, slug: 'legacy-name' })).rejects.toMatchObject({
+      code: 'knowledge_page_invalid',
+      context: integrity,
+      message: 'The derived knowledge page for slug "legacy-name" exists but is invalid.',
+    })
+
+    // A positively found target keeps the existing degraded-read behavior.
+    const present = await getKnowledgePageIfExists({ vault: vaultRoot, slug: 'present-ledger' })
+    expect(present).toEqual(await getKnowledgePage({ vault: vaultRoot, slug: 'present-ledger' }))
+    expect(present).toMatchObject({ degradation, page: { slug: 'present-ledger' } })
+    await expectNoDerivedKnowledgeWrites(vaultRoot, 'synthetic-ledger')
+  })
+
+  it('keeps malformed reserved room state outside optional absence confirmation', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-optional-reserved-')
+    await writeKnowledgePage(
+      vaultRoot,
+      'group-room-model',
+      ['---', 'slug: group-room-model', 'invalid-frontmatter-line', '---', ''].join('\n'),
+    )
+    await expect(getKnowledgePageIfExists({ vault: vaultRoot, slug: 'absent-ledger' })).resolves.toEqual({
+      degradation: null,
+      page: null,
+      slug: 'absent-ledger',
+      vault: vaultRoot,
+    })
+    await expectNoDerivedKnowledgeWrites(vaultRoot, 'absent-ledger')
+  })
+
   it('keeps malformed reserved room state outside generic read degradation', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-reserved-degradation-')
     await writeKnowledgePage(
@@ -1109,6 +1320,32 @@ function createDeferred<T>() {
     promise,
     reject,
     resolve,
+  }
+}
+
+function syntheticLedgerPage(slug: string): string {
+  return [
+    '---',
+    'title: Synthetic ledger',
+    `slug: ${slug}`,
+    'pageType: ledger',
+    'status: active',
+    '---',
+    '',
+    '# Synthetic ledger',
+    '',
+    '{"version":1}',
+    '',
+  ].join('\n')
+}
+
+async function expectNoDerivedKnowledgeWrites(vaultRoot: string, absentSlug: string): Promise<void> {
+  for (const derivedPath of [
+    path.posix.join(DERIVED_KNOWLEDGE_PAGES_ROOT, `${absentSlug}.md`),
+    DERIVED_KNOWLEDGE_LOG_PATH,
+    'derived/knowledge/index.md',
+  ]) {
+    await expect(readFile(path.join(vaultRoot, derivedPath), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   }
 }
 

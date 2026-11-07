@@ -48,43 +48,6 @@ export const ID_PREFIXES = CONTRACT_ID_PREFIXES;
 
 export const VAULT_LAYOUT = CONTRACT_VAULT_LAYOUT;
 
-export const VAULT_PATHS = Object.freeze({
-  allergiesRoot: VAULT_LAYOUT.allergiesDirectory,
-  assessmentLedgerRoot: VAULT_LAYOUT.assessmentLedgerDirectory,
-  automationsRoot: VAULT_LAYOUT.automationsDirectory,
-  scheduledLogsRoot: VAULT_LAYOUT.scheduledLogsDirectory,
-  conditionsRoot: VAULT_LAYOUT.conditionsDirectory,
-  coreDocument: VAULT_LAYOUT.coreDocument,
-  eventsRoot: VAULT_LAYOUT.eventLedgerDirectory,
-  metricSamplesRoot: VAULT_LAYOUT.metricSampleLedgerDirectory,
-  experimentsRoot: VAULT_LAYOUT.experimentsDirectory,
-  exportsRoot: VAULT_LAYOUT.exportsDirectory,
-  familyRoot: VAULT_LAYOUT.familyDirectory,
-  foodsRoot: VAULT_LAYOUT.foodsDirectory,
-  geneticsRoot: VAULT_LAYOUT.geneticsDirectory,
-  goalsRoot: VAULT_LAYOUT.goalsDirectory,
-  inboxCaptureLedgerRoot: VAULT_LAYOUT.inboxCaptureLedgerDirectory,
-  inboxAttachmentRetentionLedgerRoot: VAULT_LAYOUT.inboxAttachmentRetentionLedgerDirectory,
-  journalRoot: VAULT_LAYOUT.journalDirectory,
-  memoryDocument: VAULT_LAYOUT.memoryDocument,
-  protocolsRoot: VAULT_LAYOUT.protocolsDirectory,
-  providersRoot: VAULT_LAYOUT.providersDirectory,
-  rawAssessmentsRoot: VAULT_LAYOUT.rawAssessmentsDirectory,
-  rawCapturesRoot: VAULT_LAYOUT.rawCapturesDirectory,
-  rawDocumentsRoot: VAULT_LAYOUT.rawDocumentsDirectory,
-  rawInboxRoot: VAULT_LAYOUT.rawInboxDirectory,
-  rawIntegrationsRoot: VAULT_LAYOUT.rawIntegrationsDirectory,
-  rawMeasurementsRoot: VAULT_LAYOUT.rawMeasurementsDirectory,
-  rawMealsRoot: VAULT_LAYOUT.rawMealsDirectory,
-  rawRoot: VAULT_LAYOUT.rawDirectory,
-  rawSamplesRoot: VAULT_LAYOUT.rawSamplesDirectory,
-  rawWorkoutsRoot: VAULT_LAYOUT.rawWorkoutsDirectory,
-  recipesRoot: VAULT_LAYOUT.recipesDirectory,
-  samplesRoot: VAULT_LAYOUT.sampleLedgerDirectory,
-  workoutFormatsRoot: VAULT_LAYOUT.workoutFormatsDirectory,
-  auditRoot: VAULT_LAYOUT.auditDirectory,
-});
-
 export const VAULT_SHARDS = CONTRACT_VAULT_SHARDS;
 
 export const REQUIRED_DIRECTORIES = CONTRACT_REQUIRED_VAULT_DIRECTORIES;

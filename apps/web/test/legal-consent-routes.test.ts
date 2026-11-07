@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
-  readHostedRuntimeAiAccessDecision: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   reconcileHostedHealthDataRuntimeConsent: vi.fn(),
   recordHostedLaunchConsentDecline: vi.fn(),
@@ -75,7 +75,7 @@ vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
-  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -137,7 +137,7 @@ describe("legal consent routes", () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue(memberAuth);
     mocks.readHostedConsentStatus.mockResolvedValue(currentStatus);
     mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.reconcileHostedHealthDataRuntimeConsent.mockResolvedValue({
       consentState: "revoked",
       processingAllowed: false,
@@ -181,8 +181,8 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-07-23",
-            "terms-of-service": "2026-07-23",
+            "privacy-policy": "2026-10-26",
+            "terms-of-service": "2026-10-26",
           },
           scope: "launch.legal",
           source: "  hosted   onboarding  ",
@@ -200,8 +200,8 @@ describe("legal consent routes", () => {
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
         "health-ai-safety-disclosure": "2026-07-23",
-        "privacy-policy": "2026-07-23",
-        "terms-of-service": "2026-07-23",
+        "privacy-policy": "2026-10-26",
+        "terms-of-service": "2026-10-26",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -229,8 +229,8 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-07-23",
-            "terms-of-service": "2026-07-23",
+            "privacy-policy": "2026-10-26",
+            "terms-of-service": "2026-10-26",
           },
           inviteCode: "invite_123",
           scope: "launch.legal",
@@ -583,8 +583,8 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-07-23",
-            "terms-of-service": "2026-07-23",
+            "privacy-policy": "2026-10-26",
+            "terms-of-service": "2026-10-26",
           },
           scope: "launch.legal",
         }),
@@ -613,8 +613,8 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-01-01",
-            "privacy-policy": "2026-07-23",
-            "terms-of-service": "2026-07-23",
+            "privacy-policy": "2026-10-26",
+            "terms-of-service": "2026-10-26",
           },
           scope: "launch.legal",
         }),
@@ -649,7 +649,7 @@ describe("legal consent routes", () => {
           acceptedDocumentVersions: {
             "consumer-health-data-notice": "2026-07-23",
             "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-07-23",
+            "privacy-policy": "2026-10-26",
           },
           scope: "feature.health-ai",
           source: "settings",
@@ -667,7 +667,7 @@ describe("legal consent routes", () => {
       acceptedDocumentVersions: {
         "consumer-health-data-notice": "2026-07-23",
         "health-ai-safety-disclosure": "2026-07-23",
-        "privacy-policy": "2026-07-23",
+        "privacy-policy": "2026-10-26",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,

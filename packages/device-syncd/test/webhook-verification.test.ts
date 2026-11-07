@@ -2,21 +2,19 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
+import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { resolveDeviceSyncWebhookPreflightResponse } from "../src/webhook-verification.ts";
 
 test("device sync webhook preflight helper returns null when the request is not a provider challenge", async () => {
   const registry = createDeviceSyncRegistry([
-    createOuraDeviceSyncProvider({
-      clientId: "oura-client-id",
-      clientSecret: "oura-client-secret",
-      webhookVerificationToken: "verify-token",
+    createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test", clientUserIdSecret: "synthetic-junction-secret", environment: "sandbox", region: "us",
     }),
   ]);
 
   const result = await resolveDeviceSyncWebhookPreflightResponse({
-    provider: "oura",
+    provider: "junction",
     registry,
     method: "GET",
     url: new URL("https://sync.example.test/device-sync/webhooks/oura"),
@@ -41,10 +39,8 @@ test("device sync webhook preflight helper rejects unknown providers and provide
     /not registered/u,
   );
 
-  const providerWithoutWebhook = createOuraDeviceSyncProvider({
-    clientId: "oura-client-id",
-    clientSecret: "oura-client-secret",
-    webhookVerificationToken: "verify-token",
+  const providerWithoutWebhook = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test", clientUserIdSecret: "synthetic-junction-secret", environment: "sandbox", region: "us",
   });
   providerWithoutWebhook.descriptor = {
     ...providerWithoutWebhook.descriptor,
@@ -54,7 +50,7 @@ test("device sync webhook preflight helper rejects unknown providers and provide
   await assert.rejects(
     () =>
       resolveDeviceSyncWebhookPreflightResponse({
-        provider: "oura",
+        provider: "junction",
         registry: createDeviceSyncRegistry([providerWithoutWebhook]),
         method: "GET",
         url: new URL("https://sync.example.test/device-sync/webhooks/oura"),
@@ -65,64 +61,15 @@ test("device sync webhook preflight helper rejects unknown providers and provide
   );
 });
 
-test("device sync webhook preflight helper returns provider challenges and surfaces provider verification errors", async () => {
-  const registry = createDeviceSyncRegistry([
-    createOuraDeviceSyncProvider({
-      clientId: "oura-client-id",
-      clientSecret: "oura-client-secret",
-      webhookVerificationToken: "verify-token",
-    }),
-  ]);
-
-  const challenge = await resolveDeviceSyncWebhookPreflightResponse({
-    provider: "oura",
-    registry,
-    method: "GET",
-    url: new URL(
-      "https://sync.example.test/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
-    ),
-    headers: new Headers(),
-    rawBody: Buffer.alloc(0),
-  });
-
-  assert.deepEqual(challenge, {
-    status: 200,
-    body: {
-      challenge: "random-challenge",
-    },
-  });
-  await assert.rejects(
-    () =>
-      resolveDeviceSyncWebhookPreflightResponse({
-        provider: "oura",
-        registry: createDeviceSyncRegistry([
-          createOuraDeviceSyncProvider({
-            clientId: "oura-client-id",
-            clientSecret: "oura-client-secret",
-          }),
-        ]),
-        method: "GET",
-        url: new URL(
-          "https://sync.example.test/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
-        ),
-        headers: new Headers(),
-        rawBody: Buffer.alloc(0),
-      }),
-    /verification requires OURA_WEBHOOK_VERIFICATION_TOKEN/u,
-  );
-});
-
 test("device sync webhook preflight helper passes generic request context through to the provider-owned handler", async () => {
-  const provider = createOuraDeviceSyncProvider({
-    clientId: "oura-client-id",
-    clientSecret: "oura-client-secret",
-    webhookVerificationToken: "verify-token",
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test", clientUserIdSecret: "synthetic-junction-secret", environment: "sandbox", region: "us",
   });
   let seenMethod: string | null = null;
   let seenPathname: string | null = null;
   let seenHeader: string | null = null;
   let seenBody = "";
-  provider.webhookAdmin!.handleWebhookPreflight = async ({ method, url, headers, rawBody }) => {
+  provider.webhookAdmin = { handleWebhookPreflight: async ({ method, url, headers, rawBody }) => {
     seenMethod = method;
     seenPathname = url.pathname;
     seenHeader = headers.get("x-provider-preflight");
@@ -137,10 +84,10 @@ test("device sync webhook preflight helper passes generic request context throug
         "x-preflight-provider": "oura",
       },
     };
-  };
+  } };
 
   const result = await resolveDeviceSyncWebhookPreflightResponse({
-    provider: "oura",
+    provider: "junction",
     registry: createDeviceSyncRegistry([provider]),
     method: "POST",
     url: new URL("https://sync.example.test/device-sync/webhooks/oura"),

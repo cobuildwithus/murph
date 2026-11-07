@@ -237,14 +237,6 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     echo "Error: PR head changed while ReviewGPT context was being packaged; rerun the same round." >&2
     exit 1
   fi
-  review_gpt_recorded_first_head="$(
-    printf '%s\n' "$review_gpt_pr_body" \
-      | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'
-  )"
-  review_gpt_require_full_sha \
-    "PR body ReviewGPT first-reviewed head" \
-    "$review_gpt_recorded_first_head"
-
   if [[ "$review_gpt_round_number" == "1" ]]; then
     if [[ -n "$review_gpt_full_review_reason" ]]; then
       echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
@@ -264,11 +256,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       echo "Error: round 1 first-reviewed head must equal the current PR head." >&2
       exit 1
     fi
-    if [[ "$review_gpt_recorded_first_head" != "$review_gpt_head_oid" ]]; then
-      echo "Error: round 1 PR body first-reviewed head must equal the current PR head." >&2
-      exit 1
-    fi
-    review_gpt_first_reviewed_head="$review_gpt_recorded_first_head"
+    review_gpt_first_reviewed_head="$review_gpt_head_oid"
     review_gpt_context_anchor_head="$review_gpt_head_oid"
   else
     if [[ -z "$review_gpt_first_reviewed_head" ]] \
@@ -279,10 +267,6 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_require_full_sha "first-reviewed head" "$review_gpt_first_reviewed_head"
     if [[ "$review_gpt_first_reviewed_head" == "$review_gpt_head_oid" ]]; then
       echo "Error: later ReviewGPT rounds must preserve the original first-reviewed head." >&2
-      exit 1
-    fi
-    if [[ "$review_gpt_first_reviewed_head" != "$review_gpt_recorded_first_head" ]]; then
-      echo "Error: REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline." >&2
       exit 1
     fi
     if [[ "$review_gpt_previous_reviewed_head" == "$review_gpt_head_oid" ]]; then
@@ -417,6 +401,22 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_add_rendered_evidence
   fi
 
+  if grep -Eq '^patches/@cobuild__(review-gpt|repo-tools)@[^/]+\.patch$' \
+    "$review_gpt_pr_context_dir/changed-files.txt"; then
+    node scripts/review-gpt-dependency-context.mjs \
+      "$review_gpt_head_oid" \
+      "$review_gpt_pr_context_dir/changed-files.txt" \
+      "$review_gpt_pr_context_dir" \
+      "$review_gpt_base_oid"
+  fi
+
+  if grep -Fxq 'patches/codex-public-live.patch' "$review_gpt_pr_context_dir/changed-files.txt"; then
+    pnpm exec tsx scripts/review-gpt-native-context.ts \
+      "$review_gpt_head_oid" \
+      "$review_gpt_pr_context_dir/changed-files.txt" \
+      "$review_gpt_pr_context_dir"
+  fi
+
   if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
     review_gpt_correction_paths=""
     while IFS= read -r review_gpt_correction_path; do
@@ -458,6 +458,7 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]] \
 fi
 if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
   repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+    ".agents/skills" \
     "agent-docs/product-specs" \
     "config" \
     "packages" \
@@ -470,7 +471,19 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
 fi
 package_audit_context_bin="$(cobuild_repo_tool_bin cobuild-package-audit-context)"
 if [[ -z "$review_gpt_pr_ref" ]]; then
-  exec "$package_audit_context_bin" "$@"
+  mkdir -p "$ROOT_DIR/audit-packages"
+  review_gpt_custom_dir="$(mktemp -d "$ROOT_DIR/audit-packages/review-gpt-custom.XXXXXX")"
+  review_gpt_custom_status=0
+  "$package_audit_context_bin" "$@" 2> "$review_gpt_custom_dir/package-errors.txt" \
+    || review_gpt_custom_status=$?
+  # Custom authoring uses the same guarded snapshot and can exceed the same
+  # child-output buffer as PR review. Preserve diagnostics and the exit status.
+  awk '
+    /^Warning: excluding path from audit package: / { excluded++; next }
+    { print }
+    END { if (excluded) printf "Warning: excluded %d paths from audit package.\n", excluded }
+  ' "$review_gpt_custom_dir/package-errors.txt" >&2
+  exit "$review_gpt_custom_status"
 fi
 
 if [[ "$review_gpt_has_explicit_output_dir" != "1" ]]; then
@@ -480,10 +493,21 @@ if [[ "$review_gpt_has_explicit_output_dir" != "1" ]]; then
 fi
 
 review_gpt_package_stdout="$review_gpt_invocation_dir/package-output.txt"
-if ! "$package_audit_context_bin" "${review_gpt_package_args[@]}" \
-  > "$review_gpt_package_stdout"; then
+review_gpt_package_stderr="$review_gpt_invocation_dir/package-errors.txt"
+review_gpt_package_status=0
+"$package_audit_context_bin" "${review_gpt_package_args[@]}" \
+  > "$review_gpt_package_stdout" 2> "$review_gpt_package_stderr" \
+  || review_gpt_package_status=$?
+# Thousands of expected exclusions can overflow ReviewGPT's child-output buffer.
+# Capture diagnostics in the private invocation and preserve other messages verbatim.
+awk '
+  /^Warning: excluding path from audit package: / { excluded++; next }
+  { print }
+  END { if (excluded) printf "Warning: excluded %d paths from audit package.\n", excluded }
+' "$review_gpt_package_stderr" >&2
+if [[ "$review_gpt_package_status" != "0" ]]; then
   cat "$review_gpt_package_stdout"
-  exit 1
+  exit "$review_gpt_package_status"
 fi
 review_gpt_zip_path="$(
   sed -nE 's/^ZIP: (.*) \([^)]*\)$/\1/p' "$review_gpt_package_stdout" | tail -n 1

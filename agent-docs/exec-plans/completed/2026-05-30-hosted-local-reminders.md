@@ -38,7 +38,7 @@ Updated: 2026-06-01
   - Broad scheduler rewrites or new queue/worker systems.
   - iMessage/computer-use proof while local SMS/iMessage delivery is not
     available.
-  - Unrelated device-sync dirty-ack, retention, or Murph Age work.
+  - Unrelated device-sync dirty-ack, retention work.
 
 ## Constraints
 

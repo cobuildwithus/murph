@@ -122,35 +122,3 @@ test('does not trust unsafe or unknown Query source detail', () => {
     assert.doesNotMatch(JSON.stringify(projection), /private-vault|private_internal/u)
   }
 })
-
-test('recognizes only the fixed safe Health Commons artifact error shape', () => {
-  const projection = projectVaultCliError(
-    Object.assign(new Error('private-artifact-detail'), {
-      code: 'HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE',
-      artifact: 'protocol_run_specs',
-      category: 'unavailable',
-    }),
-  )
-
-  assert.deepEqual(projection, {
-    code: 'commons_protocol_artifact_unavailable',
-    message: 'Health Commons protocol artifacts are unavailable.',
-    retryable: false,
-    hint:
-      'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
-    stage: 'protocol_run_specs',
-  })
-
-  const unknownArtifactProjection = projectVaultCliError(
-    Object.assign(new Error('safe fallback'), {
-      code: 'HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE',
-      artifact: 'private-artifact',
-      category: 'unavailable',
-    }),
-  )
-  assert.equal(
-    unknownArtifactProjection.code,
-    'HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE',
-  )
-  assert.doesNotMatch(JSON.stringify(unknownArtifactProjection), /private-artifact/u)
-})

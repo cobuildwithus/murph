@@ -306,17 +306,6 @@ export function hostedCanonicalWriteReceiptLogStatusFields(
   };
 }
 
-export function hostedCanonicalWriteReceiptRecoveryStatusFields(
-  wake: HostedCanonicalWriteReceiptRecoveryWake,
-): HostedRuntimeRedactedJson {
-  return {
-    [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY]: wake.nextWakeAt,
-    [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]:
-      wake.nextWakeReason,
-    [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
-  };
-}
-
 export function omitHostedCanonicalWriteReceiptLogStatusFields(
   status: HostedRuntimeRedactedJson | null | undefined,
 ): HostedRuntimeRedactedJson | null {

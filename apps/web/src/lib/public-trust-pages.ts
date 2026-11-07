@@ -47,8 +47,8 @@ export const ABOUT_MURPH_CONTENT: PublicTrustPageContent = {
     {
       title: "How it is built",
       paragraphs: [
-        "Murph is available as a hosted product and as an open-source project that can be inspected and run locally. The hosted product is designed around a private personal conversation, explicit permissions, encrypted storage, and short-lived processing for work that needs readable data.",
-        "The code is published under the Apache 2.0 license. The public security page explains the hosted and local models, while the privacy policy describes data practices, retention, and user rights in detail.",
+        "Murph is a hosted product with open source code that can be inspected. The hosted product is designed around a private personal conversation, explicit permissions, encrypted storage, and short-lived processing for work that needs readable data.",
+        "The code is published under the Apache 2.0 license. The public security page explains the hosted architecture, while the privacy policy describes data practices, retention, and user rights in detail.",
       ],
     },
     {

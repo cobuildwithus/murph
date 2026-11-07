@@ -23,6 +23,12 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
   useHostedInviteStatusRefresh: mocks.useHostedInviteStatusRefresh,
 }));
 
+vi.mock("next/image", () => ({
+  default(props: { alt: string; src: string }) {
+    return createElement("img", { alt: props.alt, src: props.src });
+  },
+}));
+
 vi.mock("next/link", () => ({
   default(props: { children?: ReactNode; href: string }) {
     return createElement("a", {
@@ -31,6 +37,7 @@ vi.mock("next/link", () => ({
   },
 }));
 
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "@/src/components/hosted-onboarding/join-invite-copy";
 import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import {
@@ -65,10 +72,11 @@ test("verify-stage success page keeps the copy neutral while verification settle
     }),
   );
 
-  assert.match(markup, /Finishing verification/);
+  assert.match(markup, /Finishing verification\./);
   assert.match(markup, /Checking your signup status\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.match(markup, /Back to invite/);
+  assert.match(markup, /data-slot="link-page-surface"/);
 });
 
 test("blocked success page does not pretend setup is still running", () => {
@@ -80,10 +88,42 @@ test("blocked success page does not pretend setup is still running", () => {
     }),
   );
 
-  assert.match(markup, /Account blocked/);
+  assert.match(markup, /This account can’t continue\./);
   assert.match(markup, /Head back to your invite for next steps\./);
   assert.doesNotMatch(markup, /Payment received/);
-  assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
+  assert.doesNotMatch(markup, /data-slot="link-page-dots"/);
+});
+
+test("a payment still setting up says the same ten seconds as the invite page", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteSuccessClient, {
+      initialStatus: createStatus("checkout"),
+      inviteCode: "invite-code",
+      sessionId: null,
+    }),
+  );
+
+  assert.match(markup, /Payment received\./);
+  assert.match(markup, new RegExp(JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle.replace(".", "\\.")));
+  assert.doesNotMatch(markup, /about a minute/);
+  assert.match(markup, /data-slot="link-page-dots"/);
+});
+
+test("a dead link on the return page never claims nothing changed", () => {
+  for (const stage of ["expired", "invalid"] as const) {
+    const markup = renderToStaticMarkup(
+      createElement(JoinInviteSuccessClient, {
+        initialStatus: createStatus(stage),
+        inviteCode: "invite-code",
+        sessionId: null,
+      }),
+    );
+
+    assert.match(markup, /Ask Murph for a new one\./);
+    assert.match(markup, /Back to invite/);
+    assert.doesNotMatch(markup, /Nothing changed/);
+    assert.doesNotMatch(markup, /data-slot="link-page-dots"/);
+  }
 });
 
 test("activating success page explains when vault and assistant setup is still running", () => {
@@ -95,10 +135,9 @@ test("activating success page explains when vault and assistant setup is still r
     }),
   );
 
-  assert.match(markup, /Finishing your setup/);
   assert.match(markup, /Payment confirmed\./);
   assert.match(markup, /Setup finishes in about ten seconds/);
-  assert.match(markup, /We&#x27;ll keep checking automatically/);
+  assert.match(markup, /data-slot="link-page-dots"/);
 });
 
 test("checkout-stage success page stays blank while the returned session is being verified", () => {
@@ -297,10 +336,10 @@ test("pending success page shows email support after the setup delay", async () 
     vi.advanceTimersByTime(1);
   });
 
-  assert.match(view.container.textContent ?? "", /Setup is taking longer than expected/);
-  assert.match(view.container.textContent ?? "", /Support ready/);
-  assert.match(view.container.textContent ?? "", /The draft already includes the details we need/);
+  assert.match(view.container.textContent ?? "", /Setup is taking longer than expected\./);
+  assert.match(view.container.textContent ?? "", /We’ll keep checking automatically/);
   assert.match(view.container.textContent ?? "", /Email support/);
+  assert.match(view.container.textContent ?? "", /Back to invite/);
 
   const supportButton = findButtonByText(view.container, /Email support/);
 
@@ -402,7 +441,6 @@ function createStatus(
     },
     capabilities: {
       billingReady: true,
-      phoneAuthReady: true,
     },
     invite: {
       code: "invite-code",

@@ -11,9 +11,12 @@ const MAX_PORTAL_CONFIGURATION_ENV =
 const originalMaxPortalConfiguration =
   process.env[MAX_PORTAL_CONFIGURATION_ENV];
 
+const VOICE_TEST_MESSAGE =
+  "just picked a new voice for you! send me a voice memo so I can hear it";
+
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
-  getHostedPrivySession: vi.fn(),
+
   isHostedBillingPlanSelectionAvailable: vi.fn(),
   getPrisma: vi.fn(),
   CustomizeMurphSettings: vi.fn((props: {
@@ -27,7 +30,7 @@ const mocks = vi.hoisted(() => ({
       null,
       `Customize murph settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  HostedAccountSettingsCards: vi.fn((props: {
+  HostedLoginMethodSettings: vi.fn((props: {
     account: unknown;
     murphPhoneNumber?: string | null;
     openEmailLink?: boolean;
@@ -37,42 +40,26 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  resolveMurphContactOptions: vi.fn((input?: {
+  resolveMurphContactOptions: vi.fn((_input?: {
     contactChannels?: {
       email?: boolean;
       telegram?: boolean;
       text?: boolean;
     } | null;
-    message?: { body?: string | null } | null;
-  }) => {
-    if (
-      input?.message?.body
-        === "Hey Murph, what referral options can I choose from?"
-    ) {
-      return [{
-        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20referral%20options%20can%20I%20choose%20from%3F",
-        kind: "text",
-        label: "Messages",
-      }];
-    }
-    return [{
-      href: "sms:+15550100001?body=voice%20test",
-      kind: "text",
-      label: "Messages",
-    }];
-  }),
+  }): { href: string; kind: string; label: string }[] => [{
+    href: "sms:+15550100001",
+    kind: "text",
+    label: "Messages",
+  }]),
   HostedAiUsageActivity: vi.fn(() =>
     React.createElement("div", null, "Hosted AI usage activity")
   ),
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
-    customInferenceAvailable: boolean;
     initialDormantSolPreference: boolean;
     initialModel: string;
-    initialProvider: string;
     solAvailable: boolean;
-    veniceAvailable: boolean;
   }) =>
     React.createElement(
       "div",
@@ -147,8 +134,7 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted passkey settings ${String(props.authenticated)} ${props.secureApprovalStatus.status}`,
     )),
-  HostedPrivyProvider: vi.fn((input: { children: React.ReactNode }) =>
-    React.createElement("div", null, input.children)),
+
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyDraftRecoveryStateForOwner: vi.fn(),
@@ -171,13 +157,12 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
-  withServerApprovedPrivyAccountHints: vi.fn((input: {
-    serverApprovedPrivyUser?: unknown;
-    snapshot: unknown;
-  }) => input.snapshot),
+  readApprovalPasskeyState: vi.fn(),
+
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/sensitive-actions/passkey-store", () => ({ readApprovalPasskeyState: mocks.readApprovalPasskeyState }));
 
 const redirectMock = vi.hoisted(() => vi.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
@@ -192,7 +177,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
-  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  getHostedDashboardPageAuthSnapshot: () => { throw new Error("Settings must not require paid dashboard access"); },
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -217,7 +202,7 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
   readHostedAccountSettingsPageSnapshot:
     mocks.readHostedAccountSettingsPageSnapshot,
-  withServerApprovedPrivyAccountHints: mocks.withServerApprovedPrivyAccountHints,
+
 }));
 
 vi.mock("@/src/lib/legal/consent", async () => {
@@ -230,9 +215,6 @@ vi.mock("@/src/lib/legal/consent", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
-  getHostedPrivySession: mocks.getHostedPrivySession,
-}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   isHostedBillingPlanSelectionAvailable:
@@ -258,9 +240,6 @@ vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => 
   },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
-  HostedPrivyProvider: mocks.HostedPrivyProvider,
-}));
 
 vi.mock("@/src/components/settings/hosted-ai-usage-activity", () => ({
   HostedAiUsageActivity: mocks.HostedAiUsageActivity,
@@ -270,15 +249,16 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
   HostedBillingSettings: mocks.HostedBillingSettings,
 }));
 
-vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
-  HostedAccountSettingsCards: mocks.HostedAccountSettingsCards,
+vi.mock("@/src/components/settings/hosted-login-method-settings", () => ({
+  HostedLoginMethodSettings: mocks.HostedLoginMethodSettings,
 }));
 
 vi.mock("@/src/components/settings/customize-murph-settings", () => ({
   CustomizeMurphSettings: mocks.CustomizeMurphSettings,
 }));
 
-vi.mock("@/src/lib/murph-contact-routing", () => ({
+vi.mock("@/src/lib/murph-contact-routing", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/murph-contact-routing")>(),
   resolveMurphContactOptions: mocks.resolveMurphContactOptions,
 }));
 
@@ -431,7 +411,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
 
 test("SettingsPage suppresses plan actions while a completed update awaits webhook projection", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -440,7 +420,7 @@ test("SettingsPage suppresses plan actions while a completed update awaits webho
       suspendedAt: null,
     },
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mockSettingsPageSnapshot({
@@ -483,7 +463,7 @@ test("SettingsPage suppresses plan actions while a completed update awaits webho
 test("SettingsPage completes a return only from an active paid exact projection", async () => {
   process.env[MAX_PORTAL_CONFIGURATION_ENV] = "bpc_max_test";
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -491,7 +471,7 @@ test("SettingsPage completes a return only from an active paid exact projection"
       id: "member_123",
       suspendedAt: null,
     },
-    session: { privyUserId: "did:privy:user_123" },
+    session: { },
   });
   mockSettingsPageSnapshot({
     billingRef: {
@@ -526,7 +506,7 @@ test("SettingsPage completes a return only from an active paid exact projection"
 
 test("SettingsPage keeps an inactive same-plan return in recoverable pending state", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -534,7 +514,7 @@ test("SettingsPage keeps an inactive same-plan return in recoverable pending sta
       id: "member_123",
       suspendedAt: null,
     },
-    session: { privyUserId: "did:privy:user_123" },
+    session: { },
   });
   mockSettingsPageSnapshot({
     billingRef: {
@@ -564,7 +544,7 @@ test("SettingsPage keeps an inactive same-plan return in recoverable pending sta
 
 test("SettingsPage suppresses a personal plan return for a sponsored member", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -572,7 +552,7 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
       id: "member_123",
       suspendedAt: null,
     },
-    session: { privyUserId: "did:privy:user_123" },
+    session: { },
   });
   mocks.readHostedFamilyAccessForMember.mockResolvedValue({ groupId: "family_123" });
   mockSettingsPageSnapshot({
@@ -606,8 +586,7 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
 test.each(["active", "checkout"])(
   "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
   async (stage) => {
-    const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+
 
     try {
       mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -618,7 +597,7 @@ test.each(["active", "checkout"])(
           suspendedAt: null,
         },
         session: {
-          privyUserId: "did:privy:user_123",
+
         },
       });
 
@@ -634,14 +613,10 @@ test.each(["active", "checkout"])(
       expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
       expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
         authenticated: true,
-        authorizationEnabled: false,
+        authorizationEnabled: true,
       }, undefined);
     } finally {
-      if (originalPrivyAppId === undefined) {
-        delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-      } else {
-        process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
-      }
+
     }
   },
 );
@@ -658,19 +633,36 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
 
   const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
 
-  assert.match(markup, /Sign in to manage your data/);
-  assert.match(markup, /Choose Delete account, review the details, and confirm\./);
-  assert.match(markup, /Health content, memories, and assistant history/);
-  assert.match(markup, /active hosted/);
-  assert.match(markup, /systems within 30 days; backups within 90 days/);
-  assert.match(markup, /Account\/profile, wearable sync, webhook, and routing records/);
-  assert.match(markup, /Support: up to 3 years/);
-  assert.match(markup, /external carrier, Telegram, Linq, or email systems cannot be recalled/);
+  // Google Play links here: the steps, what is deleted and retention must stay.
+  assert.match(markup, /Delete your Murph account/);
+  assert.match(markup, /Choose Delete account and confirm\./);
+  assert.match(markup, /What’s deleted/);
+  assert.match(markup, /can’t be recalled/);
+  assert.match(markup, /Health data, memories and chats: within 30 days, backups within 90/);
+  assert.match(markup, /Account, device sync and messaging records: within 90 days/);
+  assert.match(markup, /Support records up to 3 years/);
   assert.match(markup, /mailto:legal@justco\.build/);
   assert.match(markup, /href="\/legal\/privacy"/);
+  // The sign-in action comes before the supporting details.
+  assert.ok(markup.indexOf(">Log in<") < markup.indexOf("What’s deleted"));
 });
 
-test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
+test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion without an eager factor read (%s)", async (state) => {
+
+  try {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({ authenticated: true, session: { member: { id: "synthetic-member" }, } });
+    if (state === "outage") mocks.readApprovalPasskeyState.mockRejectedValueOnce(new Error("storage unavailable"));
+    else mocks.readApprovalPasskeyState.mockResolvedValueOnce({ credentials: state === "passkey" ? [{ id: "synthetic" }] : [] });
+    const { default: Page } = await import("../app/settings/data-privacy/page");
+    expect(renderToStaticMarkup(await Page())).toContain("Hosted data privacy settings true");
+
+    expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
+  } finally {
+
+  }
+});
+
+test("SettingsPage offers sign-in without reading member settings", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
@@ -679,7 +671,11 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_REDIRECT:/");
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).toContain("health data consent");
+  expect(markup).toContain("Send verification code");
+  expect(redirectMock).not.toHaveBeenCalled();
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -690,7 +686,7 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
   expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
-  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+
 });
 
 
@@ -710,7 +706,6 @@ test("SettingsPage keeps the signed-out usage recovery handoff in Settings", asy
 
   assert.match(markup, /Continue in Settings/);
   assert.match(markup, /Sign in to review the recovery options available for your account\./);
-  assert.match(markup, /resolve plan eligibility and Family access after you sign in/);
   expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -731,9 +726,31 @@ test("SettingsPage keeps the exact signed-out Family recovery handoff in Setting
   }));
 
   assert.match(markup, /Continue to Family Settings/);
-  assert.match(markup, /choose the Family member and review their available options/);
+  assert.match(markup, /Sign in to continue to Family Settings\./);
   expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps the reason for an add usage link when signed out", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addUsage: "true" }),
+  }));
+
+  assert.match(markup, /Sign in to add usage\./);
+  // Nothing is verified yet, so the page must not name an amount or a payment.
+  assert.doesNotMatch(markup, /\$\d/);
+  expect(redirectMock).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
 });
 
 test("SettingsPage rejects an augmented signed-out Family recovery handoff", async () => {
@@ -746,12 +763,15 @@ test("SettingsPage rejects an augmented signed-out Family recovery handoff", asy
   const { default: SettingsPage } = await import(
     "../app/(dashboard)/settings/page"
   );
-  await expect(SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({
       familyRecovery: "true",
       usageRecovery: "true",
     }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
+  }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).not.toContain("One more step");
+  expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -811,9 +831,12 @@ test.each([
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({ familyInviteReturn }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
+  }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).not.toContain("One more step");
+  expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -874,9 +897,12 @@ test.each([
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({ planUpdate }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
+  }));
+  expect(markup).toContain("Continue to Settings");
+  expect(markup).not.toContain("One more step");
+  expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -888,7 +914,7 @@ test("SettingsPage strips an authenticated plan-change cancellation return", asy
       id: "member_123",
       suspendedAt: null,
     },
-    session: { privyUserId: "did:privy:1", sessionId: "hws_session_123" },
+    session: {  sessionId: "hws_session_123" },
   });
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
@@ -900,13 +926,9 @@ test("SettingsPage strips an authenticated plan-change cancellation return", asy
 });
 
 
-
-
-
-
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
-  const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
+
+
   mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
     "usage_5_usd",
     "usage_10_usd",
@@ -917,28 +939,7 @@ test("SettingsPage reads the app session and persisted account settings into the
   });
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(false);
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue({
-    identity: {
-      userId: "did:privy:user_123",
-    },
-    linkedAccounts: [
-      {
-        id: 456,
-        type: "telegram",
-        username: "sample_user",
-      },
-    ],
-    verifiedPrivyUser: {
-      id: "did:privy:user_123",
-      linkedAccounts: [
-        {
-          id: 456,
-          type: "telegram",
-          username: "sample_user",
-        },
-      ],
-    },
-  });
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -954,14 +955,14 @@ test("SettingsPage reads the app session and persisted account settings into the
       },
     ],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const accountSnapshot = {
     assistant: {
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       solAvailable: true,
     },
     email: {
@@ -1054,7 +1055,7 @@ test("SettingsPage reads the app session and persisted account settings into the
 
     assert.match(markup, /Hosted billing settings/);
     assert.match(markup, /Hosted AI usage activity/);
-    assert.match(markup, /Hosted assistant model gpt-5\.6-sol true/);
+    assert.match(markup, /Hosted assistant model gpt-6\.1-sol true/);
     assert.match(markup, /Hosted account settings \+15550100001/);
     assert.match(markup, /Manage wearables/);
     assert.match(markup, /href="\/connect"/);
@@ -1110,16 +1111,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
-      chatCompletionsAvailable: false,
       configurationAvailable: true,
-      customInferenceAvailable: false,
       expectedCurrentPlanCode: "launch_monthly",
-      initialConnection: null,
       initialDormantSolPreference: false,
-      initialModel: "gpt-5.6-sol",
-      initialProvider: "openai",
+      initialModel: "gpt-6.1-sol",
       solAvailable: true,
-      veniceAvailable: false,
     }, undefined);
     expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -1158,23 +1154,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.readHostedSecureApprovalStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
-      privyUserId: "did:privy:user_123",
+
     });
-    expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
-    expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-      snapshot: accountSnapshot,
-      serverApprovedPrivyUser: {
-        id: "did:privy:user_123",
-        linkedAccounts: [
-          {
-            id: 456,
-            type: "telegram",
-            username: "sample_user",
-          },
-        ],
-      },
-    });
-    expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+
+
+    expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
       murphPhoneNumber: "+15550100001",
       openEmailLink: true,
@@ -1183,39 +1167,30 @@ test("SettingsPage reads the app session and persisted account settings into the
       murphPhoneNumber: "+15550100001",
       openVoiceLink: true,
       voiceTestContactOption: {
-        href: "sms:+15550100001?body=voice%20test",
+        href: `sms:+15550100001?body=${encodeURIComponent(VOICE_TEST_MESSAGE)}`,
         kind: "text",
         label: "Messages",
       },
     }), undefined);
-    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(1, {
+    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledWith({
       contactChannels: {
         email: false,
         telegram: true,
         text: true,
-      },
-      message: {
-        body: "just picked a new voice for you! send me a voice memo so I can hear it",
       },
       murphEmailAddress: null,
       murphPhoneNumber: "+15550100001",
       preferredKind: "text",
       userEmailAddress: "verified@example.com",
     });
-    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(2, {
-      contactChannels: {
-        email: false,
-        telegram: true,
-        text: true,
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+      usageAddedContactOption: {
+        href: "sms:+15550100001",
+        kind: "text",
+        label: "Messages",
       },
-      message: {
-        body: "Hey Murph, what referral options can I choose from?",
-      },
-      murphEmailAddress: null,
-      murphPhoneNumber: "+15550100001",
-      preferredKind: "text",
-      userEmailAddress: "verified@example.com",
-    });
+    }), undefined);
     expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith({
       activity: usageActivity,
       missionContactOption: {
@@ -1231,7 +1206,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       authenticated: true,
       secureApprovalStatus: { status: "configured" },
     }), undefined);
-    expect(mocks.HostedPrivyProvider).toHaveBeenCalledTimes(1);
+
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
     }), undefined);
@@ -1254,26 +1229,22 @@ test("SettingsPage reads the app session and persisted account settings into the
       authorizationEnabled: true,
     }, undefined);
 
-    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+
     mocks.HostedDataPrivacySettings.mockClear();
     renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
       authenticated: true,
-      authorizationEnabled: false,
+      authorizationEnabled: true,
     }, undefined);
   } finally {
-    if (originalPrivyAppId === undefined) {
-      delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-    } else {
-      process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
-    }
+
   }
 });
 
 test("SettingsPage rejects repeated or malformed usage top-up query state", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1283,7 +1254,7 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
 
@@ -1308,7 +1279,7 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
 
 test("SettingsPage keeps an exact purchase return ahead of generic usage recovery", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1317,7 +1288,7 @@ test("SettingsPage keeps an exact purchase return ahead of generic usage recover
       suspendedAt: null,
     },
     linkedAccounts: [],
-    session: { privyUserId: "did:privy:user_123" },
+    session: { },
   });
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
     accessKind: "paid",
@@ -1363,7 +1334,7 @@ test("SettingsPage keeps an exact purchase return ahead of generic usage recover
 
 test("SettingsPage resolves an eligible Family owner recovery from authenticated state", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1372,7 +1343,7 @@ test("SettingsPage resolves an eligible Family owner recovery from authenticated
       suspendedAt: null,
     },
     linkedAccounts: [],
-    session: { privyUserId: "did:privy:user_123" },
+    session: { },
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     billingActive: true,
@@ -1495,7 +1466,7 @@ test("SettingsPage resolves an eligible Family owner recovery from authenticated
 
 test("SettingsPage surfaces and opens the authenticated active Family owner's own usage picker", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1505,7 +1476,7 @@ test("SettingsPage surfaces and opens the authenticated active Family owner's ow
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const ownerMember = {
@@ -1642,7 +1613,7 @@ test.each([
     ownerSurfaceOwnsReturn,
   }) => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.getHostedPrivySession.mockResolvedValue(null);
+
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticated: true,
       authenticatedMember: {
@@ -1652,7 +1623,7 @@ test.each([
       },
       linkedAccounts: [],
       session: {
-        privyUserId: "did:privy:user_123",
+
       },
     });
     const familyOwner = {
@@ -1730,7 +1701,7 @@ test.each([
 
 test("SettingsPage keeps a delayed owner return separate from a newer member purchase", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1740,7 +1711,7 @@ test("SettingsPage keeps a delayed owner return separate from a newer member pur
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const familyOwner = {
@@ -1829,7 +1800,7 @@ test.each(["success", "cancel"] as const)(
   "SettingsPage preserves an exact personal $1 return after the payer becomes a Family owner",
   async (checkoutKind) => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.getHostedPrivySession.mockResolvedValue(null);
+
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticated: true,
       authenticatedMember: {
@@ -1839,7 +1810,7 @@ test.each(["success", "cancel"] as const)(
       },
       linkedAccounts: [],
       session: {
-        privyUserId: "did:privy:user_123",
+
       },
     });
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
@@ -1946,7 +1917,7 @@ test.each([
   member,
 }) => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1956,7 +1927,7 @@ test.each([
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
@@ -1985,7 +1956,7 @@ test.each([
 
 test("SettingsPage keeps a frozen active purchase visible when current offers are unavailable", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -1995,7 +1966,7 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
@@ -2030,7 +2001,7 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
 
 test("SettingsPage keeps a frozen personal purchase recoverable after Family activation", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2040,7 +2011,7 @@ test("SettingsPage keeps a frozen personal purchase recoverable after Family act
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
@@ -2097,7 +2068,7 @@ test("SettingsPage keeps a frozen personal purchase recoverable after Family act
 
 test("SettingsPage opens a sponsored member's frozen purchase before usage recovery", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2107,7 +2078,7 @@ test("SettingsPage opens a sponsored member's frozen purchase before usage recov
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mocks.readHostedFamilyAccessForMember.mockResolvedValue({
@@ -2181,7 +2152,7 @@ test.each([
   },
 ])("SettingsPage keeps a $label purchase available for status and cancellation", async ({ target }) => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2190,7 +2161,7 @@ test.each([
       suspendedAt: null,
     },
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const familyOwner = {
@@ -2245,7 +2216,7 @@ test.each([
 
 test("SettingsPage keeps a former Family purchase status-only despite duplicate roster labels", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2254,7 +2225,7 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
       suspendedAt: null,
     },
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const familyOwner = {
@@ -2381,6 +2352,16 @@ test.each([
     suspendedAt: null,
   },
   {
+    billingStatus: HostedBillingStatus.paused,
+    label: "paused",
+    suspendedAt: null,
+  },
+  {
+    billingStatus: HostedBillingStatus.unpaid,
+    label: "unpaid",
+    suspendedAt: null,
+  },
+  {
     billingStatus: HostedBillingStatus.past_due,
     label: "inactive",
     suspendedAt: null,
@@ -2390,12 +2371,12 @@ test.each([
     label: "suspended",
     suspendedAt: new Date("2026-07-10T12:00:00.000Z"),
   },
-])("SettingsPage hides Edge upgrade actions for an $label paid Pulse member", async ({
+])("SettingsPage preserves billing recovery but hides Edge upgrades for a $label paid Pulse member", async ({
   billingStatus,
   suspendedAt,
 }) => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2405,7 +2386,7 @@ test.each([
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mockSettingsPageSnapshot({
@@ -2430,6 +2411,7 @@ test.each([
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
+      canManageBilling: suspendedAt === null,
       canUpgradeToEdge: false,
       usageTopUpOffers: [],
       usageTopUpPurchaseReturn: {
@@ -2451,7 +2433,7 @@ test.each([
 
 test("SettingsPage passes a pending Murph text line to account settings", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2461,7 +2443,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const accountSnapshot = {
@@ -2496,15 +2478,77 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Hosted account settings \+15550100003/);
-  expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100003",
   }), undefined);
 });
 
+const TEXT_ROUTE = { href: "sms:+15550100001", kind: "text", label: "Messages" };
+const TELEGRAM_ROUTE = { href: "https://t.me/murph_test_bot", kind: "telegram", label: "Telegram" };
+const EMAIL_ROUTE = { href: "mailto:mail@mail.withmurph.ai", kind: "email", label: "Email" };
+
+test.each([
+  { messages: true, missions: true, name: "text", route: TEXT_ROUTE },
+  { messages: true, missions: true, name: "Telegram", route: TELEGRAM_ROUTE },
+  { messages: false, missions: true, name: "email only", route: EMAIL_ROUTE },
+  { messages: false, missions: true, name: "no route", route: null },
+  { messages: true, missions: false, name: "missions off", route: TEXT_ROUTE },
+])("SettingsPage gives each surface the right link with $name", async ({
+  messages,
+  missions,
+  route,
+}) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: { billingStatus: "active", id: "member_123", suspendedAt: null },
+    linkedAccounts: [],
+    session: {},
+  });
+  mockSettingsPageSnapshot({
+    account: {
+      email: { address: "member@example.com", verifiedAt: "2025-03-27T08:30:00.000Z" },
+      phone: { number: null, verifiedAt: null },
+      telegram: { telegramUserId: null },
+    },
+  });
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [],
+    missionsEnabled: missions,
+  });
+  mocks.resolveMurphContactOptions.mockReturnValue(route ? [route] : []);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+  // The purchase handoff takes the plain route, with no message in it.
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ usageAddedContactOption: route }),
+    undefined,
+  );
+  const voiceOption = (
+    mocks.CustomizeMurphSettings.mock.calls.at(-1)?.[0] as {
+      voiceTestContactOption?: { href: string } | null;
+    }
+  ).voiceTestContactOption;
+  if (messages) {
+    expect(decodeURIComponent(voiceOption?.href ?? "")).toContain(VOICE_TEST_MESSAGE);
+  } else {
+    expect(voiceOption).toBeNull();
+  }
+  if (messages && missions) {
+    expect(mocks.HostedAiUsageActivity).toHaveBeenCalled();
+  } else {
+    expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
+  }
+});
+
 test("SettingsPage omits an empty email-only invitation but preserves activity history", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2514,7 +2558,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mockSettingsPageSnapshot({
@@ -2567,9 +2611,6 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
         email: false,
         telegram: false,
         text: false,
-      },
-      message: {
-        body: "Hey Murph, what referral options can I choose from?",
       },
     }),
   );
@@ -2627,7 +2668,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
 
 test("SettingsPage preserves the Group payment-method receipt and fresh start action", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({ id: "membership_123" });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -2638,7 +2679,7 @@ test("SettingsPage preserves the Group payment-method receipt and fresh start ac
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mockSettingsPageSnapshot({
@@ -2668,7 +2709,7 @@ test("SettingsPage preserves the Group payment-method receipt and fresh start ac
 
 test("SettingsPage does not mark an unpaid family owner group as the current plan", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2678,7 +2719,7 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
@@ -2751,7 +2792,7 @@ test.each([
   HostedBillingStatus.unpaid,
 ])("SettingsPage keeps %s Family billing recoverable from Subscription", async (billingStatus) => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2761,7 +2802,7 @@ test.each([
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
@@ -2804,7 +2845,7 @@ test.each([
 
 test("SettingsPage keeps Family settings available when the top-up catalog is unavailable", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -2812,7 +2853,7 @@ test("SettingsPage keeps Family settings available when the top-up catalog is un
       id: "member_123",
       suspendedAt: null,
     },
-    session: { privyUserId: "did:privy:user_123" },
+    session: { },
   });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     billingActive: true,
@@ -2842,8 +2883,8 @@ test("SettingsPage keeps Family settings available when the top-up catalog is un
 });
 
 test("SettingsPage awaits database-backed settings reads one at a time", async () => {
-  const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
+
+
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -2854,7 +2895,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
 
@@ -2910,12 +2951,6 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockImplementation(
     trackDatabaseRead("usageTopUpActivePurchase", null),
   );
-  // Privy network reads resolve after every database read so the render
-  // proves the page still waits for their values.
-  mocks.getHostedPrivySession.mockImplementation(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    return null;
-  });
   mocks.readHostedSecureApprovalStatus.mockImplementation(async () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     return { status: "configured" };
@@ -2951,15 +2986,11 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       undefined,
     );
   } finally {
-    if (originalPrivyAppId === undefined) {
-      delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-    } else {
-      process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
-    }
+
   }
 });
 
-test("SettingsPage preserves billing when optional usage and Privy reads fail", async () => {
+test("SettingsPage preserves billing when optional usage fails without provider identity reads", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -2970,10 +3001,10 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
-  mocks.getHostedPrivySession.mockRejectedValue(new Error("privy unavailable"));
+
   mocks.readHostedPersonalUsageCreditOfferCodes.mockRejectedValue(
     new Error("offer codes unavailable"),
   );
@@ -2995,22 +3026,23 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
     }),
     undefined,
   );
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: EMPTY_ACCOUNT_SETTINGS,
-    serverApprovedPrivyUser: null,
-  });
+
+
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ account: EMPTY_ACCOUNT_SETTINGS }), undefined,
+  );
   expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
 
 test("SettingsPage renders fallback values without reading settings data when the session has no member", async () => {
-  const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
+
+
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: null,
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
 
@@ -3026,7 +3058,7 @@ test("SettingsPage renders fallback values without reading settings data when th
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
     expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
-    expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+
     expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         authenticated: true,
@@ -3042,31 +3074,16 @@ test("SettingsPage renders fallback values without reading settings data when th
       }),
       undefined,
     );
-    expect(mocks.HostedAccountSettingsCards).not.toHaveBeenCalled();
+    expect(mocks.HostedLoginMethodSettings).not.toHaveBeenCalled();
     expect(mocks.HostedFamilySettings).not.toHaveBeenCalled();
   } finally {
-    if (originalPrivyAppId === undefined) {
-      delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-    } else {
-      process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
-    }
+
   }
 });
 
-test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
+test("SettingsPage renders canonical Telegram ownership without reading provider display hints", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue({
-    identity: {
-      userId: "did:privy:user_other",
-    },
-    linkedAccounts: [
-      {
-        id: 456,
-        type: "telegram",
-        username: "sample_user",
-      },
-    ],
-  });
+
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -3076,7 +3093,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "did:privy:user_123",
+
     },
   });
   const accountSnapshot = {
@@ -3098,10 +3115,10 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: accountSnapshot,
-    serverApprovedPrivyUser: null,
-  });
+
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ account: accountSnapshot }), undefined,
+  );
 });
 
 describe("settings subscription composition", () => {
@@ -3130,4 +3147,21 @@ describe("settings subscription composition", () => {
     assert.doesNotMatch(source, /StartPaidPulseButton/);
     assert.doesNotMatch(source, /trial end|days left|expires/i);
   });
+});
+
+test("SettingsPage reaches health-data consent after a free member signs in", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: { id: "synthetic-member", billingStatus: "not_started", suspendedAt: null },
+    session: {},
+  });
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  expect(markup).toContain('id="data-privacy"');
+  expect(markup).toContain("Hosted health data consent true");
+  expect(mocks.HostedHealthDataConsentSettings).toHaveBeenCalledWith(expect.objectContaining({
+    authenticated: true, initialStatus: GRANTED_HEALTH_DATA_CONSENT_STATUS,
+  }), undefined);
+  expect(redirectMock).not.toHaveBeenCalled();
 });

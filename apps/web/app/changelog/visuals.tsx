@@ -58,47 +58,6 @@ export function StatBlock({
   );
 }
 
-export type TerminalLine = {
-  command: string;
-  timing?: string;
-};
-
-export function TerminalMock({
-  lines,
-  label = "vault-cli",
-}: {
-  label?: string;
-  lines: readonly TerminalLine[];
-}) {
-  return (
-    <div className={FRAME_BASE}>
-      <div className={FRAME_HEADER}>
-        <div className="flex items-center gap-1.5">
-          <span aria-hidden="true" className="size-2 rounded-full bg-[#e8b4ad]" />
-          <span aria-hidden="true" className="size-2 rounded-full bg-[#e8d4a1]" />
-          <span aria-hidden="true" className="size-2 rounded-full bg-[#b3c794]" />
-        </div>
-        <p className={HEADER_LABEL}>{label}</p>
-      </div>
-      <div className="flex flex-col gap-1.5 bg-[#1f241c] px-4 py-3.5 font-mono text-[12px] leading-[1.5] text-[#e8e3d3]">
-        {lines.map((line, index) => (
-          <div key={index} className="flex items-center gap-3">
-            <span aria-hidden="true" className="text-[#83945f]">
-              $
-            </span>
-            <span className="min-w-0 flex-1 truncate">{line.command}</span>
-            {line.timing ? (
-              <span className="shrink-0 text-[#a39684] tabular-nums">
-                {line.timing}
-              </span>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export type AppEntry = {
   color: string;
   name: string;

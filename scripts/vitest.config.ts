@@ -35,6 +35,5 @@ export default defineConfig({
     ...resolveMurphVitestConcurrency(),
     maxWorkers: resolveMurphVitestMaxWorkers(),
     include: ["scripts/**/*.test.ts"],
-    exclude: ["scripts/murph-age/**/*.test.ts"],
   },
 });

@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 
-import { renderToReadableStream } from "react-dom/server";
+import { createElement } from "react";
+import { renderToReadableStream, renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  ActionApprovalDecisionScreen,
+  readActionApprovalFileName,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(() => ({ database: "test" })),
   readHostedActionApproval: vi.fn(),
+  readApprovalPasskeyState: vi.fn(),
   redirect: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireHostedActionApprovalId: vi.fn((approvalId: string) => approvalId),
@@ -14,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/sensitive-actions/passkey-store", () => ({ readApprovalPasskeyState: mocks.readApprovalPasskeyState }));
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
@@ -40,6 +48,30 @@ type ActionApprovalPageModule = typeof import("../app/approve/[approvalId]/page"
 
 let actionApprovalPage: ActionApprovalPageModule;
 
+describe("readActionApprovalFileName", () => {
+  it("reads the whole name when the name contains a closing quote", () => {
+    expect(readActionApprovalFileName(
+      "Murph will send “report.pdf” — confidential.pdf” (1.2 MB) to your current iMessage chat.",
+    )).toBe("report.pdf” — confidential.pdf");
+  });
+
+  it("keeps a quoted name on both decisions", () => {
+    for (const decision of ["approved", "denied"] as const) {
+      const markup = renderToStaticMarkup(createElement(ActionApprovalDecisionScreen, {
+        decision,
+        fileName: readActionApprovalFileName("Murph will send “report.zip” (1 KB) to your chat."),
+      }));
+      assert.match(markup, /report\.zip/);
+      assert.match(markup, decision === "approved" ? />Approved</ : />Denied</);
+      assert.match(markup, /Return to the Murph conversation where this request started\./);
+    }
+  });
+
+  it("shows no name when the sentence has none", () => {
+    expect(readActionApprovalFileName("Allow the requested action.")).toBeNull();
+  });
+});
+
 describe("action approval page", () => {
   beforeAll(async () => {
     actionApprovalPage = await import("../app/approve/[approvalId]/page");
@@ -47,6 +79,7 @@ describe("action approval page", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readApprovalPasskeyState.mockReset().mockResolvedValue({ credentials: [] });
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_test" },
     });
@@ -88,11 +121,11 @@ describe("action approval page", () => {
     const stream = await renderToReadableStream(view);
     await stream.allReady;
     const markup = await new Response(stream).text();
-    const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map(
+    const hrefs = [...markup.matchAll(/<a\s[^>]*href="([^"]+)"/gu)].map(
       (match) => match[1],
     );
 
-    assert.match(markup, /Approval link expired/);
+    assert.match(markup, /This link expired\./);
     assert.match(markup, /Nothing was approved or changed\./);
     assert.match(markup, /Request a new link/);
     assert.equal(markup.includes("Return in Telegram"), false);
@@ -106,6 +139,24 @@ describe("action approval page", () => {
       },
       preferredKind: "text",
     });
+  });
+
+  it.each([false, true])("never loads the legacy boundary for an approval (migrated=%s)", async (migrated) => {
+    mocks.requireActiveHostedAppSession.mockResolvedValue({ member: { id: "member_test" }, privyUserId: "did:privy:synthetic" });
+    mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
+    mocks.readApprovalPasskeyState.mockResolvedValue({ credentials: migrated ? [{ id: "synthetic" }] : [] });
+    const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
+    expect(view.props.children.props).not.toHaveProperty("legacyApprovalRequired");
+    expect(view.props.children.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
+    expect(mocks.readApprovalPasskeyState).not.toHaveBeenCalled();
+  });
+
+  it("keeps the decision card available during an optional factor read outage", async () => {
+    mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
+    mocks.readApprovalPasskeyState.mockRejectedValue(new Error("storage unavailable"));
+    const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
+    expect(view.props.children.props).not.toHaveProperty("legacyApprovalRequired");
+    expect(view.props.children.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
   });
 
   it("shows the recovery reply when contact resolution is unavailable", async () => {
@@ -129,7 +180,7 @@ describe("action approval page", () => {
       /That approval link expired\. Please send a new one\./,
     );
     assert.equal(markup.includes("Request a new link"), false);
-    assert.equal(markup.includes('href="'), false);
+    assert.equal(/<a\s[^>]*href="/u.test(markup), false);
   });
 
   it("does not ask a group member to confirm an automatically resumed approval", async () => {
@@ -159,11 +210,11 @@ describe("action approval page", () => {
     );
     assert.match(
       markup,
-      /Approval recorded\. Murph will continue only if this request is still pending\./,
+      /Murph will continue if this request is still open\./,
     );
     assert.equal(markup.includes("Head back to Murph to continue."), false);
     assert.equal(markup.includes("I approved the secure request."), false);
-    assert.equal(markup.includes('href="'), false);
+    assert.equal(/<a\s[^>]*href="/u.test(markup), false);
   });
 
   it("redirects an approved revisit through the bare conversation link", async () => {
@@ -225,7 +276,7 @@ describe("action approval page", () => {
       /Return to the Murph conversation where this request started\./,
     );
     assert.equal(markup.includes("I approved the secure request."), false);
-    assert.equal(markup.includes('href="'), false);
+    assert.equal(/<a\s[^>]*href="/u.test(markup), false);
   });
 
   it("does not request a confirmation when contact resolution fails", async () => {

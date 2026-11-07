@@ -158,6 +158,57 @@ describe("hosted device-sync callback boundary", () => {
     expect(JSON.stringify(entries)).not.toContain(CALLBACK_STATE);
   });
 
+  it("keeps a proof-valid return after finalized admission neutral without claiming success", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const request = buildCallbackRequest();
+    const first = await callbackRoute.GET(request.clone(), createRouteContext({ provider: "junction" }));
+    expect(new URL(first.headers.get("location")!).searchParams.get("deviceSyncStatus")).toBe("connected");
+    mocks.handleConnectionCallback.mockRejectedValueOnce(deviceSyncError({
+      code: "OAUTH_STATE_INVALID", httpStatus: 400,
+      message: "OAuth state is invalid or expired.", retryable: false,
+    }));
+
+    const revisit = await callbackRoute.GET(request.clone(), createRouteContext({ provider: "junction" }));
+    const destination = new URL(revisit.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_STATE_INVALID");
+    expect(destination.searchParams.get("deviceSyncStatus")).not.toBe("connected");
+    expect(revisit.headers.get("set-cookie")).toBeNull();
+    expect(mocks.discardConnectionCallback).not.toHaveBeenCalled();
+    expect(mocks.handleConnectionCallback).toHaveBeenLastCalledWith("junction", { expectedOwnerId: "member_a" });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    await mocks.tasks.shift()!();
+    const { entries } = mocks.writeLogs.mock.calls[0]![0];
+    expect(entries[0]).toMatchObject({ eventCode: "device-sync.callback_rejected", errorCode: "OAUTH_STATE_INVALID", level: "info", redactedJson: { provider: "junction" } });
+    expect(parseHostedRuntimeLogRequest({ entries }).entries).toHaveLength(1);
+    expect(JSON.stringify(entries)).not.toContain(CALLBACK_STATE);
+  });
+
+  it("does not claim success for unavailable state without a known earlier completion", async () => {
+    mocks.handleConnectionCallback.mockRejectedValueOnce(deviceSyncError({
+      code: "OAUTH_STATE_INVALID", httpStatus: 400,
+      message: "OAuth state is invalid or expired.", retryable: false,
+    }));
+    const response = await callbackRoute.GET(buildCallbackRequest(), createRouteContext({ provider: "junction" }));
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).not.toBe("connected");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_STATE_INVALID");
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    expect(mocks.discardConnectionCallback).not.toHaveBeenCalled();
+  });
+
+  it.each(["OAUTH_STATE_OWNER_MISMATCH", "OAUTH_PROVIDER_MISMATCH", "OAUTH_CALLBACK_REJECTED"])("preserves failure handling for %s", async (code) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.handleConnectionCallback.mockRejectedValueOnce(deviceSyncError({
+      code, httpStatus: 403, message: "Synthetic callback rejection.", retryable: false,
+    }));
+    const response = await callbackRoute.GET(buildCallbackRequest(), createRouteContext({ provider: "junction" }));
+    expect(new URL(response.headers.get("location")!).searchParams.get("deviceSyncError")).toBe(code);
+    expect(mocks.sendEmail).toHaveBeenCalledOnce();
+    expect(mocks.tasks).toHaveLength(0);
+  });
+
   it("omits unrecognized provider path text from diagnostics", async () => {
     await callbackRoute.GET(new Request(CALLBACK_URL), createRouteContext({ provider: "private-provider-value" }));
     await mocks.tasks.shift()!();

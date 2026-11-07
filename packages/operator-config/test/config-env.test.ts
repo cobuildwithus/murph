@@ -4,7 +4,6 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { test } from 'vitest'
 
 import {
-  assistantBackendTargetsEqual,
   createAssistantBackendTarget,
   normalizeAssistantBackendTarget,
 } from '../src/assistant-backend.ts'
@@ -14,7 +13,6 @@ import {
 } from '../src/assistant/provider-config.ts'
 import {
   assistantSessionIdSchema,
-  assistantStatusAutomationSchema,
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -23,7 +21,6 @@ import {
   httpBaseUrlSchema,
   normalizeHttpBaseUrlOption,
   requestIdFromOptions,
-  resolveEffectiveTopLevelToken,
   resolveVaultCliCommandPath,
   withBaseOptions,
 } from '../src/command-helpers.ts'
@@ -40,17 +37,7 @@ import {
   tryParseHostedAssistantConfig,
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
-import {
-  applySetupRuntimeEnvOverridesToProcess,
-  describeSelectedSetupWearables,
-  describeSetupChannelStatus,
-  resolveSetupChannelMissingEnv,
-  resolveSetupWearableMissingEnv,
-} from '../src/setup-runtime-env.ts'
-import {
-  normalizeSetupWearables,
-  setupCommandOptionsSchema,
-} from '../src/setup-cli-contracts.ts'
+
 import {
   timeZoneSchema,
   workoutFormatListResultSchema,
@@ -84,127 +71,7 @@ async function withTemporaryProcessEnv(
   }
 }
 
-test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
-  const env: NodeJS.ProcessEnv = {
-    WHOOP_CLIENT_ID: '  whoop-id  ',
-    TELEGRAM_BOT_TOKEN: '   telegram-bot-token   ',
-  }
-
-  assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'WHOOP_CLIENT_ID']), 'telegram-bot-token')
-  assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
-  assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
-    badge: 'ready',
-    detail: 'Bot token is available in the current environment.',
-    missingEnv: [],
-    ready: true,
-  })
-})
-
-test('setup wearables are deduplicated, sorted, and keyed off trimmed env values', () => {
-  const env: NodeJS.ProcessEnv = {
-    JUNCTION_API_KEY: '  sk_us_junction-test  ',
-    JUNCTION_CLIENT_USER_ID_SECRET: '  junction-user-secret  ',
-    JUNCTION_ENV: 'sandbox',
-    JUNCTION_REGION: '   ',
-    OURA_CLIENT_ID: '  oura-id  ',
-    OURA_CLIENT_SECRET: '  oura-secret  ',
-    WHOOP_CLIENT_ID: '  whoop-id  ',
-    WHOOP_CLIENT_SECRET: '  whoop-secret  ',
-  }
-
-  assert.deepEqual(resolveSetupWearableMissingEnv('garmin', env), ['JUNCTION_REGION'])
-
-  const configuredWearables = describeSelectedSetupWearables({
-    env,
-    wearables: ['whoop', 'garmin', 'oura', 'whoop'],
-  })
-
-  assert.deepEqual(
-    configuredWearables.map(({ wearable, ready, missingEnv }) => ({
-      missingEnv,
-      ready,
-      wearable,
-    })),
-    [
-      {
-        missingEnv: ['JUNCTION_REGION'],
-        ready: false,
-        wearable: 'garmin',
-      },
-      {
-        missingEnv: [],
-        ready: true,
-        wearable: 'oura',
-      },
-      {
-        missingEnv: [],
-        ready: true,
-        wearable: 'whoop',
-      },
-    ],
-  )
-  assert.match(
-    configuredWearables[0]?.detail ?? '',
-    /JUNCTION_REGION/u,
-  )
-  assert.deepEqual(
-    normalizeSetupWearables(['whoop', 'garmin', 'whoop']),
-    ['garmin', 'whoop'],
-  )
-})
-
-test('applySetupRuntimeEnvOverridesToProcess only writes trimmed non-empty overrides', async () => {
-  await withTemporaryProcessEnv(
-    {
-      MURPH_OPERATOR_CONFIG_TEST_KEEP: 'keep-me',
-      MURPH_OPERATOR_CONFIG_TEST_NEW: undefined,
-      MURPH_OPERATOR_CONFIG_TEST_SET: 'original',
-    },
-    async () => {
-      applySetupRuntimeEnvOverridesToProcess({
-        MURPH_OPERATOR_CONFIG_TEST_KEEP: '   ',
-        MURPH_OPERATOR_CONFIG_TEST_NEW: 'new-value',
-        MURPH_OPERATOR_CONFIG_TEST_SET: '  updated  ',
-      })
-
-      assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_KEEP, 'keep-me')
-      assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_NEW, 'new-value')
-      assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_SET, '  updated  ')
-    },
-  )
-})
-
-test('setup command options prefer explicit vault, then VAULT env, then ./vault', async () => {
-  await withTemporaryProcessEnv(
-    {
-      VAULT: '  /env-vault  ',
-    },
-    async () => {
-      assert.equal(
-        setupCommandOptionsSchema.parse({ vault: '/explicit-vault' }).vault,
-        '/explicit-vault',
-      )
-      assert.equal(
-        setupCommandOptionsSchema.parse({}).vault,
-        '/env-vault',
-      )
-    },
-  )
-
-  await withTemporaryProcessEnv(
-    {
-      VAULT: '   ',
-    },
-    async () => {
-      assert.equal(
-        setupCommandOptionsSchema.parse({}).vault,
-        './vault',
-      )
-    },
-  )
-})
-
-test('command helpers normalize top-level tokens and request ids', () => {
+test('command helpers normalize command paths and request ids', () => {
   assert.deepEqual(emptyArgsSchema.parse({}), {})
   assert.deepEqual(
     withBaseOptions({
@@ -218,37 +85,6 @@ test('command helpers normalize top-level tokens and request ids', () => {
       vault: '/vault',
     },
   )
-  assert.equal(
-    resolveEffectiveTopLevelToken([
-      '--format',
-      'json',
-      '--token-limit',
-      '10',
-      'assistant',
-      'status',
-    ]),
-    'assistant',
-  )
-  assert.equal(
-    resolveEffectiveTopLevelToken([
-      '--format=json',
-      '--token-limit=10',
-      'assistant',
-      'status',
-    ]),
-    'assistant',
-  )
-  assert.equal(
-    resolveEffectiveTopLevelToken([
-      '--filter-output=result',
-      '--token-offset=5',
-      'assistant',
-      'status',
-    ]),
-    'assistant',
-  )
-  assert.equal(resolveEffectiveTopLevelToken(['', '--token-offset', '5']), null)
-  assert.equal(resolveEffectiveTopLevelToken(['--format', 'json', '--', 'show']), 'show')
   assert.deepEqual(
     resolveVaultCliCommandPath([
       '--format',
@@ -296,7 +132,7 @@ test('assistant backend targets trim config input and strip sensitive headers be
     codexCommand: '  codex  ',
     codexHome: '  /tmp/codex-home  ',
     model: '  gpt-4o  ',
-    oss: true,
+    oss: false,
     profile: '  default  ',
     sandbox: 'workspace-write',
   })
@@ -308,28 +144,12 @@ test('assistant backend targets trim config input and strip sensitive headers be
     codexHome: '/tmp/codex-home',
     model: 'gpt-4o',
     modelProvider: null,
-    oss: true,
+    oss: false,
     profile: 'default',
     reasoningEffort: DEFAULT_MURPH_CODEX_REASONING_EFFORT,
     sandbox: 'workspace-write',
   })
 
-  assert.equal(
-    assistantBackendTargetsEqual(
-      normalizedCodexTarget,
-      createAssistantBackendTarget({
-        approvalPolicy: 'never',
-        codexCommand: 'codex',
-        codexHome: '/tmp/codex-home',
-        model: 'gpt-4o',
-        oss: true,
-        profile: 'default',
-        provider: 'codex-cli',
-        sandbox: 'workspace-write',
-      }),
-    ),
-    true,
-  )
 })
 
 test('representative contract schemas stay wired to the owned setup/operator seams', () => {
@@ -395,8 +215,8 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         adapter: 'codex-cli',
         approvalPolicy: 'never',
         codexCommand: null,
-        model: 'gpt-5.6-terra',
-        modelProvider: 'vercel-ai-gateway',
+        model: 'gpt-6.1-sol',
+        modelProvider: 'openai',
         oss: false,
         profile: null,
         reasoningEffort: 'high',
@@ -414,14 +234,14 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     continuityFingerprint: serializeAssistantProviderSessionOptions({
       provider: 'codex-cli',
       approvalPolicy: 'never',
-      model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
       reasoningEffort: 'high',
       sandbox: 'danger-full-access',
     }).continuityFingerprint,
     executionDriver: 'codex-app-server',
-    model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6.1-sol',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -429,35 +249,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     resumeKind: 'codex-thread',
     sandbox: 'danger-full-access',
   })
-  assert.deepEqual(
-    assistantStatusAutomationSchema.parse({
-      autoReply: [
-        {
-          channel: 'telegram',
-          enabledAt: '2026-04-08T12:05:00.000Z',
-          eligibleAfter: {
-            createdAt: null,
-            inputId: 'input-1',
-            occurredAt: '2026-04-08T12:05:00.000Z',
-            sourceKind: 'inbox-capture',
-          },
-        },
-      ],
-      updatedAt: '2026-04-08T12:10:00.000Z',
-    }).autoReply,
-    [
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-08T12:05:00.000Z',
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'input-1',
-          occurredAt: '2026-04-08T12:05:00.000Z',
-          sourceKind: 'inbox-capture',
-        },
-      },
-    ],
-  )
+
   assert.deepEqual(
     parseAssistantSessionRecord({
       alias: null,
@@ -541,7 +333,7 @@ test('hosted assistant config normalization keeps the active Codex profile ready
           adapter: 'codex-cli',
           approvalPolicy: null,
           codexCommand: null,
-          model: '  gpt-5.6-terra  ',
+          model: '  gpt-6.1-sol  ',
           modelProvider: '  openai  ',
           oss: false,
           profile: null,
@@ -565,7 +357,7 @@ test('hosted assistant config normalization keeps the active Codex profile ready
           adapter: 'codex-cli',
           approvalPolicy: null,
           codexCommand: null,
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
           profile: null,
@@ -596,7 +388,7 @@ test('hosted assistant config normalization keeps the active Codex profile ready
     approvalPolicy: null,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: null,

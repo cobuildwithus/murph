@@ -36,12 +36,6 @@ interface AssistantSelfDeliveryTargetDependencies {
   resolveDefaults: (
     homeDirectory: string,
   ) => Promise<AssistantSelfDeliveryTargetDefaultsLike | null>
-  saveDefaultsPatch: (
-    patch: {
-      selfDeliveryTargets: AssistantSelfDeliveryTargetMap | null
-    },
-    homeDirectory: string,
-  ) => Promise<unknown>
 }
 
 export async function listAssistantSelfDeliveryTargets(
@@ -67,79 +61,6 @@ export async function resolveAssistantSelfDeliveryTarget(
 
   const defaults = await dependencies.resolveDefaults(homeDirectory)
   return defaults?.selfDeliveryTargets?.[normalizedChannel] ?? null
-}
-
-export async function saveAssistantSelfDeliveryTarget(
-  target: AssistantSelfDeliveryTarget,
-  dependencies: AssistantSelfDeliveryTargetDependencies,
-  homeDirectory: string,
-): Promise<AssistantSelfDeliveryTarget> {
-  const normalizedTarget = normalizeAssistantSelfDeliveryTarget(
-    target,
-    dependencies.normalizeString,
-  )
-  const existing = await dependencies.resolveDefaults(homeDirectory)
-  const nextTargets = {
-    ...(existing?.selfDeliveryTargets ?? {}),
-    [normalizedTarget.channel]: normalizedTarget,
-  }
-
-  await dependencies.saveDefaultsPatch(
-    {
-      selfDeliveryTargets: nextTargets,
-    },
-    homeDirectory,
-  )
-
-  return normalizedTarget
-}
-
-export async function clearAssistantSelfDeliveryTargets(
-  channel: string | null | undefined,
-  dependencies: AssistantSelfDeliveryTargetDependencies,
-  homeDirectory: string,
-): Promise<string[]> {
-  const existing = await dependencies.resolveDefaults(homeDirectory)
-  const currentTargets = {
-    ...(existing?.selfDeliveryTargets ?? {}),
-  }
-  const normalizedChannel =
-    normalizeAssistantSelfDeliveryTargetChannel(
-      channel,
-      dependencies.normalizeString,
-    ) ?? null
-
-  if (normalizedChannel) {
-    if (!currentTargets[normalizedChannel]) {
-      return []
-    }
-
-    delete currentTargets[normalizedChannel]
-    await dependencies.saveDefaultsPatch(
-      {
-        selfDeliveryTargets:
-          Object.keys(currentTargets).length > 0 ? currentTargets : null,
-      },
-      homeDirectory,
-    )
-    return [normalizedChannel]
-  }
-
-  const clearedChannels = sortAssistantSelfDeliveryTargets(currentTargets).map(
-    (target) => target.channel,
-  )
-  if (clearedChannels.length === 0) {
-    return []
-  }
-
-  await dependencies.saveDefaultsPatch(
-    {
-      selfDeliveryTargets: null,
-    },
-    homeDirectory,
-  )
-
-  return clearedChannels
 }
 
 export async function applyAssistantSelfDeliveryTargetDefaults(

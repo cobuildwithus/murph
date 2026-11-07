@@ -33,6 +33,21 @@ const mocks = vi.hoisted(() => ({
   sendHostedEmailPublicBootstrapChallenge: vi.fn(),
 }));
 
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readStrictHostedMemberAccess: async (
+      input: Parameters<typeof actual.readStrictHostedMemberAccess>[0],
+    ) => {
+      const member = await actual.readActiveHostedMemberAccessState(input);
+      return member !== null && (member.threadContainer !== null || actual.hasStrictHostedPersonAccess(member));
+    },
+  };
+});
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -721,8 +736,13 @@ describe("hosted execution email callback routes", () => {
       label: "unpaid",
       suspendedAt: null,
     },
+    {
+      billingStatus: HostedBillingStatus.past_due,
+      label: "past_due",
+      suspendedAt: null,
+    },
   ])(
-    "returns userId null for alias-route resolution when the resolved member is $label",
+    "rejects inactive alias-route resolution when the resolved member is $label",
     async ({ billingStatus, suspendedAt }) => {
       mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
       prismaClient.hostedMember.findUnique.mockResolvedValue(createHostedMemberAccessState({
@@ -846,8 +866,13 @@ describe("hosted execution email callback routes", () => {
       label: "unpaid",
       suspendedAt: null,
     },
+    {
+      billingStatus: HostedBillingStatus.past_due,
+      label: "past_due",
+      suspendedAt: null,
+    },
   ])(
-    "returns userId null for direct-public sender resolution when the resolved member is $label",
+    "rejects inactive direct-public sender resolution when the resolved member is $label",
     async ({ billingStatus, suspendedAt }) => {
       mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
       prismaClient.hostedMember.findUnique.mockResolvedValue(createHostedMemberAccessState({

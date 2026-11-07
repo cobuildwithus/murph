@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { MemberActionRequestV1 } from "@murphai/contracts";
 import {
   buildHostedExecutionMemberActionRequestedWake,
@@ -20,6 +20,7 @@ import {
   lockHostedMemberSponsoredAccessRows,
 } from "../hosted-onboarding/shared";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
+import { createHostedPostCommitDeadline, waitForHostedPostCommitOperation } from "../hosted-onboarding/bounded-post-commit";
 
 export interface SubmitMemberActionResult {
   accepted: true;
@@ -33,12 +34,14 @@ export async function submitMemberAction(input: {
   memberId: string;
   prisma: PrismaClient;
   request: MemberActionRequestV1;
+  assertCurrentAuthorityTx?: (tx: Prisma.TransactionClient) => Promise<void>;
 }): Promise<SubmitMemberActionResult> {
   const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
     append: (prepared) =>
       input.prisma.$transaction(async (tx) => {
         await lockHostedMemberRow(tx, input.memberId);
         await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
+        await input.assertCurrentAuthorityTx?.(tx);
         await assertActiveHostedMemberAccessAllowed({
           memberId: input.memberId,
           prisma: tx,
@@ -64,16 +67,24 @@ export async function submitMemberAction(input: {
   });
 
   if (!appended.dedupeConflict) {
-    await signalHostedMailboxAppendRuntime({
-      expectedUserId: input.memberId,
-      knownCheckpoint: {
-        lane: appended.item.lane,
-        laneSeq: appended.item.laneSeq,
-        userId: input.memberId,
-      },
-      mailboxItemId: appended.item.id,
-      prisma: input.prisma,
-    });
+    try {
+      await waitForHostedPostCommitOperation({
+        deadlineMs: createHostedPostCommitDeadline(undefined),
+        operation: abortSignal => signalHostedMailboxAppendRuntime({
+          abortSignal,
+          expectedUserId: input.memberId,
+          knownCheckpoint: {
+            lane: appended.item.lane,
+            laneSeq: appended.item.laneSeq,
+            userId: input.memberId,
+          },
+          mailboxItemId: appended.item.id,
+          prisma: input.prisma,
+        }),
+      });
+    } catch {
+      // Durable acceptance stands; the existing mailbox handoff sweeper retries.
+    }
   }
 
   return {

@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-29",
+  "order": 100,
+  "item": {
+    "id": "voice-memo-language-memory",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Voice memos follow your language",
+    "summary": "Murph picks up the language you use in private conversation and remembers it for future voice memos.",
+    "details": "Your selected voice stays the same. You can change the default or ask for another language just once; a translation request does not reset your preference.",
+    "relevanceTags": [
+      "voice",
+      "memory"
+    ],
+    "sourcePullRequests": []
+  }
+}

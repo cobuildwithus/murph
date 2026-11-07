@@ -1,8 +1,11 @@
 import {
+  getBankEntityRegistryProjectionMetadata,
   isExpectedHabitatAspectRelativePath,
   requireBankEntityRegistryDefinition,
   type BankEntityDefinitionWithRegistry,
   type BankEntityKind,
+  type BankEntityRegistryProjectionHelpers,
+  type BankEntityRegistryProjectionSortBehavior,
   type CommonsGoalRef,
   type FamilyConditionHistoryEntry,
   type NutritionData,
@@ -21,11 +24,6 @@ import {
   matchesText,
   pathSlug,
 } from "./shared.ts";
-import {
-  getBankRegistryQueryMetadata,
-  type BankEntityRegistryProjectionHelpers,
-  type BankEntitySortBehavior,
-} from "./bank-registry-query-metadata.ts";
 import {
   type CanonicalEntity,
   type CanonicalEntityFamily,
@@ -102,7 +100,7 @@ export function readPriority(
 }
 
 function compareRegistryRecords<TEntity extends RegistryQueryEntity>(
-  sortBehavior: BankEntitySortBehavior | undefined,
+  sortBehavior: BankEntityRegistryProjectionSortBehavior | undefined,
 ): ((left: TEntity, right: TEntity) => number) | undefined {
   if (sortBehavior === "priority-title") {
     return buildPriorityTitleComparator as (left: TEntity, right: TEntity) => number;
@@ -128,7 +126,7 @@ function createBankEntityRegistryDefinition<TEntity extends RegistryQueryEntity>
   kind: BankEntityKind,
 ): RegistryDefinition<TEntity> {
   const { registry } = requireBankEntityRegistryDefinition(kind);
-  const projection = getBankRegistryQueryMetadata(kind);
+  const projection = getBankEntityRegistryProjectionMetadata(kind);
 
   return {
     compare: compareRegistryRecords(projection.sortBehavior),

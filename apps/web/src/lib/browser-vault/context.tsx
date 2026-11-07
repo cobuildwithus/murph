@@ -19,13 +19,9 @@ import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboard
 import {
   getBrowserVaultMetricBucketId,
   createBrowserVaultQueryClient,
-  selectBrowserVaultExperimentMetricKeys,
   type BrowserVaultReplica,
-  type BrowserVaultExperimentRunCardLookup,
-  type BrowserVaultLabsCapableQueryClient,
   type BrowserVaultMetricBucketId,
   type BrowserVaultMetricSeriesCapableQueryClient,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-replica-client";
 import {
   type BrowserVaultAnyQueryClient,
@@ -159,6 +155,11 @@ export function BrowserVaultProvider({
   initialMemberId: string | null;
   loadEnabled?: boolean;
 }) {
+  const pathname = usePathname();
+  // Account-management pages have no health-data consumers. Reuse the disabled
+  // owner so returning to data pages still requires fresh session authority.
+  const accountPage = /^\/(?:settings|connect|records)(?:\/|$)/u.test(pathname);
+
   if (developmentReplica) {
     return (
       <DevelopmentBrowserVaultProvider replica={developmentReplica}>
@@ -167,7 +168,7 @@ export function BrowserVaultProvider({
     );
   }
 
-  if (!loadEnabled) {
+  if (!loadEnabled || accountPage) {
     return (
       <DisabledBrowserVaultProvider>{children}</DisabledBrowserVaultProvider>
     );
@@ -1029,28 +1030,6 @@ export function useBrowserVaultMetricsSelector<T>(
   );
 }
 
-export function useBrowserVaultLabsSelector<T>(
-  selector: (client: BrowserVaultLabsCapableQueryClient) => T,
-): T | null {
-  const { client } = useBrowserVault();
-  const labsClient = isBrowserVaultLabsCapable(client) ? client : null;
-  return useMemo(
-    () => (labsClient ? selector(labsClient) : null),
-    [labsClient, selector],
-  );
-}
-
-export function useBrowserVaultFullSelector<T>(
-  selector: (client: BrowserVaultQueryClient) => T,
-): T | null {
-  const { client } = useBrowserVault();
-  const fullClient = client?.capability === "core+metrics+labs" ? client : null;
-  return useMemo(
-    () => (fullClient ? selector(fullClient) : null),
-    [fullClient, selector],
-  );
-}
-
 export function isBrowserVaultMetricsCapable(
   client: BrowserVaultAnyQueryClient | null,
 ): client is BrowserVaultMetricSeriesCapableQueryClient {
@@ -1058,16 +1037,6 @@ export function isBrowserVaultMetricsCapable(
     client?.capability === "core+metrics-partial" ||
     client?.capability === "core+metrics-partial+labs" ||
     client?.capability === "core+metrics" ||
-    client?.capability === "core+metrics+labs"
-  );
-}
-
-export function isBrowserVaultLabsCapable(
-  client: BrowserVaultAnyQueryClient | null,
-): client is BrowserVaultLabsCapableQueryClient {
-  return (
-    client?.capability === "core+labs" ||
-    client?.capability === "core+metrics-partial+labs" ||
     client?.capability === "core+metrics+labs"
   );
 }
@@ -1133,57 +1102,5 @@ export function useBrowserVaultMetricKeyDemand(
   const bucketsLoaded = useBrowserVaultMetricBucketDemand(bucketIds);
   return (
     metricKeyDemand.length === 0 || (bucketIds.length > 0 && bucketsLoaded)
-  );
-}
-
-export function useBrowserVaultExperimentMetricBucketDemand(input: {
-  experimentId?: string;
-  lookups?: readonly BrowserVaultExperimentRunCardLookup[];
-}): boolean {
-  const { client } = useBrowserVault();
-  const lookups = input.lookups ?? [];
-  const lookupKey = JSON.stringify(lookups);
-  const stableLookups = useMemo(
-    () => JSON.parse(lookupKey) as BrowserVaultExperimentRunCardLookup[],
-    [lookupKey],
-  );
-  const card = useMemo(() => {
-    if (!client) return null;
-    if (input.experimentId) {
-      const exact = client.experimentRunCards.get(input.experimentId);
-      if (exact) return exact;
-    }
-    return (
-      stableLookups
-        .map((lookup) => client.experimentRunCards.find(lookup))
-        .find((candidate) => candidate !== null) ?? null
-    );
-  }, [client, input.experimentId, stableLookups]);
-  const entityMetricKeys = useMemo(() => {
-    if (!client || card) return null;
-    if (input.experimentId) {
-      const exact = selectBrowserVaultExperimentMetricKeys(client, {
-        experimentId: input.experimentId,
-      });
-      if (exact !== null) return exact;
-    }
-    for (const lookup of stableLookups) {
-      const match = selectBrowserVaultExperimentMetricKeys(client, lookup);
-      if (match !== null) return match;
-    }
-    return null;
-  }, [card, client, input.experimentId, stableLookups]);
-  const cardBucketsLoaded = useBrowserVaultMetricBucketDemand(
-    card?.requiredMetricBuckets ?? [],
-  );
-  const entityMetricKeysLoaded = useBrowserVaultMetricKeyDemand(
-    entityMetricKeys ?? [],
-  );
-  return (
-    client !== null &&
-    (card
-      ? cardBucketsLoaded
-      : entityMetricKeys === null ||
-        (entityMetricKeys !== undefined && entityMetricKeysLoaded))
   );
 }

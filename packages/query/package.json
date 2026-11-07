@@ -22,21 +22,6 @@
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
-    "./browser-biomarkers": {
-      "types": "./dist/browser-biomarkers.d.ts",
-      "import": "./dist/browser-biomarkers.js",
-      "default": "./dist/browser-biomarkers.js"
-    },
-    "./browser-experiments": {
-      "types": "./dist/browser-experiments.d.ts",
-      "import": "./dist/browser-experiments.js",
-      "default": "./dist/browser-experiments.js"
-    },
-    "./browser-murph-age": {
-      "types": "./dist/browser-murph-age.d.ts",
-      "import": "./dist/browser-murph-age.js",
-      "default": "./dist/browser-murph-age.js"
-    },
     "./browser-overview": {
       "types": "./dist/browser-overview.d.ts",
       "import": "./dist/browser-overview.js",
@@ -71,11 +56,6 @@
       "types": "./dist/query-visibility.d.ts",
       "import": "./dist/query-visibility.js",
       "default": "./dist/query-visibility.js"
-    },
-    "./murph-age": {
-      "types": "./dist/murph-age.d.ts",
-      "import": "./dist/murph-age.js",
-      "default": "./dist/murph-age.js"
     }
   },
   "files": [
@@ -84,7 +64,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
@@ -95,9 +75,9 @@
     "@murphai/runtime-state": "workspace:*"
   },
   "devDependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   }
 }

@@ -1,5 +1,6 @@
 {
   "recommendations": [
-    "TypeScriptTeam.native-preview"
+    "TypeScriptTeam.native-preview",
+    "oxc.oxc-vscode"
   ]
 }

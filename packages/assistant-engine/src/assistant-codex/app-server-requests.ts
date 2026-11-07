@@ -13,6 +13,8 @@ import type {
   CodexAppServerPreparedImageInput,
 } from './images.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
+import { readCodexNonEmptyString, readCodexRecord } from './app-server-protocol.js'
+import { supportsCodexTurnDeveloperInstructions } from './config.js'
 import { withCodexToolInputContract } from './tool-input-contract.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -51,14 +53,16 @@ type CodexAppServerPreparedThreadInput = Omit<
 export function buildCodexThreadStartParams(
   input: CodexAppServerPreparedThreadInput,
 ): Record<string, unknown> {
-  return {
+  return stripUndefinedRpcParams({
     experimentalRawEvents: true,
-    ...buildCodexThreadContextParams({
-      includeInstructions: true,
-      includeServiceName: true,
-      input,
-    }),
-  }
+    ...buildCodexThreadContextParams(input),
+    dynamicTools: input.dynamicTools.map(withCodexToolInputContract),
+    ephemeral: input.ephemeral ?? undefined,
+    environments: input.environments
+      ? input.environments.map((environment) => ({ ...environment }))
+      : undefined,
+    serviceName: CODEX_RPC_CLIENT_NAME,
+  })
 }
 
 export function buildCodexThreadMetadataResumeParams(
@@ -78,60 +82,16 @@ export function buildCodexThreadResumeParams(input: {
   codexThreadId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
-    ...buildCodexThreadResumeContextParams(input.input),
+    ...buildCodexThreadContextParams(input.input),
+    developerInstructions: supportsCodexTurnDeveloperInstructions(input.input)
+      ? ''
+      : undefined,
     excludeTurns: true,
     threadId: input.codexThreadId,
   })
 }
 
-export function buildCodexThreadContextParams(input: {
-  includeInstructions: boolean
-  includeServiceName: boolean
-  input: CodexAppServerPreparedThreadInput
-}): Record<string, unknown> {
-  const permissions = normalizeNullableString(input.input.permissions)
-  if (permissions && input.input.sandbox) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Codex app-server requests cannot combine named permissions with a legacy sandbox.',
-      {
-        invalidFields: ['permissions', 'sandbox'],
-        retryable: false,
-      },
-    )
-  }
-
-  return stripUndefinedRpcParams({
-    approvalPolicy: input.input.approvalPolicy,
-    baseInstructions: input.includeInstructions
-      ? normalizeNullableString(input.input.baseInstructions)
-      : undefined,
-    cwd: input.input.workingDirectory,
-    developerInstructions: input.includeInstructions
-      ? normalizeNullableString(input.input.developerInstructions)
-      : undefined,
-    dynamicTools: input.input.dynamicTools.map(withCodexToolInputContract),
-    ephemeral: input.input.ephemeral ?? undefined,
-    environments: input.input.environments
-      ? input.input.environments.map((environment) => ({ ...environment }))
-      : undefined,
-    model: normalizeNullableString(input.input.model),
-    modelProvider: normalizeNullableString(input.input.modelProvider),
-    permissions,
-    runtimeWorkspaceRoots: input.input.runtimeWorkspaceRoots
-      ? [...input.input.runtimeWorkspaceRoots]
-      : undefined,
-    config: input.input.threadConfig
-      ? { ...input.input.threadConfig }
-      : undefined,
-    sandbox: permissions
-      ? undefined
-      : mapCodexAppServerSandboxMode(input.input.sandbox),
-    serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
-  })
-}
-
-function buildCodexThreadResumeContextParams(
+function buildCodexThreadContextParams(
   input: CodexAppServerPreparedThreadInput,
 ): Record<string, unknown> {
   const permissions = normalizeNullableString(input.permissions)
@@ -148,6 +108,12 @@ function buildCodexThreadResumeContextParams(
 
   return {
     approvalPolicy: input.approvalPolicy,
+    // The module-owned kernel is fixed while warm; cold resume refreshes it.
+    baseInstructions: normalizeNullableString(input.baseInstructions),
+    // Bundled/custom catalogs override turn guidance; keep their thread contract.
+    developerInstructions: supportsCodexTurnDeveloperInstructions(input)
+      ? ''
+      : normalizeNullableString(input.developerInstructions),
     cwd: input.workingDirectory,
     model: normalizeNullableString(input.model),
     modelProvider: normalizeNullableString(input.modelProvider),
@@ -170,8 +136,23 @@ export function buildCodexTurnStartParams(input: {
     workingDirectory: string
   }
   codexThreadId: string
+  threadResult?: unknown
 }): Record<string, unknown> {
+  const thread = readCodexRecord(input.threadResult)
   const params = stripUndefinedRpcParams({
+    collaborationMode: input.input.developerInstructions != null && supportsCodexTurnDeveloperInstructions(input.input)
+      ? {
+          mode: 'default',
+          settings: {
+            model: normalizeNullableString(input.input.model)
+              ?? readCodexNonEmptyString(thread?.model),
+            reasoning_effort: normalizeNullableString(input.input.reasoningEffort)
+              ?? readCodexNonEmptyString(thread?.reasoningEffort)
+              ?? null,
+            developer_instructions: input.input.developerInstructions,
+          },
+        }
+      : undefined,
     effort: normalizeNullableString(input.input.reasoningEffort),
     input: buildCodexAppServerInputItems({
       images: input.images,

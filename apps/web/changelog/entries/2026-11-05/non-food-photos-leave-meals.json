@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "non-food-photos-leave-meals",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Photos that aren't food leave Meals",
+    "summary": "When Murph checks a captured photo and finds it isn't food you ate, it now removes that entry and its photo instead of keeping it in Meals.",
+    "details": "A photo with a note you wrote stays, and if Murph isn't sure, it treats the photo as food. Entries saved before this change stay until you remove them.",
+    "relevanceTags": [
+      "meals",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      4609
+    ]
+  }
+}

@@ -10,7 +10,7 @@ import {
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 
 describe("hosted usage-credit offer catalog", () => {
-  it("freezes the historical catalog while giving groups a distinct $20 offer", () => {
+  it("grants 80% of each purchase price as usage across all top-up offers", () => {
     expect(HOSTED_USAGE_CREDIT_OFFER_CODES.map((code) =>
       getHostedUsageCreditOfferDefinition(code)
     )).toEqual([
@@ -18,25 +18,25 @@ describe("hosted usage-credit offer catalog", () => {
         cashAmountMinor: 500,
         cashCurrency: "usd",
         code: "usage_5_usd",
-        grantUsdMicros: 5_000_000n,
+        grantUsdMicros: 4_000_000n,
       }),
       expect.objectContaining({
         cashAmountMinor: 1_000,
         cashCurrency: "usd",
         code: "usage_10_usd",
-        grantUsdMicros: 10_000_000n,
+        grantUsdMicros: 8_000_000n,
       }),
       expect.objectContaining({
         cashAmountMinor: 2_000,
         cashCurrency: "usd",
         code: "usage_20_usd",
-        grantUsdMicros: 20_000_000n,
+        grantUsdMicros: 16_000_000n,
       }),
       expect.objectContaining({
         cashAmountMinor: 2_500,
         cashCurrency: "usd",
         code: "usage_25_usd",
-        grantUsdMicros: 25_000_000n,
+        grantUsdMicros: 20_000_000n,
       }),
     ]);
   });

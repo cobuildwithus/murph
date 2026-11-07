@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -200,7 +201,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
+vi.mock("../src/hosted-runtime/callbacks.ts", async (importOriginal) => ({
+  HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS: (await importOriginal<typeof import("../src/hosted-runtime/callbacks.ts")>()).HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS,
   assertHostedAssistantLinqTurnCommitAuthority:
     mocks.assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
@@ -365,6 +367,9 @@ type RuntimeUsageRecordPort = NonNullable<
 >;
 type RuntimeAssistantConfigurationToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
+>;
+type RuntimeUsageDiagnosticsPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageDiagnosticsPort"]
 >;
 type RuntimeLabsToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["labsToolPort"]
@@ -587,7 +592,7 @@ beforeEach(() => {
   });
   mocks.prepareHostedProviderCleanupPlan.mockImplementation(async (input: {
     deferred: boolean;
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     initialCheckpoint?: { nextWakeAt?: string | null } | null;
     nowMs: number;
     terminalCleanupMessageIds?: readonly string[] | null;
@@ -599,7 +604,7 @@ beforeEach(() => {
         const queuedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
           checkpoint: {
             nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              runnerIdleTtlMs: input.runnerIdleTtlMs,
               nowMs: input.nowMs,
             }),
           },
@@ -626,7 +631,7 @@ beforeEach(() => {
         const rearmedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
           checkpoint: {
             nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              runnerIdleTtlMs: input.runnerIdleTtlMs,
               nowMs: input.nowMs,
             }),
           },
@@ -657,7 +662,7 @@ beforeEach(() => {
       checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
         checkpoint: {
           nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           }),
         },
@@ -707,7 +712,7 @@ beforeEach(() => {
     stillDirty: false,
   });
   mocks.recordHostedProviderCleanupAfterDelivery.mockImplementation(async (input: {
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     nowMs: number;
     outcomes: readonly HostedAssistantDeliveryOutcome[];
     vaultRoot: string;
@@ -723,7 +728,7 @@ beforeEach(() => {
     const checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
       checkpoint: {
         nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          runnerIdleTtlMs: input.runnerIdleTtlMs,
           nowMs: input.nowMs,
         }),
       },
@@ -774,7 +779,7 @@ beforeEach(() => {
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
         ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           })
         : null;
@@ -895,10 +900,6 @@ async function writeHostedPhaseExperimentSource(vaultRoot: string): Promise<void
     "utf8",
   );
 }
-
-
-
-
 
 async function runRealForegroundApprovalAdmissionScenario(input: {
   deliveryEffect: boolean;
@@ -1301,6 +1302,7 @@ function createPhaseInput(input: {
   >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
   runtimeLabsToolPort?: RuntimeLabsToolPort;
+  runtimeUsageDiagnosticsPort?: RuntimeUsageDiagnosticsPort;
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -1459,6 +1461,9 @@ function createPhaseInput(input: {
                 input.runtimeAssistantConfigurationToolPort,
             }
           : {}),
+        ...(input.runtimeUsageDiagnosticsPort
+          ? { usageDiagnosticsPort: input.runtimeUsageDiagnosticsPort }
+          : {}),
         ...(input.runtimeLabsToolPort
           ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
@@ -1543,12 +1548,11 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6.1-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6.1-sol",
     sessionId: "asst_direct_usage",
-    stripeMeterSource: "murph",
     surface: null,
     tokenPricingBasis: "standard",
     totalTokens: 15,
@@ -1628,8 +1632,8 @@ async function seedDirectLinqAssistantInputRoute(input: {
       approvalPolicy: "never",
       codexCommand: null,
       codexHome: null,
-      model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol",
+      modelProvider: "hosted-openai",
       oss: false,
       profile: null,
       reasoningEffort: "medium",
@@ -2023,6 +2027,33 @@ function createPendingEffectsReconcileSystemMailboxItem() {
   };
 }
 
+/** A photo the member explicitly sent from the app, re-queued for its estimation reply. */
+function createManualMealPhotoNotificationSystemMailboxItem(
+  input: { origin?: "automatic" | "manual" } = {},
+) {
+  const captureId = "c".repeat(64);
+  const eventId = `meal-photo:${input.origin ?? "manual"}:${captureId}`;
+  return {
+    ...createSystemMailboxItem(),
+    attemptCount: 0,
+    itemId: "system_mailbox_item_manual_meal_photo",
+    mailboxDedupeKey: eventId,
+    occurredAt: "2026-04-27T00:02:00.000Z",
+    routeAction: "dispatch-assistant-notification" as const,
+    wake: buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 4,
+      captureId,
+      capturedAt: "2026-04-27T00:02:00.000Z",
+      directRoute: { channel: "linq", threadId: "linq_private_thread" },
+      eventId,
+      mealPhotoKey: "d".repeat(40),
+      memberId: "member_synthetic_phase",
+      occurredAt: "2026-04-27T00:02:00.000Z",
+      sha256: "e".repeat(64),
+    }),
+  };
+}
+
 function createAssistantAskCompletionSystemMailboxItem() {
   return {
     ...createSystemMailboxItem(),
@@ -2053,28 +2084,6 @@ function createAssistantAskCompletionSystemMailboxItem() {
   };
 }
 
-function createCodexAuthSystemMailboxItem() {
-  return {
-    ...createSystemMailboxItem(),
-    itemId: "system_mailbox_item_codex_auth",
-    mailboxDedupeKey: "dedupe_system_mailbox_item_codex_auth",
-    postCheckpointRecord: {
-      attemptId: "hca_abcdefghijklmnop",
-      kind: "codex-auth.updated" as const,
-      phase: "connected" as const,
-    },
-    routeAction: "apply-runtime-control-request" as const,
-    wake: {
-      action: "connect" as const,
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      kind: "runtime.codex-auth-requested" as const,
-      occurredAt: "2026-04-27T00:00:00.000Z",
-      userId: "member_synthetic_phase",
-    },
-  };
-}
-
 function createVaultShareProjectionSystemMailboxItem() {
   return {
     ...createSystemMailboxItem(),
@@ -2098,13 +2107,13 @@ export {
   createAssistantAskCompletionSystemMailboxItem,
   createAssistantUsageRecord,
   createBrowserVaultRefreshSystemMailboxItem,
-  createCodexAuthSystemMailboxItem,
   createDeliveryEffect,
   createDueAssistantWorkspace,
   createExternalCompletionSystemMailboxItem,
   createFailedDeliveryOutcome,
   createGroupRoomModelInitializationSystemMailboxItem,
   createMaintenanceSystemMailboxItem,
+  createManualMealPhotoNotificationSystemMailboxItem,
   createMemberActionSystemMailboxItem,
   createMemberActivationSignupWelcomeSystemMailboxItem,
   createMemberPreferencesSystemMailboxItem,
@@ -2142,6 +2151,7 @@ export type {
   RuntimeDeviceSyncConnectLinkRequest,
   RuntimeDeviceSyncPort,
   RuntimeLabsToolPort,
+  RuntimeUsageDiagnosticsPort,
   RuntimeSubscriptionToolPort,
   RuntimeUsageRecordPort,
 };

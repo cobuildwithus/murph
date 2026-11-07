@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { createInterface } from 'node:readline'
 
 import { Cli } from 'incur'
 import { afterEach, test } from 'vitest'
@@ -10,9 +13,6 @@ import type {
   DeviceAccountReconcileResult,
   DeviceAccountShowResult,
   DeviceConnectResult,
-  DeviceDaemonStartResult,
-  DeviceDaemonStatusResult,
-  DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from '@murphai/operator-config/device-cli-contracts'
 
@@ -22,6 +22,7 @@ import {
   type DeviceSyncServices,
 } from '../src/device-services.js'
 import type {
+  KnowledgeAbsentPageResult,
   KnowledgeGetResult as KnowledgeShowResult,
   KnowledgeIndexRebuildResult,
   KnowledgeLintResult,
@@ -32,9 +33,12 @@ import type {
 } from '@murphai/query'
 import { createVaultCli } from '../src/vault-cli.js'
 import {
+  binPath,
   createTempVaultContext,
+  ensureCliRuntimeArtifacts,
   runCli,
   runInProcessJsonCli,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -54,7 +58,7 @@ const deviceBaseUrl = 'http://127.0.0.1:45123'
 
 const connectedAccount: DeviceAccountShowResult['account'] = {
   id: 'acct_oura_01',
-  provider: 'oura',
+  provider: 'junction',
   externalAccountId: 'oura-user-1',
   displayName: 'Oura Test Account',
   status: 'active',
@@ -79,12 +83,6 @@ function createDeviceCommandServices() {
   const services = createIntegratedDeviceSyncServices()
   const calls = {
     connect: null as Parameters<DeviceSyncServices['connect']>[0] | null,
-    daemonStart:
-      null as Parameters<DeviceSyncServices['daemonStart']>[0] | null,
-    daemonStatus:
-      null as Parameters<DeviceSyncServices['daemonStatus']>[0] | null,
-    daemonStop:
-      null as Parameters<DeviceSyncServices['daemonStop']>[0] | null,
     disconnectAccount:
       null as Parameters<DeviceSyncServices['disconnectAccount']>[0] | null,
     listAccounts:
@@ -101,11 +99,11 @@ function createDeviceCommandServices() {
     baseUrl: deviceBaseUrl,
     providers: [
       {
-        provider: 'oura',
-        callbackPath: '/oauth/oura/callback',
-        callbackUrl: `${deviceBaseUrl}/oauth/oura/callback`,
-        webhookPath: '/webhooks/oura',
-        webhookUrl: `${deviceBaseUrl}/webhooks/oura`,
+        provider: 'junction',
+        callbackPath: '/connect/junction/callback',
+        callbackUrl: `${deviceBaseUrl}/connect/junction/callback`,
+        webhookPath: '/webhooks/junction',
+        webhookUrl: `${deviceBaseUrl}/webhooks/junction`,
         supportsWebhooks: true,
         defaultScopes: ['email', 'personal', 'daily'],
       },
@@ -115,18 +113,15 @@ function createDeviceCommandServices() {
   const connectResult: DeviceConnectResult = {
     status: 'ok',
     kind: 'device_connect_link',
-    backend: 'local-daemon',
-    baseUrl: deviceBaseUrl,
-    provider: 'oura',
-    state: 'state_oura_01',
+    backend: 'hosted',
+    provider: 'junction',
     expiresAt: '2026-04-08T01:00:00.000Z',
-    authorizationUrl: 'https://cloud.oura.test/oauth?state=state_oura_01',
-    openedBrowser: true,
+    connectUrl: 'https://connect.example.test/oura',
   }
 
   const accountListResult: DeviceAccountListResult = {
     baseUrl: deviceBaseUrl,
-    provider: 'oura',
+    provider: 'junction',
     accounts: [connectedAccount],
   }
 
@@ -140,7 +135,7 @@ function createDeviceCommandServices() {
     account: connectedAccount,
     job: {
       id: 'job_oura_01',
-      provider: 'oura',
+      provider: 'junction',
       accountId: connectedAccount.id,
       kind: 'reconcile',
       payload: {
@@ -172,50 +167,11 @@ function createDeviceCommandServices() {
     },
   }
 
-  const daemonStatusResult: DeviceDaemonStatusResult = {
-    baseUrl: deviceBaseUrl,
-    statePath: '.runtime/operations/device-sync/state.json',
-    stdoutLogPath: '.runtime/operations/device-sync/stdout.log',
-    stderrLogPath: '.runtime/operations/device-sync/stderr.log',
-    managed: true,
-    running: true,
-    healthy: true,
-    pid: 45123,
-    startedAt: '2026-04-08T00:00:00.000Z',
-    message: 'Device daemon healthy.',
-  }
-
-  const daemonStartResult: DeviceDaemonStartResult = {
-    ...daemonStatusResult,
-    started: true,
-  }
-
-  const daemonStopResult: DeviceDaemonStopResult = {
-    ...daemonStatusResult,
-    running: false,
-    healthy: false,
-    pid: null,
-    stopped: true,
-    message: 'Device daemon stopped.',
-  }
-
   const stubbedServices: DeviceSyncServices = {
     ...services,
     async connect(input) {
       calls.connect = input
       return connectResult
-    },
-    async daemonStart(input) {
-      calls.daemonStart = input
-      return daemonStartResult
-    },
-    async daemonStatus(input) {
-      calls.daemonStatus = input
-      return daemonStatusResult
-    },
-    async daemonStop(input) {
-      calls.daemonStop = input
-      return daemonStopResult
     },
     async disconnectAccount(input) {
       calls.disconnectAccount = input
@@ -279,7 +235,7 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(providers.exitCode, null)
   assert.equal(providers.envelope.ok, true)
-  assert.equal(providers.envelope.data.providers[0]?.provider, 'oura')
+  assert.equal(providers.envelope.data.providers[0]?.provider, 'junction')
   assert.deepEqual(calls.listProviders, {
     vault: vaultRoot,
     baseUrl: deviceBaseUrl,
@@ -299,8 +255,8 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(connect.exitCode, null)
   assert.equal(connect.envelope.ok, true)
-  assert.equal(connect.envelope.data.backend, 'local-daemon')
-  assert.equal(connect.envelope.data.openedBrowser, true)
+  assert.equal(connect.envelope.data.backend, 'hosted')
+  assert.equal(connect.envelope.data.connectUrl, 'https://connect.example.test/oura')
   assert.deepEqual(calls.connect, {
     vault: vaultRoot,
     provider: 'oura',
@@ -318,7 +274,7 @@ test('device commands route every verb through the registered device service gro
     '--base-url',
     deviceBaseUrl,
     '--provider',
-    'oura',
+    'junction',
   ])
   assert.equal(accounts.exitCode, null)
   assert.equal(accounts.envelope.ok, true)
@@ -326,7 +282,7 @@ test('device commands route every verb through the registered device service gro
   assert.deepEqual(calls.listAccounts, {
     vault: vaultRoot,
     baseUrl: deviceBaseUrl,
-    provider: 'oura',
+    provider: 'junction',
   })
 
   const shown = await runInProcessJsonCli<DeviceAccountShowResult>(cli, [
@@ -341,7 +297,7 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(shown.exitCode, null)
   assert.equal(shown.envelope.ok, true)
-  assert.equal(shown.envelope.data.account.provider, 'oura')
+  assert.equal(shown.envelope.data.account.provider, 'junction')
   assert.deepEqual(calls.showAccount, {
     vault: vaultRoot,
     baseUrl: deviceBaseUrl,
@@ -393,56 +349,6 @@ test('device commands route every verb through the registered device service gro
     accountId: connectedAccount.id,
   })
 
-  const status = await runInProcessJsonCli<DeviceDaemonStatusResult>(cli, [
-    'device',
-    'daemon',
-    'status',
-    '--vault',
-    vaultRoot,
-    '--base-url',
-    deviceBaseUrl,
-  ])
-  assert.equal(status.exitCode, null)
-  assert.equal(status.envelope.ok, true)
-  assert.equal(status.envelope.data.healthy, true)
-  assert.deepEqual(calls.daemonStatus, {
-    vault: vaultRoot,
-    baseUrl: deviceBaseUrl,
-  })
-
-  const started = await runInProcessJsonCli<DeviceDaemonStartResult>(cli, [
-    'device',
-    'daemon',
-    'start',
-    '--vault',
-    vaultRoot,
-    '--base-url',
-    deviceBaseUrl,
-  ])
-  assert.equal(started.exitCode, null)
-  assert.equal(started.envelope.ok, true)
-  assert.equal(started.envelope.data.started, true)
-  assert.deepEqual(calls.daemonStart, {
-    vault: vaultRoot,
-    baseUrl: deviceBaseUrl,
-  })
-
-  const stopped = await runInProcessJsonCli<DeviceDaemonStopResult>(cli, [
-    'device',
-    'daemon',
-    'stop',
-    '--vault',
-    vaultRoot,
-    '--base-url',
-    deviceBaseUrl,
-  ])
-  assert.equal(stopped.exitCode, null)
-  assert.equal(stopped.envelope.ok, true)
-  assert.equal(stopped.envelope.data.stopped, true)
-  assert.deepEqual(calls.daemonStop, {
-    vault: vaultRoot,
-    baseUrl: deviceBaseUrl,
-  })
 })
 
 test('knowledge commands round-trip the registered CLI against a temp vault', async () => {
@@ -584,7 +490,7 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   assert.equal(shown.exitCode, null)
   assert.equal(shown.envelope.ok, true)
   assert.equal(shown.envelope.data.degradation, null)
-  assert.match(shown.envelope.data.page.markdown, /# Magnesium and sleep continuity/u)
+  assert.match(shown.envelope.data.page.body, /# Magnesium and sleep continuity/u)
 
   const linted = await runInProcessJsonCli<KnowledgeLintResult>(cli, [
     'knowledge',
@@ -802,3 +708,193 @@ test('missing wiki page recovery survives the production CLI error bridge', asyn
   assert.match(missing.envelope.error.hint ?? '', /authorized write/u)
   assert.match(missing.envelope.error.hint ?? '', /continue without the page/u)
 })
+
+test('knowledge show returns complete content once and preserves explicit raw export and revision', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-projection-')
+  cleanupPaths.push(parentRoot)
+  const pagePath = 'derived/knowledge/pages/synthetic-ledger.md'
+  const body = 'A synthetic retained fact with its original qualifier.\n'.repeat(1000)
+  const markdown = [
+    '---', 'title: Synthetic ledger', 'slug: synthetic-ledger', 'pageType: ledger',
+    'status: active', '---', '', '# Synthetic ledger', '', body,
+  ].join('\n')
+  await writeVaultFile(vaultRoot, pagePath, markdown)
+  const cli = createVaultCli()
+  const args = ['knowledge', 'show', 'synthetic-ledger', '--vault', vaultRoot]
+  const show = (...flags: string[]) => runInProcessJsonCli<KnowledgeShowResult>(cli, [...args, ...flags])
+  const compact = await show()
+  const optional = await show('--if-exists')
+  const raw = await show('--raw')
+  const optionalRaw = await show('--raw', '--if-exists')
+  assert.equal(compact.envelope.ok, true)
+  assert.equal(optional.envelope.ok, true)
+  assert.equal(raw.envelope.ok, true)
+  assert.equal(optionalRaw.envelope.ok, true)
+  const compactPage = compact.envelope.data.page
+  assert.equal(Object.hasOwn(compactPage, 'markdown'), false)
+  assert.ok(compactPage.body.endsWith(body.trim()))
+  assert.equal(compactPage.pageRevisionDigest, createHash('sha256').update(markdown).digest('hex'))
+  assert.deepEqual(optional.envelope.data, compact.envelope.data)
+  assert.deepEqual(raw.envelope.data, { ...compact.envelope.data, page: { ...compactPage, markdown } })
+  assert.deepEqual(optionalRaw.envelope.data, raw.envelope.data)
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact.envelope.data))
+  const rawBytes = Buffer.byteLength(JSON.stringify(raw.envelope.data))
+  assert.ok(compactBytes < rawBytes * 0.55, 'default output omits the duplicate complete file')
+  process.stdout.write(`[knowledge-projection] ${JSON.stringify({ compactBytes, rawBytes })}\n`)
+
+  for (const flags of [[], ['--raw']]) {
+    const built = await runCli<KnowledgeShowResult>([...args, ...flags])
+    assert.equal(built.ok, true)
+    assert.deepEqual(built.data, flags.length ? raw.envelope.data : compact.envelope.data)
+  }
+  assert.equal(await readFile(path.join(vaultRoot, pagePath), 'utf8'), markdown)
+})
+
+test('optional knowledge show returns an absent page only when the graph confirms absence', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-optional-show-')
+  cleanupPaths.push(parentRoot)
+  const page = (slug: string) => [
+    '---', 'title: Synthetic ledger', `slug: ${slug}`, 'pageType: ledger', 'status: active', '---', '',
+    '# Synthetic ledger', '', '{"version":1}', '',
+  ].join('\n')
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/present-ledger.md', page('present-ledger'))
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/group-room-model.md', page('group-room-model'))
+  const cli = createVaultCli()
+  const show = (...argv: string[]) => runInProcessJsonCli<KnowledgeShowResult | KnowledgeAbsentPageResult>(
+    cli, ['knowledge', 'show', ...argv, '--vault', vaultRoot],
+  )
+
+  const absent = await show('synthetic-ledger', '--if-exists')
+  assert.equal(absent.exitCode, null)
+  assert.equal(absent.envelope.ok, true)
+  assert.deepEqual(absent.envelope.data, { degradation: null, page: null, slug: 'synthetic-ledger', vault: vaultRoot })
+  const built = await runCli<KnowledgeAbsentPageResult>([
+    'knowledge', 'show', 'synthetic-ledger', '--if-exists', '--vault', vaultRoot,
+  ])
+  assert.equal(built.ok, true)
+  assert.equal(built.data.page, null)
+
+  const strictPresent = await show('present-ledger')
+  const optionalPresent = await show('present-ledger', '--if-exists')
+  assert.equal(strictPresent.envelope.ok, true)
+  assert.equal(optionalPresent.envelope.ok, true)
+  assert.deepEqual(optionalPresent.envelope.data, strictPresent.envelope.data)
+
+  const reserved = await show('group-room-model', '--if-exists')
+  assert.equal(reserved.exitCode, 1)
+  assert.equal(reserved.envelope.ok, false)
+  assert.equal(reserved.envelope.error.code, 'knowledge_page_reserved')
+
+  // A malformed page under another basename may declare the requested slug.
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/legacy-name.md', [
+    '---', 'slug: synthetic-ledger', 'invalid-frontmatter-line', '---', '# Synthetic ledger', '',
+  ].join('\n'))
+  const unconfirmed = await show('synthetic-ledger', '--if-exists')
+  assert.equal(unconfirmed.exitCode, 1)
+  assert.equal(unconfirmed.envelope.ok, false)
+  assert.equal(unconfirmed.envelope.error.code, 'knowledge_page_invalid')
+  assert.equal(unconfirmed.envelope.error.stage, 'integrity')
+  assert.match(unconfirmed.envelope.error.message ?? '', /absence is unconfirmed/u)
+  const strictMissing = await show('synthetic-ledger')
+  assert.equal(strictMissing.exitCode, 1)
+  assert.equal(strictMissing.envelope.ok, false)
+  assert.equal(strictMissing.envelope.error.code, 'knowledge_page_not_found')
+  const degradedPresent = await show('present-ledger', '--if-exists')
+  assert.equal(degradedPresent.envelope.ok, true)
+  assert.equal(degradedPresent.envelope.data.degradation?.issueCount, 1)
+
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/pages/synthetic-ledger.md'), 'utf8'))
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/log.md'), 'utf8'))
+})
+
+test('shipped vault-cli MCP keeps structured knowledge_show results for strict and optional reads', async () => {
+  await ensureCliRuntimeArtifacts()
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-mcp-show-')
+  cleanupPaths.push(parentRoot)
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/present-ledger.md', [
+    '---', 'title: Synthetic ledger', 'slug: present-ledger', 'pageType: ledger', 'status: active', '---', '',
+    '# Synthetic ledger', '', '{"version":1}', '',
+  ].join('\n'))
+
+  // The vault is a process-level override, not an MCP tool argument.
+  const child = spawn(process.execPath, [binPath, '--mcp', '--vault', vaultRoot], {
+    env: withoutNodeV8Coverage(),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  const responses = new Map<number, McpResponse>()
+  createInterface({ input: child.stdout }).on('line', (line) => {
+    const message = JSON.parse(line) as McpResponse
+    if (typeof message.id === 'number') responses.set(message.id, message)
+  })
+  const request = async (id: number, method: string, params: unknown): Promise<McpResponse> => {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    const deadline = Date.now() + 30_000
+    while (!responses.has(id)) {
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for MCP response ${id}.`)
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    }
+    return responses.get(id) as McpResponse
+  }
+  let callerTool = 'call_write_tool'
+  const show = (id: number, args: Record<string, unknown>) =>
+    request(id, 'tools/call', {
+      name: callerTool,
+      arguments: { name: 'knowledge_show', arguments: args },
+    })
+
+  try {
+    await request(1, 'initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'knowledge-show-mcp', version: '1.0.0' },
+    })
+    // The shipped server uses progressive discovery; inspect the production tool entry.
+    const details = await request(2, 'tools/call', {
+      name: 'get_tool_details',
+      arguments: { name: 'knowledge_show' },
+    })
+    assert.equal(details.result?.isError, undefined)
+    const tool = JSON.parse(details.result?.content?.[0]?.text ?? 'null') as McpToolDetails | null
+    assert.equal(tool?.name, 'knowledge_show')
+    // A root object schema is what lets MCP return structuredContent; the union stays exact.
+    assert.equal(tool?.outputSchema?.type, 'object')
+    assert.equal(tool?.outputSchema?.anyOf?.length, 2)
+    if (tool?.annotations?.readOnlyHint === true) callerTool = 'call_read_tool'
+
+    const present = await show(3, { slug: 'present-ledger' })
+    assert.equal(present.result?.isError, undefined, present.result?.content?.[0]?.text)
+    assert.equal(present.result?.structuredContent?.page?.slug, 'present-ledger')
+    assert.deepEqual(present.result?.structuredContent, JSON.parse(present.result?.content?.[0]?.text ?? 'null'))
+
+    const absent = await show(4, { slug: 'absent-ledger', ifExists: true })
+    assert.equal(absent.result?.isError, undefined)
+    assert.deepEqual(absent.result?.structuredContent, {
+      degradation: null, page: null, slug: 'absent-ledger', vault: vaultRoot,
+    })
+
+    const strictMissing = await show(5, { slug: 'absent-ledger' })
+    assert.equal(strictMissing.result?.isError, true)
+    assert.equal(strictMissing.result?.structuredContent, undefined)
+    assert.match(strictMissing.result?.content?.[0]?.text ?? '', /No derived knowledge page exists for slug "absent-ledger"/u)
+  } finally {
+    child.stdin.end()
+    child.kill()
+  }
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/pages/absent-ledger.md'), 'utf8'))
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/log.md'), 'utf8'))
+})
+
+interface McpResponse {
+  id?: number
+  result?: {
+    content?: Array<{ text?: string }>
+    isError?: boolean
+    structuredContent?: { page?: { slug?: string } | null } & Record<string, unknown>
+  }
+}
+
+interface McpToolDetails {
+  annotations?: { readOnlyHint?: boolean }
+  name: string
+  outputSchema?: { anyOf?: unknown[]; type?: string }
+}

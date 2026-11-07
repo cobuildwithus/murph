@@ -1,11 +1,13 @@
+import { sleepSessionTypeSchema, sleepSessionStateSchema } from "@murphai/contracts/sleep-session";
 import {
   activityKindAliasGroups,
+  type SleepSessionEventRecord,
   isStrictIsoDate,
   normalizeIanaTimeZone,
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
-import { resolveWearableProviderDescriptor } from "@murphai/health-metrics";
+import { resolveWearableProviderDescriptor } from "@murphai/health-metrics/wearable-provider-catalog";
 
 import {
   readNullableStringValue,
@@ -18,6 +20,7 @@ import {
 import {
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -29,6 +32,7 @@ import {
 export {
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -85,12 +89,22 @@ const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const HOSTED_VAULT_SHARE_PROJECTION_CONTENT_DIGEST_SCHEMA =
+  "murph.hosted-vault-share.projection-content-digest.v1";
+// Digest input reuses the deliver-request parser, which requires a
+// well-formed generation field; the value never leaves this function.
+const HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER = "a".repeat(43);
+
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
   "deferredProjectionWork";
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
+export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM =
+  "projectionContentDigest";
+export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION = "v2";
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
   "first-materialization";
 export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
+export const HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM = "sourceWorkspaceVersion";
 
 export type HostedVaultShareProjectionMode =
   typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
@@ -209,7 +223,8 @@ function buildHostedVaultShareActivitySelectorKinds(
       .flatMap((group) => [...group])
       .map((kind) => normalizeActivityKindToken(kind))
       .filter((kind): kind is string => kind !== null))]
-      .sort((left, right) => left.localeCompare(right)),
+      // Normalized kinds are ASCII; code-unit order avoids ICU collator setup at Worker startup.
+      .sort(),
   );
 }
 
@@ -382,6 +397,21 @@ export type HostedVaultShareProjectionKind =
 /** Maximum snapshot replacements one durable first-materialization pass may attempt. */
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX = 25;
 
+// New share kinds do not expose app contact until deliberately classified here.
+const companionContactKinds = new Set<HostedVaultShareProjectionKind>([
+  "device-sync-status.v0", "sleep-times.v0", "workout-days.v0", "workouts.v0",
+  "heart-rate-zones-days.v0", "activity-days.v0", "sleep-duration-days.v0",
+  "deep-sleep-days.v0", "deep-sleep-sources-days.v1", "rem-sleep-days.v0", "rem-sleep-sources-days.v1",
+  "steps-days.v0", "max-heart-rate-days.v0", "distance-days.v0", "active-calories-days.v0",
+  "elevation-gain-days.v0", "floors-climbed-days.v0", "day-strain-days.v0", "workout-strain-days.v0",
+  "activity-score-days.v0", "vo2-max-days.v0", "resting-heart-rate-days.v0", "hrv-days.v0",
+  "activity-minutes-days.v1", "activity-distance-days.v1", "activity-session-count-days.v1",
+]);
+
+export function sharesCompanionContact(kind: HostedVaultShareProjectionKind): boolean {
+  return companionContactKinds.has(kind);
+}
+
 export interface HostedVaultShareFixedProjectionScope {
   projectionKind: HostedVaultShareFixedProjectionKind;
 }
@@ -434,11 +464,14 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
 
 export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
   Object.freeze(uniqueHostedVaultShareProjectionScopeList([
-    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({
-      projectionKind,
-    })),
+    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({ projectionKind })),
     ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   ] satisfies HostedVaultShareProjectionScope[]));
+
+// One canonical key per scope. The email grant itself is carried separately
+// from the data/profile authorization snapshot (99 of the current 100 scopes).
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX =
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length - 1;
 
 function uniqueHostedVaultShareProjectionScopeList(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
@@ -539,6 +572,8 @@ export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
 export const HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND = "workout";
 
 export interface HostedVaultShareDailyMetricData {
+  sleepType?: SleepSessionEventRecord["sleepType"];
+  sleepState?: SleepSessionEventRecord["sleepState"];
   date: string;
   metricKey: string;
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
@@ -747,6 +782,8 @@ export interface HostedVaultShareDeliveryRecord {
 }
 
 export interface HostedVaultShareDeliverRequest {
+  /** Canonical member timezone, encrypted with the snapshot; not a shared profile field. */
+  memberTimeZone?: string;
   /**
    * Opaque digest of the active share generations resolved immediately before
    * the runtime begins reading this scope. Web accepts delivery only while the
@@ -780,6 +817,7 @@ export interface HostedVaultShareActiveProjectionKindsResponse {
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
   generationTokensByProjectionScopeKey?: Record<string, string>;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Record<string, string>;
 }
 
 export interface HostedVaultShareDeliveryPayload {
@@ -835,15 +873,16 @@ export function getHostedVaultShareDailyMetricProjectionSpec(
 export function getHostedVaultShareProjectionMaxRecords(
   projectionScope: HostedVaultShareProjectionScope,
 ): number {
+  const sourceDateLimit = HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
   if (isHostedVaultShareActivitySelectorProjectionKind(projectionScope.projectionKind)) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
   if (
     projectionScope.projectionKind === "sleep-times.v0"
     || projectionScope.projectionKind === "workout-days.v0"
     || projectionScope.projectionKind === "heart-rate-zones-days.v0"
   ) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
   const spec = getHostedVaultShareDailyMetricProjectionSpec(
     projectionScope.projectionKind,
@@ -851,9 +890,11 @@ export function getHostedVaultShareProjectionMaxRecords(
   if (
     spec?.source.kind === "metric-series"
   ) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
-  return HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
+  return isHostedVaultShareRecentDateProjectionKind(projectionScope.projectionKind)
+    ? HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS
+    : HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
 }
 
 function parseHostedVaultShareProjectionKind(
@@ -936,6 +977,56 @@ export function buildHostedVaultShareProjectionScopeKey(
   }
 }
 
+/** Exact metric authority first, then the pre-existing sleep v1 -> v0 adapter. */
+export function hostedVaultShareReadAuthorityScopes(
+  requested: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope[] {
+  const sourceAwareKind = requested.projectionKind === "deep-sleep-days.v0"
+    ? "deep-sleep-sources-days.v1"
+    : requested.projectionKind === "rem-sleep-days.v0"
+      ? "rem-sleep-sources-days.v1" : null;
+  return sourceAwareKind
+    ? [requested, { projectionKind: sourceAwareKind }]
+    : [requested];
+}
+
+/** Civil-date arithmetic, including DST and both sides of the date line. */
+export function hostedVaultShareHistoryDateWindow(input: {
+  historyDays: 7 | 90;
+  nowMs?: number;
+  timeZone: string;
+}): { from: string; through: string } {
+  const timeZone = normalizeIanaTimeZone(input.timeZone);
+  if (!timeZone) throw new TypeError("Vault share member timezone is invalid.");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit", month: "2-digit", timeZone, year: "numeric",
+  }).formatToParts(new Date(input.nowMs ?? Date.now()));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
+  const through = `${part("year")}-${part("month")}-${part("day")}`;
+  const from = new Date(Date.parse(`${through}T12:00:00.000Z`) - (input.historyDays - 1) * 86_400_000)
+    .toISOString().slice(0, 10);
+  return { from, through };
+}
+
+/** Clip retained projections or a shorter reporting window; metric authority is separate. */
+export function filterHostedVaultShareHistoryRecords(input: {
+  records: readonly HostedVaultShareDeliveryRecord[];
+  scope: HostedVaultShareProjectionScope;
+  timeZone: string;
+  nowMs?: number;
+  requestedHistoryDays?: 7 | 90;
+}): HostedVaultShareDeliveryRecord[] {
+  if (!isHostedVaultShareRecentDateProjectionKind(input.scope.projectionKind)) {
+    return [...input.records];
+  }
+  const historyDays = input.requestedHistoryDays ?? HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
+  const { from, through } = hostedVaultShareHistoryDateWindow({ ...input, historyDays });
+  return input.records.filter((record) => {
+    const date = record.occurredAt.slice(0, 10);
+    return date >= from && date <= through;
+  });
+}
+
 export function parseHostedVaultShareProjectionScopeKey(
   value: unknown,
   label: string,
@@ -965,6 +1056,8 @@ export function parseHostedVaultShareProjectionScope(
     scope.projectionKind,
     `${label} projectionKind`,
   );
+
+  assertObjectKeys(scope, label, ["projectionKind", "selector"]);
 
   if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
     const selector = requireObject(scope.selector, `${label} selector`);
@@ -1601,6 +1694,8 @@ function parseHostedVaultShareDailyMetricData(
         "provisional",
         "sources",
         "sourcesDisagree",
+        "sleepType",
+        "sleepState",
         "unit",
         "value",
       ],
@@ -1651,9 +1746,27 @@ function parseHostedVaultShareDailyMetricData(
     metricKey,
     ...(metricSemantics === undefined ? {} : { metricSemantics }),
     ...(sourceTaggedSleepStage ? { recordedAt } : {}),
+    ...parseHostedVaultShareSleepClassification(data, spec.metricKey),
     ...sourceAwareData,
     unit,
     value: valueNumber,
+  };
+}
+
+/** Selected-session qualifiers share the canonical enums and only accompany sleep metrics. */
+export function parseHostedVaultShareSleepClassification(
+  context: Record<string, unknown> | undefined,
+  metricKey: string,
+): Pick<HostedVaultShareDailyMetricData, "sleepType" | "sleepState"> {
+  const sleepType = sleepSessionTypeSchema.optional().parse(context?.sleepType);
+  const sleepState = sleepSessionStateSchema.optional().parse(context?.sleepState);
+  const sleepMetric = ["total-sleep-minutes", "deep-sleep-minutes", "rem-sleep-minutes"].includes(metricKey);
+  if (!sleepMetric && (sleepType !== undefined || sleepState !== undefined)) {
+    throw new TypeError(`Vault share ${metricKey} does not accept sleep classification.`);
+  }
+  return {
+    ...(sleepType === undefined ? {} : { sleepType }),
+    ...(sleepState === undefined ? {} : { sleepState }),
   };
 }
 
@@ -2305,6 +2418,13 @@ export function parseHostedVaultShareDeliverRequest(
   value: unknown,
 ): HostedVaultShareDeliverRequest {
   const request = requireObject(value, "Vault share deliver request");
+  const memberTimeZone = request.memberTimeZone === undefined
+    ? undefined
+    : normalizeIanaTimeZone(requireString(request.memberTimeZone, "Vault share member timezone"));
+  if (memberTimeZone === null) throw new TypeError("Vault share member timezone is invalid.");
+  if (new TextEncoder().encode(JSON.stringify(request)).byteLength > HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES) {
+    throw new TypeError("Vault share complete projection exceeds the byte limit.");
+  }
   const sourceWorkspaceVersion = requireHostedVaultShareSourceWorkspaceVersion(
     request.sourceWorkspaceVersion,
   );
@@ -2343,6 +2463,68 @@ export function parseHostedVaultShareDeliverRequest(
   const parsedRecords = records.map((record) =>
     parseHostedVaultShareDeliveryRecord(record, projectionScope)
   );
+  assertHostedVaultSharePublicSourceCapacity(parsedRecords);
+  if (projectionKind === "workouts.v0") {
+    let calendarClosedThroughDate: string | undefined;
+    for (const record of parsedRecords) {
+      if (!("workouts" in record.data)) {
+        throw new TypeError("Vault share workouts record data is invalid.");
+      }
+      if (
+        calendarClosedThroughDate !== undefined
+        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
+      ) {
+        throw new TypeError(
+          "Vault share workouts records must use one calendarClosedThroughDate.",
+        );
+      }
+      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
+    }
+  }
+
+  return {
+    ...(memberTimeZone ? { memberTimeZone } : {}),
+    expectedGenerationToken,
+    ...(projectionMode ? { projectionMode } : {}),
+    projectionKind,
+    projectionScope,
+    records: parsedRecords,
+    sourceWorkspaceVersion,
+  };
+}
+
+export function serializeHostedVaultShareProjectionContentDigestInput(input: {
+  memberTimeZone?: string;
+  projectionScope: HostedVaultShareProjectionScope;
+  records: readonly HostedVaultShareDeliveryRecord[];
+}): string {
+  const parsed = parseHostedVaultShareDeliverRequest({
+    ...(input.memberTimeZone ? { memberTimeZone: input.memberTimeZone } : {}),
+    expectedGenerationToken: HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER,
+    projectionKind: input.projectionScope.projectionKind,
+    projectionScope: input.projectionScope,
+    records: input.records,
+    sourceWorkspaceVersion: "0",
+  });
+  const records = isHostedVaultShareCurrentStateProjectionKind(parsed.projectionKind)
+    ? parsed.records.map((record) => ({
+        data: record.data,
+        recordKey: record.recordKey,
+        ...(record.source ? { source: record.source } : {}),
+        ...(record.sourceRevision
+          ? { sourceRevision: record.sourceRevision }
+          : {}),
+      }))
+    : parsed.records;
+  return JSON.stringify({
+    ...(parsed.memberTimeZone ? { memberTimeZone: parsed.memberTimeZone } : {}),
+    projectionScope: parsed.projectionScope,
+    records,
+    schema: HOSTED_VAULT_SHARE_PROJECTION_CONTENT_DIGEST_SCHEMA,
+  });
+}
+
+function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly HostedVaultShareDeliveryRecord[]): void {
   const publicSources = new Set<string>();
   for (const record of parsedRecords) {
     if (record.source) {
@@ -2368,35 +2550,9 @@ export function parseHostedVaultShareDeliverRequest(
       `Vault share deliver request must contain at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} public sources.`,
     );
   }
-  if (projectionKind === "workouts.v0") {
-    let calendarClosedThroughDate: string | undefined;
-    for (const record of parsedRecords) {
-      if (!("workouts" in record.data)) {
-        throw new TypeError("Vault share workouts record data is invalid.");
-      }
-      if (
-        calendarClosedThroughDate !== undefined
-        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
-      ) {
-        throw new TypeError(
-          "Vault share workouts records must use one calendarClosedThroughDate.",
-        );
-      }
-      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
-    }
-  }
-
-  return {
-    expectedGenerationToken,
-    ...(projectionMode ? { projectionMode } : {}),
-    projectionKind,
-    projectionScope,
-    records: parsedRecords,
-    sourceWorkspaceVersion,
-  };
 }
 
-function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
+export function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
   const sourceWorkspaceVersion = requireString(
     value,
     "Vault share deliver request sourceWorkspaceVersion",
@@ -2447,6 +2603,9 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.projectionKinds,
         "Vault share active projection kinds response projectionKinds",
       );
+  if (projectionKinds.length > HOSTED_VAULT_SHARE_PROJECTION_KINDS.length) {
+    throw new TypeError("Vault share active projection kinds response has too many kinds.");
+  }
   const uniqueProjectionKinds: HostedVaultShareProjectionKind[] = [];
 
   for (const projectionKind of projectionKinds) {
@@ -2469,6 +2628,9 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.projectionScopes,
         "Vault share active projection kinds response projectionScopes",
       );
+  if (scopeValues.length > HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length) {
+    throw new TypeError("Vault share active projection kinds response has too many scopes.");
+  }
   const uniqueProjectionScopes: HostedVaultShareProjectionScope[] = [];
   const uniqueScopeKeys = new Set<string>();
 
@@ -2492,6 +2654,13 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.generationTokensByProjectionScopeKey,
         uniqueScopeKeys,
       );
+  const publishedSourceWorkspaceVersionByProjectionScopeKey =
+    record.publishedSourceWorkspaceVersionByProjectionScopeKey === undefined
+    ? undefined
+    : parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKey(
+        record.publishedSourceWorkspaceVersionByProjectionScopeKey,
+        uniqueScopeKeys,
+      );
 
   return {
     hasDeferredProjectionWork,
@@ -2500,6 +2669,9 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
     projectionScopes: uniqueProjectionScopes,
     ...(generationTokensByProjectionScopeKey
       ? { generationTokensByProjectionScopeKey }
+      : {}),
+    ...(publishedSourceWorkspaceVersionByProjectionScopeKey
+      ? { publishedSourceWorkspaceVersionByProjectionScopeKey }
       : {}),
   };
 }
@@ -2543,6 +2715,28 @@ function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
       );
     }
     result[scopeKey] = token;
+  }
+  return result;
+}
+
+function parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKey(
+  value: unknown,
+  activeScopeKeys: ReadonlySet<string>,
+): Record<string, string> {
+  const record = requireObject(
+    value,
+    "Vault share active projection kinds response publishedSourceWorkspaceVersionByProjectionScopeKey",
+  );
+  const result: Record<string, string> = {};
+  for (const [scopeKey, sourceWorkspaceVersion] of Object.entries(record)) {
+    if (!activeScopeKeys.has(scopeKey)) {
+      throw new TypeError(
+        "Vault share active projection published source version map contains an inactive scope key.",
+      );
+    }
+    result[scopeKey] = requireHostedVaultShareSourceWorkspaceVersion(
+      sourceWorkspaceVersion,
+    );
   }
   return result;
 }

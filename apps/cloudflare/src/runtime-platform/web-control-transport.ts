@@ -72,6 +72,13 @@ export type HostedWebControlTransport = HostedWebControlTransportConfig & {
   ) => Promise<void>;
 };
 
+export interface HostedThreadRouteAuthorityResponseMetadata {
+  responseBodyBytes: number;
+  responseBodyShape: "empty" | "null" | "array" | "scalar" | "object";
+  responseMimeCategory: ReturnType<typeof readHostedWebControlResponseMimeCategory>;
+  responseStatus: number;
+}
+
 interface HostedWebControlPlaneJsonRequest {
   acceptedStatuses?: readonly number[];
   body?: unknown;
@@ -82,6 +89,7 @@ interface HostedWebControlPlaneJsonRequest {
   preserveInitialFailureOnReplayFailure?: boolean;
   replayOnceOnRetryableFailure?: boolean;
   route: HostedRunnerWebControlRoute;
+  routeAuthorityResponseMetadata?: Partial<HostedThreadRouteAuthorityResponseMetadata>;
   sensitiveResponseBody?: {
     maxBytes: number;
   };
@@ -203,6 +211,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
+  headers?: Headers;
   route: HostedRunnerWebControlRoute;
   signal?: AbortSignal | null;
   timeoutMs: number;
@@ -436,8 +445,12 @@ async function fetchHostedWebControlPlaneJsonAttempt(
   const snapshotBodyMetrics = input.route.operation === "device_sync_runtime_snapshot"
     ? { bytesRead: 0 }
     : undefined;
+  const responseBodyMetrics = selectHostedWebControlResponseBodyMetrics(
+    snapshotBodyMetrics,
+    input,
+  );
   const readResponseText = () => readHostedWebControlPlaneResponseText({
-    bodyMetrics: snapshotBodyMetrics,
+    bodyMetrics: responseBodyMetrics,
     description: input.description,
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
@@ -493,6 +506,7 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     requestLogDetails,
     requestStartedAt,
     response,
+    responseBodyMetrics,
     snapshotBodyMetrics,
     text,
   });
@@ -503,6 +517,7 @@ function decodeHostedWebControlPlaneResponseJson({
   requestLogDetails,
   requestStartedAt,
   response,
+  responseBodyMetrics,
   snapshotBodyMetrics,
   text,
 }: {
@@ -510,6 +525,7 @@ function decodeHostedWebControlPlaneResponseJson({
   requestLogDetails: HostedExecutionStructuredLogDetails;
   requestStartedAt: number;
   response: Response;
+  responseBodyMetrics: { bytesRead: number } | undefined;
   snapshotBodyMetrics: { bytesRead: number } | undefined;
   text: string;
 }): unknown {
@@ -531,7 +547,10 @@ function decodeHostedWebControlPlaneResponseJson({
             includeSafeErrorText: false,
           }),
           responseStatus: response.status,
-          ...(snapshotDetails ?? { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
+          ...(snapshotDetails ?? {
+            responseBodyBytes: new TextEncoder().encode(text).byteLength,
+            responseMimeCategory: readHostedWebControlResponseMimeCategory(response.headers),
+          }),
         },
         level: "warn",
         message: "Hosted runtime control-plane response returned invalid JSON.",
@@ -553,6 +572,14 @@ function decodeHostedWebControlPlaneResponseJson({
       throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
     }
   }
+
+  populateHostedThreadRouteAuthorityResponseMetadata({
+    empty,
+    payload,
+    response,
+    responseBodyMetrics,
+    responseMetadata: input.routeAuthorityResponseMetadata,
+  });
 
   if (snapshotBodyMetrics && !readHostedWebControlPlaneRecord(payload)) {
     const snapshotDetails = describeHostedSnapshotResponseBody(
@@ -586,6 +613,49 @@ function decodeHostedWebControlPlaneResponseJson({
   return payload;
 }
 
+function selectHostedWebControlResponseBodyMetrics(
+  snapshotBodyMetrics: { bytesRead: number } | undefined,
+  input: HostedWebControlPlaneJsonRequest,
+): { bytesRead: number } | undefined {
+  return snapshotBodyMetrics ?? (input.routeAuthorityResponseMetadata ? { bytesRead: 0 } : undefined);
+}
+
+function populateHostedThreadRouteAuthorityResponseMetadata({
+  empty,
+  payload,
+  response,
+  responseBodyMetrics,
+  responseMetadata,
+}: {
+  empty: boolean;
+  payload: unknown;
+  response: Response;
+  responseBodyMetrics: { bytesRead: number } | undefined;
+  responseMetadata: Partial<HostedThreadRouteAuthorityResponseMetadata> | undefined;
+}): void {
+  if (responseMetadata && responseBodyMetrics) {
+    // Only the external-route effect opts in; its existing parser-failure warning owns emission.
+    responseMetadata.responseBodyBytes = responseBodyMetrics.bytesRead;
+    responseMetadata.responseBodyShape = empty ? "empty"
+      : payload === null ? "null"
+      : Array.isArray(payload) ? "array"
+      : typeof payload === "object" ? "object" : "scalar";
+    responseMetadata.responseMimeCategory = readHostedWebControlResponseMimeCategory(response.headers);
+    responseMetadata.responseStatus = response.status;
+  }
+}
+
+function readHostedWebControlResponseMimeCategory(
+  headers: Headers,
+): "missing" | "json" | "html" | "text" | "other" {
+  const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  return mime === undefined ? "missing"
+    : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
+    : mime === "text/html" ? "html"
+    : mime === "text/plain" ? "text"
+    : "other";
+}
+
 // Never return raw header values, body text, or parser messages from this boundary.
 function describeHostedSnapshotResponseBody(
   response: Response,
@@ -601,16 +671,12 @@ function describeHostedSnapshotResponseBody(
     && Number.isSafeInteger(Number(marker))
     ? Number(marker)
     : null;
-  const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  const responseMimeCategory = readHostedWebControlResponseMimeCategory(headers);
   return {
     responseBodyBytes,
     responseBodyShape,
     ...readHostedSnapshotResponseHeaderMetadata(response, true),
-    responseMimeCategory: mime === undefined ? "missing"
-      : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
-      : mime === "text/html" ? "html"
-      : mime === "text/plain" ? "text"
-      : "other",
+    responseMimeCategory,
     responseByteCountComparison: marker === null ? "missing"
       : expectedBytes === null ? "invalid"
       : expectedBytes === responseBodyBytes ? "match" : "mismatch",

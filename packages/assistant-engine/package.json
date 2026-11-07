@@ -51,10 +51,6 @@
       "types": "./dist/assistant-provider.d.ts",
       "default": "./dist/assistant-provider.js"
     },
-    "./assistant-provider-catalog": {
-      "types": "./dist/assistant-provider-catalog.d.ts",
-      "default": "./dist/assistant-provider-catalog.js"
-    },
     "./assistant-runtime": {
       "types": "./dist/assistant-runtime.d.ts",
       "default": "./dist/assistant-runtime.js"
@@ -79,10 +75,6 @@
       "types": "./dist/assistant-state.d.ts",
       "default": "./dist/assistant-state.js"
     },
-    "./assistant-status": {
-      "types": "./dist/assistant-status.d.ts",
-      "default": "./dist/assistant-status.js"
-    },
     "./assistant-store": {
       "types": "./dist/assistant-store.d.ts",
       "default": "./dist/assistant-store.js"
@@ -99,6 +91,10 @@
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"
     },
+    "./managed-automations": {
+      "types": "./dist/managed-automations.d.ts",
+      "default": "./dist/managed-automations.js"
+    },
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"
@@ -111,7 +107,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
@@ -131,12 +127,14 @@
     "openai": "6.45.0"
   },
   "engines": {
-    "node": ">=24.14.1"
+    "node": ">=24.22.1"
   },
   "devDependencies": {
-    "@openai/codex": "0.153.4",
+    "@openai/codex": "0.166.0",
+    "@types/ws": "8.18.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "zod": "^4.4.3"
+    "ws": "8.21.0",
+    "zod": "^4.5.4"
   }
 }

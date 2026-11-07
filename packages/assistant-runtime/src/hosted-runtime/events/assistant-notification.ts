@@ -1,13 +1,18 @@
+import { isHostedRetiredAssistantNotificationProfile } from "@murphai/hosted-execution/contracts";
+import { GAME_RECAP_GENERATION_RETIRED, gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
+import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
+import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
-import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_GPT_61_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 
-import type { AutomationRoute } from "@murphai/contracts";
+import { buildHostedNotificationAutomationRoute } from "../current-delivery-route.ts";
+import { deterministicContractId, ID_PREFIXES } from "@murphai/core";
 import {
   buildHostedAssistantContextFingerprintDetails,
+  buildManualMealEstimationInstructions,
   initializeAssistantGroupRoomModel,
-  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
-  seedMurphOnboardingFollowupFromStartedOnboarding,
+  reconcileMurphManagedOnboardingFollowup,
   sendAssistantNotification,
   startAssistantOnboarding,
   type AssistantExecutionContext,
@@ -20,6 +25,7 @@ import type {
   HostedExecutionLogLevel,
   HostedExecutionLogPhase,
   HostedExecutionMemberActivatedWake,
+  HostedExecutionMealPhotoCapturedWake,
   HostedExecutionOperatorTaskNotification,
   HostedExecutionRedactedLogEntry,
   HostedExecutionStructuredLogDetails,
@@ -28,10 +34,12 @@ import type {
   HostedOperatorTaskControlAction,
   HostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
-import type { AssistantCronJob } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedMemberSignupWelcomeInstructions,
+  buildHostedMemberSignupWelcomeNotificationWake,
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
+  isHostedMemberSignupWelcomeDeliveryIdentity,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -43,6 +51,8 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
+import { readHostedMailboxImportState } from "../mailbox-state.ts";
+import { isHostedManualMealPhotoWake } from "../meal-photo-import.ts";
 import type { HostedRuntimeEffectsPort } from "../platform.ts";
 import { HOSTED_ASSISTANT_WAKE_REASON } from "../wake-candidates.ts";
 import {
@@ -71,7 +81,7 @@ type HostedAssistantNotificationSystemMailboxPreparation =
   | {
       kind: "terminal_no_send";
       outcome: HostedMailboxOutcome;
-      reason: "external_route_authority_stale";
+      reason: "external_route_authority_stale" | "game_recap_generation_retired";
     };
 
 export type HostedLegacyUsageReferralAuthorityClassification =
@@ -83,7 +93,8 @@ export type HostedLegacyUsageReferralAuthorityClassification =
   | "route_mismatch";
 
 /**
- * Recovers only the one authority-less usage-referral notification shape that
+ * Handles host-owned terminal notification outcomes and recovers the
+ * authority-less usage-referral notification shape that
  * shipped before direct Linq route proof was carried into the mailbox wake.
  * The local system mailbox already owns the imported payload, so recovery must
  * happen here rather than by mutating the Web row behind its import watermark.
@@ -94,6 +105,7 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
       HostedRuntimeEffectsPort["assertExternalThreadRouteAuthority"];
     executionContext: AssistantExecutionContext;
     mailboxDedupeKey: string;
+    groupToolPort?: HostedRuntimeGroupToolPort | null;
     signal: AbortSignal | null;
     wake: HostedExecutionAssistantNotificationRequestedWake;
   },
@@ -109,6 +121,28 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
       throw new TypeError(
         "Hosted group context handoff mailbox identity is invalid.",
       );
+    }
+  }
+
+  const policy = input.wake.notification.responsePolicy;
+  if (policy?.kind === "require_game_recap" && policy.eventId === input.wake.eventId && input.groupToolPort) {
+    // A tool result only reaches the model, so the host asks before any model work.
+    // recap_authority_unavailable stays uncertain: roster, access or storage may recover.
+    const response = await input.groupToolPort.request({ action: "read_game",
+      origin: { kind: "game_recap", gameId: policy.gameId, eventId: policy.eventId } }, { signal: input.signal });
+    if (response.action === "read_game" && response.result.status === "unavailable" && response.result.error === GAME_RECAP_GENERATION_RETIRED) {
+      return {
+        kind: "terminal_no_send",
+        outcome: createNoopMailboxEffect({
+          conversationMetrics: null, deliveryIntentIds: [], mailboxLane: "assistant-notification",
+          redactedLogEntries: [emitHostedAssistantNotificationLifecycleLog({
+            extraDetails: { eventCode: "assistant.notification.game_recap_generation_retired", terminalDisposition: "game_recap_generation_retired" },
+            level: "info", message: "Hosted recap generation ended without delivery because it is durably retired.",
+            phase: "wake.running", wake: input.wake,
+          })],
+        }),
+        reason: "game_recap_generation_retired",
+      };
     }
   }
 
@@ -177,6 +211,7 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
 
 export async function executeHostedMemberActivatedWake(input: {
   wake: HostedExecutionMemberActivatedWake;
+  shouldYield?: (() => boolean) | null;
   executionContext: AssistantExecutionContext;
   sourceMailboxItemId?: string | null;
   turnEnvironment?: AssistantTurnEnvironment | null;
@@ -226,31 +261,34 @@ export async function executeHostedMemberActivatedWake(input: {
       ? signupWelcome?.route ?? null
       : input.wake.onboardingFollowupRoute
     : null;
-  const seededOnboardingFollowupWakeAt = onboardingFollowupRoute
-    ? await seedOnboardingFollowupAutomation({
-        logDetails: buildHostedOnboardingFollowupLogDetails(
-          onboardingFollowupRoute,
-        ),
-        redactedLogEntries,
-        route: onboardingFollowupRoute,
+  const followup = onboardingFollowupRoute
+    ? await reconcileMurphManagedOnboardingFollowup({
+        defaultRoute: buildHostedNotificationAutomationRoute(onboardingFollowupRoute),
+        routeValidationProfile: "hosted",
+        shouldYield: input.shouldYield,
         stableKey: input.wake.userId,
         vaultRoot: input.vaultRoot,
-        wake: input.wake,
       })
-    : null;
-  if (!signupWelcome) {
+    : { nextWakeAt: null, yielded: false };
+  if (followup.yielded === true || input.shouldYield?.() === true) {
     return createNoopMailboxEffect({
+      backgroundMaintenanceYielded: true,
       conversationMetrics: null,
       mailboxLane: "member-activated",
-      ...(seededOnboardingFollowupWakeAt
-        ? {
-            nextWakeAt: seededOnboardingFollowupWakeAt,
-            nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
-          }
-        : {}),
+      nextWakeAt: new Date().toISOString(),
+      nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
       redactedLogEntries,
     });
   }
+  const followupWakeAt = followup.nextWakeAt;
+  const outcome = createNoopMailboxEffect({
+    conversationMetrics: null,
+    mailboxLane: "member-activated",
+    nextWakeAt: followupWakeAt,
+    nextWakeReason: followupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    redactedLogEntries,
+  });
+  if (!signupWelcome) return outcome;
 
   if (signupWelcome.route.channel === "telegram") {
     redactedLogEntries.push(
@@ -264,17 +302,7 @@ export async function executeHostedMemberActivatedWake(input: {
         wake: input.wake,
       }),
     );
-    return createNoopMailboxEffect({
-      conversationMetrics: null,
-      mailboxLane: "member-activated",
-      ...(seededOnboardingFollowupWakeAt
-        ? {
-            nextWakeAt: seededOnboardingFollowupWakeAt,
-            nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
-          }
-        : {}),
-      redactedLogEntries,
-    });
+    return outcome;
   }
 
   redactedLogEntries.push(
@@ -287,8 +315,8 @@ export async function executeHostedMemberActivatedWake(input: {
   let notificationDecisionKind: string | null = null;
 
   try {
-    const notificationResult = await sendAssistantNotification(
-      buildMemberActivationSignupWelcomeNotificationInput(
+    const notificationResult = await sendAssistantNotification({
+      ...buildMemberActivationSignupWelcomeNotificationInput(
         input.wake,
         input.executionContext,
         input.vaultRoot,
@@ -298,7 +326,17 @@ export async function executeHostedMemberActivatedWake(input: {
           redactedLogEntries.push(entry);
         },
       ),
-    );
+      ...await resolveHostedConnectedChannelGreetingPolicy({
+        executionContext: input.executionContext,
+        vaultRoot: input.vaultRoot,
+        wake: buildHostedMemberSignupWelcomeNotificationWake({
+          memberId: input.wake.userId,
+          occurredAt: input.wake.occurredAt,
+          route: signupWelcome.route,
+          text: signupWelcome.text,
+        }),
+      }),
+    });
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
   } catch (error) {
     redactedLogEntries.push(
@@ -322,20 +360,67 @@ export async function executeHostedMemberActivatedWake(input: {
     }),
   );
 
-  return createNoopMailboxEffect({
-    conversationMetrics: null,
-    mailboxLane: "member-activated",
-    nextWakeAt: seededOnboardingFollowupWakeAt,
-    nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-    redactedLogEntries,
+  return outcome;
+}
+
+export async function executeHostedManualMealPhotoWake(input: {
+  wake: HostedExecutionMealPhotoCapturedWake;
+  executionContext: AssistantExecutionContext;
+  forceQueueOnly?: boolean;
+  sourceMailboxItemId?: string | null;
+  turnEnvironment?: AssistantTurnEnvironment | null;
+  vaultRoot: string;
+}): Promise<HostedMailboxOutcome> {
+  if (!isHostedManualMealPhotoWake(input.wake)) {
+    throw new TypeError("Automatic meal photos must remain import-only.");
+  }
+  if (input.executionContext.hosted?.memberId !== input.wake.userId) {
+    throw new TypeError("Manual meal estimation requires the bound member runtime.");
+  }
+  const route = input.wake.directRoute;
+  const email = route.channel === "email";
+  const eventId = `assistant.notification.requested:${input.wake.eventId}`;
+  return executeHostedAssistantNotificationWake({
+    ...input,
+    manualMealEstimation: true,
+    wake: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: input.wake.userId,
+      occurredAt: input.wake.occurredAt,
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryIdempotencyKey: eventId,
+        instructions: buildManualMealEstimationInstructions({
+          capturedAt: input.wake.mealPhoto.capturedAt,
+          mealId: deterministicContractId(
+            ID_PREFIXES.meal,
+            `meal-photo-capture:meal:${input.wake.mealPhoto.captureId}`,
+          ),
+        }),
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: route.channel,
+          delivery: {
+            kind: email ? "explicit" : "thread",
+            target: email ? route.deliveryTarget : route.threadId,
+          },
+          identityId: null,
+          threadId: email ? null : route.threadId,
+          threadIsDirect: true,
+        },
+      },
+    }),
   });
 }
 
 export async function executeHostedAssistantNotificationWake(input: {
+  groupToolPort?: HostedRuntimeGroupToolPort | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "controlOperatorTask">;
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnly?: boolean;
+  manualMealEstimation?: true;
   sourceMailboxItemId?: string | null;
   turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
@@ -371,8 +456,10 @@ export async function executeHostedAssistantNotificationWake(input: {
   const operatorTask = requireHostedOperatorMessageNotification(input.wake);
 
   try {
-    const notificationResult = await sendAssistantNotification(
-      buildAssistantNotificationInput(
+    const notificationResult = await sendAssistantNotification({
+      manualMealEstimation: input.manualMealEstimation,
+      ...buildHostedGameChatBootstrapPolicy(input),
+      ...buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
         effectsPort,
@@ -383,8 +470,10 @@ export async function executeHostedAssistantNotificationWake(input: {
         (entry) => {
           redactedLogEntries.push(entry);
         },
+        input.groupToolPort,
       ),
-    );
+      ...await resolveHostedConnectedChannelGreetingPolicy(input),
+    });
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
     const deliveryOutcome = notificationResult?.deliveryOutcome ?? null;
     const deliveryIntentId =
@@ -418,25 +507,12 @@ export async function executeHostedAssistantNotificationWake(input: {
       }
     }
   } catch (error) {
-    if (isHostedOperatorTaskTerminalNoSendError(error)) {
-      redactedLogEntries.push(
-        emitHostedAssistantNotificationLifecycleLog({
-          extraDetails: {
-            eventCode: "assistant.notification.operator_task_terminal_no_send",
-            terminalDisposition: deriveHostedExecutionErrorCode(error),
-          },
-          level: "info",
-          message: "Hosted operator message ended without a new delivery intent.",
-          phase: "wake.running",
-          wake: input.wake,
-        }),
-      );
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        deliveryIntentIds: [],
-        mailboxLane: "assistant-notification",
-        redactedLogEntries,
-      });
+    const terminalNoSend = resolveHostedNotificationTerminalNoSend(error);
+    if (terminalNoSend) {
+      redactedLogEntries.push(emitHostedAssistantNotificationLifecycleLog({
+        ...terminalNoSend, level: "info", phase: "wake.running", wake: input.wake,
+      }));
+      return createNoopMailboxEffect({ conversationMetrics: null, deliveryIntentIds: [], mailboxLane: "assistant-notification", redactedLogEntries });
     }
     if (operatorTask && readHostedNotificationErrorRetryable(error) === false) {
       await controlHostedOperatorTask({
@@ -506,161 +582,13 @@ export async function executeHostedAssistantNotificationWake(input: {
   });
 }
 
-async function seedOnboardingFollowupAutomation(input: {
-  logDetails: HostedExecutionStructuredLogDetails;
-  redactedLogEntries: HostedExecutionRedactedLogEntry[];
-  route: HostedExecutionAssistantNotificationRoute;
-  stableKey: string;
-  vaultRoot: string;
-  wake: HostedExecutionSystemWake;
-}): Promise<string | null> {
-  try {
-    // The canonical seed helper enforces route deliverability (for example,
-    // Linq participant routes without a Linq delivery source).
-    const result = await seedMurphOnboardingFollowupFromStartedOnboarding({
-      route: buildOnboardingFollowupAutomationRoute(input.route),
-      routeValidationProfile: "hosted",
-      stableKey: input.stableKey,
-      vault: input.vaultRoot,
-    });
-    if (result.kind !== "ready") {
-      return null;
-    }
-    const job = result.job;
-    try {
-      input.redactedLogEntries.push(
-        emitHostedOnboardingFollowupSeededLog({
-          details: input.logDetails,
-          job,
-          wake: input.wake,
-        }),
-      );
-    } catch {
-      // This diagnostic must never turn a successful canonical upsert into a
-      // failed onboarding-follow-up seed.
-    }
-    return job?.enabled ? job.state.nextRunAt : null;
-  } catch (error) {
-    input.redactedLogEntries.push(
-      emitHostedOnboardingFollowupSeedFailureLog({
-        details: input.logDetails,
-        error,
-        wake: input.wake,
-      }),
-    );
-    throw error;
-  }
-}
-
-function emitHostedOnboardingFollowupSeededLog(input: {
-  details: HostedExecutionStructuredLogDetails;
-  job: AssistantCronJob;
-  wake: HostedExecutionSystemWake;
-}): HostedExecutionRedactedLogEntry {
-  const details = {
-    ...input.details,
-    eventCode: "assistant.onboarding_followup_seeded",
-    onboardingFollowupEnabled: input.job?.enabled === true,
-    onboardingFollowupNextRunAt: input.job?.state.nextRunAt ?? null,
-    onboardingFollowupOpportunityDays:
-      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
-    onboardingFollowupScheduleKind: input.job?.schedule?.kind ?? null,
-  };
-
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details,
-    level: "info",
-    message: "Hosted onboarding follow-up automation seeded.",
-    phase: "wake.running",
-    wake: input.wake,
-  });
-
-  return {
-    component: "runtime",
-    eventId: input.wake.eventId,
-    level: "info",
-    message: "Hosted onboarding follow-up automation seeded.",
-    phase: "wake.running",
-    redacted: details,
-  };
-}
-
-function buildOnboardingFollowupAutomationRoute(
-  route: HostedExecutionAssistantNotificationRoute,
-): AutomationRoute {
-  const delivery = route.delivery;
-  if (route.channel === "linq") {
-    return {
-      channel: route.channel,
-      deliverySource: delivery.source ?? null,
-      deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
-      identityId: route.identityId,
-      participantId: delivery.kind === "participant" ? delivery.target : null,
-      threadId: null,
-      threadIsDirect: route.threadIsDirect,
-    };
-  }
-
-  return {
-    channel: route.channel,
-    deliverySource: delivery.source ?? null,
-    deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
-    identityId: route.identityId,
-    participantId: delivery.kind === "participant" ? delivery.target : null,
-    threadId:
-      route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
-    threadIsDirect: route.threadIsDirect,
-  };
-}
-
-function emitHostedOnboardingFollowupSeedFailureLog(input: {
-  details: HostedExecutionStructuredLogDetails;
-  error: unknown;
-  wake: HostedExecutionSystemWake;
-}): HostedExecutionRedactedLogEntry {
-  const details = {
-    ...input.details,
-    eventCode: "assistant.onboarding_followup_seed_failed",
-  };
-  const redacted = {
-    ...details,
-    ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
-    errorCode: deriveHostedExecutionErrorCode(input.error),
-  };
-
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details,
-    error: input.error,
-    level: "warn",
-    message: "Hosted onboarding follow-up automation seed failed.",
-    phase: "wake.running",
-    wake: input.wake,
-  });
-
-  return {
-    component: "runtime",
-    eventId: input.wake.eventId,
-    level: "warn",
-    message: "Hosted onboarding follow-up automation seed failed.",
-    phase: "wake.running",
-    redacted,
-  };
-}
-
 function shouldSkipFailedHostedAssistantNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
-      (
-        wake.notification.notificationPromptProfile === "creative-response"
-        || wake.notification.notificationPromptProfile ===
-          "creative-response-text"
-      )
-      || wake.notification.firstContact != null
+      wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
     )
   );
@@ -702,18 +630,6 @@ function buildHostedMemberActivationSignupWelcomeLogDetails(
     deliveryDispatchMode: "queue-only",
     firstContact: true,
     responsePolicyKind: "require_send_exact_text",
-    route,
-  });
-}
-
-function buildHostedOnboardingFollowupLogDetails(
-  route: HostedExecutionAssistantNotificationRoute,
-): HostedExecutionStructuredLogDetails {
-  return buildHostedAssistantNotificationRouteLogDetails({
-    deliveryDedupeTokenPresent: false,
-    deliveryDispatchMode: "activation",
-    firstContact: false,
-    responsePolicyKind: "none",
     route,
   });
 }
@@ -878,6 +794,62 @@ function requireMemberActivationSignupWelcome(
   return wake.signupWelcome;
 }
 
+type GameHostResponsePolicy<Kind> = Extract<
+  NonNullable<HostedExecutionAssistantNotificationRequestedWake["notification"]["responsePolicy"]>,
+  { kind: Kind }
+>;
+
+function scopeGameHostExecutionContext(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+  executionContext: AssistantExecutionContext,
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
+): AssistantExecutionContext {
+  const policy = wake.notification.responsePolicy;
+  if (policy?.kind !== "require_game_recap" && policy?.kind !== "game_missed_check_in" && policy?.kind !== "game_group_missed_check_in") return executionContext;
+  if (wake.eventId !== policy.eventId || wake.notification.route.threadIsDirect !== false) {
+    throw new TypeError("Game recap notification authority is invalid.");
+  }
+  const scope = policy.kind === "require_game_recap"
+    ? gameRecapHostedScope(wake.eventId, policy, groupToolPort)
+    : policy.kind === "game_group_missed_check_in"
+    ? (() => {
+        if (policy.roomId !== wake.userId || executionContext.hosted?.memberId !== wake.userId) throw new TypeError("Game check-in room authority is invalid.");
+        return { gameMissedCheckInScope: gameGroupMissedCheckInPolicySchema.parse(policy) };
+      })()
+    : gameMissedCheckInHostedScope(wake.eventId, policy);
+  return executionContext.hosted
+    ? { ...executionContext, hosted: { ...executionContext.hosted, ...scope } }
+    : executionContext;
+}
+
+function gameRecapHostedScope(
+  eventId: string,
+  policy: GameHostResponsePolicy<"require_game_recap">,
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
+) {
+  if (eventId !== policy.eventId || parseGameRecapEventId(eventId)?.gameId !== policy.gameId) {
+    throw new TypeError("Game recap notification authority is invalid.");
+  }
+  if (!groupToolPort) {
+    throw new TypeError("Game recap requires its trusted control port.");
+  }
+  return {
+    gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint,
+      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}) },
+    groupTool: groupToolPort,
+  };
+}
+
+function gameMissedCheckInHostedScope(
+  eventId: string,
+  policy: GameHostResponsePolicy<"game_missed_check_in">,
+) {
+  if (eventId !== `game-missed:${policy.gameId}:${policy.memberId}:${policy.firstMissedDate}`) {
+    throw new TypeError("Game check-in notification authority is invalid.");
+  }
+  return { gameMissedCheckInScope: policy };
+}
+
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
@@ -887,7 +859,12 @@ function buildAssistantNotificationInput(
   sourceMailboxItemId: string | null,
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
 ): AssistantNotificationInput {
+  const notificationPromptProfile = wake.notification.notificationPromptProfile;
+  if (isHostedRetiredAssistantNotificationProfile(notificationPromptProfile)) {
+    throw new TypeError("Retired notification profiles cannot enter active execution.");
+  }
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;
   if (privateAssistantAskCompletion) {
@@ -922,6 +899,7 @@ function buildAssistantNotificationInput(
         }
       }
     : null;
+  const scopedExecutionContext = scopeGameHostExecutionContext(wake, executionContext, groupToolPort);
   const notificationInput = buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     ...(authorizeOperatorTask
@@ -944,7 +922,7 @@ function buildAssistantNotificationInput(
       ? "queue-only"
       : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
-    executionContext,
+    executionContext: scopedExecutionContext,
     ...(wake.notification.externalThreadRouteAuthority
       ? {
           externalThreadRouteAuthority:
@@ -959,12 +937,7 @@ function buildAssistantNotificationInput(
       : null,
     instructions: wake.notification.instructions,
     logDetails: buildHostedAssistantNotificationLogDetails(wake),
-    ...(wake.notification.notificationPromptProfile
-      ? {
-          notificationPromptProfile:
-            wake.notification.notificationPromptProfile,
-        }
-      : {}),
+    ...(notificationPromptProfile ? { notificationPromptProfile } : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
     ...(privateAssistantAskCompletion
@@ -991,7 +964,7 @@ function withOperatorTaskExecution(
 ): AssistantNotificationInput {
   if (operatorTask) {
     input.assistantTargetOverride = {
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(
         executionContext.hosted?.defaultTarget?.modelProvider,
       ),
@@ -1086,7 +1059,7 @@ function buildAssistantNotificationInputFromRoute(input: {
         route.threadId,
       ]),
     },
-    deliveryKind: delivery.kind === "explicit" ? null : delivery.kind,
+    deliveryKind: delivery.kind === "explicit" || delivery.kind === "bootstrap" ? null : delivery.kind,
     deliverySource: delivery.source ?? null,
     deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
     executionContext: input.executionContext,
@@ -1320,6 +1293,7 @@ function resolveAssistantNotificationBindingDeliveryTarget(input: {
   wake: HostedRuntimeEvent;
 }): string | null {
   const delivery = input.route.delivery;
+  if (delivery.kind === "bootstrap") return null;
   if (delivery.kind !== "explicit") {
     return delivery.target;
   }
@@ -1438,13 +1412,48 @@ function isHostedThreadRouteEgressUnauthorizedError(error: unknown): boolean {
 function isHostedSignupWelcomeNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
-  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
   return (
     wake.notification.responsePolicy?.kind === "require_send_exact_text"
     && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
-    && wake.notification.deliveryDedupeToken === signupWelcomeToken
-    && wake.notification.deliveryIdempotencyKey === signupWelcomeToken
+    && isHostedMemberSignupWelcomeDeliveryIdentity(wake.notification.deliveryIdempotencyKey, wake.userId)
+    && wake.notification.deliveryDedupeToken === wake.notification.deliveryIdempotencyKey
   );
+}
+
+function isHostedConnectedChannelWelcome(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+  context: AssistantExecutionContext,
+): boolean {
+  const notification = wake.notification;
+  const route = notification.route;
+  if (!isHostedSignupWelcomeNotification(wake)
+    || context.hosted?.memberId !== wake.userId
+    || route.threadIsDirect !== true
+    || (route.channel !== "email" && route.channel !== "linq")
+    || notification.notificationPromptProfile != null
+    || notification.operatorTask != null
+    || notification.groupContextHandoff != null
+    || notification.privateAssistantAskCompletion != null
+    || notification.externalThreadRouteAuthority != null) return false;
+  const key = notification.deliveryIdempotencyKey;
+  return key === `signup-welcome:${wake.userId}`
+    || key === `signup-welcome:${wake.userId}:linq` && route.channel === "linq"
+    || route.identityId !== null && key === buildHostedMemberChannelWelcomeDeliveryIdentity({
+      memberId: wake.userId,
+      channel: route.channel,
+      destinationLookupKey: route.identityId,
+    });
+}
+
+async function resolveHostedConnectedChannelGreetingPolicy(input: {
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+  executionContext: AssistantExecutionContext;
+  vaultRoot: string;
+}): Promise<Pick<AssistantNotificationInput, "connectedChannelGreeting">> {
+  if (!isHostedConnectedChannelWelcome(input.wake, input.executionContext)) return {};
+  const state = await readHostedMailboxImportState({ vaultRoot: input.vaultRoot });
+  return BigInt(state.watermarks.conversation) > 0n
+    ? { connectedChannelGreeting: true } : {};
 }
 
 function isHostedTelegramSignupWelcomeNotification(
@@ -1470,4 +1479,20 @@ function hashHostedAssistantNotificationDeliveryKeyParts(
     .update("\0")
     .update(JSON.stringify(parts.map((part) => part ?? null)))
     .digest("hex")}`;
+}
+
+
+function resolveHostedNotificationTerminalNoSend(error: unknown): {
+  message: string;
+  extraDetails: HostedExecutionStructuredLogDetails;
+} | null {
+  if (isHostedGameBootstrapUnavailable(error)) return {
+    message: "Stale game announcement ended without delivery.",
+    extraDetails: { eventCode: "assistant.notification.game_bootstrap_unavailable", terminalDisposition: "game_bootstrap_unavailable" },
+  };
+  if (isHostedOperatorTaskTerminalNoSendError(error)) return {
+    message: "Hosted operator message ended without a new delivery intent.",
+    extraDetails: { eventCode: "assistant.notification.operator_task_terminal_no_send", terminalDisposition: deriveHostedExecutionErrorCode(error) },
+  };
+  return null;
 }

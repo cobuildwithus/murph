@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "health-sync-after-plan-ends",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Health data keeps syncing after your plan ends",
+    "summary": "Your connected health data can keep updating when your plan ends or pauses.",
+    "details": "Your sharing and consent choices still apply. Murph only replies while you have AI usage available.",
+    "relevanceTags": [
+      "health-data",
+      "account"
+    ],
+    "sourcePullRequests": [4697]
+  }
+}

@@ -1,3 +1,30 @@
+export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
+import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
+export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
+export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
+export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
+export type { GameNoticeRoom } from "./game-chat-notifications.ts";
+import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
+export { GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema } from "./game-tools.ts";
+export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
+import {
+  HOSTED_MAILBOX_LANES,
+  type HostedMailboxLane,
+  type HostedWorkspaceInvocationProcessingMode,
+} from "./runtime-control-values.ts";
+export {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+  HOSTED_MAILBOX_LANES,
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  isHostedMailboxLane,
+  type HostedMailboxLane,
+  type HostedWorkspaceInvocationProcessingMode,
+} from "./runtime-control-values.ts";
+
+import type { HostedGroupSharedReadOptions, HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
+export { parseHostedGroupSharedReadOptions, pageHostedGroupSharedHistory, parseHostedGroupSharedDateCoverage,
+  HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES, HOSTED_GROUP_SHARED_HISTORY_PAGE_MAX_BYTES,
+  type HostedGroupSharedReadOptions, type HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
 import type {
   HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
@@ -14,13 +41,8 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
-  HostedAssistantCustomInferenceOverride,
-} from "./assistant-inference.ts";
-import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
-  HostedAssistantProvider,
-  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
@@ -53,13 +75,6 @@ import {
 import type {
   HostedRuntimePendingGroupSetupInput,
 } from "./pending-group-setup.ts";
-
-export const HOSTED_MAILBOX_LANES = [
-  "system",
-  "conversation",
-] as const;
-
-export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
 export const HOSTED_RUNTIME_FAILURE_PHASE_NAMES = [
   "browser_vault.refresh",
@@ -150,7 +165,10 @@ export function readHostedRuntimeFailurePhaseCode(
 // Migration-only reader metadata. Remove after one mailbox retention window
 // has elapsed since the old producer was retired and no retained rows remain.
 export const HOSTED_RETIRED_MAILBOX_KINDS = [
+  "environment-interview.completed",
+  "environment-voice.captured",
   "group-newsletter.email-needed",
+  "runtime.codex-auth-requested",
 ] as const;
 
 export type HostedRetiredMailboxKind =
@@ -167,8 +185,6 @@ export const HOSTED_MAILBOX_KINDS = [
   "clinical-records.sync-requested",
   "clinical-records.enrichment-requested",
   "device-sync.wake",
-  "environment-interview.completed",
-  "environment-voice.captured",
   "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -189,19 +205,32 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
+  "gpt-6.1-terra",
+  "gpt-6.1-sol",
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-6-astra",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
   "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
+// Retired usage remains ingestible during rollout and replay. Never use this
+// accounting-only type as an execution or deployment allowlist.
+export type HostedAiUsageLedgerModel = HostedAiUsageAllowancePricedModel | "gpt-5.6-sol";
+
+export function normalizeHostedAiUsageLedgerModelId(value: string): HostedAiUsageLedgerModel | null {
+  const historical = value.trim().toLowerCase().split("/").at(-1)?.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
+  return historical === "gpt-5.6-sol" ? historical : normalizeHostedAiUsageAllowancePricedModelId(value);
+}
+
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
   [
     ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-  ] as readonly HostedAiUsageAllowancePricedModel[];
+    // Historical usage evidence must retain its original Flex pricing basis.
+    "gpt-5.6-sol",
+  ] as readonly HostedAiUsageLedgerModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
@@ -211,6 +240,7 @@ export type HostedAiUsageOpenAiFlexTokenPricingModel =
 export const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS = [
   "gpt-image-2",
   "gpt-image-2.5-flare",
+  "gpt-image-2.6-flare",
 ] as const;
 
 export type HostedAiUsageAllowanceOpenAiImagePricedModel =
@@ -223,6 +253,7 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
   "eleven_turbo_v2",
   "eleven_turbo_v2_5",
   "eleven_v3",
+  "eleven_v4",
 ] as const;
 
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
@@ -335,12 +366,12 @@ export function normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(
 
 export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
   value: string | null | undefined,
-): value is HostedAiUsageAllowancePricedModel {
+): value is HostedAiUsageOpenAiFlexTokenPricingModel {
   if (typeof value !== "string") {
     return false;
   }
 
-  const normalized = normalizeHostedAiUsageAllowancePricedModelId(value);
+  const normalized = normalizeHostedAiUsageLedgerModelId(value);
   return normalized
     ? HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS.includes(normalized)
     : false;
@@ -401,6 +432,7 @@ export function resolveHostedAiUsageTokenPricingBasis(input: {
   providerName: unknown;
   serviceTier?: string | null | undefined;
 }): AssistantUsageTokenPricingBasis {
+  // Priority onboarding is a platform-funded boost: member usage stays standard.
   if (input.serviceTier !== "flex") {
     return "standard";
   }
@@ -852,28 +884,41 @@ export interface HostedMailboxLaneHighWater {
   maxUpdatedAt?: string | null;
 }
 
+/** Complete mailbox-only wake provenance; absent means freshness is unknown. */
+export type HostedMailboxWakeHighWater = Record<HostedMailboxLane, string>;
+
+export function readHostedMailboxWakeHighWater(value: unknown): HostedMailboxWakeHighWater | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== HOSTED_MAILBOX_LANES.length) return null;
+  const { conversation, system } = record;
+  if (typeof conversation !== "string" || typeof system !== "string"
+      || !/^(?:0|[1-9][0-9]*)$/u.test(conversation)
+      || !/^(?:0|[1-9][0-9]*)$/u.test(system)) return null;
+  return { conversation, system };
+}
+
+/** Unknown work in either wake must not be hidden by a later known mailbox wake. */
+export function mergeHostedMailboxWakeHighWater(
+  left: HostedMailboxWakeHighWater | null | undefined,
+  right: HostedMailboxWakeHighWater | null | undefined,
+): HostedMailboxWakeHighWater | null {
+  if (!left || !right) return null;
+  return {
+    conversation: BigInt(left.conversation) >= BigInt(right.conversation) ? left.conversation : right.conversation,
+    system: BigInt(left.system) >= BigInt(right.system) ? left.system : right.system,
+  };
+}
+
 export interface HostedMailboxLaneConsumed {
   consumedSeq: string;
   lane: HostedMailboxLane;
 }
 
-export interface HostedGroupRunningBitProjection {
-  expiresAt: string;
-  publicAlias: string | null;
-  requestedBit: string;
-  schema: "murph.group-sponsorship-bit.v1";
-}
-
 export interface HostedMailboxFetchResponse {
-  // Web supplies this invocation-lifecycle fact on every fetch, including empty
-  // batches. Deploy Web before a runner that consumes it.
-  assistantProvider: HostedAssistantProvider;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
-  // Optional for consumer-first rollout. It is Web-owned, expiring group
-  // context and is attached only to fresh route-authorized group inputs.
-  groupRunningBit?: HostedGroupRunningBitProjection | null;
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
@@ -993,7 +1038,28 @@ export interface HostedRuntimeProductFeedbackRecord {
 }
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
-export const HOSTED_PATTERN_ENGINE_AUDIT_PREFIX = "Pattern engine audit:";
+export const HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX = "Usage optimization audit:";
+export const HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS = [
+  "wrong_kind", "changelog_linked", "missing_prefix", "summary_too_long", "empty_report",
+] as const;
+export type HostedUsageOptimizationAuditRejection =
+  (typeof HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS)[number];
+
+export function isHostedUsageOptimizationAuditFeedback(
+  feedback: Pick<HostedRuntimeProductFeedbackRecord, "kind" | "relatedChangelogItemIds" | "summary">,
+  onRejection?: (reason: HostedUsageOptimizationAuditRejection) => void,
+): boolean {
+  // Observe the existing short-circuit rules once, without a second validator.
+  const reject = (reason: HostedUsageOptimizationAuditRejection): false => {
+    onRejection?.(reason);
+    return false;
+  };
+  return (feedback.kind === "feature_request" || reject("wrong_kind"))
+    && (feedback.relatedChangelogItemIds.length === 0 || reject("changelog_linked"))
+    && (feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX) || reject("missing_prefix"))
+    && (feedback.summary.length <= 1800 || reject("summary_too_long"))
+    && (feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0 || reject("empty_report"));
+}
 
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
@@ -1406,8 +1472,22 @@ export interface HostedRuntimeGroupChatParticipant {
   ownerAdvisoryName?: string;
 }
 
-export interface HostedRuntimeGroupSharedReadRequest {
+export interface HostedRuntimeGroupSharedFreshnessRequirement {
+  projectionScopeKey: string;
+  date: string;
+}
+
+export interface HostedRuntimeGroupSharedFreshness {
+  /** Time of the successful shared-snapshot read, not a provider upload time. */
+  checkedAt: string;
+  refreshStatus: "requested" | "unavailable" | "not_needed";
+}
+
+export interface HostedRuntimeGroupSharedReadRequest extends HostedGroupSharedReadOptions {
+  includeCompanionPresence?: true;
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
+  /** Only missing, currently consented wearable dates can request existing sync work. */
+  freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
 }
 
 export type HostedRuntimeGroupSharedRecord = Pick<
@@ -1435,6 +1515,7 @@ export interface HostedRuntimeGroupSharedProjection {
 }
 
 export interface HostedRuntimeGroupSharedMember {
+  companionLastContactAt?: string | null;
   currentTurnHandles: readonly string[];
   displayName: string | null;
   memberId: string;
@@ -1444,6 +1525,8 @@ export interface HostedRuntimeGroupSharedMember {
 
 export type HostedRuntimeGroupSharedReadResult =
   | {
+      dateCoverage?: HostedGroupSharedDateCoverage;
+      freshness?: HostedRuntimeGroupSharedFreshness;
       members: readonly HostedRuntimeGroupSharedMember[];
       requestedProjectionScopeKeys: readonly string[];
       status: "ok";
@@ -1495,6 +1578,8 @@ export type HostedRuntimeGroupParticipantDisplayNamesResult =
     };
 
 export type HostedRuntimeGroupToolRequest =
+  | HostedGameChatBootstrapRequest
+  | HostedGameToolRequest
   | {
       action: "ask";
       membershipId: string;
@@ -1694,6 +1779,8 @@ export type HostedRuntimeGroupJournalActionResult =
   | { status: "unavailable"; unavailableReason: string };
 
 export type HostedRuntimeGroupToolResponse =
+  | HostedGameChatBootstrapResponse
+  | HostedGameToolResponse
   | {
       action: "ask";
       result: HostedRuntimeGroupAskResult;
@@ -1954,7 +2041,9 @@ export const HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH = 100_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX = 100;
-export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
+export {
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+} from "./vault-share.ts";
 export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
 const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_PATTERN = new RegExp(
   `^[0-9a-f]{${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,
@@ -2204,17 +2293,10 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
-      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
-      provider: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -2229,12 +2311,10 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
-  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
-  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -2254,36 +2334,10 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
       action: "update";
       result: HostedRuntimeAssistantConfigurationSnapshot & {
         appliesAt: "next_turn";
-        requiredPlan: "edge" | "max" | null;
+        requiredPlan: "pulse" | "edge" | "max" | null;
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
-
-export type HostedCodexAuthUpdate =
-  | {
-      attemptId: string;
-      phase: "device_code";
-      userCode: string;
-      verificationUrl: string;
-    }
-  | {
-      attemptId: string;
-      phase: "connected" | "disconnected" | "failed";
-    };
-
-export const HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES = [
-  "applied",
-  "already_applied",
-  "superseded",
-] as const;
-
-export type HostedCodexAuthUpdateResponseStatus =
-  (typeof HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES)[number];
-
-export interface HostedCodexAuthUpdateResponse {
-  applied: boolean;
-  status: HostedCodexAuthUpdateResponseStatus;
-}
 
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
@@ -2295,6 +2349,7 @@ export interface HostedRuntimeIssueExportResponse {
 }
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
+  "email",
   "linq",
   "telegram",
 ] as const;
@@ -2315,6 +2370,7 @@ export function readHostedIngressLatencySource(
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
+export const HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS = 8;
 export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runner_job_accepted",
   "runtime_phase_started",
@@ -2335,6 +2391,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
+  "terminal_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -2383,6 +2440,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // request's route timestamp. The two bounded ids correlate one Web direct
   // ensure with the runtime invocation it launched.
   orchestration?: {
+    ingressConversationIsGroup?: boolean;
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
     tokenAcquireStartedAtEpochMs?: number;
@@ -2393,6 +2451,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     // spans can instead describe a competing Temporal wake.
     directEnsureAuthDurationMs?: number;
     directEnsureHandlerDurationMs?: number;
+    directWakeStartedAtEpochMs?: number;
+    directWakeAttemptCount?: number;
+    directWakeRetryWaitMs?: number;
     directEnsureOrchestrationAttemptId?: string;
     directEnsureResultKind?:
       | "legacy_accepted"
@@ -2479,6 +2540,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
+    runtimeInvocationInputsWaitElapsedMs?: number;
+    runtimeInvocationAdmissionElapsedMs?: number;
+    runtimeInvocationFenceBindElapsedMs?: number;
+    runtimeInvocationJobPrepareElapsedMs?: number;
   };
   // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
   // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
@@ -2519,6 +2584,8 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeWakeNotifiedAtEpochMs?: number;
     foregroundWaitResolvedAtEpochMs?: number;
     foregroundImportStartedAtEpochMs?: number;
+    foregroundPrefetchPrepareElapsedMs?: number;
+    foregroundPrefetchWaitElapsedMs?: number;
     foregroundWakeOrdinal?: number;
     activeRuntimePassOrdinal?: number;
     activeRuntimePassStartedAtEpochMs?: number;
@@ -2588,6 +2655,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
+    terminalReplyCommittedAtEpochMs?: number;
     checkpointPublicationExpectedByEpochMs?: number;
     runtimeLeaseGeneration?: string;
   };
@@ -2807,6 +2875,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   readonly string[]
 > = {
   orchestration: [
+    "ingressConversationIsGroup",
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
     "tokenAcquireStartedAtEpochMs",
@@ -2815,6 +2884,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureResponseReceivedAtEpochMs",
     "directEnsureAuthDurationMs",
     "directEnsureHandlerDurationMs",
+    "directWakeStartedAtEpochMs",
+    "directWakeAttemptCount",
+    "directWakeRetryWaitMs",
     "directEnsureOrchestrationAttemptId",
     "directEnsureResultKind",
     "directEnsureAction",
@@ -2890,6 +2962,10 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
+    "runtimeInvocationInputsWaitElapsedMs",
+    "runtimeInvocationAdmissionElapsedMs",
+    "runtimeInvocationFenceBindElapsedMs",
+    "runtimeInvocationJobPrepareElapsedMs",
   ],
   dispatch: [
     "invokeReceivedAtEpochMs",
@@ -2917,6 +2993,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeWakeNotifiedAtEpochMs",
     "foregroundWaitResolvedAtEpochMs",
     "foregroundImportStartedAtEpochMs",
+    "foregroundPrefetchPrepareElapsedMs",
+    "foregroundPrefetchWaitElapsedMs",
     "foregroundWakeOrdinal",
     "activeRuntimePassOrdinal",
     "activeRuntimePassStartedAtEpochMs",
@@ -2972,6 +3050,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
+    "terminalReplyCommittedAtEpochMs",
     "checkpointPublicationExpectedByEpochMs",
     "runtimeLeaseGeneration",
   ],
@@ -2995,6 +3074,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
+    "orchestration.ingressConversationIsGroup",
     "orchestration.activeFenceTargetWasPriorVersion",
     "orchestration.activeWakeAccepted",
     "orchestration.activeWakeFoundNoActiveChild",
@@ -3501,7 +3581,17 @@ export interface HostedRuntimeLatencyTraceMilestoneEvent {
   type: "runtime_milestone";
 }
 
+export interface HostedRuntimeLatencyTraceDeliveryCommittedEvent {
+  mailboxItemIds: string[];
+  at: string;
+  checkpointPublicationExpectedBy: string;
+  runtimeAttemptId: string;
+  source: HostedIngressLatencySource;
+  type: "delivery_committed";
+}
+
 export type HostedRuntimeLatencyTraceEvent =
+  | HostedRuntimeLatencyTraceDeliveryCommittedEvent
   | HostedRuntimeLatencyTraceAssistantInputStagedEvent
   | HostedRuntimeLatencyTraceAssistantMilestoneEvent
   | HostedRuntimeLatencyTraceProviderStartedEvent
@@ -3509,6 +3599,15 @@ export type HostedRuntimeLatencyTraceEvent =
 
 export interface HostedRuntimeLatencyTraceRequest {
   event: HostedRuntimeLatencyTraceEvent;
+}
+
+export interface HostedRuntimeLatencyTraceBatchRequest {
+  events: Array<HostedRuntimeLatencyTraceAssistantMilestoneEvent | HostedRuntimeLatencyTraceMilestoneEvent>;
+}
+
+export interface HostedRuntimeLatencyTraceBatchResponse {
+  // Positional results retain each event's retry ownership. Null means persistence failed.
+  results: Array<HostedRuntimeLatencyTraceResponse | null>;
 }
 
 export interface HostedRuntimeLatencyTraceResponse {
@@ -3536,10 +3635,10 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  /** Derived from personal member signup; rechecked at each provider attempt. */
+  hostedAssistantPriorityUntil?: string;
   hostedAssistantAstraAllowed?: boolean;
-  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
-  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   hostedAssistantSubagentModelOverridesAllowed?: boolean;
   platformAiUsageAllowed?: boolean;
@@ -3616,6 +3715,40 @@ export interface HostedBrowserVaultReplicaPublishRequest {
 export interface HostedBrowserVaultReplicaPublishResponse {
   published: boolean;
   workspace: HostedWorkspaceState | null;
+}
+
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_PATH =
+  "/api/internal/hosted-runtime/protocol-admission";
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND =
+  "hosted_runtime_web_protocol_admission";
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION = 1;
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
+
+export interface HostedRuntimeWebProtocolAdmission {
+  kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
+  schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
+  nonce: string;
+  latencyMilestoneBatchMaxEvents: number;
+  runtimeLogEventCodes: readonly string[];
+  threadRouteAuthority: { direct: unknown; group: unknown };
+  runtimeReplicaBatch: { admission: unknown; settlement: unknown };
+  runtimeOwnerCompletion: { early: unknown; settled: unknown };
+}
+
+// A synthetic wire message, not a log write. Exercise every producer enum value
+// through the deployed consumer's actual parser rather than a capability label.
+export function buildHostedRuntimeLogProtocolProbe(
+  eventCode: HostedRuntimeLogEventCode,
+): HostedRuntimeLogRequest {
+  return { entries: [{
+    at: "2000-01-01T00:00:00.000Z",
+    component: "runner",
+    errorCode: "SYNTHETIC_PROTOCOL_PROBE",
+    redactedJson: { safeErrorMessage: "Synthetic protocol admission probe." },
+    eventCode,
+    level: "info",
+    phase: "invoke",
+  }] };
 }
 
 export const HOSTED_RUNTIME_LOG_LEVELS = [
@@ -3700,6 +3833,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.parser_drain_failed",
   "mailbox.parser_jobs_failed",
   "mailbox.post_checkpoint_effects_finished",
+  "mailbox.progress_alert_sampled",
   "mailbox.system_processed",
   "mailbox.telegram_attachment_download_finished",
   "mailbox.quarantined",
@@ -3707,6 +3841,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "outbox.ambiguous",
   "outbox.delivery_finished",
   "outbox.linq_app_card_fallback_error",
+  "outbox.telegram_text_accepted",
   "outbox.receipt_checkpointed",
   "runner.accepted_attempt_failed",
   "runner.error",
@@ -3717,6 +3852,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.started",
   "runner.web_control_preflight_rejected",
   "runtime.invocation_finished",
+  "runtime.retention_issue",
   "workspace.codex_home_snapshot",
 ] as const;
 
@@ -3851,20 +3987,16 @@ export interface HostedWorkspaceInvocationBudget {
   maxRuntimeMs?: number | null;
 }
 
-export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
-  "default",
-  "inbox_media_retention",
-  "system_mailbox",
-] as const;
-
-export type HostedWorkspaceInvocationProcessingMode =
-  (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
-
 export interface HostedWorkspaceInvocationRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
+  hostedAssistantPriorityUntil?: string;
   assistantExecutionBlocked?: true;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
-  idleCheckpointDelayMs?: number | null;
+  // Older runtimes ignore this field and retain their pre-Ask-fix default.
+  // Do not also send the retired idleCheckpointDelayMs field.
+  runnerIdleTtlMs?: number | null;
   leaseGeneration: string;
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerEgressToken?: string | null;
@@ -3942,10 +4074,6 @@ function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
   );
 }
 
-export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
-  return HOSTED_MAILBOX_LANES.includes(value as HostedMailboxLane);
-}
-
 export function isHostedMailboxKind(value: string): value is HostedMailboxKind {
   return HOSTED_MAILBOX_KINDS.includes(value as HostedMailboxKind);
 }
@@ -3955,3 +4083,13 @@ export function isHostedRetiredMailboxKind(
 ): value is HostedRetiredMailboxKind {
   return HOSTED_RETIRED_MAILBOX_KINDS.some((kind) => kind === value);
 }
+
+export {
+  parseHostedGroupSharedFreshnessRequirements,
+  readHostedGroupSharedFreshnessRejection,
+  type HostedGroupSharedFreshnessRejection,
+  selectRefreshableHostedGroupWearableDates,
+  hostedGroupMemberHasMissingWearableDates,
+  hostedGroupSharedNeedsWearableRecovery,
+  getHostedGroupWearableReportingGaps,
+} from "./group-shared-freshness.ts";

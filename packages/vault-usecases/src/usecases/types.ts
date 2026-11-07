@@ -57,7 +57,6 @@ import type {
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
   QueryMealNutritionTotalsResult,
-  QueryPersonalPatternReport,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableSleepPatternSummary,
 } from "../query-runtime.js"
@@ -654,14 +653,6 @@ export interface WearableSleepPatternResult {
   summary: WearablePublicSleepPatternSummary
 }
 
-export interface PersonalPatternResult {
-  filters: {
-    date: string | null
-    windowDays: number
-  }
-  report: QueryPersonalPatternReport
-}
-
 export interface VaultShowResult {
   vault: string
   formatVersion: number | null
@@ -901,6 +892,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   validate(input: CommandContext): Promise<VaultValidateResult>
   addMeal(
     input: CommandContext & {
+      name?: string
       photo?: string
       audio?: string
       note?: string
@@ -1515,12 +1507,6 @@ export interface QueryServices extends HealthQueryServiceMethods {
       windowDays?: number
     },
   ): Promise<WearableSleepPatternResult>
-  showPersonalPatterns(
-    input: CommandContext & {
-      date?: string
-      windowDays?: number
-    },
-  ): Promise<PersonalPatternResult>
   listWearableSleep(
     input: CommandContext & {
       date?: string
@@ -1705,6 +1691,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     touchedPaths: string[]
   }>
   addMeal(input: {
+    name?: string
     vaultRoot: string
     photoPath?: string
     audioPath?: string
@@ -1716,6 +1703,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }): Promise<{
     mealId: string
     event: {
+      title?: string
       id: string
       occurredAt?: string | null
       note?: string | null
@@ -1815,6 +1803,7 @@ export interface ImportersRuntime {
     }
   }>
   addMeal(input: {
+    name?: string
     photoPath?: string
     audioPath?: string
     vaultRoot: string
@@ -1826,7 +1815,9 @@ export interface ImportersRuntime {
   }): Promise<{
     mealId: string
     event: {
+      title?: string
       id: string
+      dayKey: string
       occurredAt?: string | null
       note?: string | null
       source?: ImporterSource | null
@@ -1883,6 +1874,9 @@ export interface ImportersRuntime {
     filePath: string
     vaultRoot: string
     title?: string
+    assessmentType?: string
+    questionnaireSlug?: string
+    relatedIds?: string[]
     occurredAt?: string
     importedAt?: string
     source?: string

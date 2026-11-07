@@ -229,6 +229,7 @@ export interface ActiveMealPhotoCaptureEnrollment {
 }
 
 export interface ValidatedMealPhotoUpload {
+  uploadId: string;
   bytes: Buffer;
   captureId: string;
   capturedAt: string;
@@ -1008,8 +1009,10 @@ export async function assertMealPhotoCaptureRequestHasNoBody(request: Request): 
 export async function readAndValidateMealPhotoUpload(
   request: Request,
 ): Promise<ValidatedMealPhotoUpload> {
+  const captureId = parseAutomaticMealPhotoCaptureId(request);
   return readAndValidateMealPhotoUploadWithCaptureId({
-    captureId: parseAutomaticMealPhotoCaptureId(request),
+    uploadId: captureId,
+    captureId,
     request,
   });
 }
@@ -1026,6 +1029,7 @@ export async function readAndValidateManualMealPhotoUpload(input: {
     throw mealPhotoCaptureUploadInvalid("Meal photo idempotency key is invalid.");
   }
   return readAndValidateMealPhotoUploadWithCaptureId({
+    uploadId: idempotencyKey,
     captureId: createHash("sha256")
       .update("murph:manual-meal-photo:v1\0")
       .update(input.memberId)
@@ -1045,6 +1049,7 @@ function parseAutomaticMealPhotoCaptureId(request: Request): string {
 }
 
 async function readAndValidateMealPhotoUploadWithCaptureId(input: {
+  uploadId: string;
   captureId: string;
   request: Request;
 }): Promise<ValidatedMealPhotoUpload> {
@@ -1085,6 +1090,7 @@ async function readAndValidateMealPhotoUploadWithCaptureId(input: {
   return {
     bytes,
     captureId: input.captureId,
+    uploadId: input.uploadId,
     capturedAt,
     ...dimensions,
     sha256: createHash("sha256").update(bytes).digest("hex"),

@@ -1,3 +1,4 @@
+import { companionPresenceSchema } from "@murphai/hosted-execution/companion-presence";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
@@ -34,6 +35,15 @@ export function createHostedWebDeviceSyncPort(input: {
   transport: HostedWebControlTransport;
 }): HostedRuntimeDeviceSyncPort {
   return {
+    async companionStatus(runtimeInput) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {}, boundUserId: input.boundUserId,
+        description: "Companion app presence", fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.companionPresence,
+        signal: runtimeInput.signal ?? null, timeoutMs: input.timeoutMs, transport: input.transport,
+      });
+      return companionPresenceSchema.parse(payload);
+    },
     async configureNoDataOutreach(runtimeInput) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {

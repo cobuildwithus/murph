@@ -57,8 +57,8 @@ describe("@murphai/health-commons coverage scaffolding", () => {
         generatedRoot,
       });
 
-      const protocolIndexJson = await readFile(path.join(generatedRoot, "protocol-index.json"), "utf8");
-      expect(protocolIndexJson).toContain("\"catalogHash\"");
+      const routeIndexJson = await readFile(path.join(generatedRoot, "web/routes/index.json"), "utf8");
+      expect(routeIndexJson).toContain("\"catalogHash\"");
 
       await writeHealthCommonsGeneratedArtifacts({
         check: true,
@@ -123,7 +123,7 @@ describe("@murphai/health-commons coverage scaffolding", () => {
     };
 
     expect(packageJson.scripts?.typecheck).toBe(
-      "pnpm generate && node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
+      "pnpm generate && node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
     );
     expect(packageJson.scripts?.verify).toContain("pnpm typecheck");
   });

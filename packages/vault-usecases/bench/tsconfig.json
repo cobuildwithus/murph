@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": ["experiment-followup.ts", "wearable-sources.ts", "event-list.ts", "experiment-list.ts", "experiment-list-fixture.ts", "wearable-sleep.ts", "wearable-sleep-fixture.ts", "wearable-sleep.test.ts", "experiment-list-pairs.ts", "global-projection.ts", "global-projection.test.ts"]
+}

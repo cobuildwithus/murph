@@ -32,8 +32,6 @@ export * from "../hosted-email.ts";
 export * from "../locks.ts";
 export * from "../loopback-control-plane.ts";
 export * from "./loopback-control-plane-auth.ts";
-export * from "../process-identity.ts";
-export * from "../process-kill.ts";
 export * from "../runtime-paths.ts";
 export {
   ASSISTANT_RUNTIME_DIRECTORY_NAME,
@@ -53,3 +51,5 @@ export * from "../versioned-json-files.ts";
 export * from "../sqlite-warning-filter.ts";
 export * from "../sqlite.ts";
 export * from "../ulid.ts";
+
+export * from "../hosted-media-references.ts";

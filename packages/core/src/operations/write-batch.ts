@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, promises as fs, type Stats } from "node:fs";
 
-import { auditRecordSchema } from "@murphai/contracts";
+import { auditRecordSchema, inboxCaptureRecordSchema } from "@murphai/contracts";
 
 import {
   copyFileAtomic,
@@ -12,13 +12,7 @@ import {
   writeTextFileAtomic,
 } from "../atomic-write.ts";
 import { VaultError } from "../errors.ts";
-import {
-  appendArchivedEventLedgerShard,
-  createArchivedEventLedgerShardContentReceipt,
-  inspectArchivedEventLedgerShardAppend,
-  isEventLedgerLogicalPath,
-  truncateArchivedEventLedgerShard,
-} from "../event-ledger-storage.ts";
+import { canonicalJsonlStorageForPath } from "../canonical-jsonl-storage.ts";
 import { ensureDirectory, pathExists } from "../fs.ts";
 import { VAULT_LAYOUT } from "../constants.ts";
 import {
@@ -63,8 +57,8 @@ import type { DateInput } from "../types.ts";
 
 export const WRITE_OPERATION_SCHEMA_VERSION = "murph.write-operation.v1";
 export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";
-export const TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT = 100;
-export const TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS = 24 * 60 * 60 * 1000;
+export const TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT = 0;
+export const TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS = 0;
 
 type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back" | "failed";
 type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back";
@@ -126,6 +120,7 @@ export type HostedCanonicalWriteReceiptAction =
       effect: "copy" | "reuse";
       contentRef?: HostedCanonicalWriteReceiptContentRef;
       mediaRef?: {
+        pendingUpload?: boolean;
         id: string;
         mediaKind: "image" | "video";
         expiresAt: string | null;
@@ -164,6 +159,17 @@ export interface HostedCanonicalWritePersistenceInput {
   receipt: HostedCanonicalWriteReceipt;
 }
 
+export class HostedCanonicalWriteOutcomeUnknownError extends Error {
+  readonly retryable = true;
+
+  constructor(input: { cause: unknown }) {
+    super("Hosted canonical write outcome is unknown.", { cause: input.cause });
+    this.name = "HostedCanonicalWriteOutcomeUnknownError";
+  }
+}
+
+// HostedCanonicalWriteOutcomeUnknownError means the submission may have committed.
+// Any other rejection means it did not.
 export interface HostedCanonicalWritePort {
   persistCanonicalWrite(input: HostedCanonicalWritePersistenceInput): Promise<void>;
   persistRuntimeState?(): Promise<void>;
@@ -782,6 +788,52 @@ async function applyHostedCanonicalTextReceiptAction(input: {
   await writeTextFileAtomic(target.absolutePath, Buffer.from(input.bytes).toString("utf8"));
 }
 
+async function tryApplyHostedArchivedJsonlAppend(
+  input: Parameters<typeof applyHostedCanonicalJsonlAppendReceiptAction>[0],
+): Promise<boolean> {
+  const storage = canonicalJsonlStorageForPath(input.targetRelativePath);
+  if (storage) {
+    const archivedReceipt = await storage.createArchivedJsonlShardContentReceipt(
+      input.vaultRoot,
+      input.targetRelativePath,
+    );
+    if (archivedReceipt) {
+      try {
+        await storage.appendArchivedJsonlShard({
+          expectedBaseByteLength: input.baseByteLength,
+          expectedBaseSha256: input.baseSha256,
+          payload: Buffer.from(input.bytes).toString("utf8"),
+          targetRelativePath: input.targetRelativePath,
+          vaultRoot: input.vaultRoot,
+        });
+      } catch (error) {
+        if (!(error instanceof VaultError) || error.code !== "AUDIT_ARCHIVE_BASE_MISMATCH") throw error;
+        const existing = Buffer.from(await storage.readJsonlShardText({
+          vaultRoot: input.vaultRoot, relativePath: input.targetRelativePath,
+        }));
+        const reconciled = await tryReconcileHostedCanonicalIndependentAppend({
+          bytes: input.bytes,
+          comparisonOptions: { caseInsensitive: await isVaultFilesystemCaseInsensitive(input.vaultRoot) },
+          existing,
+          target: resolveVaultPath(input.vaultRoot, input.targetRelativePath),
+          append: async () => {
+            await storage.appendArchivedJsonlShard({
+              expectedBaseByteLength: archivedReceipt.byteLength,
+              expectedBaseSha256: archivedReceipt.sha256,
+              payload: Buffer.from(input.bytes).toString("utf8"),
+              targetRelativePath: input.targetRelativePath,
+              vaultRoot: input.vaultRoot,
+            });
+          },
+        });
+        if (!reconciled) throw error;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   allowArchivedIntegrationIngestAmendment: boolean;
   baseByteLength: number;
@@ -791,22 +843,7 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
-  if (isEventLedgerLogicalPath(input.targetRelativePath)) {
-    const archivedReceipt = await createArchivedEventLedgerShardContentReceipt(
-      input.vaultRoot,
-      input.targetRelativePath,
-    );
-    if (archivedReceipt) {
-      await appendArchivedEventLedgerShard({
-        expectedBaseByteLength: input.baseByteLength,
-        expectedBaseSha256: input.baseSha256,
-        payload: Buffer.from(input.bytes).toString("utf8"),
-        targetRelativePath: input.targetRelativePath,
-        vaultRoot: input.vaultRoot,
-      });
-      return;
-    }
-  }
+  if (await tryApplyHostedArchivedJsonlAppend(input)) return;
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "jsonl_append",
   });
@@ -873,7 +910,7 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
     }
   }
 
-  if (await tryReconcileHostedCanonicalAuditAppend({
+  if (await tryReconcileHostedCanonicalIndependentAppend({
     bytes: input.bytes,
     comparisonOptions,
     existing,
@@ -889,7 +926,8 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   );
 }
 
-async function tryReconcileHostedCanonicalAuditAppend(input: {
+async function tryReconcileHostedCanonicalIndependentAppend(input: {
+  append?: () => Promise<void>;
   bytes: Uint8Array;
   comparisonOptions: VaultPathComparisonOptions;
   existing: Uint8Array;
@@ -903,10 +941,18 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
     VAULT_LAYOUT.auditDirectory,
     input.comparisonOptions,
   );
-  if (
-    !comparisonRelativePath.startsWith(`${auditDirectory}/`) ||
-    !isJsonlRelativePath(input.target.relativePath, input.comparisonOptions)
-  ) {
+  const inboxDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.inboxCaptureLedgerDirectory,
+    input.comparisonOptions,
+  );
+  // Best-effort inbox backups may omit an earlier capture. These immutable
+  // records, like audit records, can be replayed independently by identity.
+  const recordKind = comparisonRelativePath.startsWith(`${auditDirectory}/`)
+    ? "audit"
+    : comparisonRelativePath.startsWith(`${inboxDirectory}/`)
+      ? "inbox capture"
+      : null;
+  if (!recordKind || !isJsonlRelativePath(input.target.relativePath, input.comparisonOptions)) {
     return false;
   }
 
@@ -918,7 +964,7 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
   if (payloadLines.length !== 1 || payloadLines[0]?.length === 0) {
     return false;
   }
-  const incomingRecord = parseHostedAuditRecordLine(payloadLines[0]);
+  const incomingRecord = parseHostedIndependentAppendRecordLine(payloadLines[0], recordKind);
   if (!incomingRecord) {
     return false;
   }
@@ -928,20 +974,33 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
     return false;
   }
   const existingLines = existingText.length === 0 ? [] : existingText.slice(0, -1).split("\n");
+  const matched = matchIndependentAppendRecord(existingLines, incomingRecord, recordKind);
+  if (matched === null) return false;
+  if (matched) return true;
+  if (input.append) await input.append();
+  else await fs.appendFile(input.target.absolutePath, input.bytes);
+  return true;
+}
+
+function matchIndependentAppendRecord(
+  existingLines: string[],
+  incomingRecord: NonNullable<ReturnType<typeof parseHostedIndependentAppendRecordLine>>,
+  recordKind: "audit" | "inbox capture",
+): boolean | null {
   const existingRecordIds = new Set<string>();
   let matchingRecord: typeof incomingRecord | null = null;
   for (const line of existingLines) {
     if (line.length === 0) {
-      return false;
+      return null;
     }
-    const record = parseHostedAuditRecordLine(line);
+    const record = parseHostedIndependentAppendRecordLine(line, recordKind);
     if (!record) {
-      return false;
+      return null;
     }
     if (existingRecordIds.has(record.id)) {
       throw new VaultError(
         "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-        "Hosted canonical audit replay found a duplicate existing audit record ID.",
+        `Hosted canonical ${recordKind} replay found a duplicate existing ${recordKind} record ID.`,
       );
     }
     existingRecordIds.add(record.id);
@@ -954,25 +1013,28 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
     if (JSON.stringify(matchingRecord) !== JSON.stringify(incomingRecord)) {
       throw new VaultError(
         "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-        "Hosted canonical audit replay found conflicting content for an existing audit record ID.",
+        `Hosted canonical ${recordKind} replay found conflicting content for an existing ${recordKind} record ID.`,
       );
     }
     return true;
   }
 
-  await fs.appendFile(input.target.absolutePath, input.bytes);
-  return true;
+  return false;
 }
 
-function parseHostedAuditRecordLine(line: string) {
+function parseHostedIndependentAppendRecordLine(line: string, kind: "audit" | "inbox capture") {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch {
     return null;
   }
+  if (kind === "inbox capture") {
+    const result = inboxCaptureRecordSchema.safeParse(value);
+    return result.success ? { id: result.data.captureId, record: result.data } : null;
+  }
   const result = auditRecordSchema.safeParse(value);
-  return result.success ? result.data : null;
+  return result.success ? { id: result.data.id, record: result.data } : null;
 }
 
 function isArchivedIntegrationIngestAppendError(
@@ -1325,13 +1387,8 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
-    if (operation.status !== "committed") {
+    if (!isTerminalWriteOperationStatus(operation.status)) {
       result.retainedProtectedCount += 1;
-      continue;
-    }
-
-    if (operation.error) {
-      result.retainedErroredTerminalCount += 1;
       continue;
     }
 
@@ -2320,6 +2377,9 @@ export class WriteBatch {
         this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
         await this.persistBestEffort();
+        if (error instanceof HostedCanonicalWriteOutcomeUnknownError) {
+          throw error;
+        }
 
         let rollbackFailed = false;
         try {
@@ -2338,10 +2398,11 @@ export class WriteBatch {
           const rollbackTriggerError = this.record.error;
           this.record.status = "rolled_back";
           this.record.updatedAt = nowIso();
-          await this.persistBestEffort();
 
           try {
-            await this.cleanupStageArtifacts();
+            // Never remove recovery evidence unless terminal state is durable.
+            await this.persist();
+            await this.cleanupTerminalArtifacts();
           } catch {
             this.record.error = rollbackTriggerError;
             this.record.updatedAt = nowIso();
@@ -2353,16 +2414,12 @@ export class WriteBatch {
       }
 
       try {
-        await this.cleanupStageArtifacts();
+        await this.cleanupTerminalArtifacts();
       } catch (error) {
         this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
 
-        try {
-          await this.persist();
-        } catch {
-          // Leaving the stage artifacts in place is the primary diagnostic fallback.
-        }
+        await this.persistBestEffort();
       }
     } finally {
       await lock?.release();
@@ -2381,7 +2438,7 @@ export class WriteBatch {
       this.record.updatedAt = nowIso();
       this.record.error = undefined;
       await this.persist();
-      await this.cleanupStageArtifacts();
+      await this.cleanupTerminalArtifacts();
     } finally {
       await lock?.release();
     }
@@ -2422,8 +2479,11 @@ export class WriteBatch {
     }
   }
 
-  private async cleanupStageArtifacts(): Promise<void> {
+  private async cleanupTerminalArtifacts(): Promise<void> {
+    // Receipts and hosted payloads have their own durable owner. Delete the
+    // recovery journal last so interrupted cleanup remains retryable.
     await fs.rm(this.stageRootAbsolutePath, { recursive: true, force: true });
+    await safeUnlink(this.metadataAbsolutePath);
   }
 
   private async cleanupGuardReceiptIfConfigured(): Promise<void> {
@@ -3250,7 +3310,7 @@ export class WriteBatch {
     const comparisonOptions: VaultPathComparisonOptions = {
       caseInsensitive: await isVaultFilesystemCaseInsensitive(this.vaultRoot),
     };
-    let appendToArchivedEventLedger = false;
+    let archivedStorage: ReturnType<typeof canonicalJsonlStorageForPath> = null;
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyJsonlAppendTarget>>) => {
@@ -3266,8 +3326,9 @@ export class WriteBatch {
         }
 
         const baseContentReceipt = this.getPreparedJsonlBaseReceipt(action);
-        if (isEventLedgerLogicalPath(action.targetRelativePath)) {
-          const archivedState = await inspectArchivedEventLedgerShardAppend({
+        const storage = canonicalJsonlStorageForPath(action.targetRelativePath);
+        if (storage) {
+          const archivedState = await storage.inspectArchivedJsonlShardAppend({
             expectedBaseByteLength: action.originalSize,
             expectedBaseSha256: baseContentReceipt.sha256,
             payload: payloadBytes,
@@ -3359,7 +3420,7 @@ export class WriteBatch {
         } as const;
       },
       mutateTarget: async (target) => {
-        if (appendToArchivedEventLedger) {
+        if (archivedStorage) {
           const baseContentReceipt = action.baseContentReceipt;
           if (!baseContentReceipt) {
             throw this.buildResumeConflictError(
@@ -3367,7 +3428,7 @@ export class WriteBatch {
               `Archived append target "${action.targetRelativePath}" is missing its prepared base receipt.`,
             );
           }
-          const result = await appendArchivedEventLedgerShard({
+          const result = await archivedStorage.appendArchivedJsonlShard({
             expectedBaseByteLength: baseContentReceipt.byteLength,
             expectedBaseSha256: baseContentReceipt.sha256,
             payload,
@@ -3415,13 +3476,14 @@ export class WriteBatch {
         }
       },
       prepareMutation: async (target) => {
-        if (isEventLedgerLogicalPath(action.targetRelativePath)) {
-          const archivedReceipt = await createArchivedEventLedgerShardContentReceipt(
+        const storage = canonicalJsonlStorageForPath(action.targetRelativePath);
+        if (storage) {
+          const archivedReceipt = await storage.createArchivedJsonlShardContentReceipt(
             this.vaultRoot,
             action.targetRelativePath,
           );
           if (archivedReceipt) {
-            appendToArchivedEventLedger = true;
+            archivedStorage = storage;
             const originalSize = action.originalSize ?? archivedReceipt.byteLength;
             const baseContentReceipt = action.baseContentReceipt ?? archivedReceipt;
             if (baseContentReceipt.byteLength !== originalSize) {
@@ -3660,7 +3722,13 @@ export class WriteBatch {
         continue;
       }
 
-      if (action.state !== "applied") {
+      // A prepared append can have changed the target before appendFile rejects
+      // (or the process exits). Its preimage is durable even without "applied".
+      const preparedAppend = action.kind === "jsonl_append"
+        && action.state === "staged"
+        && action.originalSize !== undefined
+        && action.baseContentReceipt !== undefined;
+      if (action.state !== "applied" && !preparedAppend) {
         continue;
       }
 
@@ -3675,42 +3743,7 @@ export class WriteBatch {
           await copyFileAtomic(backupAbsolutePath, targetAbsolutePath);
         }
       } else if (action.kind === "jsonl_append") {
-        const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
-        if (
-          isEventLedgerLogicalPath(action.targetRelativePath) &&
-          action.baseContentReceipt &&
-          action.originalSize !== undefined &&
-          await createArchivedEventLedgerShardContentReceipt(
-            this.vaultRoot,
-            action.targetRelativePath,
-          )
-        ) {
-          await truncateArchivedEventLedgerShard({
-            expectedBaseByteLength: action.originalSize,
-            expectedBaseSha256: action.baseContentReceipt.sha256,
-            targetRelativePath: action.targetRelativePath,
-            vaultRoot: this.vaultRoot,
-          });
-        } else if (
-          action.allowArchivedIntegrationIngestAmendment &&
-          action.baseContentReceipt &&
-          action.originalSize !== undefined &&
-          await createArchivedIntegrationIngestShardContentReceipt(
-            this.vaultRoot,
-            action.targetRelativePath,
-          )
-        ) {
-          await truncateArchivedIntegrationIngestShard({
-            expectedBaseByteLength: action.originalSize,
-            expectedBaseSha256: action.baseContentReceipt.sha256,
-            targetRelativePath: action.targetRelativePath,
-            vaultRoot: this.vaultRoot,
-          });
-        } else if (!action.existedBefore) {
-          await safeUnlink(targetAbsolutePath);
-        } else {
-          await fs.truncate(targetAbsolutePath, action.originalSize ?? 0);
-        }
+        await this.rollbackJsonlAppend(action);
       } else if (action.kind === "delete" && action.backupRelativePath) {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
         const backupAbsolutePath = resolveVaultPath(this.vaultRoot, action.backupRelativePath).absolutePath;
@@ -3719,6 +3752,69 @@ export class WriteBatch {
 
       action.state = "rolled_back";
       action.rolledBackAt = nowIso();
+    }
+  }
+
+  private async rollbackJsonlAppend(action: Extract<StoredWriteAction, { kind: "jsonl_append" }>): Promise<void> {
+    const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
+    const storage = canonicalJsonlStorageForPath(action.targetRelativePath);
+    if (
+      storage &&
+      action.baseContentReceipt &&
+      action.originalSize !== undefined &&
+      await storage.createArchivedJsonlShardContentReceipt(
+        this.vaultRoot,
+        action.targetRelativePath,
+      )
+    ) {
+      await storage.truncateArchivedJsonlShard({
+        expectedBaseByteLength: action.originalSize,
+        expectedBaseSha256: action.baseContentReceipt.sha256,
+        targetRelativePath: action.targetRelativePath,
+        vaultRoot: this.vaultRoot,
+      });
+    } else if (
+      action.allowArchivedIntegrationIngestAmendment &&
+      action.baseContentReceipt &&
+      action.originalSize !== undefined &&
+      await createArchivedIntegrationIngestShardContentReceipt(
+        this.vaultRoot,
+        action.targetRelativePath,
+      )
+    ) {
+      await truncateArchivedIntegrationIngestShard({
+        expectedBaseByteLength: action.originalSize,
+        expectedBaseSha256: action.baseContentReceipt.sha256,
+        targetRelativePath: action.targetRelativePath,
+        vaultRoot: this.vaultRoot,
+      });
+    } else {
+      await this.assertJsonlAppendRollbackPreimage(action, targetAbsolutePath);
+      if (!action.existedBefore) await safeUnlink(targetAbsolutePath);
+      else await fs.truncate(targetAbsolutePath, action.originalSize ?? 0);
+    }
+  }
+
+  private async assertJsonlAppendRollbackPreimage(
+    action: Extract<StoredWriteAction, { kind: "jsonl_append" }>,
+    targetAbsolutePath: string,
+  ): Promise<void> {
+    if (action.baseContentReceipt && action.originalSize !== undefined) {
+      if (!(await pathExists(targetAbsolutePath))) {
+        if (action.existedBefore) {
+          throw this.buildResumeConflictError(action, "Append target disappeared before rollback.");
+        }
+      } else {
+        const content = await fs.readFile(targetAbsolutePath);
+        const base = createCommittedPayloadReceipt(content.subarray(0, action.originalSize));
+        const payload = await fs.readFile(resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath);
+        const tail = content.subarray(action.originalSize);
+        if (!receiptsMatch(base, action.baseContentReceipt)
+          || tail.byteLength > payload.byteLength
+          || !tail.equals(payload.subarray(0, tail.byteLength))) {
+          throw this.buildResumeConflictError(action, "Append target changed unexpectedly before rollback.");
+        }
+      }
     }
   }
 

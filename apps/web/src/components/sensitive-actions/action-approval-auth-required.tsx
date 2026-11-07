@@ -1,17 +1,15 @@
 "use client";
 
-import { ShieldCheck } from "lucide-react";
-
-import { HostedAuthRequiredScreen } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
+import { LinkPageSheet } from "@/src/components/link-page/link-page-sheet";
+import { LinkPageSignIn } from "@/src/components/link-page/link-page-sign-in";
 
 export function ActionApprovalAuthRequiredState() {
   return (
-    <HostedAuthRequiredScreen
-      description="This approval is private to the Murph account that received it. Sign in to review the exact action."
-      eyebrow="Secure approval"
-      eyebrowIcon={ShieldCheck}
-      footer="The action stays blocked until the account is verified and you approve it here."
-      title="Sign in to review this request"
-    />
+    <LinkPageSignIn
+      detail="It’s private to the account that received it."
+      title="Sign in to review this request."
+    >
+      <LinkPageSheet locked />
+    </LinkPageSignIn>
   );
 }

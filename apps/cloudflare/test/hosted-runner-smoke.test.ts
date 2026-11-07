@@ -127,22 +127,18 @@ describe("runHostedRunnerSmokeDetailed", () => {
               HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
             codexHostedCliVaultWriteProofCount:
               HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-            codexHostedShellMurphPathBytes: 1536,
+            codexHostedShellVaultCliPathBytes: 1536,
             codexHostedShellPythonVersion: "Python 3.11.2",
             codexHostedShellVaultCliLlmsBytes: 4096,
             codexVersion: "codex-cli 0.125.0",
             healthCommonsCatalogHash: "sha256:catalog",
             healthCommonsCliGoalProofCount:
               HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
-            healthCommonsCliProtocolListBytes: 768,
-            healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
-            healthCommonsRuntimeProtocolHitKeys: [
-              "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            healthCommonsCliKnowledgeSearchBytes: 768,
+            healthCommonsRuntimeBiomarkerDesiredDirection: "lower_or_stable",
+            healthCommonsRuntimeKnowledgeEntityKeys: [
+              "biomarker:deep-sleep-minutes",
             ],
-            healthCommonsRuntimeSearchHitKeys: [
-              "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-            ],
-            murphCommandDiscovered: true,
             operatorHomeRebound: true,
             pdfParserProviderId: "poppler.pdf",
             pdfTextSha256: "b".repeat(64),
@@ -150,7 +146,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             reportedVaultIdMatchesExpected: true,
             ripgrepCommandDiscovered: true,
             ripgrepVersion: "ripgrep 13.0.0",
-            schema: "murph.cloudflare-hosted-runner-smoke.v2",
+            schema: "murph.cloudflare-hosted-runner-smoke.v4",
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
             vaultShowBytes: 128,
@@ -205,15 +201,16 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexHostedCliVaultWriteProofCount).toBe(
         HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
       );
-      expect(result.codexHostedShellMurphPathBytes).toBe(1536);
+      expect(result.codexHostedShellVaultCliPathBytes).toBe(1536);
       expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
       expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
       expect(result.codexVersion).toBe("codex-cli 0.125.0");
       expect(result.healthCommonsCliGoalProofCount).toBe(
         HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
       );
-      expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
-      expect(result.murphCommandDiscovered).toBe(true);
+      expect(result.healthCommonsRuntimeBiomarkerDesiredDirection).toBe(
+        "lower_or_stable",
+      );
       expect(result.audioNormalizedMp3Bytes).toBe(9216);
       expect(result.audioPreparedWavBytes).toBe(35328);
       expect(result.pdfParserProviderId).toBe("poppler.pdf");

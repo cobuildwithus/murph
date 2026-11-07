@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-risk-from-high-lpa
 slug: reduce-risk-from-high-lpa
-title: Lower My Risk from High Lp(a)
-summary: Respond to inherited Lp(a) risk by controlling the cardiovascular factors that can change and choosing care based on total risk.
+title: Understand My Lp(a) Risk
+summary: Understand what an elevated Lp(a) result can mean and prepare questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:lower-cholesterol
   outcomeKind: biomarker
-  goalPhrase: lower my risk from high Lp(a)
+  goalPhrase: understand my Lp(a) risk
   successSignals:
     - id: modifiable_cardiovascular_risk
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my risk from high Lp(a).
+  startPrompt: Hey Murph, help me understand my Lp(a) risk.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -85,4 +85,4 @@ High Lp(a) does not diagnose blocked arteries or aortic stenosis. New chest pres
 
 ## Related goals
 
-[Lower My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Lower My ApoB](/goals/lower-apob) · [Lower My Risk of Heart Disease](/goals/reduce-heart-disease-risk)
+[Understand My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Understand My ApoB](/goals/lower-apob) · [Understand Heart Disease Prevention](/goals/reduce-heart-disease-risk)

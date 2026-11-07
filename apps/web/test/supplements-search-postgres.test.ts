@@ -4,8 +4,8 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFoodsQueries } from "../src/lib/foods";
+import { createProductLabelsQueries } from "../src/lib/product-labels";
 import {
-  createPublicSupplementsQueries,
   createSupplementsQueries,
   type SupplementSearchItem,
 } from "../src/lib/supplements";
@@ -969,8 +969,46 @@ describe.runIf(Boolean(testDatabaseUrl))(
           '{"fixture":true}'::jsonb
         FROM generate_series(1, 10050) AS distractors(seed)
       `);
+      await client.query(`
+        INSERT INTO foods (
+          id, canonical_key, data_origin, data_origin_id,
+          data_origin_priority, name, brand, off_market, search_text, label
+        )
+        SELECT id, id, origin, id, 10, name, brand, false, search_text,
+          '{"fixture":true}'::jsonb
+        FROM (VALUES
+          ('food-red-lentils', 'usda_foundation', 'Red Lentils Cooked', NULL,
+            'Red Lentils Cooked water salt'),
+          ('food-lentils-partial', 'usda_foundation', 'Lentils', NULL,
+            'Lentils green red yellow ingredients'),
+          ('food-branded-lentils', 'usda_branded', 'Lentils', 'Meadow Pantry',
+            'Meadow Pantry Lentils water salt'),
+          ('food-a-other-brand-lentils', 'usda_branded', 'Lentils', 'Other Maker',
+            'Meadow Pantry Lentils water salt'),
+          ('food-long-chickpeas', 'usda_foundation',
+            'Roasted Chickpeas with Herbs and Lemon Ready to Eat Family Size', NULL,
+            'Roasted Chickpeas with Herbs and Lemon Ready to Eat Family Size'),
+          ('food-brand-only-chickpeas', 'usda_branded', 'Lemonade', 'Chickpeas Co',
+            'Chickpeas Co Lemonade'),
+          ('food-generic-whole-milk', 'usda_fndds', 'Milk, whole', NULL, 'Milk, whole'),
+          ('food-generic-mashed-potatoes', 'usda_sr_legacy',
+            'Potatoes, mashed, prepared from flakes without milk, whole milk and butter added', NULL,
+            'Potatoes, mashed, prepared from flakes without milk, whole milk and butter added'),
+          ('food-generic-butter-salted', 'usda_sr_legacy', 'Butter, salted', NULL, 'Butter, salted'),
+          ('food-generic-ghee', 'usda_sr_legacy', 'Butter, Clarified butter (ghee)', NULL,
+            'Butter, Clarified butter (ghee)'),
+          ('food-generic-reduced-fat-milk', 'usda_fndds', 'Milk, reduced fat (2%)', NULL,
+            'Milk, reduced fat (2%)'),
+          ('food-generic-cornbread', 'usda_sr_legacy',
+            'Bread, cornbread, dry mix, prepared with 2% milk, 80% margarine, and eggs', NULL,
+            'Bread, cornbread, dry mix, prepared with 2% milk, 80% margarine, and eggs')
+        ) AS fixtures(id, origin, name, brand, search_text)
+      `);
       await client.query(
         "CREATE INDEX foods_fixture_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_search_english_idx ON foods USING GIN (to_tsvector('english', search_text))",
       );
       await client.query(
         "CREATE INDEX foods_fixture_name_trgm_idx ON foods USING GIN (name gin_trgm_ops)",
@@ -1118,6 +1156,41 @@ describe.runIf(Boolean(testDatabaseUrl))(
       20_000,
     );
 
+    it.each([
+      { q: "red lentils", genericOnly: true, expected: "food-red-lentils" },
+      { q: "Meadow Pantry lentils", genericOnly: false, expected: "food-branded-lentils" },
+      { q: "chikpeas", genericOnly: true, expected: "food-long-chickpeas" },
+      { q: "chickpeas", genericOnly: false, expected: "food-long-chickpeas" },
+      // Generic USDA names lead with the primary food; repeated words in a
+      // composite dish must not outrank it.
+      { q: "whole milk", genericOnly: true, expected: "food-generic-whole-milk" },
+      { q: "milk whole", genericOnly: true, expected: "food-generic-whole-milk" },
+      { q: "butter", genericOnly: true, expected: "food-generic-butter-salted" },
+      { q: "2% milk", genericOnly: true, expected: "food-generic-reduced-fat-milk" },
+    ])("ranks the complete food identity for $q", async ({ q, genericOnly, expected }) => {
+      const rows = await foodQueries.searchFoods({
+        q, genericOnly, includeOffMarket: false, limit: 5,
+      });
+      expect(rows[0]?.id).toBe(expected);
+    });
+
+    it("keeps complete stemmed food identities above partial-name matches", async () => {
+      const stemmedFoods = createProductLabelsQueries(queryClient, "foods", {
+        stemmedSearch: true,
+      });
+      const rows = await stemmedFoods.search({
+        q: "red lentil", includeOffMarket: false, limit: 5,
+      });
+      expect(rows[0]?.id).toBe("food-red-lentils");
+    });
+
+    it("does not invent a match for an unrelated food query", async () => {
+      const rows = await foodQueries.searchFoods({
+        q: "quartzsignal", includeOffMarket: false, limit: 5,
+      });
+      expect(rows).toEqual([]);
+    });
+
     it("keeps literal percent product names searchable", async () => {
       const rows = await foodQueries.searchFoods({
         includeOffMarket: false,
@@ -1140,6 +1213,7 @@ type ExplainPlanNode = {
   "Index Name"?: string;
   "Node Type"?: string;
   "Parent Relationship"?: string;
+  "Sort Method"?: string;
   Plans?: ExplainPlanNode[];
 };
 
@@ -1169,6 +1243,132 @@ function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
       FOOD_MAX_SORT_INPUT,
     );
   }
+}
+
+async function assertFoodSearchPageRanking(client: pg.Client): Promise<void> {
+  // Reuse the exact-record evidence tables from the private lookup fixture.
+  await client.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+  await client.query("SET LOCAL pg_trgm.similarity_threshold = 0.3");
+  await client.query(
+    "CREATE TEMP TABLE foods (LIKE supplements INCLUDING ALL) ON COMMIT DROP",
+  );
+  await client.query(`
+    INSERT INTO foods (
+      id, canonical_key, data_origin, data_origin_id, data_origin_priority,
+      name, brand, upc, off_market, search_text, label, serving_grams
+    )
+    SELECT
+      'food-page:' || lpad(seed::text, 3, '0'),
+      'food-page:' || lpad((CASE WHEN seed = 63 THEN 2 ELSE seed END)::text, 3, '0'),
+      CASE
+        WHEN seed = 1 THEN 'usda_foundation'
+        WHEN seed = 65 THEN 'plasticlist_bay_area_2024'
+        ELSE 'usda_branded'
+      END,
+      seed::text,
+      CASE WHEN seed IN (1, 64, 65) THEN 0 WHEN seed = 63 THEN 100 ELSE 50 END,
+      CASE WHEN seed = 62 THEN 'Pagegrain 12 oz' ELSE 'Pagegrain' END,
+      CASE WHEN seed % 2 = 0 THEN 'Page Brand A' ELSE 'Page Brand B' END,
+      CASE WHEN seed = 2 THEN '000000000002' ELSE NULL END,
+      seed = 64,
+      'Pagegrain pagetoken',
+      jsonb_build_object(
+        'fixture', seed,
+        'nutrientsPer100g', CASE WHEN seed = 4 THEN '[]'::jsonb ELSE
+          '[{"name":"Energy","unit":"kcal","amount":100},
+            {"name":"Protein","unit":"g","amount":5},
+            {"name":"Sugars","unit":"g","amount":2},
+            {"name":"Total fat","unit":"g","amount":3}]'::jsonb END
+      ),
+      25
+    FROM generate_series(1, 65) AS rows(seed)
+  `);
+  await client.query(`
+    UPDATE product_tests SET food_id = CASE
+      WHEN id = 'sibling-only-test' THEN 'food-page:063'
+      ELSE 'food-page:003'
+    END
+  `);
+  await client.query("ANALYZE foods");
+
+  const captured: { current: { text: string; values: unknown[] } | null } = {
+    current: null,
+  };
+  const queryClient = {
+    async query<T>(text: string, values: unknown[]) {
+      if (text.includes("WITH query AS")) {
+        captured.current = { text, values };
+      }
+      const result = await client.query(text, values);
+      return { rows: result.rows as T[] };
+    },
+  };
+  const privateQueries = createFoodsQueries(queryClient);
+  const privateInput = { includeOffMarket: false, limit: 3, q: "Pagegrain" };
+  const expectedIds = ["food-page:001", "food-page:002", "food-page:003"];
+  const stored = await client.query<{ id: string; label: unknown }>(
+    "SELECT id, label FROM foods",
+  );
+  const labels = new Map(stored.rows.map((row) => [row.id, row.label]));
+  const typo = await client.query<{ fts_count: number; eligible: boolean }>(`
+    SELECT
+      (SELECT count(*)::integer FROM foods WHERE
+        to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', 'Pagegrin')
+      ) AS fts_count,
+      'Pagegrain' % 'Pagegrin' AS eligible
+  `);
+  expect(typo.rows[0]).toEqual({ fts_count: 0, eligible: true });
+
+  const privateFull = await privateQueries.searchFoods({ ...privateInput, limit: 100 });
+  expect(privateFull).toHaveLength(62);
+  for (const row of privateFull) {
+    expect(row.label).toEqual(labels.get(row.id));
+  }
+  for (const q of ["pagetoken", "Pagegrain", "Pagegrin"]) {
+    const rows = await privateQueries.searchFoods({ ...privateInput, q });
+    expect(rows.map((row) => row.id)).toEqual(expectedIds);
+    expect(JSON.stringify(rows)).toBe(JSON.stringify(privateFull.slice(0, 3)));
+    expect(rows[1]?.contaminants.observationCount).toBe(0);
+    expect(rows[2]?.contaminants.observationCount).toBe(21);
+  }
+  const exact = await privateQueries.getFoodById({
+    id: "food-page:002", includeOffMarket: false,
+  });
+  expect(exact?.label).toEqual(labels.get("food-page:002"));
+  expect(await privateQueries.getFoodByUpc({
+    upc: "000000000002", includeOffMarket: false,
+  })).toEqual(exact);
+  expect((await privateQueries.searchFoods({
+    ...privateInput, genericOnly: true,
+  })).map((row) => row.id)).toEqual(["food-page:001"]);
+  expect((await privateQueries.searchFoods({
+    ...privateInput, includeOffMarket: true,
+  })).map((row) => row.id)).toEqual([
+    "food-page:001", "food-page:064", "food-page:002",
+  ]);
+
+  await privateQueries.searchFoods(privateInput);
+  const search = captured.current;
+  if (!search) throw new Error("food ranking SQL was not captured");
+  const explained = await client.query<{ "QUERY PLAN": Array<{ Plan: ExplainPlanNode }> }>(
+    `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${search.text}`, search.values,
+  );
+  const windows = flattenExplainPlan(explained.rows[0]?.["QUERY PLAN"][0]?.Plan ?? {})
+    .filter((node) => node["Node Type"] === "WindowAgg");
+  // Private relevance has the delivery window followed by canonical dedupe.
+  expect(windows).toHaveLength(2);
+  const delivery = windows[0] ?? {};
+  const input = delivery.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+  expect(input).toBeDefined();
+  expect(explainRowsProcessed(input ?? {})).toBe(3);
+  const pageLimit = flattenExplainPlan(delivery).find((node) =>
+    node["Node Type"] === "Limit" && node["Actual Rows"] === 3
+  );
+  expect(pageLimit).toBeDefined();
+  const pageSort = pageLimit?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+  expect(pageSort?.["Sort Method"]).toBe("top-N heapsort");
+  const sortInput = pageSort?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+  expect(explainRowsProcessed(sortInput ?? {})).toBeGreaterThan(3);
 }
 
 describe.runIf(Boolean(testDatabaseUrl))(
@@ -1410,9 +1610,9 @@ describe.runIf(Boolean(testDatabaseUrl))(
 );
 
 describe.runIf(Boolean(testDatabaseUrl))(
-  "public supplement evidence PostgreSQL query",
+  "food evidence and ranking PostgreSQL queries",
   () => {
-    it("deduplicates, counts, bounds, and screens exact-record product evidence", async () => {
+    it("preserves private food lookup evidence and selects results before numbering", async () => {
       const client = new pg.Client({
         connectionString: testDatabaseUrl ?? undefined,
         statement_timeout: 8_000,
@@ -1653,37 +1853,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           )
         `);
 
-        const queryClient = {
-          async query<T>(text: string, values: unknown[]) {
-            const result = await client.query(text, values);
-            return { rows: result.rows as T[] };
-          },
-        };
-        const publicQueries = createPublicSupplementsQueries(queryClient);
-        const evidence = await publicQueries.getPublicSupplementEvidence({
-          id: "brand:public-source",
-        });
-
-        expect(evidence).toMatchObject({
-          total: 21,
-          returned: 20,
-          truncated: true,
-        });
-        expect(evidence.observations).toHaveLength(20);
-        expect(evidence.observations.map((observation) => observation.id)).not.toContain(
-          "sibling-only-test",
-        );
-        expect(evidence.observations[0]).toMatchObject({
-          id: "test-1",
-          labName: "Example Lab",
-          testMethod: "Example Method",
-          screening: {
-            comparison: "exceeds",
-          },
-          alert: {
-            concernLevel: "medium",
-          },
-        });
+        await assertFoodSearchPageRanking(client);
       } finally {
         await client.query("ROLLBACK");
         await client.end();

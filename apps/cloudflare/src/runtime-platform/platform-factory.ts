@@ -1,3 +1,4 @@
+import { createHostedRuntimePollToolPort } from "./poll-tool-port.ts";
 import {
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
@@ -16,14 +17,15 @@ import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-c
 import { createHostedRuntimeAssistantAskPort } from "./assistant-ask-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedWebClinicalRecordsPort } from "./clinical-records-port.ts";
-import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
 import { createHostedRuntimeIMessageContactToolPort } from "./imessage-contact-tool-port.ts";
 import { createHostedRuntimeLabsToolPort } from "./labs-tool-port.ts";
+import { createHostedRuntimeUsageDiagnosticsPort } from "./usage-diagnostics-port.ts";
 import { createHostedRuntimePlanUsageToolPort } from "./plan-usage-tool-port.ts";
 import {
   createCloudflarePrivateImageUrlPublisher,
@@ -51,6 +53,7 @@ import { createHostedWebWorkspacePort } from "./workspace-port.ts";
 import { createCloudflareWorkspaceSnapshotPort } from "./workspace-snapshot-port.ts";
 
 export function buildHostedExecutionRuntimePlatform(input: {
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
@@ -144,6 +147,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             input.boundUserId,
             baseFetchImpl,
             {
+              fetchTransportDiagnostics: input.fetchTransportDiagnostics,
               injectBoundUserIdHeader: true,
               providerFetchBaseUrlSource:
                 input.providerFetchBaseUrlSource ?? undefined,
@@ -195,13 +199,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
     ...(transport
       ? {
-          codexAuthPort: createHostedRuntimeCodexAuthPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-          }),
           logPort,
           latencyTracePort: createHostedWebRuntimeLatencyTracePort({
             boundUserId: input.boundUserId,
@@ -213,6 +210,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           mailboxPort: createHostedWebMailboxPort({
             boundUserId: input.boundUserId,
             fetchImpl,
+            fetchTransportDiagnostics: input.fetchTransportDiagnostics,
             timeoutMs,
             transport,
           }),
@@ -259,6 +257,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             timeoutMs,
             transport,
           }),
+          pollToolPort: createHostedRuntimePollToolPort({ boundUserId: input.boundUserId, fetchImpl, timeoutMs, transport }),
           imessageContactToolPort: createHostedRuntimeIMessageContactToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
@@ -295,6 +294,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
             fetchImpl,
             timeoutMs,
             transport,
+          }),
+          usageDiagnosticsPort: createHostedRuntimeUsageDiagnosticsPort({
+            boundUserId: input.boundUserId, fetchImpl, timeoutMs, transport,
           }),
           planUsageToolPort: createHostedRuntimePlanUsageToolPort({
             boundUserId: input.boundUserId,

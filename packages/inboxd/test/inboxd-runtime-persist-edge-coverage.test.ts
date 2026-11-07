@@ -4,8 +4,9 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault, listWriteOperationMetadataPaths, readStoredWriteOperation } from "@murphai/core";
+import { initializeVault } from "@murphai/core";
 
+import { persistInterruptedInboxCapture } from "./helpers/interrupted-write.ts";
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
@@ -24,59 +25,6 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   const filePath = path.join(directory, fileName);
   await fs.writeFile(filePath, content, "utf8");
   return filePath;
-}
-
-async function markInboxCapturePersistOperationInterrupted(vaultRoot: string, capturePath: string): Promise<void> {
-  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
-  const matchingPath = (
-    await Promise.all(
-      operationPaths.map(async (relativePath) => ({
-        relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
-      })),
-    )
-  ).find((entry) => entry.operation.operationType === "inbox_capture_persist")?.relativePath;
-  assert.ok(matchingPath);
-
-  const metadataPath = path.join(vaultRoot, matchingPath);
-  const rawOperation = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
-    operationType: string;
-    status: string;
-    updatedAt: string;
-    actions: Array<Record<string, unknown>>;
-  };
-  assert.equal(rawOperation.operationType, "inbox_capture_persist");
-  const stagedCaptureAction = rawOperation.actions.find(
-    (action) =>
-      action.kind === "jsonl_append" && action.targetRelativePath === capturePath,
-  );
-  assert.ok(stagedCaptureAction);
-  assert.equal(typeof stagedCaptureAction.stageRelativePath, "string");
-  const stagedCapturePath = path.join(
-    vaultRoot,
-    String(stagedCaptureAction.stageRelativePath),
-  );
-  await fs.mkdir(path.dirname(stagedCapturePath), { recursive: true });
-  await fs.copyFile(path.join(vaultRoot, capturePath), stagedCapturePath);
-  rawOperation.status = "committing";
-  rawOperation.updatedAt = "2026-03-13T12:33:30.000Z";
-  rawOperation.actions = rawOperation.actions.map((action) => {
-    if (action.kind !== "jsonl_append" || action.targetRelativePath !== capturePath) {
-      return action;
-    }
-
-    return {
-      ...action,
-      state: "staged",
-      effect: undefined,
-      existedBefore: undefined,
-      originalSize: undefined,
-      committedPayloadReceipt: undefined,
-      appliedAt: undefined,
-    };
-  });
-
-  await fs.writeFile(metadataPath, `${JSON.stringify(rawOperation, null, 2)}\n`, "utf8");
 }
 
 function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture {
@@ -156,7 +104,7 @@ test("findStoredCaptureSnapshot recovers the staged canonical record when ledger
     externalId: "msg-find-envelope-raw-only",
   });
   const captureId = createDeterministicInboxCaptureId(inbound);
-  const persisted = await indexSurface.persistCanonicalInboxCapture({
+  const persisted = await persistInterruptedInboxCapture({
     vaultRoot,
     captureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VA03",
@@ -164,7 +112,6 @@ test("findStoredCaptureSnapshot recovers the staged canonical record when ledger
     storedAt: "2026-03-13T12:33:00.000Z",
   });
 
-  await markInboxCapturePersistOperationInterrupted(vaultRoot, persisted.capture.relativePath);
   await fs.rm(
     path.join(vaultRoot, persisted.capture.relativePath),
     { force: true },

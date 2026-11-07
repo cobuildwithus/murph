@@ -246,8 +246,8 @@ describe('image-reference-resolver', () => {
         materializeWorkspaceArtifacts: async (relativePaths) => {
           materializedPaths = [...relativePaths]
           return {
-            materializedArtifactPaths: new Set(relativePaths),
-            missingArtifactPaths: new Set<string>(),
+            materializedArtifactPaths: new Set(relativePaths.map(ref => `vault:${ref}`)),
+            missingArtifactPaths: new Map(),
           }
         },
         refs: [' raw/inbox/photo.png '],
@@ -270,8 +270,8 @@ describe('image-reference-resolver', () => {
           materializeWorkspaceArtifacts: async (relativePaths) => {
             materializedPaths = [...relativePaths]
             return {
-              materializedArtifactPaths: new Set(relativePaths),
-              missingArtifactPaths: new Set<string>(),
+              materializedArtifactPaths: new Set(relativePaths.map(ref => `vault:${ref}`)),
+              missingArtifactPaths: new Map(),
             }
           },
           refs: [
@@ -333,7 +333,7 @@ describe('image-reference-resolver', () => {
         resolveGenerateImageReferences({
           materializeWorkspaceArtifacts: async (relativePaths) => ({
             materializedArtifactPaths: new Set<string>(),
-            missingArtifactPaths: new Set(relativePaths),
+            missingArtifactPaths: new Map(relativePaths.map(ref => [`vault:${ref}`, 'missing' as const])),
           }),
           refs: ['raw/inbox/not-image.png'],
           vaultRoot,

@@ -69,6 +69,7 @@ export interface ResolvedGenerateImageReference {
 export async function resolveGenerateImageReferences(input: {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   refs: readonly string[]
+  signal?: AbortSignal | null
   skillsRoot?: string | null
   vaultRoot: string
 }): Promise<ResolvedGenerateImageReference[]> {
@@ -113,9 +114,9 @@ export async function resolveGenerateImageReferences(input: {
   }
 
   if (vaultRefs.length > 0) {
-    const materialization = await input.materializeWorkspaceArtifacts?.(vaultRefs)
+    const materialization = await input.materializeWorkspaceArtifacts?.(vaultRefs, { maxFileBytes: MAX_GENERATE_IMAGE_REFERENCE_BYTES, signal: input.signal })
     const missingRefs = materialization
-      ? vaultRefs.filter((ref) => materialization.missingArtifactPaths.has(ref))
+      ? vaultRefs.filter((ref) => !materialization.materializedArtifactPaths.has(`vault:${ref}`))
       : []
     if (missingRefs.length > 0) {
       throw new VaultCliError(

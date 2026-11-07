@@ -7,7 +7,7 @@ import {
   lookupHostedMemberIdentityByLinqEmailHandle,
 } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
 import { syncHostedMemberVerifiedEmailAuthorization } from "../src/lib/hosted-onboarding/hosted-member-store";
-import { ensureHostedMemberForPrivyIdentityResolutionTx } from "../src/lib/hosted-onboarding/member-identity-service";
+import { } from "../src/lib/hosted-onboarding/member-identity-service";
 import {
   buildHostedMemberRoutingPrivateColumns,
   HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
@@ -46,22 +46,6 @@ describe("Linq email identity authority", () => {
     expect(prisma.hostedMemberIdentity.updateMany).not.toHaveBeenCalled();
   });
 
-  it("rejects bearer/live email drift to an existing handle before creating a member", async () => {
-    const prisma = ownerClient();
-    const principal = { userId: "did:privy:synthetic", phone: null, telegram: null };
-    await expect(ensureHostedMemberForPrivyIdentityResolutionTx({
-      allowVerifiedEmailRebinding: true,
-      authMethod: "email",
-      identity: { ...principal, email: { address: "unclaimed@example.test", verifiedAt: 1 } },
-      preparedLiveIdentity: { ...principal, email: { address, verifiedAt: 1 } },
-      preparedExistingMemberId: null,
-      now,
-      prisma: prisma as never,
-    })).rejects.toMatchObject({ code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT" });
-    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
-  });
 
   it("retains the pending ciphertext context and re-derives identity after prior-key retirement", async () => {
     const prisma = ownerClient();

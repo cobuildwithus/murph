@@ -1,4 +1,6 @@
+import { cancelHostedLinqInputTyping } from "./channel-activity.ts";
 import {
+  ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
   type AssistantAutomationOperationScope,
@@ -6,6 +8,7 @@ import {
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
+  type AssistantInputExactLookupObservation,
   type AssistantInputSource,
   type AssistantProviderStartCriticalPathContext,
   type AssistantProviderStartCriticalPathTiming,
@@ -20,7 +23,6 @@ import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-ser
 
 import type {
   HostedAssistantAutomationLaneMetrics,
-  HostedMaintenanceMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
@@ -56,6 +58,7 @@ import {
 } from "./environment.ts";
 import { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 import {
+  buildHostedAssistantAutomationEventLogDetails,
   summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
 } from "./runtime-logs.ts";
@@ -64,6 +67,7 @@ import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  waitForHostedStagedLatencyTraceWrites,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
 import {
@@ -153,7 +157,7 @@ export async function runHostedAssistantAutomationLane(input: {
   >;
   freshAssistantInputIds?: readonly string[] | null;
   readForegroundInputIds?: (() => readonly string[]) | null;
-  idleCheckpointDelayMs?: number | null;
+  runnerIdleTtlMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
@@ -224,7 +228,7 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           commitTimeoutMs: input.runtime.commitTimeoutMs,
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
+          runnerIdleTtlMs: input.runnerIdleTtlMs ?? null,
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
@@ -295,6 +299,24 @@ export async function runHostedAssistantAutomationLane(input: {
   };
 }
 
+const PROVIDER_START_CRITICAL_PATH_TIMING_KEYS = [
+  "automationGroupAndOperationScopeMs", "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs", "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
+] as const;
+
+function readProviderStartCriticalPathTiming(
+  path: Partial<Record<(typeof PROVIDER_START_CRITICAL_PATH_TIMING_KEYS)[number], unknown>>
+    | null | undefined,
+): Record<string, number> | null {
+  const details: Record<string, number> = {};
+  for (const key of PROVIDER_START_CRITICAL_PATH_TIMING_KEYS) {
+    const value = path?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) details[key] = value;
+  }
+  return Object.keys(details).length > 0 ? details : null;
+}
+
 export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
@@ -307,7 +329,7 @@ export async function runHostedAssistantAutomation(
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -367,6 +389,7 @@ export async function runHostedAssistantAutomation(
       : {
           limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
           mode: "background",
+          signal,
           vaultRoot,
         },
   );
@@ -454,6 +477,7 @@ export async function runHostedAssistantAutomation(
       requestId,
       selectedAssistantInputCount: selectedInputIds.inputIds.length,
       selectedAssistantInputMode: selectedInputIds.mode,
+      ...readHostedStaleRetryDropLogDetails(selectedInputIds),
     },
     wake,
     message: "Hosted assistant automation pass starting.",
@@ -548,6 +572,11 @@ export async function runHostedAssistantAutomation(
       },
       onProviderRequestStarted: (event) => {
         options?.onProviderRequestStarted?.();
+        const criticalPathTiming = readProviderStartCriticalPathTiming(event.providerStartCriticalPath);
+        if (criticalPathTiming) redactedLogEntries.push(emitHostedRuntimeRedactedLog({
+          component: "runtime", details: criticalPathTiming, wake, phase: "wake.running",
+          message: "Hosted assistant provider-start critical path timing.",
+        }));
         const source = readHostedIngressLatencySource(event.source);
         const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
         activeProviderMilestoneTraceContext = source && runtimeAttemptId
@@ -566,10 +595,16 @@ export async function runHostedAssistantAutomation(
         });
       },
       onTerminalNonReplyCommitted: (event) => {
+        if (event.source === "linq") {
+          void cancelHostedLinqInputTyping({
+            inputIds: event.inputIds,
+            runtimeAttemptId: options?.runtimeAttemptId,
+          });
+        }
         recordHostedAssistantTerminalNonReplyBestEffort({
           commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
-          idleCheckpointDelayMs: options?.idleCheckpointDelayMs ?? null,
+          runnerIdleTtlMs: options?.runnerIdleTtlMs ?? null,
           latencyTracePort: options?.latencyTracePort ?? null,
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
@@ -744,7 +779,7 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     recordedAt: string;
     source: string;
   };
-  idleCheckpointDelayMs: number | null;
+  runnerIdleTtlMs: number | null;
   latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
   runtimeAttemptId: string | null;
 }): void {
@@ -758,7 +793,7 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     ? new Date(resolveHostedRuntimeCheckpointPublicationExpectedByMs({
         checkpointStartByMs:
           recordedAtMs
-          + resolveHostedRuntimeIdleCheckpointDelayMs(input.idleCheckpointDelayMs),
+          + resolveHostedRuntimeIdleCheckpointDelayMs(input.runnerIdleTtlMs),
         commitTimeoutMs: input.commitTimeoutMs,
       })).toISOString()
     : null;
@@ -951,6 +986,7 @@ async function recordHostedAssistantProviderStartLatencyTraceWithRetry(
   latencyTracePort: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
   request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
 ): Promise<void> {
+  await waitForHostedStagedLatencyTraceWrites();
   let response = await latencyTracePort.record(request);
 
   for (const delayMs of HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS) {
@@ -1067,6 +1103,7 @@ function buildHostedAssistantInputCandidateQueryLogDetails(input: {
       input.result.inputs.map((candidate) => candidate.event.source),
     ),
     elapsedMs: input.elapsedMs,
+    ...buildHostedAssistantExactLookupLogDetails(input.query.exactLookupObservation),
     knownInputIdCount: input.query.knownInputIds?.length ?? 0,
     limit: normalizeHostedRuntimeLogLimit(input.query.limit),
     nextCursorPresent: input.result.nextCursor !== null,
@@ -1098,6 +1135,42 @@ function buildHostedAssistantNewConversationInputQueryLogDetails(input: {
   };
 }
 
+// Present only on an admission's route query; absent rows made no exact
+// observation. A null summary means the source did not report reasons.
+function buildHostedAssistantExactLookupLogDetails(
+  observation: AssistantInputExactLookupObservation | undefined,
+): Record<string, boolean | number | string | null> {
+  if (!observation) return {};
+  return {
+    exactLookupCalled: observation.called,
+    exactLookupExclusionSummary: summarizeHostedAssistantExactLookupExclusions(observation),
+    exactLookupRequestedCount: observation.requestedCount,
+    exactLookupReturnedCount: observation.returnedCount,
+  };
+}
+
+// Emits only the declared reason codes. Unknown keys, malformed counts or a
+// total above the requested inputs yield "invalid", never a clean "none".
+function summarizeHostedAssistantExactLookupExclusions(
+  observation: AssistantInputExactLookupObservation,
+): string | null {
+  const counts: Readonly<Record<string, unknown>> | undefined = observation.exclusionReasonCounts;
+  if (!counts) return null;
+  const known = new Set<string>(ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS);
+  if (Object.keys(counts).some((key) => !known.has(key))) return "invalid";
+  const parts: string[] = [];
+  let total = 0;
+  for (const reason of ASSISTANT_INPUT_EXACT_LOOKUP_EXCLUSION_REASONS) {
+    const count = counts[reason];
+    if (count === undefined || count === 0) continue;
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return "invalid";
+    total += count;
+    parts.push(`${reason}:${count}`);
+  }
+  if (total > observation.requestedCount) return "invalid";
+  return parts.length === 0 ? "none" : parts.join(",");
+}
+
 function summarizeHostedRuntimeLogCodeCounts(values: readonly string[]): string {
   const safeValues = values.map((value) => toHostedRuntimeLogCode(value));
   const summary = summarizeHostedRuntimeStatusCounts(safeValues).statusSummary;
@@ -1117,6 +1190,20 @@ function normalizeHostedRuntimeLogSourceId(value: string | null | undefined): st
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
+}
+
+/** Reason codes and counts only: the dropped retries were never answered. */
+function readHostedStaleRetryDropLogDetails(
+  selection: Awaited<ReturnType<typeof selectHostedAssistantInputIds>>,
+): Record<string, number> {
+  const dropped = selection.mode === "background" ? selection.staleRetryDropped ?? [] : [];
+  if (dropped.length === 0) {
+    return {};
+  }
+  return {
+    staleRetryDroppedNewerAnsweredCount: dropped.filter((entry) => entry.reason === "newer_message_answered").length,
+    staleRetryDroppedTooOldCount: dropped.filter((entry) => entry.reason === "too_old").length,
+  };
 }
 
 function emitHostedRuntimeRedactedLog(
@@ -1150,42 +1237,6 @@ function emitHostedRuntimeRedactedLog(
   };
 }
 
-function buildHostedAssistantAutomationEventLogDetails(
-  event: AssistantRunEvent,
-  requestId: string,
-): Record<string, boolean | number | string | null> {
-  return {
-    errorCode: event.errorCode ?? null,
-    failureFieldsPresent: event.failureContext !== undefined,
-    ...prefixHostedAssistantAutomationFailureContext(event.failureContext),
-    inputIdPresent: "inputId" in event ? event.inputId != null : false,
-    providerKind: event.providerKind ?? null,
-    providerState: event.providerState ?? null,
-    requestId,
-    safeDetails: event.safeDetails ?? null,
-    safeErrorLength: event.safeErrorMessage?.length ?? null,
-    safeErrorMessage: event.safeErrorMessage ?? null,
-    safeErrorPresent: event.safeErrorMessage !== undefined,
-    toolCount: event.tools?.length ?? null,
-    type: event.type,
-  };
-}
-
-function prefixHostedAssistantAutomationFailureContext(
-  context: AssistantRunEvent["failureContext"] | undefined,
-): Record<string, boolean | number | string | null> {
-  if (!context) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(context).map(([key, value]) => [
-      `failure${key.charAt(0).toUpperCase()}${key.slice(1)}`,
-      value,
-    ]),
-  );
-}
-
 function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   return new Set([
     "capture.failed",
@@ -1193,6 +1244,7 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "assistant.delivery.foreground_started",
     "assistant.delivery.sent",
     "cron.job.completed",
+    "cron.delivery.reconciled",
     "cron.occurrence.expired",
     "cron.scan.job",
     "cron.scan.started",
@@ -1209,25 +1261,10 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
 function shouldAlwaysPersistHostedAssistantAutomationEvent(
   event: AssistantRunEvent,
 ): boolean {
-  return event.type === "input.reply-failed"
-    || event.type === "onboarding.followup.completed"
-    || (
-      (event.type === "cron.job.completed"
-        || event.type === "cron.occurrence.expired")
-      && event.failureContext?.automationSlug === "personal-patterns-update"
-    );
+  return event.type === "cron.delivery.reconciled"
+    || event.type === "input.reply-failed"
+    || event.type === "onboarding.followup.completed";
 }
-
-export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
-  return {
-    deviceSyncProcessed: 0,
-    deviceSyncSkipped: true,
-    nextWakeAt: null,
-    parserProcessed: 0,
-    postCheckpointRecord: null,
-  };
-}
-
 
 function earliestHostedMaintenanceWakeAt(left: string | null, right: string | null): string | null {
   if (!left) {

@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
-import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import {
   buildAbsoluteChangelogUrl,
@@ -59,31 +58,15 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
-  "realtime-environment-interview": (
-    <ChecklistMock
-      label="Live Environment interview"
-      items={[
-        { label: "Bedroom temperature", done: true },
-        { label: "Window at night", done: true },
-        { label: "Bedroom CO2", done: false },
+  "group-funding-supporters": (
+    <PreferenceCard
+      label="Supporters"
+      entries={[
+        { label: "The Group Historian", value: "Monthly sponsor" },
+        { label: "Night Shift", value: "One-time contribution" },
+        { label: "Anonymous", value: "One-time contribution" },
       ]}
     />
-  ),
-  "group-funding-supporters": (
-    <div className="w-full max-w-[320px] rounded-2xl border border-[#c4a882]/35 bg-[#fdfaf5] px-5 pb-6">
-      <GroupFundingSupporters
-        supporters={{
-          monthlySponsor: {
-            id: "hucp_changelog_monthly",
-            name: "The Group Historian",
-          },
-          oneTimeContributions: [
-            { id: "hucp_changelog_one_time_1", name: "Night Shift" },
-            { id: "hucp_changelog_one_time_2", name: "Anonymous" },
-          ],
-        }}
-      />
-    </div>
   ),
   "murph-max-plan": (
     <PreferenceCard

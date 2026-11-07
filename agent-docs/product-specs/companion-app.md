@@ -154,10 +154,11 @@ before status, token exchange, or any health setup:
    alternate-sign-in recovery. On typed `HOSTED_CONSENT_REQUIRED`, use the
    existing bearer-only legal-consent `GET` and `POST` boundary to render and
    record the required launch grants, then retry admission. On typed
-   `HOSTED_ACCESS_REQUIRED`—including a member whose prior billing history
-   makes automatic starter enrollment unsafe—enter the existing
-   billing/activation access recovery instead of falling through to health
-   setup. Typed
+   `HOSTED_ACCESS_REQUIRED`, keep unfinished signup on the existing activation
+   recovery path. Signed-up human members with `canceled`, `paused`, `unpaid`,
+   or `past_due` billing pass product admission with exactly `{ "ok": true }`;
+   admission does not re-enroll them, grant Starter usage, send a welcome, or
+   change billing. AI access and usage remain independently gated. Typed
    `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
    `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
    explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
@@ -167,6 +168,10 @@ before status, token exchange, or any health setup:
    and failed recovery remain on the account gate.
 4. After successful admission, read source-scoped status as sync truth and show
    health setup. Status is not account admission and must never replace step 1.
+
+Heartbeat and push-route registration use the same product authority under
+member and sponsorship locks, preserving private-member and consent checks.
+Runtime presence reads retain their independent runtime callback fence.
 
 Admission grants no Junction or device authority. A newly authenticated signup
 must not request a sign-in token, sign in to the Junction SDK, or create or
@@ -403,6 +408,25 @@ production evidence.
   Junction is a pre-TestFlight gate (MVP spec).
 - Apple AI data-sharing disclosure (above).
 - Bundle identifier: `ai.withmurph.app` proposed.
+
+## Shared demographic facts
+
+Birth facts and explicitly stated biological sex are canonical Identity memory,
+shared by private chat and native saves. The native app reads the narrow saved
+projection through Numbers and writes through the closed `demographics.set`
+member action. Gender is separate, age remains dated/approximate, and reads
+never wake the runtime. The [private numbers and demographic API contract](ios-meals.md#shared-demographics)
+owns sparse fields, explicit clearing, immutable retries, terminal polling,
+generation-18 admission and rollback requirements. Native UI remains in the
+separate app repository.
+
+## Typed VO2 readings
+
+The companion backend accepts typed VO2 readings through
+`POST /api/device-sync/companion/measurements`. The
+[wire contract](ios-meals.md#typed-vo2-readings) owns limits, replay, outcomes,
+additive Numbers provenance/time fields and consumer-first deployment. Native
+field and overlay adoption remain a separate release after the backend.
 
 ## Repo Placement
 

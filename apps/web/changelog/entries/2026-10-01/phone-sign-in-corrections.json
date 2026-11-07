@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "phone-sign-in-corrections",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer phone sign-in errors",
+    "summary": "When the SMS provider explicitly rejects a phone number as invalid, sign-in asks you to check the number and country code.",
+    "details": "Service failures still show the existing retry message. Verification and fraud protections remain in place.",
+    "relevanceTags": ["sign-in"],
+    "sourcePullRequests": [3941]
+  }
+}

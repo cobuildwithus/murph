@@ -16,10 +16,7 @@ export function toHostedArtifactPathKey(input: {
 
   const delimitedPath = parseDelimitedHostedArtifactPath(normalizedPath);
   if (delimitedPath) {
-    return `${delimitedPath.root}:${stripHostedWorkspaceRootPrefix(
-      delimitedPath.path,
-      delimitedPath.root,
-    )}`;
+    return `${delimitedPath.root}:${delimitedPath.path}`;
   }
 
   for (const root of HOSTED_WORKSPACE_ROOT_KEYS) {

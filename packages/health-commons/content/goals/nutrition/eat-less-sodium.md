@@ -92,4 +92,4 @@ Some people need extra sodium because of high sweat loss or specific medical con
 
 ## Related goals
 
-[Lower My Blood Pressure](/goals/lower-blood-pressure) · [Follow a DASH Diet](/goals/follow-dash-diet) · [Eat Fewer Ultra-Processed Foods](/goals/eat-fewer-ultra-processed-foods)
+[Track My Blood Pressure](/goals/lower-blood-pressure) · [Follow a DASH Diet](/goals/follow-dash-diet) · [Eat Fewer Ultra-Processed Foods](/goals/eat-fewer-ultra-processed-foods)

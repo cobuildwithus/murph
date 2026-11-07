@@ -28,6 +28,7 @@ interface QueuedSqlResult {
 class FakeSqlClient implements HostedRuntimeLogSqlClient {
   readonly calls: SqlCall[] = [];
   readonly results: QueuedSqlResult[];
+  destroy: boolean | undefined;
   released = false;
 
   constructor(results: QueuedSqlResult[]) {
@@ -49,7 +50,8 @@ class FakeSqlClient implements HostedRuntimeLogSqlClient {
     };
   }
 
-  release(): void {
+  release(destroy?: boolean): void {
+    this.destroy = destroy;
     this.released = true;
   }
 }
@@ -370,6 +372,30 @@ describe("dedicated hosted runtime log store", () => {
 
     expect(compactSql(database.client.calls.at(-1)!.text)).toBe("ROLLBACK");
     expect(database.client.released).toBe(true);
+    expect(database.client.destroy).toBe(false);
+  });
+
+  it("destroys the client when rollback fails and preserves the original error", async () => {
+    const failure = new Error("secondary unavailable");
+    const database = new FakeSqlDatabase({
+      clientResults: [
+        {},
+        {},
+        { error: failure },
+        { error: new Error("rollback unavailable") },
+      ],
+    });
+
+    await expect(recordHostedRuntimeLogs({
+      database,
+      entries: [runtimeEntry("mailbox.imported")],
+      isUserActive: async () => true,
+      userId: "member_runtime_logs_rollback_failure",
+    })).rejects.toBe(failure);
+
+    expect(compactSql(database.client.calls.at(-1)!.text)).toBe("ROLLBACK");
+    expect(database.client.released).toBe(true);
+    expect(database.client.destroy).toBe(true);
   });
 
   it("keeps retention bounded and serial", async () => {

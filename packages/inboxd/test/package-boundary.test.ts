@@ -18,49 +18,6 @@ const removedSubpaths = [
   "./telegram-webhook",
 ] as const;
 
-const expectedExports = {
-  ".": {
-    types: "./dist/index.d.ts",
-    default: "./dist/index.js",
-  },
-  "./connectors/email/directness": {
-    types: "./dist/connectors/email/directness.d.ts",
-    default: "./dist/connectors/email/directness.js",
-  },
-  "./connectors/email/normalize-parsed": {
-    types: "./dist/connectors/email/normalize-parsed.d.ts",
-    default: "./dist/connectors/email/normalize-parsed.js",
-  },
-  "./connectors/email/parsed": {
-    types: "./dist/connectors/email/parsed.d.ts",
-    default: "./dist/connectors/email/parsed.js",
-  },
-  "./connectors/linq/normalize": {
-    types: "./dist/connectors/linq/normalize.d.ts",
-    default: "./dist/connectors/linq/normalize.js",
-  },
-  "./connectors/telegram/normalize": {
-    types: "./dist/connectors/telegram/normalize.d.ts",
-    default: "./dist/connectors/telegram/normalize.js",
-  },
-  "./runtime": {
-    types: "./dist/runtime.d.ts",
-    default: "./dist/runtime.js",
-  },
-  "./retention": {
-    types: "./dist/retention.d.ts",
-    default: "./dist/retention.js",
-  },
-  "./checkpoint": {
-    types: "./dist/checkpoint.d.ts",
-    default: "./dist/checkpoint.js",
-  },
-  "./connectors/hosted-conversation": {
-    types: "./dist/connectors/hosted-conversation.d.ts",
-    default: "./dist/connectors/hosted-conversation.js",
-  },
-} as const;
-
 type InboxdPackageManifest = {
   exports?: Record<string, PackageExportEntry | undefined>;
   scripts?: Record<string, string | undefined>;
@@ -94,22 +51,6 @@ function assertBuiltExportEntry(
   assert.equal(typeof exportEntry.default, "string", `expected ${exportKey} default target`);
   assert.equal(typeof exportEntry.types, "string", `expected ${exportKey} types target`);
 }
-
-test("@murphai/inboxd manifest declares the full narrow built export contract", async () => {
-  const packageManifest = await readPackageManifest();
-
-  assert.doesNotMatch(packageManifest.scripts?.test ?? "", /\bpnpm build\b/u);
-  assert.doesNotMatch(packageManifest.scripts?.["test:coverage"] ?? "", /\bpnpm build\b/u);
-  assert.match(
-    packageManifest.scripts?.["verify:package-boundary"] ?? "",
-    /MURPH_INBOXD_TEST_BUILT_DIST=1/u,
-  );
-  assert.deepEqual(packageManifest.exports, expectedExports);
-
-  for (const exportKey of removedSubpaths) {
-    assert.equal(Object.hasOwn(packageManifest.exports ?? {}, exportKey), false);
-  }
-});
 
 builtDistTest("@murphai/inboxd declared export targets exist in the built dist contract", async () => {
   const packageManifest = await readPackageManifest();

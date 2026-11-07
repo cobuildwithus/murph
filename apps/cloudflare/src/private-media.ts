@@ -92,7 +92,8 @@ interface HostedPrivateMediaCapabilityPayload {
   sha256: string;
   sizeBytes: number;
   userId: string;
-  version: 1;
+  version: 1 | 2;
+  mediaId?: string;
 }
 
 export async function stageHostedPrivateMedia(input: {
@@ -235,12 +236,33 @@ function requireHostedPrivateMediaDeliveryOrigin(value: string): string {
   return origin;
 }
 
+/** Mint only for an owner-authorized canonical thumbnail; no second media copy. */
+export async function createHostedMealThumbnailDelivery(input: {
+  userId: string; mediaId: string; sha256: string; byteSize: number;
+  capabilitySecret: string; deliveryOrigin: string; nowMs?: number;
+}): Promise<{ mediaId: string; url: string }> {
+  const expiresAtUnixSeconds = Math.floor((input.nowMs ?? Date.now()) / 1000) + 300;
+  const payload = parseHostedPrivateMediaCapabilityPayload({
+    contentType: "image/jpeg", expiresAtUnixSeconds, sha256: input.sha256,
+    sizeBytes: input.byteSize, userId: input.userId, version: 2, mediaId: input.mediaId,
+  });
+  const capability = await sealHostedPrivateMediaCapability({
+    capabilitySecret: requireHostedPrivateMediaCapabilitySecret(input.capabilitySecret), payload,
+  });
+  const url = new URL(`${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX}${capability}/meal-thumbnail.jpg`,
+    requireHostedPrivateMediaDeliveryOrigin(input.deliveryOrigin));
+  url.searchParams.set("exp", String(expiresAtUnixSeconds));
+  return { mediaId: input.mediaId, url: url.toString() };
+}
+
 export async function readHostedPrivateMedia(input: {
   bucket: R2BucketLike;
   capability: string;
   capabilitySecret: string;
   expiresAtUnixSeconds: number;
   nowMs?: number;
+  runtimeMediaOnly?: boolean;
+  readRuntimeMedia?: (input: { userId: string; mediaId: string; sha256: string; byteSize: number }) => Promise<Uint8Array | null>;
 }): Promise<{
   bytes: Uint8Array;
   contentType: HostedPrivateMediaContentType;
@@ -261,8 +283,15 @@ export async function readHostedPrivateMedia(input: {
       capability: input.capability,
       capabilitySecret,
     });
-    if (payload.expiresAtUnixSeconds !== expiresAtUnixSeconds) {
+    if ((input.runtimeMediaOnly && payload.version !== 2) || payload.expiresAtUnixSeconds !== expiresAtUnixSeconds) {
       return null;
+    }
+    if (payload.version === 2) {
+      if (!payload.mediaId || !input.readRuntimeMedia) return null;
+      const bytes = await input.readRuntimeMedia({ userId: payload.userId, mediaId: payload.mediaId,
+        sha256: payload.sha256, byteSize: payload.sizeBytes });
+      return bytes && bytes.byteLength === payload.sizeBytes && await sha256Hex(bytes) === payload.sha256
+        && privateImageBytesMatchContentType(bytes, "image/jpeg") ? { bytes, contentType: "image/jpeg" } : null;
     }
     const objectKey = await hostedPrivateMediaObjectKey({
       sha256: payload.sha256,
@@ -418,7 +447,7 @@ function parseHostedPrivateMediaCapabilityPayload(
   }
   const keys = Object.keys(value);
   if (
-    keys.length !== 6
+    keys.length !== (value.version === 2 ? 7 : 6)
     || !keys.every((key) =>
       [
         "contentType",
@@ -427,9 +456,11 @@ function parseHostedPrivateMediaCapabilityPayload(
         "sizeBytes",
         "userId",
         "version",
+        ...(value.version === 2 ? ["mediaId"] : []),
       ].includes(key)
     )
-    || value.version !== 1
+    || (value.version !== 1 && value.version !== 2)
+    || (value.version === 2 && (value.contentType !== "image/jpeg" || typeof value.mediaId !== "string" || !HOSTED_PRIVATE_MEDIA_SHA256_PATTERN.test(value.mediaId) || typeof value.sizeBytes !== "number" || value.sizeBytes > 1024 * 1024))
     || !isHostedPrivateMediaContentType(value.contentType)
     || typeof value.sha256 !== "string"
     || !HOSTED_PRIVATE_MEDIA_SHA256_PATTERN.test(value.sha256)
@@ -448,7 +479,8 @@ function parseHostedPrivateMediaCapabilityPayload(
       "Hosted private media capability byte count",
     ),
     userId: requireHostedPrivateMediaUserId(value.userId),
-    version: 1,
+    version: value.version,
+    ...(typeof value.mediaId === "string" ? { mediaId: value.mediaId } : {}),
   };
 }
 

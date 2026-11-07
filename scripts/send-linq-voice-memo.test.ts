@@ -109,6 +109,7 @@ describe("send linq voice memo", () => {
     expect(report.upload.attachment.present).toBe(true);
     expect(report.voiceMemo.providerMessage.present).toBe(true);
     expect(report.voiceMemo.voiceMemoUrlPresent).toBe(true);
+    expect(report.voiceMemo.durationMs).toBe(750);
   });
 
   it("rejects mismatched explicit chat id and chat url", () => {
@@ -211,6 +212,7 @@ function createFetchStub(calls: ObservedFetchCall[]): typeof fetch {
           },
           voice_memo: {
             id: "attachment_secret_123",
+            duration_ms: 750,
             url: "https://cdn.example.test/download-secret",
           },
         },

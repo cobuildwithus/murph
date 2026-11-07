@@ -13,6 +13,9 @@ import {
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_UNEXPECTED_FAILURE_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_STRIPE_CANCEL_FAILED_MESSAGE,
 } from "@/src/lib/hosted-privacy/account-data-shared";
 
 /**
@@ -177,6 +180,73 @@ export function AccountDeletionRecoveryStudy() {
             <AccountDeletionMessageDialogBody
               id="design-connected-app-backlog-mobile"
               message={HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE}
+            />
+          </DialogFrame>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4" id="game-history-recovery">
+        <div className="max-w-2xl space-y-1">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Game history recovery
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            A very long game history can take more than one attempt. The dialog
+            keeps the typed confirmation, and each retry carries on from where
+            the last one stopped.
+          </p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <DialogFrame label="Desktop" width="max-w-md">
+            <AccountDeletionMessageDialogBody
+              id="design-game-history-desktop"
+              message={HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE}
+            />
+          </DialogFrame>
+          <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
+            <AccountDeletionMessageDialogBody
+              id="design-game-history-mobile"
+              message={HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE}
+            />
+          </DialogFrame>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4" id="failed-deletion-recovery">
+        <div className="max-w-2xl space-y-1">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Failed deletion recovery
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Once deletion starts, the account is suspended and Settings will not
+            load for it. Any failure the server marks as retryable keeps the
+            dialog and typed confirmation, so the member can press Delete account
+            again.
+          </p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <DialogFrame label="Subscription · Desktop" width="max-w-md">
+            <AccountDeletionMessageDialogBody
+              id="design-stripe-cancel-desktop"
+              message={HOSTED_ACCOUNT_DELETION_STRIPE_CANCEL_FAILED_MESSAGE}
+            />
+          </DialogFrame>
+          <DialogFrame label="Subscription · Mobile · 390px" width="max-w-[390px]">
+            <AccountDeletionMessageDialogBody
+              id="design-stripe-cancel-mobile"
+              message={HOSTED_ACCOUNT_DELETION_STRIPE_CANCEL_FAILED_MESSAGE}
+            />
+          </DialogFrame>
+          <DialogFrame label="Unexpected failure · Desktop" width="max-w-md">
+            <AccountDeletionMessageDialogBody
+              id="design-deletion-incomplete-desktop"
+              message={HOSTED_ACCOUNT_DELETION_UNEXPECTED_FAILURE_MESSAGE}
+            />
+          </DialogFrame>
+          <DialogFrame label="Unexpected failure · Mobile · 390px" width="max-w-[390px]">
+            <AccountDeletionMessageDialogBody
+              id="design-deletion-incomplete-mobile"
+              message={HOSTED_ACCOUNT_DELETION_UNEXPECTED_FAILURE_MESSAGE}
             />
           </DialogFrame>
         </div>

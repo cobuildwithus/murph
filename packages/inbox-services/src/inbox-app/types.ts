@@ -7,9 +7,7 @@ import type {
   IndexedAttachment as SharedIndexedAttachment,
   InboundCapture as SharedInboundCapture,
   PersistedCapture as SharedPersistedCapture,
-  PollConnector as SharedPollConnector,
 } from '@murphai/inboxd'
-import type { ConnectorRestartPolicy } from '@murphai/inboxd/runtime'
 import type { EventSource, MealNutrition } from '@murphai/contracts'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
 import type * as z from '@murphai/contracts/zod-runtime'
@@ -22,18 +20,11 @@ import type {
   InboxAttachmentListResult,
   InboxAttachmentShowResult,
   InboxAttachmentStatusResult,
-  InboxBackfillResult,
-  InboxBootstrapResult,
   InboxConnectorConfig,
-  InboxDaemonState,
-  InboxDoctorCheck,
-  InboxDoctorResult,
   InboxEnvelopeRepairResult,
   InboxInitResult,
   InboxListResult,
-  InboxParseResult,
   InboxParserAttemptCompactionResult,
-  InboxParserToolchainStatus,
   InboxPromoteDocumentResult,
   InboxPromoteExperimentNoteResult,
   InboxPromoteJournalResult,
@@ -41,15 +32,9 @@ import type {
   InboxPreservedDocument,
   InboxPreserveDocumentAttachmentsResult,
   InboxPromotionEntry,
-  InboxRequeueResult,
-  InboxRunResult,
   InboxRuntimeConfig,
   InboxSearchResult,
-  InboxSetupResult,
   InboxShowResult,
-  InboxSourceAddResult,
-  InboxSourceListResult,
-  InboxSourceRemoveResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 
 export type {
@@ -117,85 +102,13 @@ export type RuntimeStore = Pick<
 >
 
 export type PersistedCapture = SharedPersistedCapture
-export type PollConnector = SharedPollConnector
 export type RuntimeCaptureRecordInput = SharedInboundCapture
 
-export interface InboxRunEvent {
-  capture?: RuntimeCaptureRecordInput
-  connectorId: string
-  counts?: {
-    deduped: number
-    imported: number
-  }
-  details?: string
-  parser?: {
-    captureIds: string[]
-    failed: number
-    processed: number
-    succeeded: number
-  }
-  persisted?: PersistedCapture
-  phase?: 'backfill' | 'startup' | 'watch'
-  source: string
-  type:
-    | 'capture.imported'
-    | 'connector.backfill.finished'
-    | 'connector.backfill.started'
-    | 'connector.failed'
-    | 'parser.jobs.drained'
-    | 'connector.skipped'
-    | 'connector.watch.started'
-}
-
 export type InboxPipeline = SharedInboxPipeline
-
-export interface TelegramDriver {
-  getMe(signal?: AbortSignal): Promise<unknown>
-  getMessages(input: {
-    cursor?: Record<string, unknown> | null
-    limit?: number
-    includeOwnMessages?: boolean
-    signal?: AbortSignal
-  }): Promise<unknown[]>
-  startWatching(input: {
-    cursor?: Record<string, unknown> | null
-    includeOwnMessages?: boolean
-    signal: AbortSignal
-    onMessage(message: unknown): Promise<void> | void
-  }): Promise<
-    | { close?(): Promise<void> | void; stop?(): Promise<void> | void }
-    | (() => Promise<void> | void)
-    | void
-  >
-  getFile(fileId: string, signal?: AbortSignal): Promise<unknown>
-  downloadFile(filePath: string, signal?: AbortSignal): Promise<Uint8Array>
-  deleteWebhook?(input?: { dropPendingUpdates?: boolean }, signal?: AbortSignal): Promise<void>
-  getWebhookInfo?(signal?: AbortSignal): Promise<{ url?: string } | null>
-}
 
 export interface InboxRuntimeModule {
   ensureInboxVault(vaultRoot: string): Promise<void>
   openInboxRuntime(input: { vaultRoot: string }): Promise<RuntimeStore>
-  createInboxPipeline(input: {
-    vaultRoot: string
-    runtime: RuntimeStore
-  }): Promise<InboxPipeline>
-  createTelegramPollConnector(input: {
-    driver: TelegramDriver
-    id?: string
-    accountId?: string | null
-    backfillLimit?: number
-    downloadAttachments?: boolean
-    transportMode?: 'take-over-webhook' | 'require-no-webhook'
-  }): PollConnector
-  createTelegramBotApiPollDriver(input: {
-    token: string
-    allowedUpdates?: string[] | null
-    timeoutSeconds?: number
-    batchSize?: number
-    apiBaseUrl?: string
-    fileBaseUrl?: string
-  }): TelegramDriver
   rebuildRuntimeFromVault(input: {
     enqueueParserJobs: boolean
     vaultRoot: string
@@ -206,93 +119,6 @@ export interface InboxRuntimeModule {
     maxFiles?: number
     vaultRoot: string
   }): Promise<Omit<InboxEnvelopeRepairResult, 'vault'>>
-  runInboxDaemon(input: {
-    pipeline: InboxPipeline
-    connectors: PollConnector[]
-    signal: AbortSignal
-    continueOnConnectorFailure?: boolean
-    connectorRestartPolicy?: ConnectorRestartPolicy
-  }): Promise<void>
-  createParsedInboxPipeline(input: {
-    vaultRoot: string
-    runtime: RuntimeStore
-    registry: unknown
-    ffmpeg?: {
-      commandCandidates?: string[]
-      allowSystemLookup?: boolean
-    }
-    drainParsersOnDeduped?: boolean
-    onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
-  }): Promise<InboxPipeline>
-  runPollConnectorBackfill(input: {
-    connector: PollConnector
-    pipeline: InboxPipeline
-    accountId?: string | null
-  }): Promise<{
-    cursor: Record<string, unknown> | null
-  }>
-  runInboxDaemonWithParsers(input: {
-    vaultRoot: string
-    runtime: RuntimeStore
-    registry: unknown
-    ffmpeg?: {
-      commandCandidates?: string[]
-      allowSystemLookup?: boolean
-    }
-    connectors: PollConnector[]
-    signal: AbortSignal
-    continueOnConnectorFailure?: boolean
-    connectorRestartPolicy?: ConnectorRestartPolicy
-    onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
-  }): Promise<void>
-}
-
-export interface ParserToolRuntimeStatus {
-  available: boolean
-  command: string | null
-  modelPath?: string | null
-  source: 'config' | 'env' | 'system' | 'missing'
-  reason: string
-}
-
-export interface ParserDoctorRuntimeReport {
-  configPath: string
-  discoveredAt: string
-  tools: {
-    ffmpeg: ParserToolRuntimeStatus
-    whisper: ParserToolRuntimeStatus & {
-      modelPath: string | null
-    }
-  }
-}
-
-export interface ConfiguredParserRegistryRuntime {
-  doctor: ParserDoctorRuntimeReport
-  registry: unknown
-  ffmpeg?: {
-    commandCandidates?: string[]
-    allowSystemLookup?: boolean
-  }
-}
-
-export interface ParserRuntimeDrainResult {
-  status: 'failed' | 'succeeded'
-  job: {
-    attachmentId: string
-    captureId: string
-  }
-  providerId?: string
-  resultPath?: string
-  errorCode?: string
-  errorMessage?: string
-}
-
-export interface InboxParserServiceRuntime {
-  drain(input?: {
-    attachmentId?: string
-    captureId?: string
-    maxJobs?: number
-  }): Promise<ParserRuntimeDrainResult[]>
 }
 
 export interface ParsersRuntimeModule {
@@ -301,36 +127,6 @@ export interface ParsersRuntimeModule {
     maxAttempts?: number
     vaultRoot: string
   }): Promise<Omit<InboxParserAttemptCompactionResult, 'vault'>>
-  createConfiguredParserRegistry(input: {
-    vaultRoot: string
-  }): Promise<ConfiguredParserRegistryRuntime>
-  createInboxParserService(input: {
-    vaultRoot: string
-    runtime: RuntimeStore
-    registry: unknown
-    ffmpeg?: {
-      commandCandidates?: string[]
-      allowSystemLookup?: boolean
-    }
-  }): InboxParserServiceRuntime
-  discoverParserToolchain(input: {
-    vaultRoot: string
-  }): Promise<ParserDoctorRuntimeReport>
-  writeParserToolchainConfig(input: {
-    vaultRoot: string
-    tools?: Record<
-      string,
-      {
-        command?: string | null
-        modelPath?: string | null
-      }
-    >
-  }): Promise<{
-    config: {
-      updatedAt: string
-    }
-    configPath: string
-  }>
 }
 
 export interface CoreRuntimeModule {
@@ -492,111 +288,17 @@ export type InboxPaths = RuntimePaths
 
 export interface InboxServicesDependencies {
   clock?: () => Date
-  getPid?: () => number
-  getPlatform?: () => NodeJS.Platform
-  getHomeDirectory?: () => string
-  killProcess?: (pid: number, signal?: NodeJS.Signals | number) => void
-  sleep?: (milliseconds: number) => Promise<void>
   enableJournalPromotion?: boolean
   loadCoreModule?: () => Promise<CoreRuntimeModule>
   loadImportersModule?: () => Promise<ImportersFactoryRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadQueryModule?: () => Promise<QueryRuntimeModule>
-  loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
-  enableAssistantAutoReplyChannel?: (
-    vault: string,
-    channel: InboxConnectorConfig['source'],
-  ) => Promise<boolean>
-  getEnvironment?: () => NodeJS.ProcessEnv
 }
-
-export interface SourceAddInput extends CommandContext {
-  source: InboxConnectorConfig['source']
-  id: string
-  account?: string | null
-  includeOwn?: boolean
-  backfillLimit?: number
-  linqWebhookHost?: string | null
-  linqWebhookPath?: string | null
-  linqWebhookPort?: number
-  enableAutoReply?: boolean
-}
-
-export interface SourceRemoveInput extends CommandContext {
-  connectorId: string
-}
-
-export interface SourceSetEnabledInput extends CommandContext {
-  connectorId: string
-  enabled: boolean
-}
-
-export interface InboxSourceSetEnabledResult {
-  vault: string
-  configPath: string
-  connector: InboxConnectorConfig
-  connectorCount: number
-}
-
-export interface DoctorInput extends CommandContext {
-  sourceId?: string | null
-}
-
-export interface DoctorContext {
-  input: DoctorInput
-  paths: InboxPaths
-  inboxd: InboxRuntimeModule
-  checks: InboxDoctorCheck[]
-  config: InboxRuntimeConfig | null
-  databaseAvailable: boolean
-  parserToolchain: InboxParserToolchainStatus | null
-}
-
-export type DoctorTargetResolution =
-  | {
-      kind: 'all'
-      connectors: InboxConnectorConfig[]
-    }
-  | {
-      kind: 'missing'
-    }
-  | {
-      kind: 'connector'
-      connector: InboxConnectorConfig
-    }
 
 export interface InitInput extends CommandContext {
   rebuild?: boolean
   rebuildParserJobs?: boolean
-}
-
-export interface SetupInput extends CommandContext {
-  ffmpegCommand?: string
-  whisperCommand?: string
-  whisperModelPath?: string
-}
-
-export interface BootstrapInput extends SetupInput {
-  rebuild?: boolean
-  strict?: boolean
-}
-
-export interface ParseInput extends CommandContext {
-  captureId?: string | null
-  limit?: number
-}
-
-export interface RequeueInput extends CommandContext {
-  attachmentId?: string | null
-  captureId?: string | null
-  state?: 'failed' | 'running'
-}
-
-export interface BackfillInput extends CommandContext {
-  sourceId: string
-  limit?: number
-  parse?: boolean
 }
 
 export interface ListInput extends CommandContext {
@@ -640,30 +342,11 @@ export interface CompactInboxParserAttemptsInput extends CommandContext {
 }
 
 export interface InboxServices {
-  bootstrap(input: BootstrapInput): Promise<InboxBootstrapResult>
   init(input: InitInput): Promise<InboxInitResult>
-  sourceAdd(input: SourceAddInput): Promise<InboxSourceAddResult>
-  sourceList(input: CommandContext): Promise<InboxSourceListResult>
-  sourceRemove(input: SourceRemoveInput): Promise<InboxSourceRemoveResult>
-  sourceSetEnabled(input: SourceSetEnabledInput): Promise<InboxSourceSetEnabledResult>
-  doctor(input: DoctorInput): Promise<InboxDoctorResult>
-  setup(input: SetupInput): Promise<InboxSetupResult>
   repairEnvelopes(input: RepairInboxEnvelopesInput): Promise<InboxEnvelopeRepairResult>
   compactParserAttempts(
     input: CompactInboxParserAttemptsInput,
   ): Promise<InboxParserAttemptCompactionResult>
-  parse(input: ParseInput): Promise<InboxParseResult>
-  requeue(input: RequeueInput): Promise<InboxRequeueResult>
-  backfill(input: BackfillInput): Promise<InboxBackfillResult>
-  run(
-    input: CommandContext,
-    options?: {
-      onEvent?: (event: InboxRunEvent) => void
-      signal?: AbortSignal
-    },
-  ): Promise<InboxRunResult>
-  status(input: CommandContext): Promise<InboxDaemonState>
-  stop(input: CommandContext): Promise<InboxDaemonState>
   list(input: ListInput): Promise<InboxListResult>
   listAttachments(
     input: CommandContext & { captureId: string },
@@ -692,23 +375,11 @@ export interface InboxServices {
 
 export interface InboxAppEnvironment {
   clock: () => Date
-  getPid: () => number
-  getPlatform: () => NodeJS.Platform
-  getHomeDirectory: () => string
-  killProcess: (pid: number, signal?: NodeJS.Signals | number) => void
-  sleep: (milliseconds: number) => Promise<void>
-  getEnvironment: () => NodeJS.ProcessEnv
-  usesInjectedTelegramDriver: boolean
   loadCore: () => Promise<CoreRuntimeModule>
   loadImporters: () => Promise<ImportersFactoryRuntimeModule>
   loadInbox: () => Promise<InboxRuntimeModule>
   loadParsers: () => Promise<ParsersRuntimeModule>
   loadQuery: () => Promise<QueryRuntimeModule>
   requireParsers: (operation: string) => Promise<ParsersRuntimeModule>
-  loadConfiguredTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
-  enableAssistantAutoReplyChannel: (
-    vault: string,
-    channel: InboxConnectorConfig['source'],
-  ) => Promise<boolean>
   journalPromotionEnabled: boolean
 }

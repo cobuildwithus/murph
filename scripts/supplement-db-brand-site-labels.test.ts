@@ -6083,3 +6083,63 @@ describe("supplement brand-site repair preview", () => {
     assert.match(preview.parserBlockers.join("|"), /likely_missing_product_active|missing_prominent_facts_rows/u);
   });
 });
+
+describe("repair preview ordered active evidence", () => {
+  const bVitamins = ["Thiamin", "Riboflavin", "Niacin", "Pantothenic Acid", "Inositol", "Choline"];
+  const cases = [
+    { name: "Lactoferrin Lycopene", ingredients: ["Lactoferrin"], missing: false },
+    { name: "Lycopene Lactoferrin", ingredients: ["Lactoferrin"], missing: false },
+    { name: "Lactoferrin Lycopene", ingredients: ["Lycopene"], missing: true },
+    { name: "BCAA", ingredients: ["Branched Chain Amino Acids"], missing: false },
+    { name: "BCAA", ingredients: ["L-Leucine", "L-Isoleucine", "L-Valine"], missing: false },
+    { name: "BCAA", ingredients: ["L-Leucine", "L-Isoleucine"], missing: true },
+    { name: "EPA DHA", ingredients: ["EPA"], missing: true },
+    { name: "EPA DHA", ingredients: ["EPA", "DHA"], missing: false },
+    { name: "Probiotic 1 CFU", ingredients: ["Lactobacillus acidophilus"], unit: "CFU", missing: false },
+    { name: "Probiotic 1 CFU", ingredients: ["Lactobacillus acidophilus"], unit: "mg", missing: true },
+    { name: "1 CFU Lactoferrin", ingredients: ["Lactobacillus acidophilus"], unit: "CFU", missing: true },
+    { name: "Multivitamin", ingredients: bVitamins.slice(0, 5), missing: true },
+    { name: "Multivitamin", ingredients: bVitamins, missing: false },
+    { name: "Multivitamin Iodine", ingredients: bVitamins, missing: true },
+    { name: "B-Complex #12", ingredients: bVitamins.slice(0, 4), missing: true },
+    { name: "B-Complex #12", ingredients: bVitamins.slice(0, 5), missing: false },
+    { name: "B-Complex #12 Iodine", ingredients: bVitamins.slice(0, 5), missing: true },
+    { name: "Power Pak", ingredients: bVitamins.slice(0, 2), missing: true },
+    { name: "Power Pak", ingredients: bVitamins.slice(0, 3), missing: false },
+    { name: "Power Pak Iodine", ingredients: bVitamins.slice(0, 3), missing: true },
+    { name: "Calcium Magnesium", ingredients: ["Calcium"], missing: true },
+    { name: "Calcium Magnesium", ingredients: ["Calcium", "Magnesium"], missing: false },
+  ];
+
+  for (const [index, row] of cases.entries()) {
+    test(`keeps active decision ${index}: ${row.name}`, () => {
+      // Keep the origin ID neutral: it also participates in active-name matching.
+      const sourceId = `active-check-${index}`;
+      const ingredientRows = row.ingredients.map((name) => ({ name, amount: "10", unit: row.unit ?? "mg" }));
+      const preview = repairPreviewForRow({
+        id: `example-brand:${sourceId}`,
+        dataOriginId: `example-brand:${sourceId}`,
+        dataOriginUrl: `https://example.test/products/${sourceId}`,
+        name: row.name,
+        brand: "Example Brand",
+        upc: null,
+        offMarket: false,
+        searchText: "",
+        label: {
+          source: "example-brand",
+          sourceId,
+          ingredientRows,
+          servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+          factsText: `Supplement Facts Serving Size 1 capsule ${ingredientRows.map((ingredient) => `${ingredient.name} ${ingredient.amount} ${ingredient.unit}`).join(" ")}`,
+        },
+      });
+      assert.equal(preview.parserStatus, "structured_ready");
+      assert.equal(preview.parserBlockers.includes("likely_missing_product_active"), row.missing);
+      if (row.missing) {
+        assert.equal(preview.automatedBackfillReady, false);
+        assert.equal(preview.productionCandidate, null);
+        assert.deepEqual(preview.removableFieldCandidates, []);
+      }
+    });
+  }
+});

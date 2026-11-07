@@ -38,6 +38,16 @@ vi.mock("@/src/lib/hosted-onboarding/telegram-client", async () => {
   };
 });
 
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => {
+    const tx = { hostedLinqDelivery: {
+      findUnique: vi.fn(async () => null), createMany: vi.fn(async () => ({ count: 1 })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    } };
+    return { ...tx, $transaction: async (run: (transaction: typeof tx) => unknown) => run(tx) };
+  },
+}));
+
 type HostedOnboardingTelegramRouteModule = typeof import("../app/api/hosted-onboarding/telegram/webhook/route");
 
 let hostedOnboardingTelegramRoute: HostedOnboardingTelegramRouteModule;
@@ -127,7 +137,7 @@ describe("hosted onboarding Telegram webhook route", () => {
     expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
   });
 
-  it("maps visible Telegram provider refusal through the public route", async () => {
+  it("finishes a visible Telegram reply after an ambiguous provider result", async () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValueOnce({
       ignored: true,
       ok: true,
@@ -168,13 +178,9 @@ describe("hosted onboarding Telegram webhook route", () => {
       }),
     );
 
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
-        message: "Telegram sendMessage failed.",
-        retryable: true,
-      },
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ignored: false, ok: true, reason: "visible-secondary-reply:ambiguous-telegram-binding",
     });
     expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledWith({
       message: "This Telegram account isn't linked cleanly. Reconnect Telegram in Murph Settings or contact support.",

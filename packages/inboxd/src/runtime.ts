@@ -8,14 +8,6 @@ export type {
   PipelineContext,
 } from "./kernel/pipeline.ts";
 export type {
-  ConnectorRestartPolicy,
-  RunPollConnectorBackfillInput,
-  RunPollConnectorBackfillResult,
-} from "./kernel/daemon.ts";
-export {
-  runPollConnectorBackfill,
-} from "./kernel/daemon.ts";
-export type {
   PersistedCapture,
   IndexedAttachment,
 } from "./contracts/capture.ts";

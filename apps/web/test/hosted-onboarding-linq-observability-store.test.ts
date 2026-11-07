@@ -14,9 +14,10 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
-  hasConflictingHostedLinqInstantFirstTurnForChatTx,
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+  HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -506,7 +507,7 @@ describe("hosted Linq observability stores", () => {
       template: "invite_signup",
     });
     fixture.queryRaw.mockResolvedValue([
-      { anyIdentityLive: true, sameIdentityStillLive: false },
+      { anyIdentityLive: true },
     ]);
 
     await expect(ingestHostedLinqProviderEventTx({
@@ -1429,18 +1430,18 @@ describe("hosted Linq observability stores", () => {
 
   it("detects another unresolved instant first-turn obligation in the chat", async () => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
-      id: "hld_earlier_first_turn",
-    });
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      { ...buildInstantFirstTurnDeliveryFixture(), attemptedAt: new Date() },
+    ]);
 
-    await expect(hasConflictingHostedLinqInstantFirstTurnForChatTx({
+    await expect(releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx({
       eventId: "evt_current",
       linqChatId: "chat_123",
       prisma: fixture.prisma as never,
     })).resolves.toBe(true);
 
-    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
-      select: { id: true },
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+      select: expect.objectContaining({ id: true, attemptedAt: true, payloadCiphertext: true, status: true }),
       where: expect.objectContaining({
         acceptedAt: null,
         deliveredAt: null,
@@ -1456,7 +1457,15 @@ describe("hosted Linq observability stores", () => {
           { failedAt: null, status: "attempted" },
           {
             payloadCiphertext: { not: null },
-            status: { in: ["provider_dispatch_started", "failed"] },
+            status: "provider_dispatch_started",
+          },
+          {
+            payloadCiphertext: { not: null },
+            status: "failed",
+            OR: [
+              { failureCode: null },
+              { failureCode: { not: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE } },
+            ],
           },
         ],
       }),
@@ -1474,7 +1483,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: null,
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: null,
         status: "attempted",
@@ -1490,7 +1499,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: "LINQ_SEND_FAILED",
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: "sealed-reply",
+        payloadCiphertext: "sealed-reply", payloadOwnerMemberId: "member_synthetic",
         payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
         skippedAt: null,
         status: "failed",
@@ -1506,7 +1515,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: null,
         lastReceiptAt: null,
         messageLookupKey: "hbidx:linq-message:accepted",
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: null,
         status: "accepted",
@@ -1522,7 +1531,7 @@ describe("hosted Linq observability stores", () => {
         failureCode: null,
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: new Date("2026-03-26T12:00:01.000Z"),
         status: "skipped",
@@ -1530,15 +1539,15 @@ describe("hosted Linq observability stores", () => {
     },
     {
       expected: "available",
-      label: "definitive failed Web fallback",
+      label: "certified first-dispatch rejected Web fallback",
       row: {
         acceptedAt: null,
         deliveredAt: null,
         failedAt: new Date("2026-03-26T12:00:01.000Z"),
-        failureCode: "LINQ_REJECTED",
+        failureCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_FIRST_DISPATCH_REJECTED",
         lastReceiptAt: null,
         messageLookupKey: null,
-        payloadCiphertext: null,
+        payloadCiphertext: null, payloadOwnerMemberId: null,
         payloadSchema: null,
         skippedAt: null,
         status: "failed",
@@ -1546,7 +1555,7 @@ describe("hosted Linq observability stores", () => {
     },
   ] as const)("returns $expected for $label", async ({ expected, row }) => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(row);
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({ attemptedAt: new Date(), ...row });
 
     await expect(
       resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
@@ -1649,6 +1658,45 @@ describe("hosted Linq observability stores", () => {
     ).resolves.toBe("available");
   });
 
+  it.each(["awaiting_generation", "generation_queued"])("advances a reserved %s game intent through the same provider receipt", async (status) => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildGroupSetupDeliveryFixture({ source: "game_lifecycle", sourceRef: "game", template: "game_started", status });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2030-03-04T12:00:00Z"), idempotencyKey: "game-started:game",
+      linqChatId: "chat_game", prisma: fixture.prisma as never, source: "hosted_runtime_linq_delivery",
+      sourceRef: "notification", status: "provider_dispatch_started", targetKind: "thread", template: "assistant_notification",
+    })).resolves.toEqual({ claimed: true, id: delivery.id });
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { id: delivery.id, source: "game_lifecycle", status, updatedAt: delivery.updatedAt,
+        acceptedAt: null, deliveredAt: null, failedAt: null, skippedAt: null, lastReceiptAt: null, messageLookupKey: null },
+      data: expect.objectContaining({ source: "hosted_runtime_linq_delivery", status: "provider_dispatch_started" }),
+    });
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not advance a game generation reservation after another claimant wins", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildGroupSetupDeliveryFixture({ source: "game_lifecycle", template: "game_started", status: "generation_queued" });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      idempotencyKey: "game-started:game", prisma: fixture.prisma as never,
+      source: "hosted_runtime_linq_delivery", status: "provider_dispatch_started", targetKind: "thread",
+    })).resolves.toMatchObject({ claimed: false, id: delivery.id, retryAt: expect.any(Date) });
+  });
+
+  it("keeps provider evidence terminal instead of reclaiming a game generation reservation", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildGroupSetupDeliveryFixture({ source: "game_lifecycle", template: "game_started", status: "generation_queued", acceptedAt: new Date("2030-03-04T12:00:00Z"), messageLookupKey: "accepted-message" });
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      idempotencyKey: "game-started:game", prisma: fixture.prisma as never,
+      source: "hosted_runtime_linq_delivery", status: "provider_dispatch_started", targetKind: "thread",
+    })).resolves.toMatchObject({ claimed: false, id: delivery.id });
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("advances only the exact owned pre-provider attempt before sending", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -1666,6 +1714,7 @@ describe("hosted Linq observability stores", () => {
       linqChatLookupKey:
         createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
       messageLookupKey: null,
+      payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
       phoneNumberLookupKey: null,
       retryAfterAt: null,
       skippedAt: null,
@@ -1680,7 +1729,7 @@ describe("hosted Linq observability stores", () => {
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      advancePreProviderAttempt: true,
+      expectedAttemptedAt: attemptedAt,
       attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
       idempotencyKey: "linq-instant-first-turn-v1:event",
       linqChatId: "chat_123",
@@ -1693,6 +1742,7 @@ describe("hosted Linq observability stores", () => {
       template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
     })).resolves.toEqual({
       claimed: true,
+      attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
       id: "hld_instant_first_turn",
     });
 
@@ -1701,10 +1751,7 @@ describe("hosted Linq observability stores", () => {
       where: expect.objectContaining({
         attemptedAt,
         id: "hld_instant_first_turn",
-        sourceRef:
-          createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
         status: "attempted",
-        updatedAt,
       }),
     });
   });
@@ -3102,7 +3149,7 @@ describe("hosted Linq observability stores", () => {
     },
     {
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
-      label: "definitively failed",
+      label: "certified first-dispatch rejection",
       skippedAt: null,
       status: "failed",
     },
@@ -3114,6 +3161,7 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
       buildInstantFirstTurnDeliveryFixture({
+        failureCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_FIRST_DISPATCH_REJECTED",
         failedAt,
         skippedAt,
         status,
@@ -3144,6 +3192,7 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
       buildInstantFirstTurnDeliveryFixture({
+        payloadCiphertext: "sealed-reply", payloadOwnerMemberId: "member_synthetic",
         failureCode: "provider-timeout",
         failedAt: new Date("2026-03-26T12:00:01.000Z"),
         payloadSchema:
@@ -3166,6 +3215,7 @@ describe("hosted Linq observability stores", () => {
       template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
     })).resolves.toEqual({
       claimed: true,
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
       id: "hld_instant_first_turn",
     });
 
@@ -4737,7 +4787,6 @@ describe("hosted Linq observability stores", () => {
       advanced: true,
       deliveryId: "hld_skipped_retry",
       phoneNumberLookupKey: null,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
 
@@ -5425,17 +5474,11 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
       deliveryStatus: "failed",
-      reopenOnboardingLink: {
-        groupJoinReplyContext: {
-          outreachId: "hgrpjoa_buffered",
-          repliedAt: "2026-03-26T12:01:00.000Z",
-        },
-        memberId: "member_123",
-        occurredAt: "2026-03-26T00:00:00.000Z",
-        releaseDailySuppression: true,
-      },
       restoreOnboardingLink: null,
     });
+    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { onboardingLinkSentAt: null }, where: expect.objectContaining({ memberId: "member_123" }),
+    }));
   });
 
   it("does not reopen the daily marker when a buffered generic failure replays after a distinct group success", async () => {
@@ -5454,7 +5497,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       template: "invite_signup",
     });
     fixture.queryRaw.mockResolvedValue([
-      { anyIdentityLive: true, sameIdentityStillLive: false },
+      { anyIdentityLive: true },
     ]);
 
     await expect(markHostedLinqDeliveryAcceptedTx({
@@ -5464,9 +5507,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
       deliveryStatus: "failed",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
+    expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
   });
 
   it("restores group signup state when the accepted milestone replays a buffered delivery receipt", async () => {
@@ -5494,12 +5537,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
-        groupJoinReplyContext: {
-          outreachId: "hgrpjoa_buffered",
-          repliedAt: "2026-03-26T12:01:00.000Z",
-        },
         linqChatId: "chat_123",
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",
@@ -5587,7 +5625,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       });
   });
 
-  it("checks only the five exact digest attempts before suppressing stale failure reopen", async () => {
+  it("checks member/day liveness before suppressing stale failure reopen", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
     const sourceEventDigest = "c".repeat(32);
@@ -5608,7 +5646,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       template: "invite_signup",
     });
     fixture.queryRaw.mockResolvedValue([
-      { anyIdentityLive: true, sameIdentityStillLive: true },
+      { anyIdentityLive: true },
     ]);
 
     await ingestHostedLinqProviderEventTx({
@@ -5630,9 +5668,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
     const liveAttemptQuery = fixture.queryRaw.mock.calls
       .map(([query]) => query as { sql?: string; values?: unknown[] })
-      .find((query) => query.sql?.includes('AS "sameIdentityStillLive"'));
-    expect(liveAttemptQuery?.sql?.match(/EXISTS \(/gu)).toHaveLength(2);
-    expect(liveAttemptQuery?.sql?.match(/LIMIT 1/gu)).toHaveLength(2);
+      .find((query) => query.sql?.includes('AS "anyIdentityLive"'));
+    expect(liveAttemptQuery?.sql?.match(/EXISTS \(/gu)).toHaveLength(1);
+    expect(liveAttemptQuery?.sql?.match(/LIMIT 1/gu)).toHaveLength(1);
     expect(liveAttemptQuery?.sql).toContain(
       '"source_ref" LIKE ?::text ESCAPE \'!\'',
     );
@@ -5640,11 +5678,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       "'^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'",
     );
     expect(liveAttemptQuery?.values).toEqual([
-      exactEffectId,
-      `${exactEffectId}:a2`,
-      `${exactEffectId}:a3`,
-      `${exactEffectId}:a4`,
-      `${exactEffectId}:a5`,
       "linq-invite-signup:member!_123:2026-03-26T00:00:00.000Z%",
       BASE_EFFECT_ID,
     ]);
@@ -5653,7 +5686,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
   it("uses one escaped prefix existence probe when only member/day liveness is needed", async () => {
     const queryRaw = vi.fn().mockResolvedValue([{
       anyIdentityLive: true,
-      sameIdentityStillLive: false,
     }]);
 
     await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
@@ -5668,7 +5700,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       values: unknown[];
     };
     expect(query.sql.match(/EXISTS \(/gu)).toHaveLength(1);
-    expect(query.sql).toContain('FALSE AS "sameIdentityStillLive"');
     expect(query.sql).toContain('"source_ref" LIKE ?::text ESCAPE \'!\'');
     expect(query.values).toEqual([
       "linq-invite-signup:member!!!_123!%:2026-03-26T00:00:00.000Z%",
@@ -5700,7 +5731,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
         prisma: fixture.prisma as never,
       })).resolves.toEqual({
         deliveryStatus: "delivered",
-        reopenOnboardingLink: null,
         restoreOnboardingLink: {
           linqChatId: "chat_123",
           memberId: "member_123",
@@ -5737,7 +5767,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       advanced: true,
       deliveryId: "hld_delivered_signup",
       phoneNumberLookupKey: null,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat_123",
         memberId: "member_123",
@@ -6006,7 +6035,6 @@ describe("owned multi-part Linq delivery receipts", () => {
         advanced: false,
         deliveryId: "hld_parent_only_partial",
         phoneNumberLookupKey: null,
-        reopenOnboardingLink: null,
         restoreOnboardingLink: null,
       });
 
@@ -6220,6 +6248,7 @@ function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
   lastReceiptAt: Date | null;
   messageLookupKey: string | null;
   payloadCiphertext: string | null;
+  payloadOwnerMemberId: string | null;
   payloadSchema: string | null;
   skippedAt: Date | null;
   status: string;
@@ -6237,7 +6266,7 @@ function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
     linqChatLookupKey:
       createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
     messageLookupKey: null,
-    payloadCiphertext: null,
+    payloadCiphertext: null, payloadOwnerMemberId: null,
     payloadSchema: null,
     phoneNumberLookupKey: null,
     retryAfterAt: null,

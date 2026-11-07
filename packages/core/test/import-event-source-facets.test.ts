@@ -24,6 +24,17 @@ const rows = (vaultRoot: string) => listHistoryEvents({ vaultRoot, kinds: ["test
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("explicit imported source facet lifecycle", () => {
+  it("distinguishes an exact facet-free source lookup from the legacy wildcard", async () => {
+    const vaultRoot = await vault();
+    await importEventBatch({ vaultRoot, apply: true, decisions: [child()] });
+    expect(await findEventByExternalRef({ vaultRoot, ...parent(), facet: null })).toBeNull();
+    expect(await findEventByExternalRef({ vaultRoot, ...parent() })).toMatchObject({ externalRef: { facet: "document-extraction-first" } });
+    await importEventBatch({ vaultRoot, apply: true, decisions: [{ action: "upsert", payload: payload() }] });
+    const exact = await findEventByExternalRef({ vaultRoot, ...parent(), facet: null });
+    expect(exact).not.toBeNull();
+    expect(exact?.externalRef?.facet).toBeUndefined();
+  });
+
   it("retracts only owned parent facets, preserves unrelated sources and replays without new tombstones", async () => {
     const vaultRoot = await vault();
     await importEventBatch({ vaultRoot, apply: true, decisions: [child(), child(v1, "document-extraction-second"),

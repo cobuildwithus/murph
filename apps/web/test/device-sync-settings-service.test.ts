@@ -125,24 +125,24 @@ test("buildHostedDeviceSyncSettingsResponse allows a family-sponsored member wit
   }));
 });
 
-test("buildHostedDeviceSyncSettingsResponse explains canceled access before reading connections", async () => {
+test("buildHostedDeviceSyncSettingsResponse explains unfinished signup before reading connections", async () => {
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
   const prisma = createAccessPrisma({
     accountGroupMemberships: [],
-    billingStatus: "canceled",
+    billingStatus: "incomplete",
     suspendedAt: null,
   });
 
   await expect(buildHostedDeviceSyncSettingsResponse({
     member: {
-      billingStatus: "canceled",
+      billingStatus: "incomplete",
       id: "member_123",
       suspendedAt: null,
     },
     prisma: prisma as never,
   })).rejects.toMatchObject({
     code: "HOSTED_ACCESS_REQUIRED",
-    message: "Your subscription is canceled. Open billing to resume access.",
+    message: "Finish hosted activation before continuing.",
   });
 
   expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith(expect.objectContaining({
@@ -167,7 +167,7 @@ function createAccessPrisma(member: {
 }) {
   return {
     hostedMember: {
-      findUnique: vi.fn(async () => ({
+      findUnique: vi.fn(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : ({
         ...member,
         threadContainer: null,
       })),

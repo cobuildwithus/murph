@@ -2,6 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createDeferred,
+  createMailboxItem,
   createMailboxPort,
   createPlatform,
   createSnapshotFixtureRef,
@@ -24,16 +25,14 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "../src/hosted-runtime.ts";
 
-test("metadata-only post-checkpoint reconciliation does not rearm the idle window", async () => {
+test("empty post-checkpoint wake hands off without rearming the idle window", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-  const idleCheckpointDelayMs = 180_000;
+  const runnerIdleTtlMs = 180_000;
   const dueAssistantWakeAt = TEST_NOW;
   const durableWakeAt = "2026-04-27T00:20:00.000Z";
-  const replacementWakeAt = "2026-04-27T00:10:00.000Z";
   const assistantOneObserved = createDeferred<void>();
-  const assistantTwoObserved = createDeferred<void>();
   const checkpointStartedAtMs: number[] = [];
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   const durableEffect = vi.fn(async () => {
@@ -56,7 +55,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_metadata_only_checkpoint_timing",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -79,7 +78,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: [createMailboxItem()],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -124,19 +123,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
               };
             }
 
-            if (assistantPass === 2) {
-              assistantTwoObserved.resolve();
-              return {
-                nextWakeAt: replacementWakeAt,
-                nextWakeReason: "assistant",
-                progressed: false,
-                runtimeProjectionCheckpointRequested: true,
-              };
-            }
-
-            return {
-              progressed: false,
-            };
+            assert.fail("retirement must not re-enter assistant service");
           },
           vaultRoot,
         },
@@ -147,25 +134,21 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
 
     await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
     await waitForFakeTimerScheduled(() => events.join(","));
-    await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-    await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-    await Promise.race([
-      waitForFakeTimerScheduled(() => events.join(",")),
-      resultPromise,
-    ]);
-    await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-    await resultPromise;
+    await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
+    const result = await resultPromise;
+    assert.equal(assistantPass, 1);
+    assert.equal(result.nextWakeAt, dueAssistantWakeAt);
+    assert.equal(result.nextWakeReason, "assistant");
 
     assert.equal(durableEffect.mock.calls.length, 1);
     assert.deepEqual(checkpointStartedAtMs, [
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs,
     ]);
     const finalCheckpoint = checkpointRequests.at(-1);
     assert.deepEqual(
       [finalCheckpoint?.nextWakeAt, finalCheckpoint?.nextWakeReason],
-      [replacementWakeAt, "assistant"],
+      [dueAssistantWakeAt, "assistant"],
     );
   } finally {
     vi.useRealTimers();
@@ -178,7 +161,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const checkpointStartedAtMs: number[] = [];
-  const idleCheckpointDelayMs = 180_000;
+  const runnerIdleTtlMs = 180_000;
   const metadataPassDelayMs = 60_000;
   const replacementWakeAt = "2026-04-27T00:20:00.000Z";
   const firstPassObserved = createDeferred<void>();
@@ -192,7 +175,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     const resultPromise = withRealTimeout(
       runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs } }),
+        createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs } }),
         {
           async createCheckpointSnapshot() {
             checkpointStartedAtMs.push(Date.now());
@@ -200,7 +183,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
           },
           async importItem() { return { status: "imported" }; },
           platform: createPlatform({
-            mailboxPort: createMailboxPort({ events, items: [] }),
+            mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -242,7 +225,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
     await withRealTimeout(metadataPassObserved.promise, 15_000, () => events.join(","));
     await waitForFakeTimerScheduled(() => events.join(","));
     assert.equal(checkpointRequests.length, 0);
-    await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - metadataPassDelayMs - 1);
+    await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - metadataPassDelayMs - 1);
     assert.equal(checkpointRequests.length, 0);
     await vi.advanceTimersByTimeAsync(1);
     await Promise.race([resultPromise, waitForFakeTimerScheduled(() => events.join(","))]);
@@ -250,7 +233,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
     await resultPromise;
 
     assert.equal(assistantPass, 2);
-    assert.deepEqual(checkpointStartedAtMs, [Date.parse(TEST_NOW) + idleCheckpointDelayMs]);
+    assert.deepEqual(checkpointStartedAtMs, [Date.parse(TEST_NOW) + runnerIdleTtlMs]);
     const finalCheckpoint = checkpointRequests.at(-1);
     assert.deepEqual(
       [finalCheckpoint?.nextWakeAt, finalCheckpoint?.nextWakeReason],

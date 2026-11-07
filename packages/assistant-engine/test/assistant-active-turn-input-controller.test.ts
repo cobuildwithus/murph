@@ -2300,3 +2300,183 @@ test('active-turn controller serializes overlapping input-available hook admissi
     controller.close()
   }
 })
+
+
+test('group draft window preserves the admission checkpoint failure that canceled its wait', async () => {
+  const { createAssistantActiveTurnInputController } =
+    await import('../src/assistant/active-turn-input-controller.ts')
+  const checkpointRejected = new AssistantActiveTurnInputCheckpointRejectedError(
+    'Synthetic checkpoint rejection',
+  )
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => { throw checkpointRejected },
+    sessionId: 'session-synthetic-draft',
+    turnId: 'turn-synthetic-draft',
+    vault: '/vaults/test',
+  })
+  try {
+    controller.pauseProviderSteering()
+    const draft = controller.finishDraftWindow()
+    const observedDraft = draft.catch((error: unknown) => error)
+    await expect(controller.notifyInputAvailable()).rejects.toBe(checkpointRejected)
+    expect(await observedDraft).toBe(checkpointRejected)
+    await expect(controller.admitAvailable()).rejects.toBe(checkpointRejected)
+  } finally {
+    controller.close()
+  }
+})
+
+test('group draft window preserves a late fatal steer rejection and keeps admission failed', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const steerStarted = createDeferred<void>()
+  const steerResult = createDeferred<void>()
+  const steerRejected = Object.assign(new Error('Synthetic late steer rejection'), {
+    code: 'SYNTHETIC_STEER_REJECTED',
+  })
+  const interrupt = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    sessionId: 'session-synthetic-draft',
+    turnId: 'turn-synthetic-draft',
+    vault: '/vaults/test',
+  })
+  controller.registerLiveProviderTurn({
+    codexThreadId: 'synthetic-provider-session',
+    interrupt,
+    providerTurnId: 'synthetic-provider-turn',
+    sessionId: 'session-synthetic-draft',
+    steer: async () => {
+      steerStarted.resolve()
+      await steerResult.promise
+    },
+    turnId: 'turn-synthetic-draft',
+  })
+
+  try {
+    const input = {
+      expectedActiveTurnId: 'turn-synthetic-draft',
+      prompt: 'Synthetic group follow-up',
+      sessionId: 'session-synthetic-draft',
+      vault: '/vaults/test',
+    }
+    const completion = steerAssistantActiveTurnInput(input)
+    assert.ok(completion)
+    const observedCompletion = completion.catch((error: unknown) => error)
+    await steerStarted.promise
+
+    controller.pauseProviderSteering()
+    const observedDraft = controller.finishDraftWindow().catch((error: unknown) => error)
+    steerResult.reject(steerRejected)
+
+    expect(await observedDraft).toBe(steerRejected)
+    expect(await observedCompletion).toBe(steerRejected)
+    await expect(controller.admitAvailable()).rejects.toBe(steerRejected)
+    expect(steerAssistantActiveTurnInput(input)).toBeNull()
+    expect(interrupt).not.toHaveBeenCalled()
+  } finally {
+    steerResult.resolve()
+    controller.fail(new Error('Synthetic fatal steer test complete'))
+    controller.close()
+  }
+})
+
+test('group draft window still reviews input after a late inactive-steer rejection', async () => {
+  vi.useFakeTimers()
+  const { createAssistantActiveTurnInputController } =
+    await import('../src/assistant/active-turn-input-controller.ts')
+  const steerStarted = createDeferred<void>()
+  const steerResult = createDeferred<void>()
+  const interrupt = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => ({
+      acceptedInputs: [{
+        id: 'synthetic-late-input',
+        promptFallbackReason: 'missing-content-ref',
+        promptFallbackText: 'Synthetic group follow-up',
+        source: 'assistant-input',
+      }],
+      kind: 'accepted',
+      prompt: 'Synthetic group follow-up',
+    }),
+    sessionId: 'session-synthetic-draft',
+    turnId: 'turn-synthetic-draft',
+    vault: '/vaults/test',
+  })
+  controller.registerLiveProviderTurn({
+    codexThreadId: 'synthetic-provider-session',
+    interrupt,
+    providerTurnId: 'synthetic-provider-turn',
+    sessionId: 'session-synthetic-draft',
+    steer: async () => {
+      steerStarted.resolve()
+      await steerResult.promise
+    },
+    turnId: 'turn-synthetic-draft',
+  })
+
+  try {
+    await controller.notifyInputAvailable()
+    await steerStarted.promise
+    controller.pauseProviderSteering()
+    const draft = controller.finishDraftWindow()
+    draft.catch(() => undefined)
+    steerResult.reject(Object.assign(new Error('Synthetic completed provider turn'), {
+      code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+    }))
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    const outcome = await draft
+    expect(outcome).toMatchObject({
+      acceptedInput: {
+        acceptedInputs: [{ id: 'synthetic-late-input' }],
+        kind: 'accepted',
+        prompt: 'Synthetic group follow-up',
+      },
+      kind: 'review',
+    })
+    assert.ok(outcome.kind === 'review')
+    expect(outcome.acceptedInput?.providerAlreadySteered).toBeUndefined()
+    expect(interrupt).not.toHaveBeenCalled()
+  } finally {
+    steerResult.resolve()
+    controller.close()
+  }
+})
+
+test.each(['eager', 'finish'] as const)(
+  'group draft window preserves external caller cancellation through the %s signal',
+  async (signalOwner) => {
+    const { createAssistantActiveTurnInputController } =
+      await import('../src/assistant/active-turn-input-controller.ts')
+    const caller = new AbortController()
+    const cancellation = new Error('Synthetic caller cancellation')
+    const admissionHook = vi.fn(async () => ({ kind: 'no-new-input' as const }))
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook,
+      sessionId: 'session-synthetic-draft',
+      signal: signalOwner === 'eager' ? caller.signal : undefined,
+      turnId: 'turn-synthetic-draft',
+      vault: '/vaults/test',
+    })
+
+    try {
+      if (signalOwner === 'eager') {
+        controller.pauseProviderSteering()
+      }
+      const observedDraft = controller.finishDraftWindow({
+        signal: signalOwner === 'finish' ? caller.signal : undefined,
+      }).catch((error: unknown) => error)
+      caller.abort(cancellation)
+
+      const error = await observedDraft
+      expect(error).toMatchObject({ code: 'ABORT_ERR', name: 'AbortError' })
+      assert.ok(error instanceof Error)
+      expect(error.cause).toBe(cancellation)
+      expect(admissionHook).not.toHaveBeenCalled()
+    } finally {
+      controller.close()
+    }
+  },
+)

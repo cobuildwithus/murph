@@ -93,4 +93,4 @@ Persistent new bloating, early fullness, pelvic pain, abnormal bleeding, anemia,
 
 ## Related goals
 
-[Improve My Digestion](/goals/improve-digestion) · [Relieve Constipation](/goals/relieve-constipation) · [Manage IBS Symptoms](/goals/manage-ibs-symptoms)
+[Improve My Digestion](/goals/improve-digestion) · [Relieve Constipation](/goals/relieve-constipation) · [Track My IBS Symptoms](/goals/manage-ibs-symptoms)

@@ -13,6 +13,8 @@ import {
   type Response,
 } from "@playwright/test";
 
+import { writeWearableStage, type WearableStage } from "@murphai/hosted-local-harness/wearable-progress";
+
 import { KernelComputerClient } from "../src/lib/computer-use/kernel-client.ts";
 import {
   buildHostedLocalBrowserSessionCookie,
@@ -42,6 +44,7 @@ interface BrowserConfig {
   source: WearableSource;
   startUrl: string;
   timeoutMs: number;
+  dataTimeoutMs: number;
   webBaseUrl: string;
   webOrigin: string;
 }
@@ -125,19 +128,21 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "MURPH_E2E_WHOOP_EMAIL",
   "MURPH_E2E_WHOOP_OTP",
   "MURPH_E2E_WHOOP_PASSWORD",
-  "WHOOP_CLIENT_ID",
-  "WHOOP_CLIENT_SECRET",
-  "OURA_CLIENT_ID",
-  "OURA_CLIENT_SECRET",
 ] as const;
 
-let stage = "configuration";
+let stage: WearableStage = "configuration";
+
 let activePage: Page | null = null;
 let activeConfig: BrowserConfig | null = null;
 let failureDiagnostic: string | null = null;
 
+function setStage(nextStage: WearableStage): void {
+  stage = nextStage;
+  writeWearableStage(nextStage);
+}
+
 async function main(): Promise<void> {
-  stage = "configuration";
+  setStage("configuration");
   activePage = null;
   activeConfig = null;
   failureDiagnostic = null;
@@ -145,7 +150,7 @@ async function main(): Promise<void> {
   activeConfig = config;
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
-  stage = "browser_launch";
+  setStage("browser_launch");
   const session = await openBrowserSession(config);
   let failure: unknown;
   let failed = false;
@@ -163,7 +168,7 @@ async function main(): Promise<void> {
 
     await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
-    stage = "murph_vital_disclosure";
+    setStage("murph_vital_disclosure");
     await page
       .getByRole("dialog")
       .getByRole("button", {
@@ -172,15 +177,15 @@ async function main(): Promise<void> {
       })
       .click({ timeout: config.timeoutMs });
 
-    stage = "murph_connect_start";
+    setStage("murph_connect_start");
     await page.waitForURL((url) => url.origin !== config.webOrigin, {
       timeout: config.timeoutMs,
     });
 
-    stage = `junction_${config.source}_authorization`;
+    setStage(`junction_${config.source}_authorization`);
     await completeAuthorizationAndRequireCallback(page, config);
 
-    stage = "murph_connected_completion";
+    setStage("murph_connected_completion");
     await page.waitForURL(
       (url) => url.origin === config.webOrigin && url.pathname === "/home",
       { timeout: config.timeoutMs },
@@ -189,24 +194,18 @@ async function main(): Promise<void> {
       timeout: config.timeoutMs,
     });
 
-    stage = "murph_persisted_connect_page";
-    await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
-      waitUntil: "domcontentloaded",
-    });
-    await assertWearableConnectionState(page, config, "connected");
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await assertWearableConnectionState(page, config, "connected");
+    await requirePersistedWearableConnection(page, config);
 
     if (config.awaitCanonicalData) {
-      stage = "garmin_canonical_data";
+      setStage("garmin_canonical_data");
       await waitForCanonicalDataCheck({
         input: process.stdin,
         onReady: () => process.stdout.write("MURPH_E2E_GARMIN_CONNECTED=1\n"),
-        timeoutMs: config.timeoutMs + 30_000,
+        timeoutMs: config.dataTimeoutMs + 30_000,
       });
     }
 
-    stage = "junction_cleanup";
+    setStage("junction_cleanup");
     await disconnectJunctionAccount(page, config);
 
   } catch (error) {
@@ -216,7 +215,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (!failed) stage = "browser_cleanup";
+    setStage("browser_cleanup");
     await closeBrowserSession(session, config);
   } catch (error) {
     if (!failed) {
@@ -297,13 +296,10 @@ async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession
   }
   const tunnelPort = requireKernelTunnelPort(config.webBaseUrl);
   const kernelClient = new KernelComputerClient({ apiKey });
-  const kernelProfile = `murph-junction-${config.source}-canary`;
-  await kernelClient.ensureProfile(kernelProfile);
   const kernelBrowser = await kernelClient.createAutomationBrowser({
     headless: config.headless,
-    profileName: kernelProfile,
-    saveChanges: true,
-    timeoutSeconds: Math.ceil((config.timeoutMs + 60_000) / 1_000),
+    timeoutSeconds: Math.ceil((config.timeoutMs
+      + (config.awaitCanonicalData ? config.dataTimeoutMs + 60_000 : 0) + 60_000) / 1_000),
   });
   let kernelTunnel: OwnedKernelTunnel | null = null;
 
@@ -358,12 +354,15 @@ async function closeBrowserSession(
   }
 
   const cleanupErrors: unknown[] = [];
+  writeWearableStage("browser_cookie_cleanup");
   await session.context.clearCookies({
     domain: new URL(config.webBaseUrl).hostname,
   }).catch((error: unknown) => cleanupErrors.push(error));
+  writeWearableStage("browser_tunnel_cleanup");
   await stopKernelTunnel(session.kernelTunnel)
     .catch((error: unknown) => cleanupErrors.push(error));
   try {
+    writeWearableStage("browser_remote_cleanup");
     await session.kernelClient.deleteBrowserByIdOrName(session.kernelSessionId);
   } catch (error) {
     cleanupErrors.push(error);
@@ -467,11 +466,11 @@ async function navigateToHostedLocalStart(
   tunnel: OwnedKernelTunnel | null,
 ): Promise<void> {
   if (tunnel) {
-    stage = "kernel_tunnel_ready";
+    setStage("kernel_tunnel_ready");
     await waitForKernelTunnelReady(page, config, tunnel);
   }
 
-  stage = "murph_connect_intent";
+  setStage("murph_connect_intent");
   try {
     await page.goto(config.startUrl, {
       timeout: config.timeoutMs,
@@ -588,19 +587,7 @@ async function completeExternalAuthorization(
         continue;
       }
     } else {
-      await fillVisible(page, [
-        'input[type="email"]',
-        'input[autocomplete="email"]',
-        'input[autocomplete="username"]',
-        'input[name*="email" i]',
-        'input[name="username"]',
-      ], config.email);
-      if (config.password) {
-        await fillVisible(page, [
-          'input[type="password"]',
-          'input[autocomplete="current-password"]',
-        ], config.password);
-      }
+      if (await fillAuthorizationCredentials(page, config)) continue;
 
       const otpInput = await findVisibleEditable(page, [
         'input[autocomplete="one-time-code"]',
@@ -861,15 +848,45 @@ function isExpectedJunctionCallbackResponse(
     && url.pathname === "/api/device-sync/connect/junction/callback";
 }
 
+// A route transition restarts the caller's trust and challenge validation before
+// it attempts any other credential field on the replacement page.
+async function fillAuthorizationCredentials(page: Page, config: BrowserConfig): Promise<boolean> {
+  if (await fillVisible(page, [
+    'input[type="email"]',
+    'input[autocomplete="email"]',
+    'input[autocomplete="username"]',
+    'input[name*="email" i]',
+    'input[name="username"]',
+  ], config.email)) return true;
+  if (!config.password) return false;
+  return fillVisible(page, [
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+  ], config.password);
+}
+
 async function fillVisible(
   page: Page,
   selectors: readonly string[],
   value: string,
-): Promise<void> {
+): Promise<boolean> {
+  const formUrl = page.url();
   const input = await findVisibleEditable(page, selectors);
-  if (input && await input.inputValue() !== value) {
-    await input.fill(value);
+  if (page.url() !== formUrl) return true;
+  if (!input) return false;
+  try {
+    if (await input.inputValue() !== value) {
+      // A restored provider session can leave the login form while its fields
+      // are being inspected. Never fill a locator rebound on the next page.
+      if (page.url() !== formUrl) return true;
+      await input.fill(value);
+    }
+  } catch (error) {
+    if (page.url() === formUrl) throw error;
+    // The authorization loop validates the new route and its consent surface.
+    return true;
   }
+  return page.url() !== formUrl;
 }
 
 async function findVisibleEditable(
@@ -1141,6 +1158,30 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
   ].join(" ");
 }
 
+async function requirePersistedWearableConnection(
+  page: Page,
+  config: BrowserConfig,
+): Promise<void> {
+  for (const phase of ["navigation", "reload"] as const) {
+    setStage(`murph_persisted_connect_${phase}`);
+    const response = phase === "navigation"
+      ? await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
+        waitUntil: "domcontentloaded",
+      })
+      : await page.reload({ waitUntil: "domcontentloaded" });
+    // Chromium can finish navigation on an HTTP error page. Do not replace
+    // that failure with a full connection-state wait or accept stale markup.
+    if (!response?.ok()) {
+      throw new Error(`Persisted connect navigation returned HTTP ${response?.status() ?? "none"}.`);
+    }
+    const url = new URL(page.url());
+    if (url.origin !== config.webOrigin || url.pathname !== "/connect") {
+      throw new Error("Persisted connect navigation left the expected page.");
+    }
+    await assertWearableConnectionState(page, config, "connected");
+  }
+}
+
 async function assertWearableConnectionState(
   page: Page,
   config: BrowserConfig,
@@ -1168,7 +1209,19 @@ async function disconnectJunctionAccount(
       name: new RegExp(`^Disconnect (?:${config.label}|account)\\?$`, "i"),
     })
     .waitFor();
-  await dialog.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url());
+      return candidate.request().method() === "POST"
+        && url.origin === config.webOrigin
+        && /^\/api\/settings\/device-sync\/connections\/[^/]+(?:\/sources\/[^/]+)?\/disconnect$/u.test(url.pathname);
+    }, { timeout: config.timeoutMs }),
+    dialog.getByRole("button", { name: "Disconnect", exact: true }).click(),
+  ]);
+  if (!response.ok()) {
+    // Never include the response body or connection-specific URL in CI output.
+    throw new Error(`MURPH_E2E_JUNCTION_DISCONNECT_HTTP_${response.status()}`);
+  }
   await page.getByText("Source disconnected", { exact: true }).waitFor({
     timeout: config.timeoutMs,
   });
@@ -1304,6 +1357,14 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       minimumMs: 30_000,
       runnerName: RUNNER_NAME,
     }),
+    dataTimeoutMs: readHostedLocalBrowserTimeout({
+      defaultMs: 420_000,
+      environment,
+      key: "MURPH_E2E_GARMIN_DATA_TIMEOUT_MS",
+      maximumMs: 1_800_000,
+      minimumMs: 30_000,
+      runnerName: RUNNER_NAME,
+    }),
     webBaseUrl: parsedWebBaseUrl.toString().replace(/\/$/u, ""),
     webOrigin: parsedWebBaseUrl.origin,
   };
@@ -1322,6 +1383,7 @@ export {
   navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  requirePersistedWearableConnection as requireHostedLocalJunctionPersistedConnectionForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
   waitForCanonicalDataCheck as waitForHostedLocalJunctionCanonicalDataCheckForTest,

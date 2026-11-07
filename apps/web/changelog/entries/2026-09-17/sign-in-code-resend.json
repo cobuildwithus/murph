@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 110,
+  "item": {
+    "id": "sign-in-code-resend",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Retry a sign-in code sooner",
+    "summary": "You can request a second sign-in code within a minute when the first one does not work out.",
+    "details": "Rapid retries that are declined no longer use up the longer per-contact sending allowance.",
+    "relevanceTags": ["account", "reliability"],
+    "sourcePullRequests": []
+  }
+}

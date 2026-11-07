@@ -88,6 +88,10 @@ export type {
   HostedGrowthReferralLinkUsage,
 } from "@/src/lib/hosted-ops/growth-referral-link-usage";
 
+// A purchase's own return URL names its target, so a one-time gift stays a group
+// gift after its payer or the group's owner is deleted.
+const GROUP_FUNDING_CHECKOUT_RETURN_PATTERN =
+  /^https:\/\/[^/]+\/groups\/fund\//u;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
 const WEEKLY_ROWS = 8;
@@ -1651,12 +1655,8 @@ export async function readHostedGrowthDashboard(
     prisma.hostedUsageCreditPurchase.findMany({
       select: {
         cashAmountMinor: true,
+        checkoutSuccessUrl: true,
         groupSponsorshipAuthorizationId: true,
-        groupSponsorshipMoment: {
-          select: {
-            purchaseId: true,
-          },
-        },
         paidAt: true,
       },
       where: {
@@ -1868,7 +1868,9 @@ export async function readHostedGrowthDashboard(
           cashAmountMinor: purchase.cashAmountMinor,
           isGroupSponsorship:
             purchase.groupSponsorshipAuthorizationId !== null
-            || purchase.groupSponsorshipMoment !== null,
+            || GROUP_FUNDING_CHECKOUT_RETURN_PATTERN.test(
+              purchase.checkoutSuccessUrl,
+            ),
           paidAt: purchase.paidAt,
         }]
       ),
@@ -1960,16 +1962,6 @@ export async function captureHostedGrowthDailySnapshot(
 ): Promise<HostedGrowthSnapshotCapture> {
   const productionCanaryMemberId =
     await readHostedLinqProductionCanaryMemberId({ prisma });
-  const productionCanaryRouting = productionCanaryMemberId
-    ? await readHostedMemberRoutingRecord({
-        memberId: productionCanaryMemberId,
-        prisma,
-      })
-    : null;
-  const productionCanaryLinqChatLookupKeys = [...new Set([
-    productionCanaryRouting?.linqChatLookupKey,
-    productionCanaryRouting?.pendingLinqChatLookupKey,
-  ].filter((lookupKey): lookupKey is string => Boolean(lookupKey)))];
   const realHostedMemberWhere = buildHostedGrowthMemberWhere(
     productionCanaryMemberId,
   );
@@ -2071,61 +2063,18 @@ export async function captureHostedGrowthDailySnapshot(
   });
   const [
     current,
-    inboundMessagesPriorDay,
-    outboundLinqMessagesPriorDay,
-    outboundTelegramEmailMessagesPriorDay,
+    {
+      inboundMessages: inboundMessagesPriorDay,
+      outboundMessages: outboundMessagesPriorDay,
+    },
     activityCounts,
   ] =
     await Promise.all([
       readCurrentHostedGrowthMetrics(now, prisma, realHostedMemberWhere),
-      prisma.hostedMailboxItem.count({
-        where: {
-          kind: INBOUND_MESSAGE_MAILBOX_KIND,
-          ...(productionCanaryMemberId
-            ? {
-                member: {
-                  id: {
-                    not: productionCanaryMemberId,
-                  },
-                },
-              }
-            : {}),
-          occurredAt: {
-            gte: priorDayStart,
-            lt: snapshotDate,
-          },
-        },
-      }),
-      prisma.hostedLinqDelivery.count({
-        where: {
-          ...(productionCanaryLinqChatLookupKeys.length > 0
-            ? {
-                OR: [
-                  { linqChatLookupKey: null },
-                  {
-                    linqChatLookupKey: {
-                      notIn: productionCanaryLinqChatLookupKeys,
-                    },
-                  },
-                ],
-              }
-            : {}),
-          attemptedAt: {
-            gte: priorDayStart,
-            lt: snapshotDate,
-          },
-          status: {
-            in: [...OUTBOUND_LINQ_SENT_STATUSES],
-          },
-        },
-      }),
-      prisma.hostedOutboundMessageVolumeReceipt.count({
-        where: {
-          recordedAt: {
-            gte: priorDayStart,
-            lt: snapshotDate,
-          },
-        },
+      readHostedGrowthMessageCounts({
+        prisma,
+        productionCanaryMemberId,
+        range: { gte: priorDayStart, lt: snapshotDate },
       }),
       activityCountsPromise,
     ]);
@@ -2149,8 +2098,6 @@ export async function captureHostedGrowthDailySnapshot(
       );
     });
   }
-  const outboundMessagesPriorDay =
-    outboundLinqMessagesPriorDay + outboundTelegramEmailMessagesPriorDay;
   const activityCreateCounts = activityCounts.available
     ? activityCounts
     : {
@@ -2272,6 +2219,71 @@ async function recordHostedGrowthGroupPrivateConversions(input: {
   });
 }
 
+async function readHostedGrowthMessageCounts(input: {
+  prisma: HostedGrowthPrisma;
+  productionCanaryMemberId: string | null;
+  range: { gte: Date; lt?: Date };
+}): Promise<{ inboundMessages: number; outboundMessages: number }> {
+  const { prisma, productionCanaryMemberId, range } = input;
+  const productionCanaryRouting = productionCanaryMemberId
+    ? await readHostedMemberRoutingRecord({
+        memberId: productionCanaryMemberId,
+        prisma,
+      })
+    : null;
+  const productionCanaryLinqChatLookupKeys = [...new Set([
+    productionCanaryRouting?.linqChatLookupKey,
+    productionCanaryRouting?.pendingLinqChatLookupKey,
+  ].filter((lookupKey): lookupKey is string => Boolean(lookupKey)))];
+  const [inboundMessages, outboundLinqMessages, outboundTelegramEmailMessages] =
+    await Promise.all([
+      prisma.hostedMailboxItem.count({
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          ...(productionCanaryMemberId
+            ? {
+                member: {
+                  id: {
+                    not: productionCanaryMemberId,
+                  },
+                },
+              }
+            : {}),
+          occurredAt: range,
+        },
+      }),
+      prisma.hostedLinqDelivery.count({
+        where: {
+          ...(productionCanaryLinqChatLookupKeys.length > 0
+            ? {
+                OR: [
+                  { linqChatLookupKey: null },
+                  {
+                    linqChatLookupKey: {
+                      notIn: productionCanaryLinqChatLookupKeys,
+                    },
+                  },
+                ],
+              }
+            : {}),
+          attemptedAt: range,
+          status: {
+            in: [...OUTBOUND_LINQ_SENT_STATUSES],
+          },
+        },
+      }),
+      prisma.hostedOutboundMessageVolumeReceipt.count({
+        where: {
+          recordedAt: range,
+        },
+      }),
+    ]);
+  return {
+    inboundMessages,
+    outboundMessages: outboundLinqMessages + outboundTelegramEmailMessages,
+  };
+}
+
 /**
  * Lifetime message total for public marketing surfaces. Snapshot message
  * counts only exist from July 2026 onward, so the base stands in for the
@@ -2298,44 +2310,19 @@ export async function readHostedMessageVolumeTotal(
       },
     });
     const liveStart = snapshots._max.snapshotDate ?? startOfUtcDay(now);
-    const [
-      liveInbound,
-      liveOutboundLinq,
-      liveOutboundTelegramEmail,
-    ] = await Promise.all([
-      prisma.hostedMailboxItem.count({
-        where: {
-          kind: INBOUND_MESSAGE_MAILBOX_KIND,
-          occurredAt: {
-            gte: liveStart,
-          },
-        },
-      }),
-      prisma.hostedLinqDelivery.count({
-        where: {
-          attemptedAt: {
-            gte: liveStart,
-          },
-          status: {
-            in: [...OUTBOUND_LINQ_SENT_STATUSES],
-          },
-        },
-      }),
-      prisma.hostedOutboundMessageVolumeReceipt.count({
-        where: {
-          recordedAt: {
-            gte: liveStart,
-          },
-        },
-      }),
-    ]);
+    const productionCanaryMemberId =
+      await readHostedLinqProductionCanaryMemberId({ prisma });
+    const live = await readHostedGrowthMessageCounts({
+      prisma,
+      productionCanaryMemberId,
+      range: { gte: liveStart },
+    });
 
     return HOSTED_MESSAGE_VOLUME_BASE +
       (snapshots._sum.inboundMessagesPriorDay ?? 0) +
       (snapshots._sum.outboundMessagesPriorDay ?? 0) +
-      liveInbound +
-      liveOutboundLinq +
-      liveOutboundTelegramEmail;
+      live.inboundMessages +
+      live.outboundMessages;
   } catch {
     return HOSTED_MESSAGE_VOLUME_BASE;
   }

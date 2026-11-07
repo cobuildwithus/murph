@@ -93,6 +93,7 @@ import {
   validateAssistantCronDeliveryTarget,
 } from './cron/targets.ts'
 import {
+  fingerprintAssistantCronDelivery,
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 } from './cron/delivery-reconciliation.ts'
@@ -112,6 +113,7 @@ export {
   resolveAssistantCronDefaultTimeZone,
   resolveAssistantCronDefaultTimeZoneProjection,
   resolveAssistantCronVaultTimeZone,
+  widenAssistantCronActiveUntilForFinalOccurrence,
 } from './cron/canonical-jobs.ts'
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
@@ -525,9 +527,8 @@ export async function getAssistantCronStatus(
       ),
   )
   // Background maintenance hidden by active foreground yield still needs a
-  // wake: a released claim carries its persisted retry time, and a due but
-  // never-claimed occurrence gets the same short catch-up deferral so it is
-  // not disarmed until an unrelated wake.
+  // wake: preserve future occurrences and persisted retry times, and give a
+  // due but never-claimed occurrence the same short catch-up deferral.
   const backgroundMaintenanceRetryWakeAt = earliestAssistantAutomationWakeAt(
     ...projection.yieldDeferredBackgroundMaintenanceEntries.map((entry) => {
       if (entry.runtimeState.state.runningAt !== null) {
@@ -540,7 +541,7 @@ export async function getAssistantCronStatus(
       }
       return isAssistantCronJobDue(entry.job, now)
         ? computeAssistantCronBackgroundMaintenanceYieldRetryAt(now)
-        : null
+        : entry.job.state.nextRunAt
     }),
   )
   const nextRunAt = earliestAssistantAutomationWakeAt(
@@ -667,6 +668,7 @@ export async function processDueAssistantCronJobsLocal(
   }
 
   await repairPendingAssistantCronDeliveries({
+    onEvent: input.onEvent,
     paths,
     vault: input.vault,
   })
@@ -742,6 +744,7 @@ export async function processDueAssistantCronJobsLocal(
       errorCode: result.runErrorCode,
       errorMessage: result.run.error,
       errorPresent: result.run.error !== null,
+      failureContext: result.runFailureContext,
       retryScheduled: assistantCronRetryScheduled(result),
       job: result.job,
       onEvent: input.onEvent,
@@ -874,6 +877,9 @@ function emitAssistantCronJobCompletedEvent(input: {
   errorCode: string | null
   errorMessage: string | null
   errorPresent: boolean
+  failureContext?: Awaited<
+    ReturnType<typeof executeClaimedAssistantCronJob>
+  >['runFailureContext']
   retryScheduled: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
@@ -900,6 +906,7 @@ function emitAssistantCronJobCompletedEvent(input: {
       : {}),
     failureContext: {
       automationSlug: input.automationSlug,
+      ...input.failureContext,
       // Typed VaultCliError code (e.g. ASSISTANT_CODEX_USAGE_LIMIT) so
       // provider-level outages are queryable in the persisted hosted runtime
       // log; the June 2026 quota incident was invisible there.
@@ -912,6 +919,12 @@ function emitAssistantCronJobCompletedEvent(input: {
         input.routeValidationProfile,
       ),
       runOutcome: input.runOutcome,
+      ...(input.runOutcome === 'delivery_pending'
+        ? { deliveryFingerprint: fingerprintAssistantCronDelivery(
+            input.job.jobId,
+            input.job.state.pendingDeliveryIntentId,
+          ) }
+        : {}),
       scheduleKind: input.job.schedule.kind,
       sourceKind: input.sourceKind,
     },

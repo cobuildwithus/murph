@@ -13,14 +13,10 @@ import { loadGeneratedHealthCommonsWebGoalIndex } from "../src/goal-index-runtim
 import { extractHealthCommonsGoalSources } from "../src/goal-sources.ts";
 import type { HealthCommonsContentSet, HealthCommonsSourcePage } from "../src/load.ts";
 import {
-  loadGeneratedHealthCommonsWebGoalPage,
-} from "../src/goal-runtime.ts";
-import {
   buildHealthCommonsWebGeneratedArtifacts,
   HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION,
   type HealthCommonsWebGoalIndex,
-  type HealthCommonsWebGoalPage,
 } from "../src/web-artifacts.ts";
 
 const temporaryRoots: string[] = [];
@@ -236,51 +232,15 @@ describe("Health Commons goal artifacts", () => {
       .not.toBe(first.entities[0]?.revision.workflowSpecRevisionId);
   });
 
-  it("loads generated goal artifacts by the static route id", async () => {
-    const catalog = buildHealthCommonsCatalogFromContent({
-      ...content(),
-      redirects: [
-        {
-          from: "goal_template:lower-rhr",
-          to: "goal_template:lower-resting-heart-rate",
-        },
-      ],
-    });
+  it("loads the generated compact goal index", async () => {
+    const catalog = buildHealthCommonsCatalogFromContent(content());
     const artifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
     const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-goal-"));
     temporaryRoots.push(generatedWebRoot);
 
-    await Promise.all([
-      writeJson(generatedWebRoot, "routes/index.json", artifacts.routeIndex),
-      writeJson(generatedWebRoot, "browse/goals.json", artifacts.goalIndex),
-      ...[...artifacts.projectionArtifacts.entries()].map(([relativePath, artifact]) =>
-        writeJson(generatedWebRoot, relativePath, artifact)
-      ),
-    ]);
+    await writeJson(generatedWebRoot, "browse/goals.json", artifacts.goalIndex);
 
     expect(loadGeneratedHealthCommonsWebGoalIndex({ generatedWebRoot }).goals).toHaveLength(1);
-    expect(loadGeneratedHealthCommonsWebGoalPage({
-      generatedWebRoot,
-      routeId: "lower-resting-heart-rate",
-    })).toMatchObject({
-      key: "goal_template:lower-resting-heart-rate",
-      revision: {
-        workflowSpecRevisionId: expect.stringMatching(/^sha256:/u),
-      },
-    });
-    expect(loadGeneratedHealthCommonsWebGoalPage({
-      generatedWebRoot,
-      routeId: "lower-rhr",
-    })).toMatchObject({
-      key: "goal_template:lower-resting-heart-rate",
-      route: {
-        routeId: "lower-resting-heart-rate",
-      },
-    });
-    expect(loadGeneratedHealthCommonsWebGoalPage({
-      generatedWebRoot,
-      routeId: "not-a-goal",
-    })).toBeNull();
   });
 
   it("requires an independently useful body for an indexable goal", () => {
@@ -387,56 +347,6 @@ describe("Health Commons goal artifacts", () => {
     expect(() => buildHealthCommonsCatalogFromContent(content(goalPage({ body })))).toThrow(
       "Goal source URL must be a valid public HTTPS URL without credentials or sensitive query parameters.",
     );
-  });
-
-  it.each([
-    "https://[invalid.example/source",
-    "https://user:password@example.org/source",
-    "https://0.0.0.1/source",
-    "https://10.0.0.1/source",
-    "https://100.64.0.1/source",
-    "https://127.0.0.1/source",
-    "https://169.254.0.1/source",
-    "https://172.16.0.1/source",
-    "https://192.0.2.1/source",
-    "https://192.168.0.1/source",
-    "https://198.18.0.1/source",
-    "https://198.51.100.1/source",
-    "https://203.0.113.1/source",
-    "https://224.0.0.1/source",
-    "https://example.org/source?token=placeholder",
-    "https://example.org/source?api_key=placeholder",
-    "http://example.org/source",
-  ])("rejects an unsafe direct source URL in a generated goal page", async (unsafeUrl) => {
-    const catalog = buildHealthCommonsCatalogFromContent(content());
-    const artifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
-    const generatedWebRoot = await mkdtemp(
-      path.join(os.tmpdir(), "murph-health-commons-goal-source-"),
-    );
-    temporaryRoots.push(generatedWebRoot);
-    const pageArtifact = artifacts.projectionArtifacts.get(
-      "pages/goals/lower-resting-heart-rate.json",
-    ) as HealthCommonsWebGoalPage;
-    const unsafePageArtifact: HealthCommonsWebGoalPage = {
-      ...pageArtifact,
-      sources: pageArtifact.sources.map((source, index) => (
-        index === 0 ? { ...source, url: unsafeUrl } : source
-      )),
-    };
-
-    await Promise.all([
-      writeJson(generatedWebRoot, "routes/index.json", artifacts.routeIndex),
-      writeJson(
-        generatedWebRoot,
-        "pages/goals/lower-resting-heart-rate.json",
-        unsafePageArtifact,
-      ),
-    ]);
-
-    expect(() => loadGeneratedHealthCommonsWebGoalPage({
-      generatedWebRoot,
-      routeId: "lower-resting-heart-rate",
-    })).toThrow("Health Commons generated web goal page is invalid");
   });
 
   it("rejects a credential-bearing source URL in the compact generated index", async () => {

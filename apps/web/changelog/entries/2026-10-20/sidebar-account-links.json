@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-10-20",
+  "order": 100,
+  "item": {
+    "id": "sidebar-account-links",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Devices and Settings in the sidebar",
+    "summary": "Open Devices and Settings directly from the sidebar without opening the account menu.",
+    "details": "The current page is highlighted, and Sign out remains in the account menu.",
+    "sourcePullRequests": [],
+    "relevanceTags": ["web", "settings"],
+    "tryIt": { "label": "Open Settings", "href": "/settings" }
+  }
+}

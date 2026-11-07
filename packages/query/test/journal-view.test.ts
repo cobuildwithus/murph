@@ -456,49 +456,6 @@ test("Journal combines exercises across grouped activity sessions", () => {
   ]);
 });
 
-test("Journal groups activity aliases with the shared vocabulary", () => {
-  const view = buildJournalView(
-    createVaultReadModel({
-      entities: [
-        event(
-          "dance_1",
-          "activity_session",
-          "2026-08-25T17:30:00.000Z",
-          { activityType: "dancing", durationMinutes: 30 },
-          "Dancing",
-        ),
-        event(
-          "dance_2",
-          "activity_session",
-          "2026-08-25T18:00:00.000Z",
-          { activityType: "cardio_dance", durationMinutes: 25 },
-          "Cardio dance",
-        ),
-      ],
-      vaultRoot: "test://journal-activity-vocabulary",
-    }),
-    [],
-    {
-      asOf: "2026-08-25T22:00:00.000Z",
-      vocabulary: {
-        concepts: [
-          {
-            aliases: ["cardio-dance", "dancing"],
-            icon: "dance",
-            id: "dance",
-            label: "Dance",
-          },
-        ],
-        version: 1,
-      },
-    },
-  );
-
-  assert.equal(view.eventCount, 1);
-  assert.equal(view.days[0]?.events[0]?.title, "Dance");
-  assert.equal(view.days[0]?.events[0]?.summary, "55 min across 2 sessions");
-});
-
 test("Journal groups deterministic activity aliases without vocabulary", () => {
   const view = buildJournalView(
     createVaultReadModel({
@@ -1223,4 +1180,64 @@ test("Journal preserves WHOOP Recovery when canonical normalization uses Readine
   assert.equal(sleep?.metrics.readinessScore, null);
   assert.equal(view.recordCount, 1);
   assert.deepEqual(sleep?.records.map((record) => record.label), ["Recovery score"]);
+});
+
+
+test("Journal counts mirrored workouts once while preserving source attribution and distinct sessions", () => {
+  const workout = (id: string, source: string, start: string, duration = 28) => event(
+    id, "activity_session", start,
+    { activityType: "cycling", durationMinutes: duration,
+      dataOrigin: { sourceProviderSlug: source },
+      workout: { startedAt: start, metrics: { activeEnergyKcal: source === "whoop-v2" ? 120 : 119.8 } } }, "Cycling");
+  const originals = [
+    workout("direct", "whoop-v2", "2026-08-20T10:00:00Z"),
+    workout("mirror", "apple-health-kit", "2026-08-20T10:00:15Z"),
+    workout("later", "whoop-v2", "2026-08-20T18:00:00Z", 35),
+  ];
+  const build = (entities: CanonicalEntity[]) => buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-mirrors" }), [],
+    { asOf: "2026-08-21T12:00:00Z" });
+  const shortSessions = build([
+    workout("short-original", "whoop-v2", "2026-08-20T10:00:00Z", 0.5),
+    workout("short-next", "apple-health-kit", "2026-08-20T10:00:30Z", 0.5),
+  ]);
+  assert.equal(shortSessions.days[0]?.events[0]?.records.length, 2);
+  const snapshot = structuredClone(originals);
+  const view = build(originals);
+  const entry = view.days[0]!.events[0]!;
+  assert.equal(entry.metrics.activityMinutes, 63);
+  assert.equal(entry.summary, "1 h 3 across 2 sessions");
+  assert.equal(entry.records.length, 2);
+  assert.equal(entry.records.find((record) => record.id === "direct")?.source, "WHOOP · Apple Health");
+  assert.equal(view.weeks[0]?.activityMinutes, 63);
+  assert.deepEqual(build(originals.slice().reverse()), view);
+  assert.deepEqual(originals, snapshot);
+
+  for (const different of [
+    workout("different-duration", "apple-health-kit", "2026-08-20T10:00:00Z", 45),
+    workout("different-time", "apple-health-kit", "2026-08-20T11:00:00Z"),
+    workout("same-provider", "WHOOP", "2026-08-20T10:00:00Z"),
+    workout("unknown-source", "device", "2026-08-20T10:00:00Z"),
+    workout("unknown-time", "apple-health-kit", "2026-08-20"),
+  ]) {
+    assert.equal(build([originals[0]!, different]).days[0]?.events[0]?.records.length, 2);
+  }
+});
+
+test("Journal presents matching main sleep copies once without erasing conflicting evidence", () => {
+  const sleep = (id: string, source: string, duration = 430) => event(
+    id, "sleep_session", "2026-08-20T07:30:00Z",
+    { durationMinutes: duration, sleepType: "main_sleep", source,
+      startAt: "2026-08-19T23:30:00Z", endAt: "2026-08-20T07:30:00Z" }, "Sleep");
+  const build = (entities: CanonicalEntity[]) => buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-sleep-mirrors" }), [],
+    { asOf: "2026-08-21T12:00:00Z" });
+  const mirror = sleep("mirror", "apple-health-kit");
+  mirror.attributes.sleepType = "unknown";
+  const view = build([sleep("direct", "whoop-v2"), mirror]);
+  assert.equal(view.days[0]?.events[0]?.records.length, 1);
+  assert.equal(view.days[0]?.events[0]?.records[0]?.source, "WHOOP · Apple Health");
+  assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 430);
+  assert.equal(build([sleep("direct", "whoop-v2"), sleep("other", "apple-health-kit", 390)])
+    .days[0]?.events[0]?.records.length, 2);
 });

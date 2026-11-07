@@ -21,6 +21,11 @@ import type {
 } from "./types.ts";
 import { METRIC_POINT_SCHEMA_VERSION, METRIC_SELECTION_SCHEMA_VERSION } from "./types.ts";
 
+/** Canonical manual measurements use this label, including existing replicas. */
+export function isManualMetricSource(sourceLabel: string | null): boolean {
+  return sourceLabel === "Manual";
+}
+
 export function selectMetricValue(input: {
   metricKey?: string;
   biomarkerKey?: string;
@@ -331,9 +336,9 @@ function selectHighestPrecedenceCandidates(
   if (candidates.length === 0) {
     return candidates;
   }
-  const highestSourcePriority = Math.min(...candidates.map(sourcePriority));
+  const highestSourcePriority = Math.min(...candidates.map((candidate) => metricSourcePriority(candidate.source.kind)));
   return candidates.filter((candidate) =>
-    sourcePriority(candidate) === highestSourcePriority
+    metricSourcePriority(candidate.source.kind) === highestSourcePriority
   );
 }
 
@@ -366,7 +371,7 @@ function compareMetricPointsForSelection(
 
   if (left.effectiveDate !== right.effectiveDate) return right.effectiveDate.localeCompare(left.effectiveDate);
 
-  const priorityDelta = sourcePriority(left) - sourcePriority(right);
+  const priorityDelta = metricSourcePriority(left.source.kind) - metricSourcePriority(right.source.kind);
   if (priorityDelta !== 0) return priorityDelta;
 
   if (left.observedAt !== right.observedAt) return right.observedAt.localeCompare(left.observedAt);
@@ -386,8 +391,9 @@ function readPositiveCausalSeq(value: string | undefined): bigint | null {
   return causalSeq <= 9_223_372_036_854_775_807n ? causalSeq : null;
 }
 
-function sourcePriority(point: MetricPoint): number {
-  switch (point.source.kind) {
+/** Which source wins when several report a metric on one date; lower wins. */
+export function metricSourcePriority(kind: string | null): number {
+  switch (kind) {
     case "test-result": return 0;
     case "measurement": return 1;
     case "wearable-summary": return 3;

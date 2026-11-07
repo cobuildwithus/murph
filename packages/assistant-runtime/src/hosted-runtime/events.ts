@@ -43,6 +43,7 @@ import {
 import type {
   HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
+import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 
@@ -55,9 +56,9 @@ export async function executeHostedMailboxEvent(input: {
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId?: string | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: Pick<
@@ -88,7 +89,7 @@ export async function executeHostedMailboxEvent(input: {
       wake: input.wake,
       vaultRoot: input.vaultRoot,
       signal: input.signal,
-      shouldYield: input.shouldYieldClinicalRecords,
+      shouldYield: input.shouldYieldBackgroundMaintenance,
     });
     return { bootstrapResult: null, ...outcome };
   }
@@ -119,14 +120,12 @@ export async function executeHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext ?? null,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
-    ...(input.shouldYieldClinicalRecords
-      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
-      : {}),
-    ...(input.shouldYieldAssistantAskCompletion
-      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
-      : {}),
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+    shouldYieldDeviceImportPreparation: input.shouldYieldDeviceImportPreparation,
+    ...(input.shouldYieldBackgroundMaintenance
+      ? {
+          shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
+        }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
@@ -167,9 +166,9 @@ async function handleHostedMailboxEvent(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -189,14 +188,12 @@ async function handleHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
-    ...(input.shouldYieldClinicalRecords
-      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
-      : {}),
-    ...(input.shouldYieldAssistantAskCompletion
-      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
-      : {}),
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+    shouldYieldDeviceImportPreparation: input.shouldYieldDeviceImportPreparation,
+    ...(input.shouldYieldBackgroundMaintenance
+      ? {
+          shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
+        }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
@@ -212,13 +209,13 @@ async function executeHostedSystemWake(input: {
   preferenceCausalSeq?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
+    "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldDeviceImportPreparation?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -230,6 +227,7 @@ async function executeHostedSystemWake(input: {
       );
       return executeHostedMemberActivatedWake({
         wake: input.wake,
+        shouldYield: input.shouldYieldBackgroundMaintenance,
         executionContext: input.executionContext,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
@@ -275,6 +273,7 @@ async function executeHostedSystemWake(input: {
         "./events/assistant-notification.ts"
       );
       return executeHostedAssistantNotificationWake({
+        groupToolPort: input.runtime.platform.groupToolPort,
         effectsPort: input.runtime.platform.effectsPort,
         wake: input.wake,
         executionContext: input.executionContext,
@@ -295,7 +294,7 @@ async function executeHostedSystemWake(input: {
       return executeHostedAssistantAskCompletedWake({
         wake: input.wake,
         executionContext: input.executionContext,
-        shouldYield: input.shouldYieldAssistantAskCompletion ?? null,
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
         signal: input.signal,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
@@ -312,8 +311,8 @@ async function executeHostedSystemWake(input: {
       } = await loadHostedClinicalRecordsMaintenanceModule();
       const clinicalRecordsMetrics = await runHostedClinicalRecordsSyncWakeLane({
         clinicalRecordsPort: input.runtime.platform.clinicalRecordsPort ?? null,
-        ...(input.shouldYieldClinicalRecords
-          ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
+        ...(input.shouldYieldBackgroundMaintenance
+          ? { shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance }
           : {}),
         signal: input.signal,
         vaultRoot: input.vaultRoot,
@@ -349,7 +348,9 @@ async function executeHostedSystemWake(input: {
         runtimeLogContext: input.runtimeLogContext,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
-        shouldYieldDeviceSync: input.shouldYieldDeviceSync,
+        shouldYieldImportPreparation: input.shouldYieldDeviceImportPreparation,
+        shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+        cooperativeYieldReason: input.backgroundMaintenanceYieldReason,
         signal: input.signal,
         timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
@@ -357,7 +358,7 @@ async function executeHostedSystemWake(input: {
       });
       const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
         || input.signal?.aborted === true
-        || input.shouldYieldDeviceSync?.() === true;
+        || input.shouldYieldBackgroundMaintenance?.() === true;
       const activityAutomation = shouldSkipActivityAutomation
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({
@@ -395,32 +396,6 @@ async function executeHostedSystemWake(input: {
           ? { systemProgressed: true as const }
           : {}),
       });
-    case "environment-voice.captured": {
-      const { executeHostedEnvironmentVoiceWake } = await import(
-        "./events/environment-voice.ts"
-      );
-      return await executeHostedEnvironmentVoiceWake({
-        executionContext: input.executionContext,
-        runtime: input.runtime,
-        signal: input.signal,
-        turnEnvironment: createHostedAssistantTurnEnvironment({
-          operatorHomeRoot: input.operatorHomeRoot,
-          runtimeEnv: input.runtimeEnv,
-          vaultRoot: input.vaultRoot,
-        }),
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
-    case "environment-interview.completed": {
-      const { executeHostedEnvironmentInterviewWake } = await import(
-        "./events/environment-interview.ts"
-      );
-      return await executeHostedEnvironmentInterviewWake({
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -440,18 +415,6 @@ async function executeHostedSystemWake(input: {
           ? { kind: "vault-share.projection" }
           : null,
       });
-    case "runtime.codex-auth-requested": {
-      const { executeHostedCodexAuthWake } = await import(
-        "./events/codex-auth.ts"
-      );
-      return await executeHostedCodexAuthWake({
-        operatorHomeRoot: input.operatorHomeRoot,
-        platform: input.runtime.platform,
-        runtimeEnv: input.runtimeEnv,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
     case "assistant.ask.requested":
       // The detached controller is the only owner of requested asks. Running
       // one through serial foreground maintenance would grant reply authority
@@ -471,12 +434,23 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Retired hosted vault-share revoke wakes must never reach system wake execution.",
       );
-    case "meal-photo.captured":
-      // Meal photos become canonical meal records at mailbox import so their
-      // staged object can be cleaned up only after the workspace checkpoint.
-      throw new TypeError(
-        "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
+    case "meal-photo.captured": {
+      const { executeHostedManualMealPhotoWake } = await import(
+        "./events/assistant-notification.ts"
       );
+      return executeHostedManualMealPhotoWake({
+        wake: input.wake,
+        executionContext: input.executionContext,
+        forceQueueOnly: input.forceQueueOnlyAssistantNotification,
+        sourceMailboxItemId: input.sourceMailboxItemId,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vaultRoot: input.vaultRoot,
+      });
+    }
     case "health.daily-metric.reported":
       // The canonical observation landed at mailbox import. After that write
       // checkpoints, refresh any already-granted group projections.

@@ -115,8 +115,7 @@ generic projector, validation framework, or recovery state owner.
   source. The reviewed blood-test source and test remain byte-for-byte unchanged
   from the round-seven head.
 - Canonical CLI generation passes after refreshing the stale Query workspace
-  build that owns `MurphAgeLocalModelCardArtifactWarning`. No Murph Age source
-  or compatibility workaround changed. This base-only update does not require
+  build. No compatibility workaround changed. This base-only update does not require
   another ReviewGPT round; required CI on the merged head owns broad proof.
 - Required CI is green on merged candidate
   `1da7be341bbae52188f0e56577f626d5b89ddca8`: both CLI host-matrix jobs,

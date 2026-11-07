@@ -1,5 +1,5 @@
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type { VariantProps } from "class-variance-authority";
-import type { ReactNode } from "react";
 
 import type { buttonVariants } from "@/src/components/ui/button";
 import type {
@@ -47,25 +47,24 @@ interface HostedUsageTopUpDialogProps {
   }) => Record<string, unknown>;
   checkoutUrl?: string;
   deferTerminalRefreshUntilClose?: boolean;
-  groupPaymentMode?: "monthly" | "one_time";
   initialCheckoutErrorCode?: HostedUsageCreditCapacityConflictCode;
   initialOpen?: boolean;
+  /** The next refresh needs the return, so the page that follows owns removing it. */
+  keepPurchaseReturnQuery?: boolean;
+  /** A link from Murph opened this, so it fills the screen as a night page. */
+  linkPage?: boolean;
   inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
   quietSuccessfulReturn?: boolean;
-  renderPurchaseDetails?: ReactNode;
-  renderSelectionDetails?: (input: {
-    disabled: boolean;
-    mobileStickyActionVisible: boolean;
-    selectedOffer: HostedUsageTopUpOffer | null;
-  }) => ReactNode;
-  scope?: "family" | "group" | "personal";
+  scope?: "family" | "personal";
   targetLabel?: string;
   triggerClassName?: string;
   triggerLabel?: string;
   triggerSize?: VariantProps<typeof buttonVariants>["size"];
+  /** The way back to the chat. With one, a verified purchase ends on a page that offers it. */
+  usageAddedContactOption?: MurphContactOption | null;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
 }
 
@@ -186,7 +185,7 @@ function readStatusContent(input: {
   canRetryCheckout: boolean;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
-  scope?: "family" | "group" | "personal";
+  scope?: "family" | "personal";
   selectionConflict?: HostedUsageTopUpSelectionConflict | null;
   status: HostedUsageTopUpPurchaseStatus | null;
   targetLabel?: string;
@@ -194,7 +193,6 @@ function readStatusContent(input: {
 }): { message: string; title: string } {
   if (input.selectionConflict) {
     return readSelectionConflictStatusContent({
-      kind: input.selectionConflict,
       pollKind: input.pollKind,
       status: input.status,
     });
@@ -295,17 +293,12 @@ function readStatusContent(input: {
 
   switch (input.status) {
     case "fulfilled":
-      return input.scope === "group"
-        ? content(
-            "This group has more Murph",
-            "Your contribution is ready.",
-          )
-        : content(
-            "Usage added",
-            input.scope === "family" && input.targetLabel
-              ? `The available usage for ${input.targetLabel} has been updated.`
-              : "Your available usage has been updated.",
-          );
+      return content(
+        "Usage added",
+        input.scope === "family" && input.targetLabel
+          ? `The available usage for ${input.targetLabel} has been updated.`
+          : "Your available usage has been updated.",
+      );
     case "expired":
       return content("Checkout canceled", "Checkout canceled. No usage was added.");
     case "payment_failed":
@@ -323,28 +316,9 @@ function readStatusContent(input: {
 }
 
 function readSelectionConflictStatusContent(input: {
-  kind: HostedUsageTopUpSelectionConflict;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   status: HostedUsageTopUpPurchaseStatus | null;
 }): { message: string; title: string } {
-  if (input.kind === "sponsorship") {
-    const message =
-      "The sponsor details you just entered were not applied. The original purchase is shown below.";
-    switch (input.status) {
-      case "fulfilled":
-        return content("Original sponsorship completed", message);
-      case "expired":
-        return content("Original sponsorship canceled", message);
-      case "payment_failed":
-        return content("Original sponsorship not completed", message);
-      case "checkout_open":
-      case "payment_pending":
-      case "reconciling":
-      case null:
-        return content("Original sponsorship found", message);
-    }
-  }
-
   if (input.pollKind === "failed") {
     return content(
       "Couldn't check the earlier amount",

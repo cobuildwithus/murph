@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from "@murphai/contracts";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -37,7 +38,7 @@ import {
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
-import { generateRecordId } from "./ids.ts";
+import { deterministicContractId, generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
 import { readUtf8File, walkVaultFilesInterruptible } from "./fs.ts";
 import {
@@ -149,16 +150,20 @@ export function resolveAutomationUpsertSlug(input: {
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
-  /** Scheduler-only consumption; explicit edits always retire attached children. */
-  completedOccurrence?: true;
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  /** Scheduler-only lower bound for the first occurrence after a cadence migration. */
+  scheduleNotBefore?: Date;
   followUpSourceIntentId?: string;
   followUpParentAutomationId?: string;
   now?: Date;
   vaultRoot: string;
 }
+
+type UpsertAutomationWithLatestRegistryInput = UpsertAutomationInput & {
+  completedOccurrence?: true;
+};
 
 export interface UpsertAutomationResult {
   auditPath: string;
@@ -167,6 +172,8 @@ export interface UpsertAutomationResult {
 }
 
 export interface PatchAutomationInput {
+  /** Scheduler-only lower bound, committed atomically with the replacement cadence. */
+  scheduleNotBefore?: Date;
   activeUntil?: string | null;
   continuityPolicy?: AutomationContinuityPolicy;
   expectedUpdatedAt?: string;
@@ -223,6 +230,14 @@ export interface ListAutomationInput {
 export interface ListAutomationResult {
   items: AutomationRecord[];
   count: number;
+}
+
+export interface ArchiveAutomationIfOccurrenceCurrentInput {
+  expectedUpdatedAt: string;
+  lookup: string;
+  now?: Date;
+  occurrenceAt: string;
+  vaultRoot: string;
 }
 
 export interface ArchiveAutomationIfActiveUntilElapsedInput {
@@ -569,6 +584,7 @@ function resolveAutomationPatchSchedule(input: {
 
 function normalizeAutomationAssistantTargetOverride(
   value: unknown,
+  stored = false,
 ): AutomationAssistantTargetOverride | null {
   if (value === undefined || value === null) {
     return null;
@@ -588,8 +604,11 @@ function normalizeAutomationAssistantTargetOverride(
   const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
     object.reasoningEffort,
   );
+  if (!stored && model === "gpt-5.6-sol") {
+    throw new TypeError("assistantTargetOverride.model is retired; use gpt-6.1-sol.");
+  }
   const target: AutomationAssistantTargetOverride = {
-    ...(model ? { model } : {}),
+    ...(model ? { model: normalizeStoredAssistantModel(model) ?? model } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };
@@ -867,6 +886,7 @@ function parseAutomationRecord(
     route: normalizeAutomationRoute(attributes.route),
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
+      true,
     ),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
@@ -1110,6 +1130,41 @@ export async function upsertAutomation(
   return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
 }
 
+/** Replays stored input slots before allocating another ordinary save. */
+export async function createAutomationForInputs(
+  input: Omit<UpsertAutomationInput, "automationId" | "createOnly" | "slug"> & {
+    acceptedInputIds: readonly string[];
+    claimedAutomationIds: Set<string>;
+  },
+): Promise<Pick<UpsertAutomationResult, "created" | "record">> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const { acceptedInputIds, claimedAutomationIds, ...writeInput } = input;
+    if (acceptedInputIds.length === 0) {
+      throw new VaultError("VAULT_INVALID_INPUT", "An ordinary input save requires accepted input ids.");
+    }
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const recordsById = new Map(records.map((record) => [record.automationId, record]));
+    let automationId = "";
+    for (const inputId of acceptedInputIds) {
+      for (let slot = 0; ; slot += 1) {
+        automationId = deterministicContractId(
+          "automation", JSON.stringify(["murph.automation.input-create.v1", inputId, slot]),
+        );
+        const record = recordsById.get(automationId);
+        if (!record) break;
+        if (claimedAutomationIds.has(automationId)) continue;
+        claimedAutomationIds.add(automationId);
+        return { created: false, record };
+      }
+    }
+    const result = await upsertAutomationWithLatestRegistry({
+      ...writeInput, automationId, createOnly: true,
+    }, records);
+    claimedAutomationIds.add(automationId);
+    return result;
+  });
+}
+
 /** Registers one child per dispatched message under the existing registry lock. */
 export async function registerAutomationFollowUp(
   input: UpsertAutomationInput & { followUpSourceIntentId: string; parentExpectedUpdatedAt?: string },
@@ -1207,7 +1262,37 @@ export async function patchAutomation(
       title: input.title ?? existingRecord.title,
       vaultRoot: input.vaultRoot,
       allowSlugRename: input.slug !== undefined,
+      scheduleNotBefore: input.scheduleNotBefore,
     }, records);
+  });
+}
+
+export async function archiveAutomationIfOccurrenceCurrent(
+  input: ArchiveAutomationIfOccurrenceCurrentInput,
+): Promise<boolean> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (
+      !existingRecord ||
+      existingRecord.status !== "active" ||
+      existingRecord.updatedAt !== input.expectedUpdatedAt ||
+      existingRecord.schedule.kind !== "at" ||
+      Date.parse(existingRecord.schedule.at) !== Date.parse(input.occurrenceAt)
+    ) {
+      return false;
+    }
+    await upsertAutomationWithLatestRegistry({
+      ...existingRecord,
+      completedOccurrence: true,
+      now: input.now,
+      status: "archived",
+      vaultRoot: input.vaultRoot,
+    }, records);
+    return true;
   });
 }
 
@@ -1684,8 +1769,26 @@ function resolveAdvancedDeviceActivityCursor(input: {
     : null;
 }
 
+function resolveAutomationScheduleAnchorAt(input: {
+  existingRecord: AutomationRecord | null;
+  schedule: AutomationSchedule;
+  status: AutomationStatus;
+  now: string;
+  scheduleNotBefore?: Date;
+}): string {
+  const { existingRecord, schedule, status, now } = input;
+  const anchor = existingRecord === null
+    || !isDeepStrictEqual(existingRecord.schedule, schedule)
+    || (existingRecord.status !== "active" && status === "active")
+    ? now
+    : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
+  return input.scheduleNotBefore === undefined ? anchor : new Date(Math.max(
+    Date.parse(anchor), input.scheduleNotBefore.getTime(),
+  )).toISOString();
+}
+
 async function upsertAutomationWithLatestRegistry(
-  input: UpsertAutomationInput,
+  input: UpsertAutomationWithLatestRegistryInput,
   records?: AutomationRecord[],
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
@@ -1737,13 +1840,8 @@ async function upsertAutomationWithLatestRegistry(
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
-  const scheduleAnchorAt = (
-    existingRecord === null ||
-    !isDeepStrictEqual(existingRecord.schedule, schedule) ||
-    (existingRecord.status !== "active" && status === "active")
-  )
-    ? now
-    : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
+  const scheduleAnchorAt = resolveAutomationScheduleAnchorAt({ existingRecord, schedule, status, now,
+    scheduleNotBefore: input.scheduleNotBefore });
   const requestedTags = input.tags === undefined
     ? existingRecord?.tags ?? []
     : normalizeAutomationTags(input.tags);
@@ -1813,7 +1911,7 @@ async function upsertAutomationWithLatestRegistry(
     markdown: "",
   };
 
-  await retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords, status });
+  await retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords });
 
   const { auditPath, record: writtenRecord } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
@@ -1861,15 +1959,11 @@ function resolveAutomationFollowUpFields({ input, existingRecord, schedule, acti
   };
 }
 
-async function retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords, status }: {
-  input: UpsertAutomationInput;
+async function retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords }: {
+  input: UpsertAutomationWithLatestRegistryInput;
   existingRecord: AutomationRecord | null;
   currentRecords: AutomationRecord[];
-  status: AutomationRecord["status"];
 }): Promise<void> {
-  if (input.completedOccurrence && (existingRecord?.schedule.kind !== "at" || status !== "archived")) {
-    throw new VaultError("VAULT_INVALID_INPUT", "Only a consumed one-shot can preserve attached follow-ups.");
-  }
   // Retire children first: a crash must not leave an edited parent authorizing
   // obsolete optional work. Ordinary one-shot consumption keeps its child.
   if (existingRecord && !input.completedOccurrence) {

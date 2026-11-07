@@ -61,6 +61,7 @@ import type {
   AssistantResponseCard,
   TelegramRichMessage,
 } from '@murphai/operator-config/assistant-response-cards'
+import { readSleepSummaryNote } from '@murphai/operator-config/assistant-response-cards'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -684,6 +685,30 @@ export async function sendPreparedTelegramVoiceMemoMessage(
   })
 }
 
+function canSendNativeLinqCard(
+  card: AssistantResponseCard,
+): card is Exclude<AssistantResponseCard, { kind: 'exercise_routine' | 'telegram_rich_content' }> {
+  // Queued legacy workout cards have no editor; preserve their durable text fallback.
+  return card.kind !== 'exercise_routine'
+    && card.kind !== 'telegram_rich_content'
+    && !(card.kind === 'compact_table' && 'workout' in card && card.editor === undefined)
+}
+
+function buildLinqAppCardDeliveryResult(
+  delivered: Awaited<ReturnType<typeof sendLinqIMessageAppCard>>,
+  target: string,
+) {
+  return {
+    providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    ...(delivered.providerMessageIds
+      ? { providerMessageIds: delivered.providerMessageIds } : {}),
+    ...(delivered.providerMessageEffects
+      ? { providerMessageEffects: delivered.providerMessageEffects } : {}),
+    providerThreadId: null,
+    target,
+  }
+}
+
 export async function sendLinqMessage(
   input: {
     card?: AssistantResponseCard | null
@@ -764,8 +789,7 @@ export async function sendLinqMessage(
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
   const shouldAttemptDirectNativeCard =
     card !== null &&
-    card.kind !== 'exercise_routine' &&
-    card.kind !== 'telegram_rich_content' &&
+    canSendNativeLinqCard(card) &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
@@ -801,6 +825,7 @@ export async function sendLinqMessage(
         if (
           dependencies.signal?.aborted
           || providerRequestWasSkipped(error)
+          || readSleepSummaryNote(card, input.message) !== null
         ) {
           throw error
         }
@@ -817,6 +842,7 @@ export async function sendLinqMessage(
             card,
             chatId: target,
             idempotencyKey,
+            companionMessage: input.message,
           },
           {
             env,
@@ -824,22 +850,7 @@ export async function sendLinqMessage(
             ...(dependencies.signal ? { signal: dependencies.signal } : {}),
           },
         )
-        const providerMessageId = normalizeOptionalText(
-          delivered.message?.id ?? null,
-        )
-        return {
-          providerMessageId,
-          ...(providerMessageId
-            ? {
-                providerMessageEffects: [{
-                  message: null,
-                  providerMessageId,
-                }],
-              }
-            : {}),
-          providerThreadId: null,
-          target,
-        }
+        return buildLinqAppCardDeliveryResult(delivered, target)
       } catch (error) {
         if (
           dependencies.signal?.aborted ||
@@ -858,7 +869,7 @@ export async function sendLinqMessage(
 
   const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
-    : appendImageAlternativeText(input.message, responseMedia)
+    : input.message
   assertLinqMessagePartsWithinLimits({
     message,
     operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
@@ -1533,6 +1544,7 @@ async function sendTelegramMessageDetailed(
           : buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
         maxDeliveryAttempts,
+        onTextSendAccepted: dependencies.onTextSendAccepted,
         replyToMessageId,
         signal: dependencies.signal,
         target,
@@ -1712,6 +1724,7 @@ async function sendTelegramTextChunk(input: {
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
+  onTextSendAccepted?: TelegramRuntimeDependencies['onTextSendAccepted']
   maxDeliveryAttempts: number
   replyToMessageId: string | null
   signal?: AbortSignal
@@ -1740,6 +1753,7 @@ async function sendTelegramTextChunk(input: {
       operation: 'sendMessage',
       result: await sendTelegramTextChunkOnce({
         baseUrl: input.baseUrl,
+        onTextSendAccepted: input.onTextSendAccepted,
         entities: input.entities,
         fetchImplementation: input.fetchImplementation,
         replyToMessageId: input.replyToMessageId,
@@ -2419,6 +2433,7 @@ function assertSingleTelegramRichFallbackMessage(
 }
 
 async function sendTelegramTextChunkOnce(input: {
+  onTextSendAccepted?: TelegramRuntimeDependencies['onTextSendAccepted']
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
@@ -2429,6 +2444,8 @@ async function sendTelegramTextChunkOnce(input: {
   text: string
   token: string
 }): Promise<TelegramSendAttemptResult> {
+  const requestStartedAt = new Date().toISOString()
+  const started = performance.now()
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
@@ -2448,6 +2465,15 @@ async function sendTelegramTextChunkOnce(input: {
       token: input.token,
     })
 
+    if (result.response.ok && isTelegramSuccessResponse(result.payload)) {
+      observeTelegramTextSendAcceptance({
+        observer: input.onTextSendAccepted,
+        payload: result.payload,
+        requestStartedAt,
+        requestDurationMs: Math.max(0, Math.round(performance.now() - started)),
+        responseReceivedAt: new Date().toISOString(),
+      })
+    }
     return {
       kind: 'response',
       ...result,
@@ -2475,6 +2501,40 @@ async function sendTelegramTextChunkOnce(input: {
         },
       ),
     }
+  }
+}
+
+function observeTelegramTextSendAcceptance(input: {
+  observer: TelegramRuntimeDependencies['onTextSendAccepted']
+  payload: unknown
+  requestStartedAt: string
+  responseReceivedAt: string
+  requestDurationMs: number
+}): void {
+  if (!input.observer) return
+  try {
+    const result = (input.payload as { result?: { date?: unknown; message_id?: unknown } }).result
+    const date = result?.date
+    // Telegram dates are Unix seconds. Bound conversion before toISOString;
+    // absent/malformed metadata must not invalidate an accepted send.
+    const providerSentAt = typeof date === 'number' && Number.isSafeInteger(date)
+      && date > 0 && date <= 8_640_000_000_000
+      ? new Date(date * 1000).toISOString()
+      : null
+    const messageId = result?.message_id
+    const providerMessageIdStatus = typeof messageId === 'number'
+      && Number.isSafeInteger(messageId) && messageId >= 0
+      ? (messageId === 0 ? 'zero' : 'positive')
+      : 'missing_or_invalid'
+    void Promise.resolve(input.observer({
+      providerSentAt,
+      providerMessageIdStatus,
+      requestStartedAt: input.requestStartedAt,
+      responseReceivedAt: input.responseReceivedAt,
+      requestDurationMs: input.requestDurationMs,
+    })).catch(() => {})
+  } catch {
+    // A diagnostic failure must never retry a non-idempotent accepted message.
   }
 }
 

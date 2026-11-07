@@ -1,3 +1,4 @@
+import { isRetiredDeviceFeature } from "./retired-device-features.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import { isDisplayGradeMetricSampleEntity } from "./metrics/index.ts";
 
@@ -45,6 +46,7 @@ function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolea
 export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean {
   if (
     entity.family === "audit" ||
+    isRetiredDeviceFeature(entity) ||
     isDefaultHiddenMetricObservationEntity(entity)
   ) {
     return false;
@@ -60,6 +62,7 @@ export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean 
 export function isSearchIndexedQueryEntity(entity: CanonicalEntity): boolean {
   return (
     entity.family !== "audit" &&
+    !isRetiredDeviceFeature(entity) &&
     !isDefaultHiddenMetricObservationEntity(entity)
   );
 }

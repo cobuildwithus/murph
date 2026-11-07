@@ -1,17 +1,12 @@
 "use client";
 
-import { MonitorCheck } from "lucide-react";
-
-import { HostedAuthRequiredScreen } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
+import { LinkPageSignIn } from "@/src/components/link-page/link-page-sign-in";
 
 export function ComputerHandoffAuthRequiredState() {
   return (
-    <HostedAuthRequiredScreen
-      description="This link is private to the Murph account that received it. Sign in, then this page will reload so you can finish here."
-      eyebrow="Private page"
-      eyebrowIcon={MonitorCheck}
-      footer="The handoff stays paused until the account is verified."
-      title="Sign in to open this private page"
+    <LinkPageSignIn
+      detail="This link is private to your Murph account."
+      title="Sign in to finish this step."
     />
   );
 }

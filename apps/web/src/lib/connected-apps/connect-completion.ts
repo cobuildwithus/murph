@@ -1,6 +1,7 @@
 import "server-only";
 
 import { formatHostedConnectedAppToolkitLabel } from "@/src/lib/connected-apps/config";
+import { resolveConnectLogoSrc } from "@/src/lib/device-sync/connect-logos";
 import type {
   DeviceSyncCompletionContactAction,
   DeviceSyncCompletionDialogModel,
@@ -68,6 +69,9 @@ export async function resolveConnectedAppCompletionDialogModel(input: {
     ? `${alias} ${toolkitLabel}`
     : toolkitLabel ?? alias ?? "Your integration";
   const failed = status !== "success";
+  const logo = toolkit && toolkitLabel
+    ? { name: toolkitLabel, src: resolveConnectLogoSrc(toolkit) }
+    : null;
 
   if (failed) {
     return {
@@ -75,11 +79,12 @@ export async function resolveConnectedAppCompletionDialogModel(input: {
       // The failure path on a connected-app callback typically lands the user
       // here without a fresh claim; the only useful next step is to ask Murph
       // for a new connect link, not a route-level retry.
-      detail: "Ask Murph for a new connection link when you are ready.",
+      detail: "Ask Murph for a new link.",
       failed: true,
       kind: "connected-app",
+      logo,
       retryHref: null,
-      title: `${accountLabel} connection did not finish`,
+      title: `${accountLabel} didn’t connect.`,
       unverified: false,
     };
   }
@@ -92,12 +97,13 @@ export async function resolveConnectedAppCompletionDialogModel(input: {
   return {
     contactAction,
     detail: contactAction
-      ? `${accountLabel} is ready. Text Murph to start using it.`
+      ? "Go back to your chat."
       : `${accountLabel} is ready. Murph will start using it on your next message.`,
     failed: false,
     kind: "connected-app",
+    logo,
     retryHref: null,
-    title: `${accountLabel} is connected`,
+    title: `${accountLabel} is connected.`,
     unverified: false,
   };
 }
@@ -126,7 +132,7 @@ async function resolveConnectedAppContactAction(input: {
     return {
       href: messagesHref,
       kind: "imessage",
-      label: "Text Murph",
+      label: "Open Messages",
     };
   }
 

@@ -39,7 +39,7 @@ const runId = Date.now();
 const userId = `member_local_stale_deferred_${runId}`;
 const chatId = `chat_local_stale_deferred_${runId}`;
 const linqWebhookSecret = "linq-local-stale-deferred-secret";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const replyText = "Reply after stale deferred wake preemption.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -149,10 +149,9 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "30000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
+
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
@@ -300,7 +299,7 @@ async function waitForConversationImportAtLeast(
 
   while (Date.now() - startedAt < input.timeoutMs) {
     const status = await readHostedRunnerStatusWithLogLimit(100);
-    const importedSeq = readLatestImportedConversationSeq(status);
+    const importedSeq = status.mailboxLag.find((lane) => lane.lane === "conversation")?.importedSeq ?? null;
     if (importedSeq !== null && compareSeq(importedSeq, seq) >= 0) {
       return status;
     }
@@ -316,28 +315,6 @@ function readConversationMaxSeq(status: HostedRunnerStatusResponse): string {
     throw new Error("Status did not include conversation mailbox lag.");
   }
   return lane.maxSeq;
-}
-
-function readLatestImportedConversationSeq(
-  status: Pick<HostedRunnerStatusResponse, "recentLogs">,
-): string | null {
-  const logs = status.recentLogs ?? [];
-  let latest: string | null = null;
-
-  for (const log of logs) {
-    if (log.eventCode !== "mailbox.imported") {
-      continue;
-    }
-    const seq = log.redactedJson?.conversationSeqEnd;
-    if (typeof seq !== "string" || seq.trim().length === 0) {
-      continue;
-    }
-    if (latest === null || compareSeq(seq, latest) > 0) {
-      latest = seq;
-    }
-  }
-
-  return latest;
 }
 
 function compareSeq(left: string, right: string): number {

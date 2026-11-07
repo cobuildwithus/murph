@@ -2,7 +2,6 @@ import { HostedBillingStatus } from "@prisma/client";
 
 import { hasHostedMemberOwnActiveAccess, isHostedMemberSuspended } from "./entitlement";
 import {
-  resolveHostedAccessibleOnboardingStage,
   type HostedOnboardingStage,
   type HostedPostVerificationStage,
 } from "./stage";
@@ -44,7 +43,6 @@ export function hasHostedRecoverableBilling(input: {
 }
 
 export function deriveHostedOnboardingStage(input: {
-  activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
   hasExistingSubscription?: boolean;
@@ -66,7 +64,7 @@ export function deriveHostedOnboardingStage(input: {
   }
 
   if (hasHostedOnboardingRecoverySurfaceAccess(input)) {
-    return resolveHostedAccessibleOnboardingStage(input.activationPending);
+    return "active";
   }
 
   if (requiresHostedBillingCheckout(input.billingStatus)) {
@@ -77,7 +75,6 @@ export function deriveHostedOnboardingStage(input: {
 }
 
 export function deriveHostedPostVerificationStage(input: {
-  activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   hasExistingSubscription?: boolean;
   sponsoredAccessActive?: boolean;
@@ -88,7 +85,7 @@ export function deriveHostedPostVerificationStage(input: {
   }
 
   if (hasHostedOnboardingRecoverySurfaceAccess(input)) {
-    return resolveHostedAccessibleOnboardingStage(input.activationPending);
+    return "active";
   }
 
   return requiresHostedBillingCheckout(input.billingStatus) ? "checkout" : "blocked";

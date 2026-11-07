@@ -1,4 +1,4 @@
-import { isHostedRunnerImageTransition, readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
+import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -47,6 +47,11 @@ export interface HostedStandbyCoordinatorStubLike {
     releaseId: string;
     region: HostedRunnerRegion;
   }): Promise<{ accepted: true }>;
+  reportStandbySlotStopped(input: {
+    releaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+  }): Promise<void>;
   readStandbyCoordinatorState?(): Promise<HostedStandbyCoordinatorState>;
 }
 
@@ -81,8 +86,12 @@ export interface HostedRunnerSlotLifecycle {
     region: HostedRunnerRegion;
     slotName: string;
     timeoutMs: number;
+    /** Observe an existing ready process without starting it or blocking binding. */
+    recheck?: true;
   }): Promise<{
     prepared: true;
+    /** Additive attestation; older Workers may omit it. Deploy smoke requires it. */
+    runnerImage?: { bundleFingerprint: string; sourceFingerprint: string };
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
@@ -135,6 +144,8 @@ export interface HostedStandbySlotCoordinatorState {
 }
 
 export interface HostedStandbyRunnerContainerNamespaceLike {
+  get?(id: unknown): HostedStandbyRunnerContainerStubLike;
+  idFromString?(id: string): unknown;
   getByName(
     name: string,
     options?: HostedStandbyNamespaceLocationOptions,
@@ -193,8 +204,6 @@ export function readHostedStandbyMode(
 export function readHostedStandbyTarget(
   source: Readonly<Record<string, unknown>>,
 ): number {
-  // Mixed images serve bound members, but never advertise pristine warm inventory.
-  if (isHostedRunnerImageTransition(source)) return 0;
   const raw = source.HOSTED_EXECUTION_STANDBY_TARGET;
   if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) {
     return 2;
@@ -260,15 +269,15 @@ export function resolveHostedStandbyCoordinatorName(input: {
   return `standby-coordinator--v-${requireReleaseId(input.releaseId)}--r-${input.region.toLowerCase()}`;
 }
 
-export function createHostedRunnerSlotName(releaseId: string, profile: "default" | "small" = "default"): string {
-  return createHostedSlotName(profile === "small" ? "runner-small" : "runner", releaseId);
+export function createHostedRunnerSlotName(releaseId: string): string {
+  return createHostedSlotName("runner", releaseId);
 }
 
 export function createHostedStandbySlotName(releaseId: string): string {
   return createHostedSlotName("standby", releaseId);
 }
 
-function createHostedSlotName(prefix: "runner" | "runner-small" | "standby", releaseId: string): string {
+function createHostedSlotName(prefix: "runner" | "standby", releaseId: string): string {
   if (typeof crypto === "undefined" || typeof crypto.getRandomValues !== "function") {
     throw new Error("Hosted standby slot generation requires Web Crypto.");
   }

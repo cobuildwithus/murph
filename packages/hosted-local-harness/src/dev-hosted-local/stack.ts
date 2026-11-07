@@ -1,3 +1,4 @@
+import { buildHostedLocalWebAuthEnvironment, removeHostedLocalWebAuthorityEnvironment } from "../authority-env.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, existsSync } from "node:fs";
@@ -26,6 +27,7 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_HTTPS_ORIGIN,
   HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
@@ -95,6 +97,7 @@ import {
   HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
   writeHostedLocalStripeCheckoutDiagnostics,
 } from "./stripe.ts";
+import { preflightHostedLocalTemporalWorker } from "./temporal-preflight.ts";
 import {
   buildHostedLocalTemporalRuntimeEnv,
   requireHostedLocalTemporalWorkerPackageDir,
@@ -119,7 +122,6 @@ import {
 
 const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
 const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
-  path.join(webDir, "src", "lib", "health-commons", "biomarker-detail.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-browse.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-detail.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-projections.ts"),
@@ -138,6 +140,8 @@ export interface HostedLocalDevStack {
    * `runtimeEnv` and only injected into the web child process env.
    */
   hostedAppSessionHmacKey: string;
+  hostedBetterAuthSecret: string;
+  hostedAuthStorageKey: string;
   oidcIdentity: HostedExecutionOidcIdentity;
   oidcToken: string;
   processes: {
@@ -188,20 +192,6 @@ const HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD_OUTPUT =
   "hosted-local-temporal-mailbox-signal-fault-preload.js";
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
-const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
-  "codex-model-catalog.openai-flex.json";
-const HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS = [
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-] as const;
-const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
-  id: "flex",
-  name: "Flex",
-  description: "Lower-cost flexible processing",
-} as const;
-const HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG = "gpt-5.4-nano";
-const HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG = "gpt-5.4-mini";
 const HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE =
   ".murph-runner-bundle-manifest.json";
 function registerHostedLocalStackLifecycle(input: {
@@ -243,7 +233,11 @@ export async function startHostedLocalDevStack(input: {
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   if (config.temporal.mode !== "disabled") {
-    requireHostedLocalTemporalWorkerPackageDir(initialEnv);
+    await preflightHostedLocalTemporalWorker({
+      env: initialEnv,
+      packageDir: requireHostedLocalTemporalWorkerPackageDir(initialEnv),
+      signal: input.abortSignal,
+    });
   }
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
@@ -406,7 +400,10 @@ export async function startHostedLocalDevStack(input: {
     const hostedAppSessionHmacKey =
       rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
       || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
-    delete rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
+    const webAuthEnvironment = buildHostedLocalWebAuthEnvironment({
+      ...rawVercelEnv, ...input.webProcessEnvOverrides,
+    });
+    removeHostedLocalWebAuthorityEnvironment(rawVercelEnv);
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
     const shouldPreserveTestNodeEnvForLocalTestMode =
       usesWranglerLocalDevTestRoutes(rawVercelEnv)
@@ -549,12 +546,6 @@ export async function startHostedLocalDevStack(input: {
     // strip removes values inherited from the shell or env files, and trusted
     // harness-owned values are re-added afterward so web/temporal children
     // never see them.
-    const hostedLocalCodexModelCatalogJson = workerPortMode === "start"
-      ? await prepareHostedLocalCodexModelCatalog({
-        catalogPath: path.join(tempDir, HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE),
-        env: initialProcessEnv,
-      })
-      : null;
     const workerRuntimeSourceEnv: NodeJS.ProcessEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
@@ -566,9 +557,6 @@ export async function startHostedLocalDevStack(input: {
       // the managed Web child directly because workerd does not trust Caddy's
       // local development certificate.
       ...buildHostedWorkerWebBaseUrlEnv(config),
-      ...(hostedLocalCodexModelCatalogJson !== null
-        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
-        : {}),
       ...(codexSubscriptionAuthEnvValue !== null
         ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
         : {}),
@@ -651,8 +639,6 @@ export async function startHostedLocalDevStack(input: {
       "Enable Vercel OIDC for the linked project and make sure the Vercel CLI is logged in.",
     );
 
-    warnForMissingEnv("NEXT_PUBLIC_PRIVY_APP_ID", runtimeEnv.NEXT_PUBLIC_PRIVY_APP_ID);
-    warnForMissingEnv("PRIVY_VERIFICATION_KEY", runtimeEnv.PRIVY_VERIFICATION_KEY);
     const stripeListenerWillCaptureSecret = !config.skipStripeListen && !config.skipWeb;
     writeHostedLocalStripeCheckoutDiagnostics({
       env: runtimeEnv,
@@ -667,61 +653,12 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
     });
 
-    if (!config.skipPrismaMigrate) {
-      if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "exec",
-          "prisma",
-          "db",
-          "push",
-          config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      } else {
-        await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      }
-
-      // The DB is now the hosted Linq home-line authority, so seed the
-      // configured lines the same way the Vercel deploy does. Without this a
-      // fresh local database has no assignable line and onboarding activation
-      // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
-      // sync is skipped locally so startup needs no Linq API call. With no
-      // configured conversation phones there is nothing to seed and the
-      // script's pool-ready assertion would fail startup, so skip it: e2e
-      // scenarios seed their own line inventory, and a dev stack without Linq
-      // env keeps failing closed at activation exactly as before.
-      const configuredLinqConversationPhones =
-        runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
-      if (configuredLinqConversationPhones.length > 0) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "linq:sync-lines",
-          "--",
-          "--skip-provider-inventory",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      } else {
-        (input.stderrTarget ?? process.stderr).write(
-          "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
-        );
-      }
-    }
+    await prepareHostedLocalDatabase({
+      abortSignal: abortController.signal,
+      config,
+      runtimeEnv,
+      stderrTarget: input.stderrTarget,
+    });
 
     if (!config.skipWeb) {
       await maybeGenerateHostedWebHealthCommons({
@@ -733,74 +670,14 @@ export async function startHostedLocalDevStack(input: {
     }
 
     if (workerRuntimeEnv !== null) {
-      if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
-        const runnerBundleEnv: NodeJS.ProcessEnv = {
-          ...(workerProcessEnv ?? workerRuntimeEnv),
-          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
-            (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
-          MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
-        };
-        if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
-          runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
-        }
-        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
-          cwd: repoRoot,
-          env: runnerBundleEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-        if (workerProcessEnv !== null) {
-          workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
-        }
-      }
-      const runnerBundleFingerprintEnv =
-        await readHostedLocalRunnerBundleFingerprintEnv();
-      applyHostedLocalRunnerBundleFingerprintEnv({
-        fingerprintEnv: runnerBundleFingerprintEnv,
+      await prepareHostedLocalRunner({
+        abortSignal: abortController.signal,
+        initialEnv,
+        tempDir,
+        workerConfigPath,
+        workerPersistDir,
         workerProcessEnv,
         workerRuntimeEnv,
-      });
-      const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
-        abortSignal: abortController.signal,
-        tempDir,
-      });
-      await writeFile(
-        workerConfigPath,
-        `${JSON.stringify(
-          buildWranglerLocalDevConfig(workerRuntimeEnv, {
-            cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
-            configDir: path.dirname(workerConfigPath),
-            workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
-          }),
-          null,
-          2,
-        )}\n`,
-        {
-          encoding: "utf8",
-          mode: 0o600,
-        },
-      );
-      await chmod(workerConfigPath, 0o600);
-
-      const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: runnerCleanupScope,
-        stoppedOnly: true,
-      });
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        force: false,
-        ignoreErrors: true,
-        preserveCurrentBuild: true,
-        scope: runnerCleanupScope,
-      });
-      await cleanupHostedRunnerContainerLocalState({
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        persistDir: workerPersistDir,
       });
     }
     throwIfAbortSignalAborted(abortController.signal);
@@ -949,6 +826,7 @@ export async function startHostedLocalDevStack(input: {
     const webProcessSourceEnv: NodeJS.ProcessEnv = {
       ...runtimeEnv,
       ...(input.webProcessEnvOverrides ?? {}),
+      ...webAuthEnvironment,
       HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
       // Keep disabled mode fail-closed even when dev-local subsequently
       // loads apps/web/.env.local and .env into the child process.
@@ -991,7 +869,7 @@ export async function startHostedLocalDevStack(input: {
 
     const tlsProxyProcess = config.skipWeb
       ? null
-      : maybeStartTlsProxy({
+      : await maybeStartTlsProxy({
         pipeOutput: input.pipeOutput,
         runtimeEnv,
         stderrTarget: input.stderrTarget,
@@ -1199,6 +1077,8 @@ export async function startHostedLocalDevStack(input: {
         workerPersistDir,
       },
       hostedAppSessionHmacKey,
+      hostedBetterAuthSecret: webAuthEnvironment.HOSTED_BETTER_AUTH_SECRET,
+      hostedAuthStorageKey: webAuthEnvironment.HOSTED_AUTH_STORAGE_KEY,
       kill,
       oidcIdentity,
       oidcToken,
@@ -1308,6 +1188,167 @@ export async function startHostedLocalDevStack(input: {
   function killHostedLocalMinioMonitor(): void {
     if (minioMonitor !== null) {
       minioMonitor.kill();
+    }
+  }
+}
+
+async function prepareHostedLocalRunner({
+  abortSignal,
+  initialEnv,
+  tempDir,
+  workerConfigPath,
+  workerPersistDir,
+  workerProcessEnv,
+  workerRuntimeEnv,
+}: {
+  abortSignal: AbortSignal;
+  initialEnv: NodeJS.ProcessEnv;
+  tempDir: string;
+  workerConfigPath: string;
+  workerPersistDir: string;
+  workerProcessEnv: NodeJS.ProcessEnv | null;
+  workerRuntimeEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
+    const runnerBundleEnv: NodeJS.ProcessEnv = {
+      ...(workerProcessEnv ?? workerRuntimeEnv),
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
+        (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
+      MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
+    };
+    if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
+      runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
+    }
+    await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
+      cwd: repoRoot,
+      env: runnerBundleEnv,
+      name: "setup",
+      signal: abortSignal,
+    });
+    if (workerProcessEnv !== null) {
+      workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
+    }
+  }
+  const runnerBundleFingerprintEnv =
+    await readHostedLocalRunnerBundleFingerprintEnv();
+  applyHostedLocalRunnerBundleFingerprintEnv({
+    fingerprintEnv: runnerBundleFingerprintEnv,
+    workerProcessEnv,
+    workerRuntimeEnv,
+  });
+  const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
+    abortSignal: abortSignal,
+    tempDir,
+  });
+  await writeFile(
+    workerConfigPath,
+    `${JSON.stringify(
+      buildWranglerLocalDevConfig(workerRuntimeEnv, {
+        cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
+        configDir: path.dirname(workerConfigPath),
+        workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
+      }),
+      null,
+      2,
+    )}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await chmod(workerConfigPath, 0o600);
+
+  const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
+  await cleanupHostedRunnerContainers({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    ignoreErrors: true,
+    scope: runnerCleanupScope,
+    stoppedOnly: true,
+  });
+  await cleanupHostedRunnerImages({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    force: false,
+    ignoreErrors: true,
+    preserveCurrentBuild: true,
+    scope: runnerCleanupScope,
+  });
+  await cleanupHostedRunnerContainerLocalState({
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    persistDir: workerPersistDir,
+  });
+}
+
+async function prepareHostedLocalDatabase({
+  abortSignal,
+  config,
+  runtimeEnv,
+  stderrTarget,
+}: {
+  abortSignal: AbortSignal;
+  config: HostedLocalDevConfig;
+  runtimeEnv: NodeJS.ProcessEnv;
+  stderrTarget: NodeJS.WritableStream | undefined;
+}): Promise<void> {
+  if (!config.skipPrismaMigrate) {
+    if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
+      const pushSchema = (...flags: string[]) => runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "exec",
+        "prisma",
+        "db",
+        "push",
+        ...flags,
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+      if (config.forceResetLocalDatabase) {
+        await pushSchema("--force-reset");
+      } else {
+        await pushSchema().catch(() => pushSchema("--accept-data-loss"));
+      }
+    } else {
+      await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    }
+
+    // The DB is now the hosted Linq home-line authority, so seed the
+    // configured lines the same way the Vercel deploy does. Without this a
+    // fresh local database has no assignable line and onboarding activation
+    // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
+    // sync is skipped locally so startup needs no Linq API call. With no
+    // configured conversation phones there is nothing to seed and the
+    // script's pool-ready assertion would fail startup, so skip it: e2e
+    // scenarios seed their own line inventory, and a dev stack without Linq
+    // env keeps failing closed at activation exactly as before.
+    const configuredLinqConversationPhones =
+      runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
+    if (configuredLinqConversationPhones.length > 0) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "linq:sync-lines",
+        "--",
+        "--skip-provider-inventory",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      (stderrTarget ?? process.stderr).write(
+        "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
+      );
     }
   }
 }
@@ -2280,124 +2321,6 @@ function stripHostedLocalHostOnlyCodexEnv<TEnv extends Record<string, string | u
   return nextEnv;
 }
 
-async function prepareHostedLocalCodexModelCatalog(input: {
-  catalogPath: string;
-  env: NodeJS.ProcessEnv;
-}): Promise<string> {
-  const result = spawnSync(
-    "codex",
-    ["debug", "models", "--bundled"],
-    {
-      encoding: "utf8",
-      env: buildHostedLocalCodexCatalogCommandEnv(input.env),
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  if (result.error) {
-    throw new Error("Hosted local dev could not read the bundled Codex model catalog.", {
-      cause: result.error,
-    });
-  }
-  if (result.status !== 0) {
-    throw new Error("Hosted local dev could not read the bundled Codex model catalog.");
-  }
-
-  const catalogText = buildHostedLocalOpenAiCodexModelCatalogText(result.stdout);
-  await mkdir(path.dirname(input.catalogPath), { mode: 0o700, recursive: true });
-  await writeFile(input.catalogPath, catalogText, { encoding: "utf8", mode: 0o644 });
-  await chmod(input.catalogPath, 0o644);
-
-  return input.catalogPath;
-}
-
-function buildHostedLocalCodexCatalogCommandEnv(
-  env: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  return {
-    ...(env.PATH ? { PATH: env.PATH } : {}),
-    ...(env.PATHEXT ? { PATHEXT: env.PATHEXT } : {}),
-    ...(env.SystemRoot ? { SystemRoot: env.SystemRoot } : {}),
-    ...(env.SystemDrive ? { SystemDrive: env.SystemDrive } : {}),
-  };
-}
-
-function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawCatalog);
-  } catch (error) {
-    throw new Error("Hosted local dev received an invalid Codex model catalog.", {
-      cause: error,
-    });
-  }
-
-  if (!isRecord(parsed) || !Array.isArray(parsed.models)) {
-    throw new Error("Hosted local dev received a Codex model catalog without a models array.");
-  }
-
-  const catalogModels = parsed.models.filter(isRecord);
-  for (const slug of HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS) {
-    const targetModel = catalogModels.find((candidate) => candidate.slug === slug);
-    if (!targetModel) {
-      throw new Error(
-        `Hosted local dev Codex model catalog is missing ${slug}.`,
-      );
-    }
-
-    const serviceTiers = Array.isArray(targetModel.service_tiers)
-      ? targetModel.service_tiers
-      : [];
-    const hasFlexTier = serviceTiers
-      .filter(isRecord)
-      .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
-    targetModel.service_tiers = hasFlexTier
-      ? serviceTiers
-      : [
-        ...serviceTiers,
-        HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
-      ];
-    targetModel.tool_mode = "code_mode";
-  }
-
-  const deploySmokeModel = catalogModels
-    .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
-  if (deploySmokeModel) {
-    Object.assign(deploySmokeModel, {
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      // The OpenAI API rejects gpt-5.4-nano when Codex >= 0.143 sends the
-      // x-openai-internal-codex-responses-lite header.
-      use_responses_lite: false,
-    });
-  } else {
-    const templateModel = catalogModels
-      .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
-    if (!templateModel) {
-      throw new Error(
-        `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG}.`,
-      );
-    }
-
-    parsed.models.push({
-      ...templateModel,
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      use_responses_lite: false,
-    });
-  }
-
-  return `${JSON.stringify(parsed, null, 2)}\n`;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -2568,28 +2491,49 @@ function writeRunnerContainerSmokeWarning(
   );
 }
 
-function maybeStartTlsProxy(input: {
+async function maybeStartTlsProxy(input: {
   pipeOutput?: boolean;
   runtimeEnv: NodeJS.ProcessEnv;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
-}): BufferedNamedChildProcess | null {
+}): Promise<BufferedNamedChildProcess | null> {
   if (input.runtimeEnv.MURPH_DEV_SKIP_TLS_PROXY === "1") {
     return null;
   }
 
+  const requiresManagedHttps = input.runtimeEnv.HOSTED_WEB_BASE_URL?.trim()
+    === HOSTED_LOCAL_HTTPS_ORIGIN;
   const caddyfilePath = path.join(repoRoot, "Caddyfile");
   if (!existsSync(caddyfilePath)) {
+    if (requiresManagedHttps) {
+      throw new Error("Canonical local HTTPS requires the repository Caddyfile. Restore it before starting the stack.");
+    }
     return null;
   }
 
   try {
     execFileSync("which", ["caddy"], { stdio: "ignore" });
   } catch {
+    if (requiresManagedHttps) {
+      throw new Error(
+        "Canonical local HTTPS requires Caddy on PATH. Install Caddy before starting the stack, "
+        + "or use MURPH_DEV_SKIP_TLS_PROXY=1 for direct HTTP work without browser authentication or OAuth.",
+      );
+    }
     (input.stderrTarget ?? process.stderr).write(
       "[tls-proxy] Caddyfile found but `caddy` is not on PATH; skipping local HTTPS proxy. Install with `brew install caddy` to enable.\n",
     );
     return null;
+  }
+
+  if (requiresManagedHttps) {
+    await assertPortAvailable(
+      "127.0.0.1",
+      Number(new URL(HOSTED_LOCAL_HTTPS_ORIGIN).port),
+      "Canonical local HTTPS is already owned by another listener. "
+      + "Obtain an explicit handoff from its owner before starting this stack, "
+      + "or use MURPH_DEV_SKIP_TLS_PROXY=1 for direct HTTP work without browser authentication or OAuth.",
+    );
   }
 
   return spawnChildProcess("tls-proxy", "caddy", [
@@ -2811,7 +2755,7 @@ function appendStartupDiagnostics(
   return new Error(
     [
       message,
-      output ? `process output tail:\n${tail(output)}` : null,
+      output ? `process output tails:\n${output}` : null,
       redactHostedLocalDiagnosticText(diagnostics),
     ].filter((value): value is string => value !== null).join("\n"),
   );

@@ -7,15 +7,19 @@ import {
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { parseHostedRuntimeUsageRecordRequest } from "@murphai/hosted-execution/parsers";
 import { HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
+import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId } = await requireHostedCloudflareCallbackJsonRequest(request, {
+    runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
   });
   const body = parseHostedRuntimeUsageRecordRequest(payload);
 
   const usage = body.usage;
+  const authority = readHostedRuntimeCallbackAuthority(request);
   const result = await recordHostedAiUsageRecordsAndSendLimitNotices({
+    runtimeIdentity: authority ? { ...authority, userId } : null,
     accountAllowance: true,
     ...(body.noticeDeliveryTarget === undefined
       ? {}

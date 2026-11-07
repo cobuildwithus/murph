@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
   isHostedProductSupportEscalationSummary,
+  isHostedUsageOptimizationAuditFeedback,
 } from "../src/runtime-control.js";
 import {
   parseHostedRuntimeProductFeedbackRecordRequest,
@@ -10,6 +12,37 @@ import {
 } from "../src/parsers.js";
 
 describe("hosted product feedback contracts", () => {
+  it("preserves audit length and short-circuit precedence with optional rejection observation", () => {
+    const prefix = HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX;
+    const audit = { kind: "feature_request" as const, relatedChangelogItemIds: [], summary: `${prefix} Report.` };
+    const cases = [
+      { feedback: audit, accepted: true, rejection: undefined },
+      { feedback: { ...audit, summary: prefix + "x".repeat(1800 - prefix.length) }, accepted: true, rejection: undefined },
+      { feedback: { ...audit, summary: prefix + "x".repeat(1801 - prefix.length) }, accepted: false, rejection: "summary_too_long" },
+      // Length still rejects before the later empty-report rule.
+      { feedback: { ...audit, summary: prefix + " ".repeat(1800) }, accepted: false, rejection: "summary_too_long" },
+      { feedback: { ...audit, summary: `${prefix} \t` }, accepted: false, rejection: "empty_report" },
+      { feedback: { ...audit, summary: "x".repeat(1801) }, accepted: false, rejection: "missing_prefix" },
+      { feedback: { ...audit, relatedChangelogItemIds: ["synthetic-change"], summary: "x".repeat(1801) }, accepted: false, rejection: "changelog_linked" },
+      { feedback: { ...audit, kind: "frustration" as const, relatedChangelogItemIds: ["synthetic-change"], summary: "x".repeat(1801) }, accepted: false, rejection: "wrong_kind" },
+    ];
+    for (const { feedback, accepted, rejection } of cases) {
+      const observe = vi.fn();
+      expect(isHostedUsageOptimizationAuditFeedback(feedback)).toBe(accepted);
+      expect(isHostedUsageOptimizationAuditFeedback(feedback, observe)).toBe(accepted);
+      expect(observe.mock.calls).toEqual(rejection === undefined ? [] : [[rejection]]);
+    }
+    const lateRead = vi.fn((): never => { throw new Error("Later rule must stay unevaluated"); });
+    const observe = vi.fn();
+    expect(isHostedUsageOptimizationAuditFeedback({
+      kind: "feature_interest",
+      get relatedChangelogItemIds(): string[] { return lateRead(); },
+      get summary(): string { return lateRead(); },
+    }, observe)).toBe(false);
+    expect(observe).toHaveBeenCalledExactlyOnceWith("wrong_kind");
+    expect(lateRead).not.toHaveBeenCalled();
+  });
+
   it("allows summaries up to five thousand characters", () => {
     expect(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH).toBe(5_000);
   });

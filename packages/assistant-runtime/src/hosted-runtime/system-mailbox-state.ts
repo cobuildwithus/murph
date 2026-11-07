@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import {
+  isHostedRetiredAssistantNotificationProfile,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -14,6 +16,7 @@ import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
   HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
+  isHostedRetiredMailboxKind,
 } from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
@@ -39,6 +42,7 @@ import {
 
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+  HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "../hosted-device-sync-limits.ts";
 import { readHostedMailboxImportState } from "./mailbox-state.ts";
 import type {
@@ -69,7 +73,8 @@ const HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX =
 type HostedSystemMailboxSerializationKey =
   | HostedSystemMailboxRouteAction
   | "apply-vault-share-projection"
-  | `run-device-sync-wake:${string}`;
+  | `run-device-sync-wake:${string}`
+  | `apply-clinical-enrichment:${string}`;
 
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -83,8 +88,6 @@ export type HostedSystemMailboxRouteAction =
   | "run-clinical-records-sync"
   | "apply-clinical-enrichment"
   | "run-device-sync-wake"
-  | "run-environment-interview"
-  | "run-environment-voice"
   | "import-group-journal-fact"
   | "import-reported-daily-metric"
   | "apply-runtime-control-request";
@@ -157,15 +160,26 @@ export async function recoverHostedSystemMailboxClaims(vaultRoot: string): Promi
 }
 
 export async function readHostedSystemMailboxProgress(input: {
+  assistantExecutionBlocked?: boolean;
   importedSeq: string;
   now?: () => string;
+  state?: HostedSystemMailboxState;
   vaultRoot: string;
-}): Promise<HostedSystemMailboxProgress> {
-  return resolveHostedSystemMailboxProgress({
-    importedSeq: input.importedSeq,
-    now: (input.now ?? (() => new Date().toISOString()))(),
-    state: await readHostedSystemMailboxState(input.vaultRoot),
+}): Promise<HostedSystemMailboxProgress & { modelFreeWakeAt: string | null }> {
+  const now = (input.now ?? (() => new Date().toISOString()))();
+  const state = input.state ?? await readHostedSystemMailboxState(input.vaultRoot);
+  // Filter items before selecting a wake: future retries have no executionClass,
+  // and the unrestricted selector can hide them behind an earlier assistant head.
+  const { next } = await resolveHostedSystemMailboxWakeCandidates({
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
+    now: () => now,
+    state: selectHostedModelFreeSystemMailboxItems(state, input.assistantExecutionBlocked),
+    vaultRoot: input.vaultRoot,
   });
+  return {
+    ...resolveHostedSystemMailboxProgress({ importedSeq: input.importedSeq, now, state }),
+    modelFreeWakeAt: next.at,
+  };
 }
 
 export interface HostedSystemMailboxProgress {
@@ -403,6 +417,8 @@ export async function removeHostedSystemMailboxPendingItem(input: {
 }
 
 export async function removeHostedSystemMailboxPendingItemIfCurrent(input: {
+  /** Completion published after this admission's accepted checkpoint. */
+  completedDeviceSyncWake?: Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }> | null;
   item: HostedSystemMailboxPendingItem;
   vaultRoot: string;
 }): Promise<boolean> {
@@ -414,10 +430,26 @@ export async function removeHostedSystemMailboxPendingItemIfCurrent(input: {
         state,
       };
     }
+    const completedWake = input.completedDeviceSyncWake;
+    const coveredIds = completedWake && current.lastAttemptAt !== null
+      ? projectHostedDeviceHintCoverage({
+          now: current.lastAttemptAt,
+          pending: state.pending.map((item) => item === current ? {
+            ...item,
+            deviceSyncContinuationOwner: true,
+            postCheckpointRecord: null,
+            status: "pending",
+            wake: completedWake,
+          } : item),
+        }).get(current.itemId)?.retirableHintIds
+      : undefined;
     return {
       result: true,
       state: {
-        pending: state.pending.filter((item) => item.itemId !== input.item.itemId),
+        pending: state.pending.filter((item) => item.itemId !== input.item.itemId
+          && !(coveredIds?.has(item.itemId)
+            && item.wake.kind === "device-sync.wake"
+            && item.wake.reason === "reconcile_due")),
       },
     };
   });
@@ -433,7 +465,9 @@ export async function removeHostedSystemMailboxPendingItems(input: {
   }));
 }
 
-export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
+// Reuse the existing durable maintenance item for retention and control-plane
+// retries. Its historical dense-raw-retention identity remains restore-compatible.
+export async function setHostedDeviceSyncMaintenanceMailboxWakeAt(input: {
   nextWakeAt: string | null;
   now?: () => string;
   persistAtCanonicalBoundary?: boolean;
@@ -518,6 +552,7 @@ function isHostedDeviceSyncDenseRawRetentionMailboxItem(
 }
 
 export async function resolveHostedSystemMailboxNextWakeAt(input: {
+  assistantExecutionBlocked?: boolean;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   now?: () => string;
@@ -527,6 +562,7 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 }
 
 export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
+  assistantExecutionBlocked?: boolean;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   excludeItemId?: string | null;
@@ -547,6 +583,7 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
 }
 
 export async function resolveHostedSystemMailboxWakeCandidates(input: {
+  assistantExecutionBlocked?: boolean;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   excludeItemId?: string | null;
@@ -571,6 +608,7 @@ export async function resolveHostedSystemMailboxWakeCandidates(input: {
 }
 
 function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
+  assistantExecutionBlocked?: boolean;
   continuationItemIds: ReadonlySet<string>;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
@@ -594,11 +632,11 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     state: remainingStateBeforeAdmission,
   });
   const coverage = projectHostedDeviceHintCoverage({ now, pending: remainingState.pending });
-  const eligibleDirtyHintIds = projectHostedEligibleDirtyHintIds({ ...input, state: remainingState });
+  const eligibleDeviceHintIds = projectHostedEligibleDeviceHintIds({ ...input, state: remainingState });
   const modelFreeProjectedState = usesHostedModelFreeSystemMailboxSelection({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
-  }) ? selectHostedModelFreeSystemMailboxItems(remainingState) : remainingState;
+  }) ? selectHostedModelFreeSystemMailboxItems(remainingState, input.assistantExecutionBlocked) : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
     : {
@@ -612,13 +650,13 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   });
   const ready = findHostedRunnableSystemMailboxItem({
     allowedRouteActions: input.allowedRouteActions ?? null,
-    continuationItemIds: input.continuationItemIds, coverage, eligibleDirtyHintIds, now,
+    continuationItemIds: input.continuationItemIds, coverage, eligibleDeviceHintIds, now,
     state: selectionState,
   });
   const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
     allowedRouteActions: null,
     state: remainingState,
-  }).filter((item) => resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned");
+  }).filter((item) => resolveHostedSystemMailboxItemExecutionClass(item, input.assistantExecutionBlocked) === "default_owned");
   const readyDefaultOwnedItem = findNextHostedSystemMailboxQueueItem({
     allowedRouteActions: null,
     now,
@@ -628,26 +666,26 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     ? selectHostedRuntimeWakeCandidate(defaultOwnedItems.map((item) =>
         createHostedRuntimeWakeCandidate(
           resolveSystemMailboxItemNextWakeAt(item, now),
-          resolveHostedSystemMailboxItemWakeReason(item),
+          resolveHostedSystemMailboxItemWakeReason(item, input.assistantExecutionBlocked),
         )
       ))
     : createHostedRuntimeWakeCandidate(
         resolveSystemMailboxItemNextWakeAt(readyDefaultOwnedItem, now),
-        resolveHostedSystemMailboxItemWakeReason(readyDefaultOwnedItem),
+        resolveHostedSystemMailboxItemWakeReason(readyDefaultOwnedItem, input.assistantExecutionBlocked),
       );
   const next: HostedSystemMailboxWakeCandidate = ready !== null
     ? {
       ...createHostedRuntimeWakeCandidate(
         now,
-        resolveHostedSystemMailboxItemWakeReason(ready),
+        resolveHostedSystemMailboxItemWakeReason(ready, input.assistantExecutionBlocked),
       ),
-      executionClass: resolveHostedSystemMailboxItemExecutionClass(ready),
+      executionClass: resolveHostedSystemMailboxItemExecutionClass(ready, input.assistantExecutionBlocked),
     }
     : {
       ...selectHostedRuntimeWakeCandidate(items.map((item) =>
         createHostedRuntimeWakeCandidate(
           resolveSystemMailboxItemNextWakeAt(item, now),
-          resolveHostedSystemMailboxItemWakeReason(item),
+          resolveHostedSystemMailboxItemWakeReason(item, input.assistantExecutionBlocked),
         )
       )),
       executionClass: null,
@@ -660,10 +698,11 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
 
 function resolveHostedSystemMailboxItemExecutionClass(
   item: HostedSystemMailboxPendingItem,
+  assistantExecutionBlocked = false,
 ): "default_owned" | "model_free" {
   // Local timers have no Web lane sequence, but use the same execution owner
   // as imported work. Sequence numbers track handling, not execution class.
-  return isHostedModelFreeSystemMailboxItem(item)
+  return isHostedModelFreeSystemMailboxItem(item, assistantExecutionBlocked)
     ? "model_free"
     : "default_owned";
 }
@@ -716,7 +755,7 @@ export function findHostedRunnableSystemMailboxItem(input: {
   pendingOnly?: boolean;
   continuationItemIds: ReadonlySet<string>;
   coverage: ReadonlyMap<string, HostedDeviceHintCoverage>;
-  eligibleDirtyHintIds: ReadonlySet<string>;
+  eligibleDeviceHintIds: ReadonlySet<string>;
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
@@ -737,24 +776,28 @@ export function findHostedRunnableSystemMailboxItem(input: {
     && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)
     && item.nextAttemptAt !== null
     && !systemMailboxItemIsDue(item, input.now)
-    && Date.parse(item.occurredAt) <= Date.parse(input.now)
     && [...(input.coverage.get(item.itemId)?.coveredHintIds ?? [])]
-      .some((id) => input.eligibleDirtyHintIds.has(id))
+      .some((id) => input.eligibleDeviceHintIds.has(id))
   );
-  // Canonical dirty work is runnable now even when the owner's stored job retry
+  // Covered dirty or connection work is runnable even when the owner's job retry
   // is later. A returned item is runnable now; its stored retry remains intact
   // and must not be used to re-derive the admission time by the wake publisher.
+  // The owner's source occurrence time is metadata, not a retry deadline.
   return owner ?? null;
 }
 
-export function projectHostedEligibleDirtyHintIds(input: {
+export function projectHostedEligibleDeviceHintIds(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   eligibleItemIds?: ReadonlySet<string>;
+  now: string;
   state: HostedSystemMailboxState;
 }): ReadonlySet<string> {
   return new Set(input.state.pending.filter((item) =>
-    item.wake.kind === "device-sync.wake" && item.wake.reason === "webhook_hint"
+    systemMailboxItemIsDue(item, input.now)
+    && item.wake.kind === "device-sync.wake"
+    && (item.wake.reason === "webhook_hint" || item.wake.reason === "connected"
+      || isHostedManualDeviceReconcileRequest(item.wake))
     && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions ?? null)
     && (input.allowedWakeKinds == null || input.allowedWakeKinds.includes(item.wake.kind))
     && (input.eligibleItemIds === undefined || input.eligibleItemIds.has(item.itemId))
@@ -833,7 +876,8 @@ export function isHostedPlainDeviceSyncWakeHintReason(reason: string | null | un
 
 export interface HostedDeviceHintCoverage {
   coveredHintIds: ReadonlySet<string>;
-  coveredScheduleIds: ReadonlySet<string>;
+  retirableHintIds: ReadonlySet<string>;
+  admittedWake?: HostedDeviceHintCoverageOwner["wake"];
 }
 
 type HostedDeviceHintCoverageOwner = HostedSystemMailboxPendingItem & {
@@ -842,6 +886,7 @@ type HostedDeviceHintCoverageOwner = HostedSystemMailboxPendingItem & {
 };
 
 export function projectHostedDeviceHintCoverage(input: {
+  eligibleItemIds?: ReadonlySet<string>;
   now: string;
   pending: readonly HostedSystemMailboxPendingItem[];
 }): ReadonlyMap<string, HostedDeviceHintCoverage> {
@@ -849,7 +894,7 @@ export function projectHostedDeviceHintCoverage(input: {
   const activeByConnection = new Map<string, {
     owner: HostedDeviceHintCoverageOwner;
     coveredHintIds: Set<string>;
-    coveredScheduleIds: Set<string>;
+    retirableHintIds: Set<string>;
     scheduleBlocked: boolean;
   }>();
   for (const item of input.pending) {
@@ -858,29 +903,125 @@ export function projectHostedDeviceHintCoverage(input: {
     if (isHostedDeviceHintCoverageOwner(item)) {
       const active = {
         owner: item, coveredHintIds: new Set<string>(),
-        coveredScheduleIds: new Set<string>(), scheduleBlocked: false,
+        retirableHintIds: new Set<string>(), scheduleBlocked: false,
       };
       // Another owner is a barrier for the preceding owner on this connection.
       activeByConnection.set(connectionId, active);
       coverage.set(item.itemId, {
         coveredHintIds: active.coveredHintIds,
-        coveredScheduleIds: active.coveredScheduleIds,
+        retirableHintIds: active.retirableHintIds,
       });
       continue;
     }
     const active = activeByConnection.get(connectionId);
     if (!active) continue;
+    const admittedWake = input.eligibleItemIds === undefined || input.eligibleItemIds.has(item.itemId)
+      ? admitHostedDeviceSyncWork(active.owner, item, input.now)
+      : null;
+    if (admittedWake) {
+      active.owner = { ...active.owner, wake: admittedWake };
+      coverage.get(active.owner.itemId)!.admittedWake = admittedWake;
+      active.coveredHintIds.add(item.itemId);
+      active.scheduleBlocked = true;
+      continue;
+    }
     if (!isHostedDeviceHintCoveredByOwner(active.owner, item, input.now)) {
       activeByConnection.delete(connectionId);
       continue;
     }
     active.coveredHintIds.add(item.itemId);
-    // Dirty work needs an executing owner. Idle schedule retirement cannot
-    // cross it, even when later schedules would otherwise be superseded.
-    if (item.wake.reason === "webhook_hint") active.scheduleBlocked = true;
-    if (!active.scheduleBlocked) active.coveredScheduleIds.add(item.itemId);
+    // Retention has already transferred a plain webhook to this exact retry.
+    // Its durable owner will fetch canonical dirty state on the next pass;
+    // keeping the duplicate hint would only block the handling frontier.
+    if (item.wake.reason === "webhook_hint") {
+      active.scheduleBlocked = true;
+      if (item.nextAttemptAt !== null
+        && item.nextAttemptAt === active.owner.nextAttemptAt
+        && !systemMailboxItemIsDue(item, input.now)
+        && (input.eligibleItemIds === undefined || input.eligibleItemIds.has(active.owner.itemId))) {
+        active.retirableHintIds.add(item.itemId);
+      }
+    }
+    if (!active.scheduleBlocked) active.retirableHintIds.add(item.itemId);
   }
   return coverage;
+}
+
+function isHostedManualDeviceReconcileRequest(wake: HostedExecutionSystemWake): boolean {
+  return wake.kind === "device-sync.wake" && wake.reason === "reconcile_due"
+    && wake.hint?.reason === "manual_reconcile"
+    && Object.keys(wake.hint).every((key) => ["reason", "occurredAt"].includes(key));
+}
+
+function isHostedPendingDeviceWork(
+  owner: HostedDeviceHintCoverageOwner,
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): item is HostedDeviceHintCoverageOwner {
+  const wake = item.wake;
+  return wake.kind === "device-sync.wake"
+    && (wake.reason === "connected" || isHostedManualDeviceReconcileRequest(wake))
+    && item.routeAction === "run-device-sync-wake" && item.status === "pending"
+    && item.attemptCount === 0 && item.postCheckpointRecord === null
+    && item.deviceSyncContinuationOwner !== true && item.mailboxLaneSeq !== null
+    && item.mailboxDedupeKey === wake.eventId
+    && BigInt(item.mailboxLaneSeq) > BigInt(owner.mailboxLaneSeq)
+    && wake.userId === owner.wake.userId && wake.provider === owner.wake.provider
+    && wake.expectedConnectedAt === owner.wake.expectedConnectedAt
+    && Date.parse(wake.occurredAt) <= Date.parse(now)
+    && systemMailboxItemIsDue(item, now)
+    && (isHostedManualDeviceReconcileRequest(wake)
+      || Object.keys(wake.hint ?? {}).every((key) =>
+        ["jobs", "scopes", "nextReconcileAt", "occurredAt"].includes(key)));
+}
+
+function admitHostedDeviceSyncWork(
+  owner: HostedDeviceHintCoverageOwner,
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): HostedDeviceHintCoverageOwner["wake"] | null {
+  if (!isHostedPendingDeviceWork(owner, item, now)) return null;
+  const wake = item.wake;
+  if (isHostedManualDeviceReconcileRequest(wake)) {
+    // Preserve the request across preemption before hydration. The service
+    // creates provider-specific manual jobs after restoring the exact retries.
+    return { ...owner.wake, hint: { ...owner.wake.hint, reason: "manual_reconcile_pending" } };
+  }
+  const existing = owner.wake.hint?.jobs ?? [];
+  const incoming = (wake.hint?.jobs ?? []).map((job) => {
+    // Web job keys can repeat across separate source completions in
+    // one account epoch. Give the new request its own job without resetting
+    // the existing job's cursor or backoff. The atomic claim persists this key.
+    if (job.dedupeKey && /^hosted-device-sync:[a-f0-9]{64}$/u.test(job.dedupeKey)
+      && existing.some((retained) => retained.dedupeKey === job.dedupeKey)) {
+      return { ...job, dedupeKey: `hosted-device-sync-connection:${createHash("sha256")
+        .update(JSON.stringify([wake.eventId, job.dedupeKey])).digest("hex")}` };
+    }
+    return job;
+  });
+  // Explicit identities survive transfer; ambiguous collisions stay blocked.
+  if (incoming.length === 0
+    || existing.length + incoming.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT
+    || new Set(incoming.map((job) => job.dedupeKey)).size !== incoming.length
+    || incoming.some((job) => !job.dedupeKey
+      || existing.some((retained) => retained.dedupeKey === job.dedupeKey))) {
+    return null;
+  }
+  const ownerCadence = owner.wake.hint?.nextReconcileAt;
+  const incomingCadence = wake.hint?.nextReconcileAt;
+  return {
+    ...owner.wake,
+    hint: {
+      ...owner.wake.hint,
+      ...(wake.hint?.scopes === undefined ? {} : { scopes: [...wake.hint.scopes] }),
+      ...(incomingCadence && (!ownerCadence || incomingCadence > ownerCadence)
+        ? { nextReconcileAt: incomingCadence } : {}),
+      jobs: [...existing, ...incoming.map((job) => ({
+        ...job,
+        availableAt: job.availableAt ?? wake.occurredAt,
+      }))],
+    },
+  };
 }
 
 function isHostedDeviceHintCoverageOwner(
@@ -912,7 +1053,7 @@ function isHostedDeviceHintCoveredByOwner(
     && wake.expectedConnectedAt === owner.wake.expectedConnectedAt
     && (wake.reason !== "reconcile_due" || cadence != null)
     && (cadence == null || (ownerCadence != null && Date.parse(cadence) < Date.parse(ownerCadence)))
-    && Date.parse(wake.occurredAt) <= Date.parse(now);
+    && (wake.reason === "webhook_hint" || Date.parse(wake.occurredAt) <= Date.parse(now));
 }
 
 export function isHostedRetainedDeviceScheduledAdmission(
@@ -1118,9 +1259,11 @@ export function isHostedSystemMailboxModelFreeExactNotificationItem(
 
 export function isHostedModelFreeSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
+  assistantExecutionBlocked = false,
 ): boolean {
   if (
     classifyHostedSystemMailboxExecutionClass({
+      assistantExecutionBlocked,
       dedupeKey: item.mailboxDedupeKey,
       kind: item.wake.kind,
     }) !== "model_free"
@@ -1134,8 +1277,9 @@ export function isHostedModelFreeSystemMailboxItem(
 
 export function selectHostedModelFreeSystemMailboxItems(
   state: HostedSystemMailboxState,
+  assistantExecutionBlocked = false,
 ): HostedSystemMailboxState {
-  return { pending: state.pending.filter(isHostedModelFreeSystemMailboxItem) };
+  return { pending: state.pending.filter((item) => isHostedModelFreeSystemMailboxItem(item, assistantExecutionBlocked)) };
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {
@@ -1205,7 +1349,25 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
   }
 
   return {
-    pending: pending.map(parseHostedSystemMailboxPendingItem),
+    pending: pending.flatMap((value) => {
+      // Old snapshots can retain retired work at any completion stage. Skip
+      // before parsing its removed payload, action, or post-checkpoint record.
+      const wake = value && typeof value === "object" && "wake" in value
+        ? value.wake : null;
+      if (wake && typeof wake === "object" && "kind" in wake
+        && typeof wake.kind === "string" && isHostedRetiredMailboxKind(wake.kind)) {
+        return [];
+      }
+      if (wake && typeof wake === "object" && "kind" in wake
+        && wake.kind === "assistant.notification.requested"
+        && "notification" in wake && wake.notification
+        && typeof wake.notification === "object"
+        && "notificationPromptProfile" in wake.notification
+        && isHostedRetiredAssistantNotificationProfile(wake.notification.notificationPromptProfile)) {
+        return [];
+      }
+      return [parseHostedSystemMailboxPendingItem(value)];
+    }),
   };
 }
 
@@ -1287,8 +1449,6 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-clinical-records-sync"
     || value === "apply-clinical-enrichment"
     || value === "run-device-sync-wake"
-    || value === "run-environment-interview"
-    || value === "run-environment-voice"
     || value === "import-group-journal-fact"
     || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
@@ -1400,48 +1560,6 @@ function parseHostedSystemMailboxRecordRequest(
           `hosted system mailbox postCheckpointRecord records[${index}]`,
         )
       ),
-    };
-  }
-
-  if (record.kind === "codex-auth.updated") {
-    assertHostedSystemMailboxRecordKeys(
-      record,
-      ["attemptId", "kind", "phase"],
-      "hosted system mailbox Codex auth postCheckpointRecord",
-    );
-    if (record.phase !== "connected" && record.phase !== "disconnected") {
-      throw new TypeError(
-        "hosted system mailbox Codex auth postCheckpointRecord phase is invalid.",
-      );
-    }
-    return {
-      attemptId: readRequiredString(
-        record.attemptId,
-        "hosted system mailbox Codex auth postCheckpointRecord attemptId",
-      ),
-      kind: "codex-auth.updated",
-      phase: record.phase,
-    };
-  }
-
-  if (record.kind === "environment-voice.audio-delete") {
-    assertHostedSystemMailboxRecordKeys(
-      record,
-      ["audioKey", "kind"],
-      "hosted system mailbox Environment voice postCheckpointRecord",
-    );
-    const audioKey = readRequiredString(
-      record.audioKey,
-      "hosted system mailbox Environment voice postCheckpointRecord audioKey",
-    );
-    if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
-      throw new TypeError(
-        "hosted system mailbox Environment voice postCheckpointRecord audioKey is invalid.",
-      );
-    }
-    return {
-      audioKey,
-      kind: "environment-voice.audio-delete",
     };
   }
 
@@ -1642,6 +1760,14 @@ function resolveHostedSystemMailboxSerializationKey(
   ) {
     return `${item.routeAction}:${item.wake.connectionId}`;
   }
+  if (
+    item.routeAction === "apply-clinical-enrichment"
+    && item.wake.kind === "clinical-records.enrichment-requested"
+  ) {
+    // Extraction and mailbox order are independent. A waiting job must not
+    // block the prepared job that the extractor needs applied before advancing.
+    return `${item.routeAction}:${item.wake.jobId}`;
+  }
   return item.routeAction;
 }
 
@@ -1681,12 +1807,13 @@ function resolveSystemMailboxItemNextWakeAt(
 
 function resolveHostedSystemMailboxItemWakeReason(
   item: HostedSystemMailboxPendingItem,
+  assistantExecutionBlocked = false,
 ): string {
   if (item.routeAction === "run-device-sync-wake") {
     return HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
   }
 
-  return isHostedModelFreeSystemMailboxItem(item)
+  return isHostedModelFreeSystemMailboxItem(item, assistantExecutionBlocked)
     ? "mailbox"
     : HOSTED_ASSISTANT_WAKE_REASON;
 }

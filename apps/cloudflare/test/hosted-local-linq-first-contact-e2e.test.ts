@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -45,6 +45,7 @@ import {
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
+  rethrowHostedLocalProviderCountFailure,
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -59,6 +60,7 @@ import {
   HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type ObservedLinqRequest,
   type HostedLocalLinqStub,
@@ -96,7 +98,7 @@ const directRetryRecoveryReplyText =
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const localRunnerIdleTtlMs = "300000";
 const runRealInstantFirstTurn =
   process.env.MURPH_RUN_REAL_LINQ_FIRST_TURN_E2E === "1";
@@ -807,6 +809,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const chatId = `chat_local_linq_link_retry_recovery_${Date.now()}`;
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const primaryText = "Continue after confirmation:";
+    const promptMarker = "Give me the recovery link";
     const eventId = `evt_linq_link_retry_recovery_${richLinkRetryRecoveryUserId}`;
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(richLinkRetryRecoveryUserId),
@@ -848,7 +851,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     requireScenario().queueAssistantResponses([
       `${primaryText}\n${richLinkRetryRecoveryUrl}`,
     ], {
-      matchInputContains: "Give me the recovery link",
+      matchInputContains: promptMarker,
     });
 
     const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -903,7 +906,16 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     );
     expect(completed.lastErrorCode ?? null).toBeNull();
     expect(completed.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    try {
+      expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    } catch (error) {
+      await rethrowHostedLocalProviderCountFailure(error, {
+        scenario: requireScenario(),
+        userId: richLinkRetryRecoveryUserId,
+        providerBaseline,
+        promptMarker,
+      });
+    }
     expect(requireLinqStub().countAcceptedSends(replyPath, primaryMatcher)).toBe(
       primaryBaseline + 1,
     );
@@ -924,7 +936,16 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     });
     expect(lateEnsure.kind).toBe("runtime_processing_accepted");
     await requireScenario().waitForHostedIdle(richLinkRetryRecoveryUserId);
-    expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    try {
+      expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    } catch (error) {
+      await rethrowHostedLocalProviderCountFailure(error, {
+        scenario: requireScenario(),
+        userId: richLinkRetryRecoveryUserId,
+        providerBaseline,
+        promptMarker,
+      });
+    }
     expect(requireLinqStub().countAcceptedSends(replyPath, primaryMatcher)).toBe(
       primaryBaseline + 1,
     );
@@ -1118,7 +1139,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expect(inboundPromptText).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
-    expect(inboundPromptText).toContain("User message:\nSource: linq");
+    expect(inboundPromptText).toContain("Source: linq");
     },
     300_000,
   );
@@ -1514,7 +1535,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
   beforeAll(async () => {
     directWakeRetryBarrier = await startHostedLocalDirectWakeRetryBarrier();
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
     }, {
       faultInjection: true,
       webProcessEnvOverrides: {
@@ -1676,7 +1697,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
 testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200",
     }, {
       faultInjection: true,
     });
@@ -1863,27 +1884,11 @@ function buildActivationWake(userId: string) {
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
-  const rawBody = JSON.stringify(event);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
-
-  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
-    body: rawBody,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "x-webhook-signature": signature,
-      "x-webhook-timestamp": timestamp,
-    },
-    method: "POST",
+  return postHostedLocalLinqWebhook({
+    event,
+    secret: linqWebhookSecret,
+    webBaseUrl: requireScenario().harness.webBaseUrl,
   });
-}
-
-function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
-  const signature = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-
-  return `sha256=${signature}`;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {
@@ -2180,7 +2185,7 @@ async function ensureLinqScenario(): Promise<void> {
   }
 
   await startLinqScenario({
-    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+    HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
   });
 }
 

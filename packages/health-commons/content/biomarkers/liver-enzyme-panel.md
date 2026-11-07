@@ -74,24 +74,15 @@ biomarker:
     - different labs or reference ranges
     - fasting status
 relations:
--
-  type: related_protocol
-  target: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
--
-  type: parent_family
-  target: experiment_family:alcohol-abstinence
--
-  type: cites
-  target: source_artifact:pmid-29726886
--
-  type: cites
-  target: source_artifact:pmid-29730627
--
-  type: cites
-  target: source_artifact:pmid-41399621
--
-  type: cites
-  target: source_artifact:pmid-41899181
+  - type: cites
+    target: source_artifact:pmid-29726886
+  - type: cites
+    target: source_artifact:pmid-29730627
+  - type: cites
+    target: source_artifact:pmid-41399621
+  - type: cites
+    target: source_artifact:pmid-41899181
+
 claims:
 -
   claimId: one-month-liver-marker-context

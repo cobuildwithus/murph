@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createHostedWorkspaceRuntimeBridgeJobOptions } from "@murphai/assistant-runtime/hosted-invocation-testkit";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import {
   buildHostedSecureBoxAad,
@@ -76,6 +81,67 @@ describe("hosted mailbox secure-box encryption", () => {
         field,
         kind: "member.channels.updated",
       });
+    }
+  });
+
+  it.each(["creative-response", "creative-response-text"])("decrypts an old %s wake and terminally skips it without model or delivery effects", async (notificationPromptProfile) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retired-encrypted-wake-"));
+    try {
+      const metadata = {
+        dedupeKey: "assistant.notification.requested:synthetic-retired", itemId: "synthetic-retired",
+        kind: "assistant.notification.requested" as const, lane: "system", laneSeq: "1",
+        occurredAt: "2026-05-01T00:00:00.000Z", payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+        payloadStorage: "inline" as const, userId: "synthetic-group",
+      };
+      const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
+      // Persist the historical producer shape, independent of current builders.
+      const oldWake = {
+        eventId: metadata.dedupeKey, kind: metadata.kind, occurredAt: metadata.occurredAt, userId: metadata.userId,
+        notification: {
+          notificationPromptProfile, instructions: "Retired synthetic creative request.",
+          responsePolicy: { kind: "require_send" }, deliveryDispatchMode: "queue-only",
+          deliveryDedupeToken: "synthetic-retired", deliveryIdempotencyKey: "synthetic-retired",
+          route: { actorId: null, channel: "telegram", delivery: { kind: "thread", target: "synthetic-group" }, identityId: "synthetic-group", threadId: "synthetic-group", threadIsDirect: false },
+        },
+      };
+      const ciphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
+        aad: buildHostedSecureBoxAad({ ...buildHostedMailboxPayloadSecureBoxAad(metadata), domain: "ingress", lane: "mailbox-payload", scope, userId: metadata.userId }),
+        domain: "ingress", lane: "mailbox-payload", plaintext: new TextEncoder().encode(JSON.stringify(oldWake)),
+        rootKey, rootKeyId, scope,
+      }));
+      const decode = vi.fn(async () => ({
+        status: "decoded" as const,
+        wake: parseHostedExecutionWake(await decryptHostedMailboxPayloadCiphertext({
+          ciphertext, environment: createHostedMailboxEncryptionEnvironmentFromIngressRoot({ rootKey, rootKeyId }), metadata,
+        })),
+      }));
+      const unexpectedEffect = vi.fn(() => { throw new Error("Retired work must not access model, delivery, or other runtime effects."); });
+      const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+        decodeMailboxPayload: { decode },
+        platform: {
+          artifactStore: { get: unexpectedEffect, put: unexpectedEffect },
+          effectsPort: { readRawEmailMessage: unexpectedEffect, sendEmail: unexpectedEffect },
+          providerFetch: unexpectedEffect,
+        },
+        request: { attemptId: "synthetic-attempt", leaseGeneration: "1", providerEgressToken: "synthetic-token", userId: metadata.userId, workspaceVersion: "1" },
+        runtime: {}, snapshotArchiveBuilder: { buildEncryptedSnapshot: unexpectedEffect },
+        vaultRoot, waitForBackgroundAssistantWork: async () => {},
+      });
+      await expect(options.importItem({
+        item: {
+          createdAt: metadata.occurredAt, dedupeKey: metadata.dedupeKey, expiresAt: null,
+          id: metadata.itemId, kind: metadata.kind, lane: "system", laneSeq: "1", occurredAt: metadata.occurredAt,
+          payloadBytes: ciphertext.length, payloadInlineCiphertext: ciphertext, payloadRef: null,
+          payloadSchema: metadata.payloadSchema, updatedAt: metadata.occurredAt, userId: metadata.userId,
+        },
+        payload: { payloadCiphertext: ciphertext, payloadSchema: metadata.payloadSchema, requestId: null, source: "inline", status: "resolved" },
+        route: { action: "dispatch-assistant-notification", advanceProgress: true, itemRef: { id: metadata.itemId, kind: metadata.kind, lane: "system", laneSeq: "1" }, state: "route" },
+      })).resolves.toEqual({ reasonCode: "mailbox.notification_profile_retired", status: "skipped" });
+      expect(decode).toHaveBeenCalledOnce();
+      expect(unexpectedEffect).not.toHaveBeenCalled();
+      expect(await readdir(vaultRoot)).toEqual([]);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
     }
   });
 

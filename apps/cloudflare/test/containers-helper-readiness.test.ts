@@ -1,5 +1,8 @@
+import { DatabaseSync } from "node:sqlite";
 import { Container } from "@cloudflare/containers";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { classifyRunnerContainerColdWaitDirectCause } from "../src/runner-container-error-codes.js";
 
 const runnerPort = 8_080;
 const productionStartToListenMs = 1_650;
@@ -24,6 +27,7 @@ interface ProbeStats {
 interface ProbeHarness {
   abortContext: ReturnType<typeof vi.fn>;
   crash(exitCode?: number): void;
+  nativeContainer: { readonly running: boolean };
   runner: Container;
   stats: ProbeStats;
 }
@@ -276,11 +280,132 @@ describe("patched Cloudflare container readiness probes", () => {
     )).toHaveLength(forwardedListenerCount);
   });
 
-  it("propagates caller abort without a retry or late healthy transition", async () => {
+  it.each([
+    {
+      boundary: "startContainerIfNotRunning",
+      listeningAtMs: 10_000,
+      stickyProbeNumbers: [1],
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      probeStartedAtMs: [0],
+      portWaitCount: 0,
+    },
+    {
+      boundary: "waitForPort",
+      listeningAtMs: 0,
+      stickyProbeNumbers: [2],
+      message: "Container request aborted.",
+      probeStartedAtMs: [0, 50],
+      portWaitCount: 1,
+    },
+  ])("proves $boundary cancellation provenance without a retry or late healthy transition", async (scenario) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:02:00.000Z"));
     const harness = await createProbeHarness({
-      listeningAtMs: 10_000,
+      listeningAtMs: scenario.listeningAtMs,
+      stickyProbeNumbers: scenario.stickyProbeNumbers,
+      stickyProbeReleaseMs: 10_000,
+    });
+    const abortController = new AbortController();
+    const waitForPort = vi.spyOn(harness.runner, "waitForPort");
+    const readiness = harness.runner.startAndWaitForPorts({
+      cancellationOptions: {
+        abort: abortController.signal,
+        instanceGetTimeoutMS: 8_000,
+        portProbeTimeoutMS: boundedProbeTimeoutMs,
+        portReadyTimeoutMS: 8_000,
+        waitInterval: runnerPollIntervalMs,
+      },
+      ports: runnerPort,
+    });
+    // Exact top-level messages from the installed patched SDK, not a runner double.
+    const rejection = Promise.all([
+      expect(readiness).rejects.toBeInstanceOf(Error),
+      expect(readiness).rejects.toMatchObject({ message: scenario.message }),
+    ]);
+
+    setTimeout(() => abortController.abort(new DOMException("Timed out", "TimeoutError")), 200);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+
+    expect(harness.stats.startCount).toBe(1);
+    expect(harness.stats.probeStartedAtMs).toEqual(scenario.probeStartedAtMs);
+    expect(harness.stats.abortedProbeCount).toBe(1);
+    expect(harness.stats.maxInFlightProbeCount).toBe(1);
+    expect(harness.stats.inFlightProbeCount).toBe(0);
+    expect(harness.stats.settledProbeCount).toBe(scenario.probeStartedAtMs.length);
+    expect(harness.stats.onStartCount).toBe(0);
+    expect(waitForPort).toHaveBeenCalledTimes(scenario.portWaitCount);
+    expect(harness.stats.onErrorCount).toBe(0);
+    expect(harness.stats.stateTransitions).not.toContain("healthy");
+    expect(harness.abortContext).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "initial wait retaining native no-instance with optimistic running",
+      causeMessage: "there is no container instance that can be provided to this durable object",
+      classification: "native_no_instance",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: true,
+    },
+    {
+      name: "port wait retaining native no-instance with optimistic running",
+      causeMessage: "there is no container instance that can be provided to this durable object",
+      classification: "native_no_instance",
+      failureFromProbeNumber: 2,
+      message: "Container request aborted.",
+      nativeRunning: true,
+    },
+    {
+      name: "port wait retaining a port-not-listening failure",
+      causeMessage: "the container is not listening",
+      classification: "port_not_listening",
+      failureFromProbeNumber: 1,
+      message: "Container request aborted.",
+      nativeRunning: true,
+    },
+    {
+      name: "initial wait losing monitor no-instance behind a port failure",
+      causeMessage: "the container is not listening",
+      classification: "port_not_listening",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: false,
+    },
+    {
+      name: "initial wait with an absent direct cause",
+      causeMessage: undefined,
+      classification: "absent",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: true,
+    },
+    {
+      name: "initial wait with a private unknown failure",
+      causeMessage: "synthetic-private-startup-sentinel",
+      classification: "other",
+      failureFromProbeNumber: 1,
+      message: "Aborted waiting for container to start as we received a cancellation signal",
+      nativeRunning: true,
+    },
+  ])("observes direct startup failure context: $name", async (scenario) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-18T12:00:00.000Z"));
+    const probeFailure = scenario.causeMessage === undefined
+      ? undefined
+      : new Error(scenario.causeMessage);
+    const harness = await createProbeHarness({
+      listeningAtMs: 0,
+      ...(scenario.nativeRunning ? {} : {
+        monitorFailure: new Error(
+          "there is no container instance that can be provided to this durable object",
+        ),
+      }),
+      probeFailure: {
+        fromProbeNumber: scenario.failureFromProbeNumber,
+        value: probeFailure,
+      },
       stickyProbeReleaseMs: 10_000,
     });
     const abortController = new AbortController();
@@ -293,22 +418,37 @@ describe("patched Cloudflare container readiness probes", () => {
         waitInterval: runnerPollIntervalMs,
       },
       ports: runnerPort,
-    });
-    const rejection = expect(readiness).rejects.toThrow(
-      "Aborted waiting for container to start",
-    );
+    }).catch((error: unknown) => ({
+      directCause: classifyRunnerContainerColdWaitDirectCause(error),
+      error,
+      nativeRunning: harness.nativeContainer.running,
+    }));
 
-    setTimeout(() => abortController.abort(new DOMException("Timed out", "TimeoutError")), 200);
+    setTimeout(() => abortController.abort(new DOMException("Timed out", "TimeoutError")), 600);
     await vi.advanceTimersByTimeAsync(1_000);
-    await rejection;
+    const failure = await readiness;
+    if (!failure) {
+      throw new Error("Expected the native readiness wait to fail");
+    }
 
-    expect(harness.stats.startCount).toBe(1);
-    expect(harness.stats.probeStartedAtMs).toEqual([0]);
-    expect(harness.stats.abortedProbeCount).toBe(1);
-    expect(harness.stats.maxInFlightProbeCount).toBe(1);
-    expect(harness.stats.inFlightProbeCount).toBe(0);
+    // Native I/O supplies the failure; the installed SDK owns the wrapper and
+    // its retained direct cause. A monitor refusal can be lost at this boundary.
+    expect(failure.error).toMatchObject({
+      cause: probeFailure,
+      message: scenario.message,
+    });
+    expect(failure.directCause).toBe(scenario.classification);
+    expect(failure.nativeRunning).toBe(scenario.nativeRunning);
+    expect(JSON.stringify({
+      directCause: failure.directCause,
+      nativeRunning: failure.nativeRunning,
+    })).not.toContain("synthetic-private-startup-sentinel");
+    expect(harness.stats.healthyAtMs).toBeNull();
     expect(harness.stats.onStartCount).toBe(0);
+    expect(harness.stats.onErrorCount).toBe(0);
     expect(harness.stats.stateTransitions).not.toContain("healthy");
+    expect(harness.stats.inFlightProbeCount).toBe(0);
+    expect(harness.stats.settledProbeCount).toBe(harness.stats.probeStartedAtMs.length);
     expect(harness.abortContext).not.toHaveBeenCalled();
   });
 
@@ -374,6 +514,8 @@ async function runTimingVariant(
 async function createProbeHarness(options: {
   crashAtMs?: number;
   listeningAtMs: number;
+  monitorFailure?: Error;
+  probeFailure?: { fromProbeNumber: number; value: unknown };
   stickyProbeNumbers?: readonly number[];
   stickyProbeReleaseMs: number;
 }): Promise<ProbeHarness> {
@@ -474,6 +616,14 @@ async function createProbeHarness(options: {
             return;
           }
 
+          const probeFailure = options.probeFailure;
+          if (probeFailure && probeNumber >= probeFailure.fromProbeNumber) {
+            timer = setTimeout(() => {
+              finish(() => reject(probeFailure.value));
+            }, readyProbeResponseMs);
+            return;
+          }
+
           const useStickyRelease = options.stickyProbeNumbers?.includes(
             probeNumber,
           ) ?? probeStartedAtMs < options.listeningAtMs;
@@ -486,7 +636,13 @@ async function createProbeHarness(options: {
         });
       },
     })),
-    monitor: vi.fn(() => monitor),
+    monitor: vi.fn(() => {
+      if (options.monitorFailure) {
+        running = false;
+        rejectMonitor(options.monitorFailure);
+      }
+      return monitor;
+    }),
     signal: vi.fn((_signal: number) => undefined),
     start: vi.fn((_config: unknown) => {
       running = true;
@@ -555,7 +711,123 @@ async function createProbeHarness(options: {
   return {
     abortContext,
     crash,
+    nativeContainer: containerBinding,
     runner,
     stats,
   };
+}
+
+// This suite exercises the installed patched SDK's SQL, scheduling, generic
+// request accounting, and alarm owner. The adapter supplies storage/native I/O,
+// not an imitation deadline or alarm algorithm.
+describe("native container deadline schedules", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("runs a persisted deadline despite generic RPC activity and inflight requests", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const database = new DatabaseSync(":memory:");
+    let releaseRequest!: (response: Response) => void;
+    const responsePending = new Promise<Response>((resolve) => { releaseRequest = resolve; });
+    const callback = vi.fn(async () => { native.running = false; });
+    const { native, runner } = await createNativeScheduleHarness(database, callback, () => responsePending);
+    try {
+      await runner.schedule(new Date(now + 600_000), "onActivityExpired", null);
+      native.running = true;
+      const request = runner.containerFetch("http://container/internal/runtime-wake");
+      await vi.waitFor(() => expect(native.getTcpPort).toHaveBeenCalled());
+      vi.setSystemTime(now + 600_000);
+      runner.renewActivityTimeout();
+      await runner.alarm();
+      expect(callback).toHaveBeenCalledOnce();
+      expect(await runner.listSchedules("onActivityExpired")).toEqual([]);
+      const response = new Response(null, { status: 204 });
+      Object.defineProperty(response, "webSocket", { value: null });
+      releaseRequest(response);
+      await expect(request).resolves.toMatchObject({ status: 204 });
+      expect(await runner.listSchedules("onActivityExpired")).toEqual([]);
+    } finally {
+      releaseRequest(new Response(null, { status: 204 }));
+      database.close();
+    }
+  });
+
+  it("preserves a pre-armed recovery task when the SDK consumes a throwing callback", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const database = new DatabaseSync(":memory:");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { runner } = await createNativeScheduleHarness(database, async () => {
+      runner.deleteSchedules("onActivityExpired");
+      await runner.schedule(new Date(now + 60_000), "onActivityExpired", null);
+      throw new Error("synthetic health/storage failure after prearming");
+    });
+    try {
+      const original = await runner.schedule(new Date(now), "onActivityExpired", null);
+      await runner.alarm();
+      expect(await runner.getSchedule(original.taskId)).toBeUndefined();
+      expect(await runner.listSchedules("onActivityExpired")).toMatchObject([{ time: (now + 60_000) / 1_000 }]);
+    } finally { database.close(); }
+  });
+
+  it("keeps tasks through object replacement and uses the preceding callback name", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const database = new DatabaseSync(":memory:");
+    try {
+      const original = await createNativeScheduleHarness(database, async () => undefined);
+      const task = await original.runner.schedule(new Date(now + 600_000), "onActivityExpired", null);
+      vi.setSystemTime(now + 600_000);
+      const callback = vi.fn(async () => undefined);
+      const replacement = await createNativeScheduleHarness(database, callback);
+      expect(await replacement.runner.listSchedules("onActivityExpired")).toEqual([task]);
+      await replacement.runner.alarm();
+      expect(callback).toHaveBeenCalledOnce();
+      expect(await replacement.runner.listSchedules("onActivityExpired")).toEqual([]);
+    } finally { database.close(); }
+  });
+});
+
+async function createNativeScheduleHarness(
+  database: DatabaseSync,
+  onExpiry: () => Promise<void>,
+  fetchResponse: () => Promise<Response> = async () => new Response(null, { status: 204 }),
+) {
+  const values = new Map<string, unknown>([["__CF_CONTAINER_STATE", { status: "healthy", lastChange: Date.now() }]]);
+  const constructorOperations: Promise<unknown>[] = [];
+  const native = {
+    running: false,
+    getTcpPort: vi.fn(() => ({ fetch: fetchResponse })),
+  };
+  const storage = {
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: unknown) => { values.set(key, value); },
+    kv: { get: (key: string) => values.get(key), put: (key: string, value: unknown) => { values.set(key, value); } },
+    setAlarm: vi.fn(async (_at: number) => undefined),
+    deleteAlarm: vi.fn(async () => undefined),
+    sync: async () => undefined,
+    sql: {
+      exec: (query: string, ...bindings: (string | number | boolean | null)[]) =>
+        database.prepare(query).all(...bindings.map((value) => typeof value === "boolean" ? Number(value) : value)),
+    },
+  };
+  class ScheduledContainer extends Container {
+    override sleepAfter = "10m";
+    override defaultPort = runnerPort;
+    override async onActivityExpired(): Promise<void> { await onExpiry(); }
+  }
+  const runner = new ScheduledContainer({
+    container: native,
+    storage,
+    blockConcurrencyWhile(operation: () => Promise<unknown>) {
+      const promise = Promise.resolve().then(operation);
+      constructorOperations.push(promise);
+      return promise;
+    },
+  } as never, {});
+  await Promise.all(constructorOperations);
+  return { native, runner };
 }

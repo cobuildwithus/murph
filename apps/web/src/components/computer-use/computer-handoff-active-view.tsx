@@ -1,18 +1,29 @@
 "use client";
 
 import { track } from "@vercel/analytics";
-import { ArrowUpRight, CheckCircle2, Keyboard, Monitor } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Keyboard, MessageCircle } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { Button, buttonVariants } from "@/src/components/ui/button";
-import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
-import { cn } from "@/src/lib/utils";
+import {
+  ComputerHandoffBrowserObject,
+  ComputerHandoffSavingScreen,
+} from "@/src/components/computer-use/computer-handoff-screens";
+import {
+  LINK_PAGE_PILL_CLASS,
+  LinkPagePill,
+  LinkPageScreen,
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
+import { Button } from "@/src/components/ui/button";
 
 type Phase =
   | { kind: "idle"; error: string | null }
   | { kind: "saving" }
   | { kind: "done"; redirectTo: string };
+
+const HANDOFF_COVER_CLASS =
+  "fixed inset-0 z-20 flex flex-col overflow-y-auto bg-[#1C1915] text-[#FFFCF6]";
 
 interface ComputerHandoffActiveViewProps {
   doneEndpoint: string;
@@ -117,125 +128,153 @@ export function ComputerHandoffActiveView({
           {!takeoverStarted && phase.kind === "idle" ? (
             <div
               aria-describedby="computer-handoff-takeover-description"
-              aria-labelledby="computer-handoff-takeover-title"
+              aria-label="Your turn"
               aria-modal="true"
-              className="fixed inset-0 z-10 flex min-h-dvh items-center justify-center bg-background px-6 py-12 text-foreground"
+              className={HANDOFF_COVER_CLASS}
               role="dialog"
             >
-              <div className="flex w-full max-w-sm flex-col items-center text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card">
-                  <Monitor className="h-5 w-5 text-primary" aria-hidden="true" />
-                </span>
-                <p className="mt-5 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                  Private browser
-                </p>
-                <h1
-                  id="computer-handoff-takeover-title"
-                  className="mt-3 font-serif text-3xl leading-tight text-balance"
-                >
-                  Your turn
-                </h1>
-                <p
-                  id="computer-handoff-takeover-description"
-                  className="mt-4 text-sm leading-6 text-muted-foreground text-pretty"
-                >
-                  Take over to finish this step. Use the keyboard icon in the browser
-                  to type or paste.
-                </p>
-                <Button
-                  type="button"
-                  size="lg"
-                  className="mt-8 w-full"
-                  onClick={onTakeOver}
-                  aria-label="Take over the private browser"
-                >
-                  Take over
-                </Button>
-              </div>
+              <LinkPageSurface>
+                <ComputerHandoffTakeoverScreen onTakeOver={onTakeOver} />
+              </LinkPageSurface>
             </div>
           ) : null}
           {takeoverStarted ? (
             <div
-              className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3"
+              className="pointer-events-none fixed inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-4"
               style={{
-                paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)",
+                paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 1rem)",
               }}
             >
-              <ComputerHandoffFloatingIsland
-                handle={
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-                  </span>
-                }
-              >
-                <div className="flex max-w-[calc(100vw-6rem)] flex-wrap items-center gap-2">
-                  {idleError ? (
-                    <span role="alert" className="text-xs text-destructive">
-                      {idleError}
-                    </span>
-                  ) : null}
-                  <Button
-                    type="button"
-                    size="lg"
-                    onClick={onDone}
-                    disabled={controlsDisabled}
-                    aria-label="Finish this step and return to Murph"
-                  >
-                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                    Done
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon-lg"
-                    className="hidden size-11 rounded-2xl sm:inline-flex"
-                    onClick={focusLiveView}
-                    disabled={controlsDisabled}
-                    aria-label="Focus the private browser"
-                    title="Focus browser"
-                  >
-                    <Keyboard className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </div>
-              </ComputerHandoffFloatingIsland>
+              <ComputerHandoffIsland
+                controlsDisabled={controlsDisabled}
+                error={idleError}
+                onDone={onDone}
+                onFocus={focusLiveView}
+              />
             </div>
           ) : null}
         </>
       ) : null}
       {phase.kind === "saving" ? (
-        <div
-          aria-busy
-          aria-live="polite"
-          role="status"
-          className="fixed inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-background px-6 py-12 text-foreground"
-        >
-          <MurphPulseLoader className="h-8 w-auto" />
-          <p className="text-sm font-medium text-muted-foreground">
-            Saving your progress...
-          </p>
+        <div aria-busy aria-live="polite" className={HANDOFF_COVER_CLASS} role="status">
+          <LinkPageSurface>
+            <ComputerHandoffSavingScreen announceDetail={false} />
+          </LinkPageSurface>
         </div>
       ) : null}
       {phase.kind === "done" ? (
-        <div
-          aria-live="polite"
-          role="status"
-          className="fixed inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-background px-6 py-12 text-foreground"
-        >
-          <CheckCircle2 className="h-8 w-8 text-primary" aria-hidden="true" />
-          <p className="font-serif text-2xl font-normal text-foreground">
-            All set
-          </p>
-          <a
-            ref={successAnchorRef}
-            href={phase.redirectTo}
-            className={cn(buttonVariants({ size: "lg" }))}
-            aria-label="Open Murph to send your reply"
-          >
-            <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-            Open Murph
-          </a>
+        <div aria-live="polite" className={HANDOFF_COVER_CLASS} role="status">
+          <LinkPageSurface>
+            <ComputerHandoffDoneScreen
+              anchorRef={successAnchorRef}
+              redirectTo={phase.redirectTo}
+            />
+          </LinkPageSurface>
         </div>
       ) : null}
     </>
+  );
+}
+
+export function ComputerHandoffTakeoverScreen({
+  onTakeOver,
+}: {
+  onTakeOver?: () => void;
+}) {
+  return (
+    <LinkPageScreen
+      actions={
+        <LinkPagePill aria-label="Take over the private browser" onClick={onTakeOver}>
+          Take over
+        </LinkPagePill>
+      }
+      announceDetail={false}
+      detail={
+        <span id="computer-handoff-takeover-description">
+          Take over to finish this step. Use the keyboard icon to type or paste.
+        </span>
+      }
+      title="Your turn."
+    >
+      <ComputerHandoffBrowserObject />
+    </LinkPageScreen>
+  );
+}
+
+export function ComputerHandoffDoneScreen({
+  anchorRef,
+  redirectTo,
+}: {
+  anchorRef?: Ref<HTMLAnchorElement>;
+  redirectTo: string;
+}) {
+  return (
+    <LinkPageScreen
+      actions={
+        <a
+          aria-label="Open Murph to send your reply"
+          className={LINK_PAGE_PILL_CLASS}
+          href={redirectTo}
+          ref={anchorRef}
+        >
+          <MessageCircle aria-hidden="true" className="size-5 shrink-0" />
+          {redirectTo.startsWith("sms:") ? "Open Messages" : "Open Murph"}
+        </a>
+      }
+      announceDetail={false}
+      detail="Reply to Murph to continue."
+      title="All set."
+    />
+  );
+}
+
+export function ComputerHandoffIsland({
+  controlsDisabled = false,
+  error = null,
+  keepInViewport,
+  onDone,
+  onFocus,
+  persistKey,
+}: {
+  controlsDisabled?: boolean;
+  error?: ReactNode;
+  keepInViewport?: boolean;
+  onDone?: () => void;
+  onFocus?: () => void;
+  persistKey?: string | null;
+}) {
+  return (
+    <ComputerHandoffFloatingIsland
+      keepInViewport={keepInViewport}
+      handle={error ? (
+        <span className="text-sm font-medium leading-5 text-[#E27B6E]" role="alert">
+          {error}
+        </span>
+      ) : (
+        <span className="text-base font-semibold leading-[22px]">Murph is waiting</span>
+      )}
+      persistKey={persistKey}
+    >
+      <Button
+        aria-label="Focus the private browser"
+        className="hidden size-[52px] shrink-0 rounded-full bg-[#2A2622] text-[#FFFCF6] hover:bg-[#34302B] sm:inline-flex"
+        disabled={controlsDisabled}
+        onClick={onFocus}
+        size="unstyled"
+        title="Focus browser"
+        type="button"
+        variant="unstyled"
+      >
+        <Keyboard className="h-4 w-4" aria-hidden="true" />
+      </Button>
+      <LinkPagePill
+        aria-label="Finish this step and return to Murph"
+        className="h-[52px] w-auto shrink-0 px-[26px]"
+        disabled={controlsDisabled}
+        onClick={onDone}
+      >
+        Done
+      </LinkPagePill>
+    </ComputerHandoffFloatingIsland>
   );
 }

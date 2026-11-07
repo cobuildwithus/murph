@@ -1,6 +1,8 @@
+import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type {
+  HostedExecutionConversationMessageWake,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
@@ -12,7 +14,12 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import {
+  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
+  hasHostedLinqInboundWithinDays,
+} from "./linq-daily-state";
+import {
   hostedOnboardingError,
+  type HostedLinqRouteAuthorityMismatchReason,
 } from "./errors";
 import {
   evaluateHostedLinqEgressPolicy,
@@ -46,6 +53,7 @@ import {
 import {
   buildHostedMailboxLiveItemWhere,
   decodeHostedMailboxStoredPayload,
+  hasHostedMailboxAutomationEngagementSince,
   resolveHostedMailboxPayloadRef,
 } from "../hosted-mailbox/store";
 
@@ -56,7 +64,6 @@ export type HostedLinqRuntimeEgressAssertionResult = {
   sourceEventId?: string;
 };
 
-const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
 const HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT = {
@@ -84,7 +91,7 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
   prisma: HostedLinqEngagementClient;
   target: string | null;
   targetKind?: string | null;
-}): Promise<{ policy: HostedLinqEgressPolicyResult }> {
+}): Promise<{ policy: HostedLinqEgressPolicyResult; service: string | null }> {
   const targetKind = input.targetKind?.trim() ?? "";
   const newConversation = targetKind === "participant";
   const chatHealth = newConversation
@@ -119,6 +126,7 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
       });
 
   return {
+    service: chatHealth?.service ?? null,
     policy: evaluateHostedLinqEgressPolicy({
       chatHealthStatus: chatHealth?.providerStatus ?? null,
       lineDeliveryHealthStatus: line?.healthStatus ?? null,
@@ -128,6 +136,42 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
       newConversation,
     }),
   };
+}
+
+// Called only after Web resolves the exact Linq route. Other channels never
+// consult this policy, and replies proven against accepted ingress bypass it.
+export async function isHostedLinqProactivityPaused(input: {
+  answeredMailboxItemIds: readonly string[];
+  authority: HostedLinqRuntimeEgressAssertionResult;
+  memberId: string;
+  now: Date;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string | null;
+  service: string | null;
+}): Promise<boolean> {
+  const service = input.service?.trim().toLowerCase();
+  if (service === "sms" || service === "rcs") return false;
+  const route = input.authority.resolvedRoute;
+  if (input.authority.sourceEventId || route.targetKind === "participant") {
+    return false;
+  }
+  if (await hasHostedLinqInboundWithinDays(input)) return false;
+  if (await hasHostedMailboxAutomationEngagementSince({
+    prisma: input.prisma,
+    since: new Date(input.now.getTime()
+      - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+    userId: input.memberId,
+  })) return false;
+  // Group authority is resolved without decoding a reply. Only on a would-be
+  // pause, prove any exact reply against ingress instead of a lagging daily row.
+  return route.threadIsDirect || !await readMatchingPersistedHostedLinqInbound({
+    answeredMailboxItemIds: input.answeredMailboxItemIds,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyToMessageId: input.replyToMessageId,
+    target: route.target,
+    threadIsDirect: false,
+  });
 }
 
 export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
@@ -202,12 +246,12 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     // authority: a personal proactive send still cannot reach a group thread,
     // and the owning container is not held to a home route it cannot have.
     if (targetThreadRoute.containerMemberId !== input.memberId) {
-      throwHostedLinqRouteAuthorityMismatch();
+      throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
     }
 
     const target = normalizeNullable(input.target);
     if (!target) {
-      throwHostedLinqRouteAuthorityMismatch();
+      throwHostedLinqRouteAuthorityMismatch("durable_target_missing");
     }
     const fromPhoneNumber = await readHostedLinqLinePhoneNumberByLookupKey({
       phoneNumberLookupKey: targetThreadRoute.accountLookupKey,
@@ -229,7 +273,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     };
   }
 
-  const persistedDirectInbound = await readMatchingPersistedHostedLinqDirectInbound({
+  const persistedDirectInbound = await readMatchingPersistedHostedLinqInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     memberId: input.memberId,
     prisma: input.prisma,
@@ -283,12 +327,13 @@ interface MatchingPersistedHostedLinqDirectInbound {
   target: string;
 }
 
-async function readMatchingPersistedHostedLinqDirectInbound(input: {
+async function readMatchingPersistedHostedLinqInbound(input: {
   answeredMailboxItemIds: readonly string[];
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
   target: string | null;
+  threadIsDirect?: boolean;
 }): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
   const target = normalizeNullable(input.target);
   const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
@@ -312,7 +357,7 @@ async function readMatchingPersistedHostedLinqDirectInbound(input: {
     });
 
     for (const item of candidates) {
-      const matched = await readMatchingPersistedHostedLinqDirectInboundMailboxItem({
+      const matched = await readMatchingPersistedHostedLinqInboundMailboxItem({
         item,
         memberId: input.memberId,
         payloadCiphertext:
@@ -320,6 +365,7 @@ async function readMatchingPersistedHostedLinqDirectInbound(input: {
         prisma: input.prisma,
         replyToMessageId: requestReplyToMessageId,
         target,
+        threadIsDirect: input.threadIsDirect ?? true,
       });
       if (matched) {
         return matched;
@@ -330,14 +376,95 @@ async function readMatchingPersistedHostedLinqDirectInbound(input: {
   });
 }
 
-async function readMatchingPersistedHostedLinqDirectInboundMailboxItem(input: {
+async function readMatchingPersistedHostedLinqInboundMailboxItem(input: {
   item: HostedLinqDirectInboundMailboxItem;
   memberId: string;
   payloadCiphertext: string | null;
   prisma: HostedLinqEngagementClient;
   replyToMessageId: string;
   target: string;
+  threadIsDirect: boolean;
 }): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
+  const wake = await readPersistedHostedLinqInboundMailboxItem(input);
+  if (
+    !wake
+    || wake.message.channel !== "linq"
+    || wake.message.linqMessage.isFromMe !== false
+    || wake.message.linqMessage.threadIsDirect !== input.threadIsDirect
+    || wake.message.linqMessage.chatId !== input.target
+    || wake.message.linqMessage.messageId !== input.replyToMessageId
+  ) {
+    return null;
+  }
+
+  return {
+    accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
+    directRecipient: wake.message.linqMessage.from,
+    sourceEventId: input.item.dedupeKey,
+    target: wake.message.linqMessage.chatId,
+  };
+}
+
+export async function hasLaterHostedLinqMemberMessage(input: {
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string | null;
+  sourceEventId: string;
+  target: string;
+}): Promise<boolean> {
+  const target = normalizeNullable(input.target);
+  const replyToMessageId = normalizeNullable(input.replyToMessageId);
+  if (!target || !replyToMessageId) {
+    return false;
+  }
+
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const availableAt = new Date();
+    const candidates = await readHostedLinqDirectInboundCandidates({
+      answeredMailboxItemIds: [],
+      availableAt,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+    const payloadsByMailboxItemId = await readHostedLinqDirectInboundPayloads({
+      availableAt,
+      candidates,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+
+    let laterMemberMessage = false;
+    for (const item of candidates) {
+      if (item.dedupeKey === input.sourceEventId) {
+        return laterMemberMessage;
+      }
+      const wake = await readPersistedHostedLinqInboundMailboxItem({
+        item,
+        memberId: input.memberId,
+        payloadCiphertext:
+          payloadsByMailboxItemId.get(item.id)?.payloadCiphertext ?? null,
+        prisma: input.prisma,
+      });
+      if (
+        wake?.message.channel === "linq"
+        && wake.message.linqMessage.isFromMe === false
+        && wake.message.linqMessage.threadIsDirect === true
+        && wake.message.linqMessage.chatId === target
+        && wake.message.linqMessage.messageId !== replyToMessageId
+      ) {
+        laterMemberMessage = true;
+      }
+    }
+    return false;
+  });
+}
+
+async function readPersistedHostedLinqInboundMailboxItem(input: {
+  item: HostedLinqDirectInboundMailboxItem;
+  memberId: string;
+  payloadCiphertext: string | null;
+  prisma: HostedLinqEngagementClient;
+}): Promise<HostedExecutionConversationMessageWake | null> {
   const item = input.item;
   if (
     item.userId !== input.memberId
@@ -370,21 +497,11 @@ async function readMatchingPersistedHostedLinqDirectInboundMailboxItem(input: {
     || wake.userId !== input.memberId
     || wake.eventId !== item.dedupeKey
     || wake.occurredAt !== item.occurredAt.toISOString()
-    || wake.message.channel !== "linq"
-    || wake.message.linqMessage.isFromMe !== false
-    || wake.message.linqMessage.threadIsDirect !== true
-    || wake.message.linqMessage.chatId !== input.target
-    || wake.message.linqMessage.messageId !== input.replyToMessageId
   ) {
     return null;
   }
 
-  return {
-    accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
-    directRecipient: wake.message.linqMessage.from,
-    sourceEventId: item.dedupeKey,
-    target: wake.message.linqMessage.chatId,
-  };
+  return wake;
 }
 
 async function readHostedLinqDirectInboundCandidates(input: {
@@ -488,7 +605,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
   if (chatLookupKeys.length === 0 && !canResolveHostedLinqHomeRouteOverride(input)) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("requested_target_missing");
   }
 
   const routing = await input.prisma.hostedMemberRouting.findUnique({
@@ -513,7 +630,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   });
 
   if (!routing) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("member_routing_missing");
   }
 
   const exactRouteKind =
@@ -527,7 +644,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   const routeKind = exactRouteKind
     ?? (canResolveHostedLinqHomeRouteOverride(input) ? "current" : null);
   if (!routeKind) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("target_not_owned");
   }
 
   if (exactRouteKind) {
@@ -760,20 +877,23 @@ async function resolveHostedMemberDirectLinqRoute(input: {
       ? input.privateState.linqRecipientPhone
       : input.privateState.pendingLinqRecipientPhone,
   );
-  if (
-    !target
-    || !targetLookupKey
-    || !createHostedLinqChatLookupKeyReadCandidates(target).includes(targetLookupKey)
-    || (
-      linePhoneNumberLookupKey !== null
-      && (
-        fromPhoneNumber === null
-        || !createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber)
-          .includes(linePhoneNumberLookupKey)
-      )
-    )
-  ) {
-    throwHostedLinqRouteAuthorityMismatch();
+  if (!target) {
+    throwHostedLinqRouteAuthorityMismatch("route_projection_chat_missing");
+  }
+  if (!targetLookupKey) {
+    throwHostedLinqRouteAuthorityMismatch("route_projection_chat_lookup_key_missing");
+  }
+  if (!createHostedLinqChatLookupKeyReadCandidates(target).includes(targetLookupKey)) {
+    throwHostedLinqRouteAuthorityMismatch("route_projection_chat_lookup_key_mismatch");
+  }
+  if (linePhoneNumberLookupKey !== null) {
+    if (fromPhoneNumber === null) {
+      throwHostedLinqRouteAuthorityMismatch("route_projection_sender_phone_missing_or_invalid");
+    }
+    if (!createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber)
+      .includes(linePhoneNumberLookupKey)) {
+      throwHostedLinqRouteAuthorityMismatch("route_projection_sender_lookup_key_mismatch");
+    }
   }
 
   const contactKind = normalizeHostedLinqParticipantContactKind(
@@ -837,7 +957,7 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
       || !createHostedPhoneLookupKeyReadCandidates(phoneNumber)
         .includes(input.contactLookupKey)
     ) {
-      throwHostedLinqRouteAuthorityMismatch();
+      throwHostedLinqRouteAuthorityMismatch("pending_recipient_invalid");
     }
     return {
       lookupKey: input.contactLookupKey,
@@ -854,7 +974,7 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
     where: { memberId: input.memberId },
   });
   if (!identity) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("member_identity_missing");
   }
   const phoneNumber = normalizePhoneNumber(
     await readHostedMemberIdentityPhoneNumber(identity, input.prisma),
@@ -870,7 +990,7 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
     || !phoneLookupKeys.includes(identityLookupKey)
     || !phoneLookupKeys.includes(expectedLookupKey)
   ) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("member_recipient_invalid");
   }
   return {
     lookupKey: expectedLookupKey,
@@ -922,12 +1042,13 @@ function canResolveHostedLinqHomeRouteOverride(input: {
   );
 }
 
-function throwHostedLinqRouteAuthorityMismatch(): never {
+function throwHostedLinqRouteAuthorityMismatch(reason: HostedLinqRouteAuthorityMismatchReason): never {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
     httpStatus: 403,
     message: "Linq egress target does not match the runtime user's Linq route.",
     retryable: false,
+    linqRouteAuthorityMismatchReason: reason,
   });
 }
 
@@ -1007,8 +1128,7 @@ function isHostedLinqSignupWelcomeFirstContact(input: {
   idempotencyKey?: string | null;
   memberId: string;
 }): boolean {
-  return normalizeNullable(input.idempotencyKey)
-    === `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  return isHostedMemberSignupWelcomeDeliveryIdentity(input.idempotencyKey, input.memberId);
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

@@ -5,6 +5,23 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  signal: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: mocks.signal }));
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/legal/consent")>(),
+  assertHostedHistoricalLaunchConsentGranted: async () => undefined,
+}));
+// Replace only external crypto; admission locks, append and candidate SQL are real.
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(),
+  prepareHostedDomainRootForWeb: async ({ userId }: { userId: string }) => ({ domain: "ingress", userId, rootKeyId: "synthetic-root" }),
+  revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({}) }),
+}));
+vi.mock("@/src/lib/hosted-mailbox/encryption", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-mailbox/encryption")>(),
+  encryptHostedMailboxPayloadStringFromPreparedRoot: async () => "synthetic-encrypted-payload",
 }));
 
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
@@ -16,6 +33,7 @@ vi.mock("@/src/lib/prisma", async (importOriginal) => {
   };
 });
 
+import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
 import {
   runHostedPreferenceHandoffSweeper,
 } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
@@ -26,6 +44,8 @@ import {
   hasHostedRuntimeActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { submitMemberAction } from "@/src/lib/member-actions/submit";
+import type { MemberActionV1 } from "@murphai/contracts";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -51,6 +71,7 @@ describe.skipIf(!runPostgresProof)(
     });
 
     afterEach(async () => {
+      vi.useRealTimers();
       if (prisma && memberIds.length > 0) {
         await prisma.hostedThreadContainer.deleteMany({
           where: { memberId: { in: memberIds } },
@@ -64,6 +85,25 @@ describe.skipIf(!runPostgresProof)(
 
     afterAll(async () => {
       await prisma?.$disconnect();
+    });
+
+    it.each(["canceled", "paused", "unpaid", "past_due"] as const)("recovers %s work within a limit-one page and stops after import", async (billingStatus) => {
+      const client = requirePrisma(prisma);
+      const now = new Date();
+      const ids = [createId("suspended"), createId("withdrawn"), createId("lapsed")];
+      memberIds.push(...ids);
+      await client.hostedMember.createMany({ data: ids.map((id, index) => ({ id, billingStatus, suspendedAt: index === 0 ? now : null })) });
+      await client.hostedConsentGrant.create({ data: { memberId: ids[1], scope: "launch.health-data", status: "revoked", documentVersionsJson: {}, source: "web_onboarding", grantedAt: now, revokedAt: now } });
+      await client.hostedMailboxItem.createMany({ data: ids.map((userId, index) => mailboxItem({
+        id: createId("lapsed_handoff"), userId, kind: "device-sync.wake", createdAt: new Date(now.getTime() - (4 - index) * 60_000),
+      })) });
+      const requestHandoff = buildRequestHandoff([]);
+      const recover = () => runHostedPreferenceHandoffSweeper({ handoffLimit: 1, now,
+        hasActiveAccess: userId => hasHostedRuntimeActiveAccess(userId, { prisma: client }), logger: buildLogger(), requestHandoff });
+      expect(await recover()).toMatchObject({ handoffAccepted: 1 });
+      expect(requestHandoff).toHaveBeenCalledWith(expect.objectContaining({ expectedUserId: ids[2] }));
+      await client.hostedWorkspace.create({ data: { userId: ids[2], redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" } } });
+      expect(await recover()).toMatchObject({ handoffAttempted: 0 });
     });
 
     it("excludes expired participant leases before the bounded page", async () => {
@@ -218,6 +258,16 @@ describe.skipIf(!runPostgresProof)(
         handoffLimit: 1,
         hasActiveAccess,
         logger: buildLogger(),
+        now: new Date(now.getTime() - 1),
+        requestHandoff,
+      })).resolves.toMatchObject({ candidateUsers: 0, handoffAttempted: 0 });
+      expect(hasActiveAccess).not.toHaveBeenCalled();
+      expect(requestHandoff).not.toHaveBeenCalled();
+
+      await expect(runHostedPreferenceHandoffSweeper({
+        handoffLimit: 1,
+        hasActiveAccess,
+        logger: buildLogger(),
         now,
         requestHandoff,
       })).resolves.toMatchObject({
@@ -239,6 +289,151 @@ describe.skipIf(!runPostgresProof)(
         `access-complete:${liveMember.memberId}`,
         `handoff:${liveMember.memberId}`,
       ]);
+    });
+
+    it.each([
+      "member.action.requested",
+      "member.preferences.updated",
+      "device-sync.wake",
+      "health.daily-metric.reported",
+      "runtime.browser-vault-refresh-requested",
+      "runtime.maintenance-requested",
+    ])("recovers %s only after the fixed grace period", async (kind) => {
+      const client = requirePrisma(prisma);
+      const createdAt = new Date();
+      const memberId = createId("member_handoff_age");
+      const itemId = createId("mailbox_handoff_age");
+      memberIds.push(memberId);
+      await client.hostedMember.create({
+        data: { billingStatus: "active", id: memberId },
+      });
+      await client.hostedMailboxItem.create({
+        data: mailboxItem({ createdAt, id: itemId, kind, userId: memberId }),
+      });
+      const hasActiveAccess = vi.fn(async () => true);
+      const requestHandoff = buildRequestHandoff([]);
+      const sweep = (ageMs: number) => runHostedPreferenceHandoffSweeper({
+        handoffLimit: 1,
+        hasActiveAccess,
+        logger: buildLogger(),
+        now: new Date(createdAt.getTime() + ageMs),
+        requestHandoff,
+      });
+
+      await expect(sweep(59_999)).resolves.toMatchObject({ candidateUsers: 0 });
+      expect(hasActiveAccess).not.toHaveBeenCalled();
+      expect(requestHandoff).not.toHaveBeenCalled();
+      await expect(sweep(60_000)).resolves.toMatchObject({ handoffAccepted: 1 });
+      expect(requestHandoff).toHaveBeenCalledExactlyOnceWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: memberId,
+        mailboxItemId: itemId,
+      });
+    });
+
+    it.each([
+      ["preferences", "member.preferences.updated", "member.preferences.updated"],
+      ["runtime control", "runtime.browser-vault-refresh-requested", "device-sync.wake"],
+    ])("selects aged %s work when creation time and lane order disagree", async (_label, freshKind, agedKind) => {
+      const client = requirePrisma(prisma);
+      const now = new Date();
+      const memberId = createId("member_handoff_reordered");
+      const freshItemId = createId("mailbox_handoff_fresh");
+      const agedItemId = createId("mailbox_handoff_aged");
+      memberIds.push(memberId);
+      await client.hostedMember.create({
+        data: { billingStatus: "active", id: memberId },
+      });
+      // PostgreSQL timestamps the transaction before append-lock acquisition;
+      // a transaction that started earlier can receive a later lane sequence.
+      await client.hostedMailboxItem.createMany({
+        data: [
+          mailboxItem({
+            createdAt: new Date(now.getTime() - 59_000),
+            id: freshItemId, kind: freshKind, laneSeq: 1n, userId: memberId,
+          }),
+          mailboxItem({
+            createdAt: new Date(now.getTime() - 60_000),
+            id: agedItemId, kind: agedKind, laneSeq: 2n, userId: memberId,
+          }),
+        ],
+      });
+      const requestHandoff = buildRequestHandoff([]);
+      await expect(runHostedPreferenceHandoffSweeper({
+        handoffLimit: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(), now, requestHandoff,
+      })).resolves.toMatchObject({ candidateUsers: 1, handoffAccepted: 1 });
+      expect(requestHandoff).toHaveBeenCalledExactlyOnceWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: memberId,
+        mailboxItemId: agedItemId,
+      });
+    });
+
+    it("does not re-signal wakes produced in the same slow recovery sweep", async () => {
+      const client = requirePrisma(prisma);
+      const startedAt = new Date();
+      const memberId = createId("member_handoff_same_sweep");
+      memberIds.push(memberId);
+      await client.hostedMember.create({
+        data: { billingStatus: "active", id: memberId },
+      });
+      const requestHandoff = buildRequestHandoff([]);
+      const appendAndSignal = async (laneSeq: bigint) => {
+        const item = mailboxItem({
+          createdAt: new Date(),
+          id: createId("mailbox_handoff_same_sweep"),
+          kind: "device-sync.wake",
+          laneSeq,
+          userId: memberId,
+        });
+        await client.hostedMailboxItem.create({ data: item });
+        await requestHandoff({ expectedUserId: memberId, mailboxItemId: item.id });
+      };
+      const hasActiveAccess = vi.fn(async () => true);
+      const recover = (input: Parameters<typeof runHostedPreferenceHandoffSweeper>[0]) =>
+        runHostedPreferenceHandoffSweeper({
+          ...input, hasActiveAccess, logger: buildLogger(), requestHandoff,
+        });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(startedAt);
+
+      const result = await runHostedDeviceSyncRecoverySweep({
+        runDeferredWakeSweeper: async () => {
+          await appendAndSignal(1n);
+          return {
+            dueConnections: 1, hasMoreDueConnections: false,
+            releaseCleared: 0, releaseFailed: 0, releaseLimit: 100, released: 1,
+          };
+        },
+        runDueReconcileSweeper: async () => {
+          await appendAndSignal(2n);
+          // The first producer can finish long before the final handoff stage.
+          vi.setSystemTime(new Date(startedAt.getTime() + 120_000));
+          return {
+            dueConnections: 1, hasMoreDueConnections: false, wakeAccepted: 1,
+            wakeAttempted: 1, wakeFailed: 0, wakeLimit: 100, wakeNotAccepted: 0,
+          };
+        },
+        runPreferenceHandoffSweeper: recover,
+      });
+      expect(result.preferenceHandoffSweeper.handoffAttempted).toBe(0);
+      expect(requestHandoff).toHaveBeenCalledTimes(2);
+
+      // A failed later recovery keeps the same durable item eligible. Once
+      // imported, runtime retry ownership suppresses all further handoffs.
+      requestHandoff.mockRejectedValueOnce(new Error("signal unavailable"));
+      await expect(recover({})).resolves.toMatchObject({ handoffFailed: 1 });
+      await expect(recover({})).resolves.toMatchObject({ handoffAccepted: 1 });
+      const firstItemId = requestHandoff.mock.calls[0]?.[0].mailboxItemId;
+      expect(requestHandoff.mock.calls[2]?.[0].mailboxItemId).toBe(firstItemId);
+      expect(requestHandoff.mock.calls[3]?.[0].mailboxItemId).toBe(firstItemId);
+      await client.hostedWorkspace.create({
+        data: { userId: memberId, redactedStatusJson: { hostedMailboxSystemImportedSeq: "2" } },
+      });
+      await expect(recover({})).resolves.toMatchObject({ handoffAttempted: 0 });
+      expect(requestHandoff).toHaveBeenCalledTimes(4);
     });
 
     it("retains recovery when the imported frontier is malformed", async () => {
@@ -302,6 +497,37 @@ describe.skipIf(!runPostgresProof)(
         `access-complete:${memberId}`,
         `handoff:${memberId}`,
       ]);
+    });
+
+    it.each(["meal.delete", "workout.live.apply"] as const)("recovers accepted %s after a lost initial wake and stops at import", async kind => {
+      const client = requirePrisma(prisma);
+      const memberId = createId("member_action_recovery");
+      memberIds.push(memberId);
+      await client.hostedMember.create({ data: { id: memberId, billingStatus: "active" } });
+      // An idle workspace has no timer to rescue this accepted action.
+      await client.hostedWorkspace.create({ data: { userId: memberId, nextWakeAt: null } });
+      const action: MemberActionV1 = kind === "meal.delete"
+        ? { kind, version: 1, mealId: "meal_fixture" }
+        : {
+          kind, version: 1,
+          expectedWorkout: { actionBinding: "a".repeat(64), exercises: [{ name: "Synthetic movement", sets: [{ logged: false }] }] },
+          mutations: [{ kind: "set.put", exercisePosition: 1, exerciseName: "Synthetic movement", setPosition: 1, expectedResult: null, result: { kind: "reps", reps: 8 } }],
+        };
+      const actionId = randomUUID();
+      mocks.signal.mockReset().mockRejectedValueOnce(new Error("synthetic Temporal failure before acceptance"));
+      await expect(submitMemberAction({ memberId, prisma: client, request: {
+        action, actionId, requestedAt: new Date().toISOString(), schemaVersion: 1,
+      } })).resolves.toMatchObject({ accepted: true, actionId });
+      const item = await client.hostedMailboxItem.findFirstOrThrow({ where: { userId: memberId, dedupeKey: `member.action.requested:${actionId}` } });
+      expect(item.kind).toBe("member.action.requested");
+      expect(mocks.signal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ mailboxItemId: item.id, expectedUserId: memberId }));
+      const now = new Date(item.createdAt.getTime() + 60_000);
+      mocks.signal.mockResolvedValue({ signalAccepted: true, workflowId: "hosted-user-runtime:synthetic" });
+      await expect(runHostedPreferenceHandoffSweeper({ now, logger: buildLogger() })).resolves.toMatchObject({ candidateUsers: 1, handoffAccepted: 1 });
+      expect(mocks.signal).toHaveBeenLastCalledWith({ abortSignal: expect.any(AbortSignal), expectedUserId: memberId, mailboxItemId: item.id });
+      await client.hostedWorkspace.update({ where: { userId: memberId }, data: { redactedStatusJson: { hostedMailboxSystemImportedSeq: String(item.laneSeq) } } });
+      await expect(runHostedPreferenceHandoffSweeper({ now, logger: buildLogger() })).resolves.toMatchObject({ candidateUsers: 0 });
+      expect(mocks.signal).toHaveBeenCalledTimes(2);
     });
 
     it("signals only system items beyond the persisted imported frontier", async () => {

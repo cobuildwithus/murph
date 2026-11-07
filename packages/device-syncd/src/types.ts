@@ -17,7 +17,6 @@ import type {
 } from "@murphai/importers/device-providers/provider-descriptors";
 import type {
   CompleteDeviceProviderSourceDay,
-  DeviceBatchImportExecutionOptions,
 } from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
@@ -56,13 +55,13 @@ export interface DeviceSyncServiceConfig {
   stateDatabasePath?: string;
   sessionTtlMs?: number;
   workerLeaseMs?: number;
-  workerPollMs?: number;
   // Number of durable job rows per drain tick. A provider batch may complete
   // multiple compatible rows in one worker pass, and each row counts here.
   workerBatchSize?: number;
-  schedulerPollMs?: number;
   log?: DeviceSyncLogger;
   shouldYieldJobExecution?: (() => boolean) | null;
+  // Admission priority only: provider I/O and atomic publication keep running.
+  shouldYieldImportPreparation?: (() => boolean) | null;
 }
 
 export type DeviceSyncJobFailureDisposition = "queued" | "dead";
@@ -87,7 +86,22 @@ export type DeviceSyncProviderRequestCandidateAliasSource =
   | "workoutId"
   | "workout_id";
 
-export interface DeviceSyncJobFailureDiagnosticDetails {
+export type JunctionRequestStage =
+  | "request_setup"
+  | "awaiting_headers"
+  | "response_body"
+  | "post_body";
+
+/** Metadata-only observations of one JUNCTION_API_REQUEST_TIMEOUT attempt. */
+export interface JunctionRequestTimeoutDiagnosticDetails {
+  providerRequestTimeoutMs?: number;
+  providerRequestElapsedMs?: number;
+  providerRequestAttempt?: number;
+  providerRequestStage?: JunctionRequestStage;
+  providerResponseHeadersPresent?: boolean;
+}
+
+export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTimeoutDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;
@@ -98,6 +112,12 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   junctionEcgActualRecordingCount?: number;
   junctionEcgActualSampleCount?: number;
   junctionEcgBindingReason?: string;
+  junctionEcgPageCount?: number;
+  junctionEcgGroupCount?: number;
+  junctionEcgProviderMatchGroupCount?: number;
+  junctionEcgInstanceMatchGroupCount?: number;
+  junctionEcgInstanceMissingGroupCount?: number;
+  junctionEcgMatchedGroupCount?: number;
   junctionEcgExpectedRecordingCount?: number;
   junctionEcgExpectedSampleCount?: number;
   junctionEcgMaxRecordingCount?: number;
@@ -107,6 +127,11 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   normalizationSourceProvider?: string;
   normalizationTimestampKind?: string;
   normalizationTimestampSemantics?: string;
+  normalizationValueKind?: string;
+  normalizationValueRange?: string;
+  normalizationUnitKind?: string;
+  validationRetryDelayMs?: number;
+  providerHttpStatusSource?: string;
   providerHttpStatus?: number;
   providerHttpStatusText?: string;
   providerRequestAuthKind?: string;
@@ -153,6 +178,16 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   providerOAuthResponseShapeKind?: string;
 }
 
+/**
+ * In-memory logical identity of one claimed job row. Hosted telemetry emits
+ * only context-separated digests of it; never log these values directly.
+ */
+export interface DeviceSyncJobIdentity {
+  accountId: string;
+  dedupeKey: string | null;
+  jobId: string;
+}
+
 export interface DeviceSyncJobFailureDiagnostic {
   accountId: string;
   accountStatus: DeviceSyncAccountStatus | null;
@@ -164,6 +199,8 @@ export interface DeviceSyncJobFailureDiagnostic {
   details: DeviceSyncJobFailureDiagnosticDetails;
   /** Actual committed queue transition for this failed attempt, when known. */
   jobDisposition?: DeviceSyncJobFailureDisposition;
+  /** Rows whose failure transition committed in this attempt, when known. */
+  jobIdentities?: DeviceSyncJobIdentity[];
   /** Job kind of the failing job (for example `resource`, `reconcile`), when known. */
   jobKind?: string;
   /** Maximum attempt budget committed on the failing job row, when known. */
@@ -185,15 +222,26 @@ export type DeviceSyncJobTimingOutcome =
   | "failed"
   | "yielded";
 
+/** Importer persistence outcomes; applied can include evidence-only writes. */
+export type DeviceSyncImportOutcomeCounts = {
+  applied: number;
+  noop: number;
+  failed: number;
+  unknown: number;
+};
+
 /**
- * Bounded metadata for one claimed worker attempt. This intentionally omits
- * account/job ids, payloads, cursors, provider responses, and health values so
- * hosted runtimes can persist it as privacy-safe operational telemetry.
+ * Bounded metadata for one claimed worker attempt. Apart from the in-memory
+ * `jobIdentities`, this intentionally omits account/job ids, payloads, cursors,
+ * provider responses, and health values so hosted runtimes can persist it as
+ * privacy-safe operational telemetry.
  */
 export interface DeviceSyncJobTimingDiagnostic {
   at: string;
   attempts: number;
   canonicalProgressCommitted?: true;
+  /** Provider-proven forward coverage, published with the owned continuation. */
+  continuationProgressCommitted?: true;
   connectionSourceReadCount: number;
   connectionSourceReadElapsedMs: number;
   credentialRefreshCount: number;
@@ -204,6 +252,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   scheduledJobCount?: number;
   nextScheduledJobDelayMs?: number | null;
   jobCount: number;
+  /** Rows covered by this claimed attempt; never emit these values directly. */
+  jobIdentities?: DeviceSyncJobIdentity[];
   jobKind: string;
   outcome: DeviceSyncJobTimingOutcome;
   provider: string;
@@ -215,25 +265,15 @@ export interface DeviceSyncJobTimingDiagnostic {
   providerUnattributedElapsedMs: number | null;
   resource?: string;
   snapshotImportCount: number;
+  snapshotImportDeferredCount?: number;
+  snapshotImportOutcomes: DeviceSyncImportOutcomeCounts;
+  completeSourceDayImportOutcomes: DeviceSyncImportOutcomeCounts;
   snapshotImportElapsedMs: number;
   snapshotCanonicalCoreElapsedMs: number;
   snapshotCanonicalWriteElapsedMs: number;
   snapshotEventIdentityIndexCacheHitCount: number;
   snapshotEventIdentityIndexElapsedMs: number;
   snapshotNormalizationElapsedMs: number;
-}
-
-export interface DeviceSyncHttpConfig {
-  host?: string;
-  port?: number;
-  controlToken?: string;
-  publicHost?: string;
-  publicPort?: number;
-}
-
-export interface DeviceSyncHttpListenerAddress {
-  host: string;
-  port: number;
 }
 
 export type PublicProviderDescriptor = DeviceSyncProviderDescriptor;
@@ -1033,6 +1073,8 @@ export interface ProviderJobContext {
 }
 
 export interface ProviderJobResult {
+  /** A finite existing scan advanced; retries, rescheduling, and new jobs are not progress. */
+  continuationProgress?: true;
   scheduledJobs?: DeviceSyncJobInput[];
   metadataPatch?: Record<string, unknown>;
   nextReconcileAt?: string | null;
@@ -1148,7 +1190,24 @@ export interface DeviceWebhookHandler {
   verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
 }
 
+export interface ScheduledReconcileProbeResult {
+  outcome: "unchanged" | "changed" | "ineligible";
+  reason: string;
+  nextReconcileAt?: string;
+  /** Complete logical collection reads, including inventory; not HTTP pages. */
+  requestCount: number;
+  recordCount: number;
+  /** Serialized decoded records, not transport/billing bytes. */
+  responseBytes: number;
+  elapsedMs: number;
+}
+
 export interface DeviceJobExecutor {
+  probeScheduledReconcile?(
+    account: StoredDeviceSyncAccount,
+    now: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ScheduledReconcileProbeResult>;
   // Optional execution scope for one bounded worker drain. Never retains live
   // authorization; a new drain or standalone worker call gets a fresh scope.
   createPassExecutor?(): DeviceJobExecutor;
@@ -1161,17 +1220,6 @@ export interface DeviceJobExecutor {
   batch?: DeviceJobBatchExecutor;
 }
 
-export interface DeviceSyncOAuthAdapter {
-  buildConnectUrl(input: {
-    state: string;
-    callbackUrl: string;
-    scopes: string[];
-    now: string;
-  }): string;
-  exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
-  refreshTokens(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
-}
-
 export interface DeviceSyncProvider {
   provider: string;
   descriptor: DeviceProviderDescriptor;
@@ -1182,14 +1230,6 @@ export interface DeviceSyncProvider {
   webhookHandler?: DeviceWebhookHandler;
   jobExecutor?: DeviceJobExecutor;
   webhookAdmin?: ProviderWebhookAdminCapability;
-}
-
-export interface DeviceSyncOAuthProvider extends DeviceSyncProvider {
-  connectionHandler: DeviceConnectionHandler & {
-    refreshTokens: NonNullable<DeviceConnectionHandler["refreshTokens"]>;
-  };
-  jobExecutor: DeviceJobExecutor;
-  oauthAdapter: DeviceSyncOAuthAdapter;
 }
 
 export interface DeviceSyncRegistry extends NamedDeviceProviderRegistry<DeviceSyncProvider> {
@@ -1286,16 +1326,9 @@ export interface DeviceSyncImporterPort {
     snapshot: unknown;
     vaultRoot?: string;
   }, options?: {
-    importSession?: DeviceBatchImportExecutionOptions["session"];
     signal?: AbortSignal | null;
   }): Promise<unknown>;
   resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
     vaultRoot?: string;
   }): Promise<string | undefined>;
-}
-
-export interface NodeServerHandle {
-  control: DeviceSyncHttpListenerAddress;
-  public: DeviceSyncHttpListenerAddress | null;
-  close(): Promise<void>;
 }

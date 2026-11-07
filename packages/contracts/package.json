@@ -1,13 +1,10 @@
 {
   "name": "@murphai/contracts",
-  "version": "1.3.3",
-  "private": false,
+  "version": "1.3.5",
+  "private": true,
   "type": "module",
   "sideEffects": false,
   "license": "Apache-2.0",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
@@ -25,6 +22,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./sleep-session": {
+      "types": "./dist/sleep-session.d.ts",
+      "import": "./dist/sleep-session.js",
+      "default": "./dist/sleep-session.js"
+    },
+    "./experiment-outcome": {
+      "types": "./dist/experiment-outcome.d.ts",
+      "import": "./dist/experiment-outcome.js",
+      "default": "./dist/experiment-outcome.js"
     },
     "./journal-presentation": {
       "types": "./dist/journal-presentation.d.ts",
@@ -51,7 +58,7 @@
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo tsconfig.scripts.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false && node ../../scripts/run-typescript.mjs package -p tsconfig.scripts.json --pretty false",
     "build:incremental": "node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false && node ../../scripts/run-typescript.mjs package -p tsconfig.scripts.json --pretty false",
-    "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.json --pretty false && node ../../scripts/run-typescript.mjs package -p tsconfig.vitest.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.json --pretty false && node ../../scripts/run-typescript.mjs check -p tsconfig.vitest.json --pretty false",
     "generate": "node --run build && node ./dist/scripts/generate-json-schema.js",
     "test:vitest": "vitest run --config vitest.config.ts",
     "test:coverage:vitest": "vitest run --config vitest.config.ts --coverage",
@@ -64,6 +71,6 @@
     "verify": "node --run test"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   }
 }

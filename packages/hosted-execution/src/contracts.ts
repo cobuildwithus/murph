@@ -1,3 +1,4 @@
+import type { HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
 import type {
   HostedDataKeyEnvelopeV1,
   HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
@@ -31,6 +32,8 @@ import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
 
+export const HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS = 10 * 60 * 1_000;
+
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
@@ -54,7 +57,6 @@ export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
   "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
-  "runtime.codex-auth-requested",
   "runtime.device-sync-recovery-requested",
   "runtime.mailbox-lag-observed",
 ] as const;
@@ -62,17 +64,9 @@ export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
 export type HostedExecutionRuntimeControlWakeKind =
   (typeof HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS)[number];
 
-export const HOSTED_CODEX_AUTH_ACTIONS = [
-  "connect",
-  "disconnect",
-] as const;
-
-export type HostedCodexAuthAction =
-  (typeof HOSTED_CODEX_AUTH_ACTIONS)[number];
-
 export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
   HostedExecutionRuntimeControlWakeKind,
-  "runtime.codex-auth-requested" | "runtime.pending-effects-reconcile-requested"
+  "runtime.pending-effects-reconcile-requested"
 >;
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
@@ -108,8 +102,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "clinical-records.sync-requested",
   "clinical-records.enrichment-requested",
   "device-sync.wake",
-  "environment-interview.completed",
-  "environment-voice.captured",
   "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -130,6 +122,7 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
   "linq",
   "telegram",
   "email",
+  "voice",
 ] as const;
 
 export type HostedExecutionConversationMessageChannel =
@@ -246,6 +239,7 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
 
 export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
   "context-handoff",
+  // Reader compatibility for retained mailbox rows and restored snapshots.
   "creative-response",
   "creative-response-text",
   "operator-message",
@@ -254,10 +248,33 @@ export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
 export type HostedExecutionAssistantNotificationPromptProfile =
   (typeof HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES)[number];
 
+export function isHostedRetiredAssistantNotificationProfile(
+  value: unknown,
+): value is "creative-response" | "creative-response-text" {
+  return value === "creative-response" || value === "creative-response-text";
+}
+
 export type HostedExecutionAssistantNotificationResponsePolicy =
+  | HostedGameGroupMissedCheckInPolicy
   | { kind: "allow_send_or_skip" }
   | { kind: "require_send" }
-  | { kind: "require_send_exact_text"; text: string };
+  | { kind: "require_game_rematch"; gameId: string; eventId: string; termsVersion: number }
+  | { kind: "require_send_exact_text"; text: string }
+  | {
+      kind: "require_game_recap";
+      eventId: string;
+      gameId: string;
+      pairFingerprint: string;
+      loreAccess?: "read";
+    }
+  | {
+      kind: "game_missed_check_in";
+      eventId: string;
+      firstMissedDate: string;
+      gameId: string;
+      memberId: string;
+      pairFingerprint: string;
+    };
 
 export interface HostedExecutionAssistantNotificationDeliverySource {
   fromPhoneNumber: string;
@@ -265,7 +282,7 @@ export interface HostedExecutionAssistantNotificationDeliverySource {
 }
 
 export interface HostedExecutionAssistantNotificationDelivery {
-  kind: "explicit" | "participant" | "thread";
+  kind: "explicit" | "participant" | "thread" | "bootstrap";
   source?: HostedExecutionAssistantNotificationDeliverySource | null;
   target: string;
 }
@@ -300,6 +317,8 @@ export interface HostedExecutionOperatorTaskNotification {
 }
 
 export interface HostedExecutionAssistantNotificationRequestedPayload {
+  /** Only a server-admitted game event may bootstrap its route-less group. */
+  gameChatBootstrap?: { gameId: string; eventId: string };
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;
@@ -612,17 +631,9 @@ export interface HostedExecutionPendingEffectsReconcileRequestedEvent
   kind: "runtime.pending-effects-reconcile-requested";
 }
 
-export interface HostedExecutionCodexAuthRequestedEvent
-  extends HostedExecutionBaseEvent {
-  action: HostedCodexAuthAction;
-  attemptId: string;
-  kind: "runtime.codex-auth-requested";
-}
-
 export type HostedExecutionRuntimeControlRequestedEvent =
   | HostedExecutionPlainRuntimeControlRequestedEvent
-  | HostedExecutionPendingEffectsReconcileRequestedEvent
-  | HostedExecutionCodexAuthRequestedEvent;
+  | HostedExecutionPendingEffectsReconcileRequestedEvent;
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
@@ -790,10 +801,19 @@ export interface HostedExecutionEmailConversationMessagePayload {
   to?: string[];
 }
 
+/** Native normalized speech admitted by the authenticated call owner. */
+export interface HostedExecutionVoiceConversationMessagePayload {
+  channel: "voice";
+  callId: string;
+  inputId: string;
+  text: string;
+}
+
 export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
-  | HostedExecutionEmailConversationMessagePayload;
+  | HostedExecutionEmailConversationMessagePayload
+  | HostedExecutionVoiceConversationMessagePayload;
 
 /**
  * Returns only the human-authored text represented by a conversation wake.
@@ -810,7 +830,7 @@ export function readHostedExecutionConversationMessageText(
       .join("\n")
     : payload.channel === "telegram"
       ? payload.telegramMessage.text ?? ""
-      : "";
+      : payload.channel === "voice" ? payload.text : "";
   const normalized = text.trim();
   return normalized.length > 0 ? normalized : null;
 }
@@ -895,33 +915,6 @@ export interface HostedExecutionClinicalEnrichmentRequestedWake
   kind: "clinical-records.enrichment-requested";
 }
 
-export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES = 3 * 1024 * 1024;
-
-export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES = [
-  "audio/mp4",
-  "audio/ogg",
-  "audio/webm",
-] as const;
-
-export type HostedExecutionEnvironmentVoiceContentType =
-  (typeof HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES)[number];
-
-export interface HostedExecutionEnvironmentVoiceCapturedPayload {
-  audioKey: string;
-  byteLength: number;
-  captureId: string;
-  capturedAt: string;
-  contentType: HostedExecutionEnvironmentVoiceContentType;
-  durationMs: number;
-  sha256: string;
-}
-
-export interface HostedExecutionEnvironmentVoiceCapturedWake
-  extends HostedExecutionBaseWake {
-  environmentVoice: HostedExecutionEnvironmentVoiceCapturedPayload;
-  kind: "environment-voice.captured";
-}
-
 export const HOSTED_EXECUTION_DAILY_METRIC_MAX_METRIC_LENGTH = 120;
 export const HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH = 80;
 
@@ -961,31 +954,10 @@ export interface HostedExecutionGroupJournalFactRecordedWake
   kind: "journal.group-fact.recorded";
 }
 
-export interface HostedExecutionEnvironmentInterviewTopicCompletion {
-  answers: Array<{
-    aspectId: string;
-    indicatorId: string;
-    note?: string | null;
-    value: string | number | boolean;
-  }>;
-  topicId: string;
-}
-
-export interface HostedExecutionEnvironmentInterviewCompletedPayload {
-  completedAt: string;
-  completionId: string;
-  topics: HostedExecutionEnvironmentInterviewTopicCompletion[];
-}
-
-export interface HostedExecutionEnvironmentInterviewCompletedWake
-  extends HostedExecutionBaseWake {
-  environmentInterview: HostedExecutionEnvironmentInterviewCompletedPayload;
-  kind: "environment-interview.completed";
-}
-
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
+  uploadId?: string;
   byteLength: number;
   captureId: string;
   capturedAt: string;
@@ -1021,16 +993,9 @@ export interface HostedExecutionPendingEffectsReconcileRequestedWake
   kind: "runtime.pending-effects-reconcile-requested";
 }
 
-export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBaseWake {
-  action: HostedCodexAuthAction;
-  attemptId: string;
-  kind: "runtime.codex-auth-requested";
-}
-
 export type HostedExecutionRuntimeControlWake =
   | HostedExecutionPlainRuntimeControlWake
-  | HostedExecutionPendingEffectsReconcileRequestedWake
-  | HostedExecutionCodexAuthRequestedWake;
+  | HostedExecutionPendingEffectsReconcileRequestedWake;
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";
@@ -1048,8 +1013,6 @@ export type HostedExecutionWake =
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionClinicalEnrichmentRequestedWake
   | HostedExecutionDeviceSyncWake
-  | HostedExecutionEnvironmentInterviewCompletedWake
-  | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionGroupJournalFactRecordedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake

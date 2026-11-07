@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
+import { appendFile, lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -9,6 +9,9 @@ import {
   deflateRawSync,
   inflateRawSync,
 } from "node:zlib";
+
+import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
+import { materializeIntegrationIngestHistory, thawIntegrationIngestHistoryForAppend } from "./integration-ingest-cold-storage.ts";
 
 import {
   integrationIngestReceiptSchema,
@@ -32,9 +35,10 @@ import {
   shardCompressionFromPath,
   type ShardCompression,
 } from "./shard-compression.ts";
-import { INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
+import { applyJsonlAppendTarget, INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
+import { isErrnoException } from "./types.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
 import { toMonthlyShardRelativePath } from "./jsonl.ts";
 import { withCanonicalWriteLock } from "./operations/canonical-write-lock.ts";
@@ -74,6 +78,7 @@ export interface BuildIntegrationIngestRecordInput {
   sampleIdsComplete: boolean;
   eventCount: number;
   sampleCount: number;
+  publication?: IntegrationIngestRecord["publication"];
   provenance?: Record<string, unknown>;
 }
 
@@ -110,7 +115,11 @@ export interface ArchivedIntegrationIngestShardContentReceipt {
   sha256: string;
 }
 
+// Active months stay cheap to append until their plain evidence reaches this size.
+const ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES = 4 * 1024 * 1024;
+
 export interface ArchiveClosedIntegrationIngestShardsInput {
+  archiveCurrentMonth?: boolean;
   now?: Date;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -354,6 +363,7 @@ export function buildIntegrationIngestRecord(
       eventCount: input.eventCount,
       sampleCount: input.sampleCount,
     },
+    ...(input.publication ? { publication: input.publication } : {}),
     ...(input.provenance && Object.keys(input.provenance).length > 0
       ? { provenance: input.provenance }
       : {}),
@@ -907,7 +917,8 @@ export async function selectNovelIntegrationIngestEvidence(
       input.vaultRoot,
       [integrationIngestShardPath(input.importedAt)],
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof HostedColdHistoryUnavailableError) throw error;
     return failOpenSelection();
   }
 
@@ -1285,6 +1296,7 @@ export async function prepareLiveIntegrationIngestAppendPayload(
   targetRelativePath: string,
   payload: string,
 ): Promise<string> {
+  await materializeIntegrationIngestHistory(vaultRoot, [targetRelativePath]);
   const target = resolveVaultPath(vaultRoot, targetRelativePath);
   if (!(await pathExists(target.absolutePath))) {
     return payload;
@@ -1359,6 +1371,7 @@ export async function archiveClosedIntegrationIngestShards(
     const sources = (await listClosedIntegrationIngestShardSources(
       input.vaultRoot,
       currentMonth,
+      input.archiveCurrentMonth === true,
     )).filter((source) => source.kind !== "brotli");
     let archivedByteCount = 0;
     let archivedShardCount = 0;
@@ -1368,6 +1381,10 @@ export async function archiveClosedIntegrationIngestShards(
     for (const source of sources) {
       const { logicalPath } = source;
       input.signal?.throwIfAborted();
+      if (integrationIngestMonthKeyFromLogicalPath(logicalPath) === currentMonth) {
+        const stat = await lstat(resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath);
+        if (stat.size < ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES) continue;
+      }
       const gzipPath = `${logicalPath}.gz`;
       const zipPath = `${logicalPath}.zip`;
       if (
@@ -1506,6 +1523,7 @@ function integrationIngestMonthKeyFromLogicalPath(logicalPath: string): string |
 async function listClosedIntegrationIngestShardSources(
   vaultRoot: string,
   currentMonth: string,
+  includeCurrentMonth = false,
 ): Promise<IntegrationIngestRowSource[]> {
   const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
   return sortIntegrationIngestRowSources(paths
@@ -1513,7 +1531,7 @@ async function listClosedIntegrationIngestShardSources(
     .map(integrationIngestRowSourceFromPath)
     .filter((source) => {
       const month = integrationIngestMonthKeyFromLogicalPath(source.logicalPath);
-      return month !== null && month < currentMonth;
+      return month !== null && (month < currentMonth || (includeCurrentMonth && month === currentMonth));
     }));
 }
 
@@ -1556,7 +1574,7 @@ async function recoverInterruptedClosedIntegrationIngestArchivesLocked(input: {
   vaultRoot: string;
 }): Promise<RecoverInterruptedClosedIntegrationIngestArchivesResult> {
   const groups = new Map<string, IntegrationIngestRowSource[]>();
-  for (const source of await listClosedIntegrationIngestShardSources(input.vaultRoot, input.currentMonth)) {
+  for (const source of await listClosedIntegrationIngestShardSources(input.vaultRoot, input.currentMonth, true)) {
     const group = groups.get(source.logicalPath) ?? [];
     group.push(source);
     groups.set(source.logicalPath, group);
@@ -1938,6 +1956,7 @@ export async function appendArchivedIntegrationIngestShard({
   targetRelativePath,
   vaultRoot,
 }: AppendArchivedIntegrationIngestShardInput): Promise<AppendArchivedIntegrationIngestShardResult> {
+  await thawIntegrationIngestHistoryForAppend(vaultRoot, targetRelativePath);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const payloadBytes = Buffer.from(payload, "utf8");
   const records = await parseIntegrationIngestAppendPayload(payload, targetRelativePath);
@@ -1983,11 +2002,22 @@ export async function appendArchivedIntegrationIngestShard({
   }
 
   if (isShardCompression(source.kind)) {
-    await rewriteCompressedIntegrationIngestArchive({
-      appendPayload: Buffer.from(appendPayload, "utf8"),
-      source,
-      vaultRoot,
-    });
+    try {
+      await rewriteCompressedIntegrationIngestArchive({
+        appendPayload: Buffer.from(appendPayload, "utf8"),
+        source,
+        vaultRoot,
+      });
+    } catch (error) {
+      if (!(error instanceof VaultError) || error.code !== "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE") throw error;
+      await restorePlainIntegrationIngestShard(vaultRoot, source, validatedBase);
+      const target = resolveVaultPath(vaultRoot, targetRelativePath);
+      await applyJsonlAppendTarget({
+        target,
+        readPayload: async () => appendPayload,
+        appendPayload: (chunk) => appendFile(target.absolutePath, chunk, "utf8"),
+      });
+    }
   } else {
     const baseContent = await readIntegrationIngestSourceText(vaultRoot, source);
     await writeIntegrationIngestArchiveText(vaultRoot, source, `${baseContent}${appendPayload}`);
@@ -1997,12 +2027,43 @@ export async function appendArchivedIntegrationIngestShard({
   };
 }
 
+// Publish the identical base before retiring the archive. An interruption leaves
+// either exact duplicates (handled by existing recovery) or the verified plain
+// base; the existing write receipt owns append replay and rollback in both cases.
+async function restorePlainIntegrationIngestShard(
+  vaultRoot: string,
+  source: IntegrationIngestRowSource,
+  expected: ArchivedIntegrationIngestShardContentReceipt,
+): Promise<void> {
+  const target = resolveVaultPath(vaultRoot, source.logicalPath);
+  await prepareFileAtomicExclusive(target.absolutePath, async (tempAbsolutePath) => {
+    await pipeline(
+      Readable.from(openIntegrationIngestSourceByteChunks(vaultRoot, source)),
+      createWriteStream(tempAbsolutePath, { flags: "wx", mode: 0o600 }),
+    );
+    const actual = await validateRawIntegrationIngestSource({
+      absolutePath: tempAbsolutePath,
+      logicalPath: source.logicalPath,
+      signal: null,
+    });
+    if (actual.byteLength !== expected.byteLength || actual.sha256 !== expected.sha256) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+        "Restored integration ingest base does not match its validated receipt.",
+        { relativePath: source.logicalPath },
+      );
+    }
+  });
+  await unlink(resolveVaultPath(vaultRoot, source.sourcePath).absolutePath);
+}
+
 export async function truncateArchivedIntegrationIngestShard({
   expectedBaseByteLength,
   expectedBaseSha256,
   targetRelativePath,
   vaultRoot,
 }: TruncateArchivedIntegrationIngestShardInput): Promise<void> {
+  await materializeIntegrationIngestHistory(vaultRoot, [targetRelativePath]);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const inspection = await inspectIntegrationIngestSourceBytes(vaultRoot, source, {
     prefixByteLength: expectedBaseByteLength,
@@ -2251,6 +2312,7 @@ async function openIntegrationIngestLineStream(
 async function listIntegrationIngestRowSources(
   vaultRoot: string,
 ): Promise<IntegrationIngestRowSource[]> {
+  await materializeIntegrationIngestHistory(vaultRoot);
   const extensions = [".jsonl", ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `.jsonl${suffix}`)];
   const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
   return resolveIntegrationIngestShardRepresentations(
@@ -2276,6 +2338,7 @@ async function readIntegrationIngestShardSources(
   vaultRoot: string,
   logicalPath: string,
 ): Promise<IntegrationIngestRowSource[]> {
+  await materializeIntegrationIngestHistory(vaultRoot, [logicalPath]);
   const sources: IntegrationIngestRowSource[] = [];
   for (const sourcePath of [logicalPath, ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `${logicalPath}${suffix}`)]) {
     if (await pathExists(resolveVaultPath(vaultRoot, sourcePath).absolutePath)) {
@@ -2583,7 +2646,8 @@ async function* readBoundedIntegrationIngestArchiveChunks(
     }
   } catch (error) {
     signal?.throwIfAborted();
-    if (error instanceof VaultError) {
+    // A failed read proves nothing about the archive; only decoding can.
+    if (error instanceof VaultError || (isErrnoException(error) && error.syscall !== undefined)) {
       throw error;
     }
     throw new VaultError(
@@ -2896,7 +2960,7 @@ async function resolveIntegrationIngestShardRepresentations(
     if (
       siblings.length > 1
       && month !== null
-      && month < currentMonth
+      && month <= currentMonth
       && siblings.every((source) => source.kind !== "zip")
     ) {
       currentSources = await withCanonicalWriteLock(vaultRoot, async () => {

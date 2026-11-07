@@ -5,10 +5,37 @@ import path from 'node:path'
 import { test } from 'vitest'
 
 import { importDeviceBatch, upsertProtocol } from '@murphai/core'
-import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
+import type { JsonObject } from '@murphai/contracts'
 
 import { buildEffectiveProtocolSnapshotFromPrivateProtocol } from '../src/usecases/experiment-journal-vault.ts'
 import { createIntegratedVaultServices } from '../src/vault-services.ts'
+
+async function persistPrivateProtocol(
+  vault: string,
+  slug: string,
+  effectiveSpec: Parameters<typeof buildEffectiveProtocolSnapshotFromPrivateProtocol>[0]['effectiveSpec'],
+) {
+  const { record: { entity } } = await upsertProtocol({
+    vaultRoot: vault, slug, title: slug,
+    frontmatter: {
+      commonsProtocolRef: {
+        key: 'protocol_variant:retired/saved-private-origin',
+        pageRevisionId: `sha256:${'3'.repeat(64)}`,
+        runSpecRevisionId: `sha256:${'4'.repeat(64)}`,
+      },
+      lineage: { sourceKind: 'health_commons_protocol' },
+      diff: [], effectiveSpec, personalization: {},
+    },
+  })
+  return {
+    protocolRef: {
+      protocolId: entity.protocolId,
+      protocolRevisionId: entity.protocolRevisionId,
+      effectiveSpecHash: entity.effectiveSpecHash,
+    },
+    effectiveProtocolSnapshot: buildEffectiveProtocolSnapshotFromPrivateProtocol(entity),
+  }
+}
 
 function baseExperimentPlanPayload() {
   return {
@@ -94,27 +121,11 @@ test('custom experiment plans reject protocol lineage fields', async () => {
         },
       },
     }),
-    /Custom experiment plans must not include protocol references/u,
-  )
-})
-
-test('Health Commons protocol-backed experiment plans require commonsProtocolRef', async () => {
-  const services = createIntegratedVaultServices()
-
-  await assert.rejects(
-    services.core.planExperiment({
-      vault: '/tmp/murph-vault',
-      requestId: null,
-      payload: {
-        ...baseExperimentPlanPayload(),
-        source: { kind: 'health_commons_protocol' },
-      },
-    }),
     /commonsProtocolRef/u,
   )
 })
 
-test('withdrawn Health Commons protocols fail plan and start without creating a run', async () => {
+test('retired public protocol sources fail plan and start without creating a run', async () => {
   await withInitializedVault(async ({ services, vault }) => {
     const payload = {
       ...baseExperimentPlanPayload(),
@@ -136,7 +147,7 @@ test('withdrawn Health Commons protocols fail plan and start without creating a 
     ]) {
       await assert.rejects(
         attempt(),
-        /no longer available to start.*currently runnable protocol/u,
+        /source|commonsProtocolRef/u,
       )
     }
 
@@ -148,6 +159,20 @@ test('withdrawn Health Commons protocols fail plan and start without creating a 
       }),
       /No experiment found/u,
     )
+  })
+})
+
+test('inline private plans reject retired public lineage and caller-supplied snapshots before writing', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const variants: JsonObject[] = [
+      { protocol: { slug: 'private-plan', frontmatter: { commonsProtocolRef: { key: 'protocol_variant:retired/source' } } } },
+      { protocol: { slug: 'private-plan' }, effectiveProtocolSnapshot: { effectiveSpecHash: `sha256:${'7'.repeat(64)}`, doseSignature: 'Forged snapshot' } },
+    ]
+    for (const extra of variants) {
+      const payload = { ...baseExperimentPlanPayload(), source: { kind: 'private_protocol' }, ...extra }
+      await assert.rejects(services.core.startExperiment({ vault, requestId: null, payload }), /public protocol links are retired|derive their snapshot/u)
+      await assert.rejects(services.query.showExperiment({ vault, requestId: null, lookup: 'sleep-reset' }), /No experiment found/u)
+    }
   })
 })
 
@@ -276,37 +301,19 @@ test('custom experiment starts still persist calendar-ful synthesized adherence 
 
 test('protocol daily frequency persists repeated explicit-occurrence adherence', async () => {
   await withInitializedVault(async ({ services, vault }) => {
-    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
-      (entry) =>
-        entry.key ===
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
-    )
-    assert.ok(protocol?.protocol)
 
     await services.core.startExperiment({
       vault,
       requestId: null,
       payload: {
-        source: { kind: 'health_commons_protocol' },
+        source: { kind: 'private_protocol' },
         experiment: {
           slug: 'synthetic-micro-set-frequency',
           title: 'Synthetic micro-set frequency',
           startedOn: '2026-06-01',
           status: 'active',
         },
-        commonsProtocolRef: {
-          key: protocol.key,
-          pageRevisionId: protocol.revision.pageRevisionId,
-          runSpecRevisionId: protocol.revision.runSpecRevisionId,
-        },
-        effectiveProtocolSnapshot: {
-          effectiveSpecHash: protocol.revision.runSpecRevisionId,
-          doseSignature: 'Eight synthetic micro-sets daily',
-          modality: 'micro set',
-          frequency: { sessionsPerDay: 8 },
-          targetSessions: 2920,
-          minimumUsefulSessions: 2800,
-        },
+        ...(await persistPrivateProtocol(vault, 'synthetic-micro-set-frequency', { doseSignature: 'Eight synthetic micro-sets daily', modality: 'micro set', frequency: { sessionsPerDay: 8 }, targetSessions: 2920, minimumUsefulSessions: 2800 })),
         runPlan: {
           modality: 'Micro set',
           targetSessions: 2920,
@@ -345,14 +352,8 @@ test('protocol daily frequency persists repeated explicit-occurrence adherence',
   })
 })
 
-test('Health Commons protocol starts persist snapshot activity evidence in the adherence target', async () => {
+test('Private protocol starts persist snapshot activity evidence in the adherence target', async () => {
   await withInitializedVault(async ({ services, vault }) => {
-    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
-      (entry) =>
-        entry.key ===
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
-    )
-    assert.ok(protocol?.protocol)
     const activitySessionEvidence = {
       activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
       minimumDurationMinutes: 35,
@@ -362,26 +363,14 @@ test('Health Commons protocol starts persist snapshot activity evidence in the a
       vault,
       requestId: null,
       payload: {
-        source: { kind: 'health_commons_protocol' },
+        source: { kind: 'private_protocol' },
         experiment: {
           slug: 'multi-activity-cardio',
           title: 'Multi-activity cardio',
           startedOn: '2026-06-01',
           status: 'active',
         },
-        commonsProtocolRef: {
-          key: protocol.key,
-          pageRevisionId: protocol.revision.pageRevisionId,
-          runSpecRevisionId: protocol.revision.runSpecRevisionId,
-        },
-        effectiveProtocolSnapshot: {
-          effectiveSpecHash: protocol.revision.runSpecRevisionId,
-          doseSignature: 'Three 35-minute easy cardio sessions each week',
-          modality: 'cycling',
-          activitySessionEvidence,
-          targetSessions: 12,
-          minimumUsefulSessions: 9,
-        },
+        ...(await persistPrivateProtocol(vault, 'multi-activity-cardio', { doseSignature: 'Three 35-minute easy cardio sessions each week', modality: 'cycling', activitySessionEvidence, targetSessions: 12, minimumUsefulSessions: 9 })),
         runPlan: {
           modality: 'Cycling',
           targetSessions: 12,
@@ -505,6 +494,22 @@ test('Health Commons protocol starts persist snapshot activity evidence in the a
       activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
       minimumDurationMinutes: 35,
     })
+  })
+})
+
+test('private protocol starts reject stale revisions and forged snapshots before writing', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const saved = await persistPrivateProtocol(vault, 'saved-plan', { doseSignature: 'One saved comparison' })
+    for (const patch of [
+      { protocolRef: { ...saved.protocolRef, protocolRevisionId: `sha256:${'9'.repeat(64)}` } },
+      { effectiveProtocolSnapshot: { ...saved.effectiveProtocolSnapshot, doseSignature: 'A different comparison' } },
+    ]) {
+      await assert.rejects(services.core.startExperiment({
+        vault, requestId: null,
+        payload: { ...baseExperimentPlanPayload(), source: { kind: 'private_protocol' }, ...saved, ...patch },
+      }), /saved private protocol/u)
+    }
+    await assert.rejects(services.query.showExperiment({ vault, requestId: null, lookup: 'sleep-reset' }), /No experiment found/u)
   })
 })
 

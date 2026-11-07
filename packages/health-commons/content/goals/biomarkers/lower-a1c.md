@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-a1c
 slug: lower-a1c
-title: Lower My A1C
-summary: Lower A1C with a safe combination of food, movement, medication, and monitoring that fits your diabetes status.
+title: Understand My A1C
+summary: Understand what A1C measures, how to read results in context, and what to discuss with your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:improve-blood-sugar-control
   outcomeKind: biomarker
-  goalPhrase: lower my A1C
+  goalPhrase: understand my A1C
   successSignals:
     - id: a1c_level
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my A1C.
+  startPrompt: Hey Murph, help me understand my A1C.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -87,4 +87,4 @@ Severe hypoglycemia, confusion, fainting, vomiting with very high glucose, deep 
 
 ## Related goals
 
-[Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Move Out of the Prediabetes Range](/goals/move-out-of-prediabetes-range) · [Improve My Insulin Sensitivity](/goals/improve-insulin-sensitivity)
+[Track My Blood Sugar](/goals/improve-blood-sugar-control) · [Understand My Prediabetes](/goals/move-out-of-prediabetes-range) · [Understand Insulin Sensitivity](/goals/improve-insulin-sensitivity)

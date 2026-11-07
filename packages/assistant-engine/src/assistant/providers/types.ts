@@ -65,22 +65,6 @@ export function supportsAnyAssistantRichUserMessageContent(
   return supportedTypes.some((type) => type !== 'text')
 }
 
-export interface AssistantModelCapabilities {
-  images: boolean
-  pdf: boolean
-  reasoning: boolean
-  streaming: boolean
-  tools: boolean
-}
-
-export interface AssistantCatalogModel {
-  capabilities: AssistantModelCapabilities
-  description: string
-  id: string
-  label: string
-  source: 'current' | 'static'
-}
-
 export interface AssistantProviderCapabilities {
   supportedUserMessageContentTypes: readonly AssistantUserMessageContentType[]
   supportsNativeResume: boolean
@@ -121,7 +105,7 @@ export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
  * never enter `CodexThreadIdentity`/route fingerprints or persisted session
  * target config, because tier changes must not fork thread continuity.
  */
-export type AssistantProviderServiceTier = 'flex'
+export type AssistantProviderServiceTier = 'flex' | 'priority'
 
 export interface AssistantProviderDynamicTool {
   readonly deferLoading?: boolean
@@ -129,15 +113,6 @@ export interface AssistantProviderDynamicTool {
   readonly inputSchema: object
   readonly name: string
   readonly namespace: string
-}
-
-/**
- * Trusted per-turn limits for generated songs. This is execution policy only:
- * prompts and model-supplied tool arguments cannot relax it.
- */
-export interface AssistantGenerateSongTurnPolicy {
-  readonly maxAttempts: number
-  readonly requiredDurationSeconds: number
 }
 
 export interface AssistantProviderTurn {
@@ -155,7 +130,6 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
-  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
@@ -253,6 +227,17 @@ export type AssistantProviderRequestOutcome =
   | 'partial'
   | 'succeeded'
 
+/**
+ * `observed` carries a same-process `performance.now()` reading. `unavailable`
+ * means no completion notification arrived; `superseded` means later provider
+ * activity followed the last one, or the selected response came from an
+ * earlier sampling. Neither may be replaced by another boundary.
+ */
+export type AssistantProviderFinalResponseCompletion =
+  | { kind: 'observed'; observedAtMonotonicMs: number }
+  | { kind: 'superseded' }
+  | { kind: 'unavailable' }
+
 export type AssistantNoReplyDisposition = {
   kind: 'none'
 }
@@ -264,6 +249,8 @@ export interface AssistantTargetedMessageReactionAction {
 }
 
 export interface AssistantProviderTurnExecutionResult {
+  /** A confined routing leaf completed without starting or resuming the root thread. */
+  providerThreadUnchanged?: true
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
@@ -275,6 +262,11 @@ export interface AssistantProviderTurnExecutionResult {
   response: string
   /** Final provider-authored text before runtime-owned presentation transforms. */
   providerAuthoredResponse?: string | null
+  /**
+   * Murph-local receipt of the provider's final per-response completion for
+   * this result. Absent when the provider cannot report it.
+   */
+  finalResponseCompletion?: AssistantProviderFinalResponseCompletion
   /** Capability-free semantic response persisted into model-visible history. */
   transcriptResponse: string | null
   // Completed final answers that were followed by a steered user message and

@@ -4,11 +4,15 @@ import {
   FamilyInviteScreen,
   type FamilyInviteView,
 } from "@/src/components/family/family-invite-screen";
-import type {
-  FamilyInviteWebAcceptInitialState,
+import {
+  FamilyInviteJoinedScreen,
+  type FamilyInviteWebAcceptInitialState,
 } from "@/src/components/family/family-invite-accept-client";
-import { JoinInviteCenteredShell } from "@/src/components/hosted-onboarding/join-invite-shell";
+import { LinkPageSurface } from "@/src/components/link-page/link-page-shell";
 import type { HostedFamilyInviteAcceptanceView } from "@/src/lib/hosted-onboarding/family-plan";
+
+const PHONE_CLASS =
+  "flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]";
 
 // A synthetic Messages deep link. The live page builds this from the invitee's
 // existing Murph line (or a configured fallback); here it only needs to render
@@ -60,27 +64,19 @@ export function FamilyInviteJoinStudy() {
     >
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
         The production <code>/family/accept/[inviteCode]</code> page a sponsored
-        member lands on. The eyebrow, three privacy promises, and copy are fixed;
-        the call to action changes with how the invite was sent and whether the
-        visitor is already signed in. Preview only — accept, sign-in, and channel
+        member lands on. The ticket and three privacy promises are fixed; the
+        sentence and action change with how the invite was sent and whether the
+        visitor is already signed in. Preview only: accept, sign-in, and channel
         buttons are inert here.
       </p>
 
-      <div
-        className="overflow-hidden rounded-3xl border border-border"
-        data-design-state="full-page-phone-bound"
-        inert
-      >
-        <JoinInviteCenteredShell>
-          <FamilyInviteScreen
-            authenticated={false}
-            messagesAcceptHref={DESIGN_MESSAGES_HREF}
-            view={BASE_PENDING_VIEW}
-          />
-        </JoinInviteCenteredShell>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        <InviteStatePreview
+          label="Sent by text"
+          state="full-page-phone-bound"
+          messagesAcceptHref={DESIGN_MESSAGES_HREF}
+          view={BASE_PENDING_VIEW}
+        />
         <InviteStatePreview
           label="Signed in · accept in one tap"
           state="signed-in-accept"
@@ -105,6 +101,16 @@ export function FamilyInviteJoinStudy() {
           state="telegram-only"
           view={TELEGRAM_ONLY_VIEW}
         />
+        <div className="flex flex-col gap-3" data-design-state="joined">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Joined
+          </p>
+          <div className={PHONE_CLASS} inert>
+            <LinkPageSurface>
+              <FamilyInviteJoinedScreen />
+            </LinkPageSurface>
+          </div>
+        </div>
         <InviteStatePreview
           label="Already used · open Murph"
           state="already-used"
@@ -153,8 +159,8 @@ function InviteStatePreview(props: {
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
-      <div className="rounded-2xl border border-border bg-background p-6" inert>
-        <div className="mx-auto w-full max-w-md">
+      <div className={PHONE_CLASS} inert>
+        <LinkPageSurface>
           <FamilyInviteScreen
             authenticated={props.authenticated ?? false}
             messagesAcceptHref={props.messagesAcceptHref ?? null}
@@ -163,7 +169,7 @@ function InviteStatePreview(props: {
               ? { webAcceptInitialState: props.webAcceptInitialState }
               : {})}
           />
-        </div>
+        </LinkPageSurface>
       </div>
     </div>
   );

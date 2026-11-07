@@ -38,13 +38,3 @@ export function stripSettingsQueryParams(queryKeys: readonly string[]): void {
   }
   window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
-
-export function formatContactPhoneNumber(phoneNumber: string): string {
-  const digits = phoneNumber.replace(/\D/g, "");
-
-  if (/^1\d{10}$/u.test(digits)) {
-    return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
-  }
-
-  return phoneNumber;
-}

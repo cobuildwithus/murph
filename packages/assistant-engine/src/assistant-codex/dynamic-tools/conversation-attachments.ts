@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../../assistant/execution-context.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import type { AssistantWorkspaceArtifactMaterializer } from '../../assistant/execution-context.js'
@@ -84,7 +85,8 @@ export async function executeConversationAttachmentsTool(input: {
     }
     return result(true, JSON.stringify({ ref: selected.rawPath,
       instruction: 'Inspect this vault-relative path with view_image before answering a visual question. It is also an exact image-editing reference.' }))
-  } catch {
+  } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     return result(false, 'The selected image could not be loaded. Try again later, or ask the participant to resend it.')
   }
 }

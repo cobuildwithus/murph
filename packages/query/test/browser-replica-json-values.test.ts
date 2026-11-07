@@ -3,9 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { createBrowserVaultReplica } from "../src/browser-replica/build.ts";
-import { selectBrowserVaultExperimentResults } from "../src/browser-replica/experiments.ts";
 import { cloneJson, isBrowserSafeJson } from "../src/browser-replica/json-values.ts";
-import { createBrowserVaultQueryClient } from "../src/browser-replica/query.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
 
 test("browser JSON admission rejects an entire value containing unsupported nested data", () => {
@@ -40,7 +38,7 @@ test("browser JSON copies preserve existing serialization of numbers, holes, and
   assert.deepEqual(cloneJson(inherited), {});
 });
 
-test("replica and experiment projections retain allowlists and detach nested protocol values", async () => {
+test("replica experiment entities retain allowlists and detach nested protocol values", async () => {
   const protocolRef = { protocolId: "protocol:synthetic", nested: ["original"] };
   const attributes = {
     effectiveProtocolSnapshot: { invalid: undefined },
@@ -90,20 +88,5 @@ test("replica and experiment projections retain allowlists and detach nested pro
     nested: ["original"],
   });
 
-  const client = createBrowserVaultQueryClient(replica);
-  const result = selectBrowserVaultExperimentResults(client, "exp_json_copy", {
-    asOf: "2026-04-20T12:00:00.000Z",
-  });
-  assert.ok(result);
-  assert.equal(result.experiment.effectiveProtocolSnapshot, null);
-  assert.equal(result.experiment.commonsProtocolRef, null);
-  const resultRef = result.experiment.protocolRef;
-  assert.ok(resultRef);
-  assert.ok(Array.isArray(resultRef.nested));
-  resultRef.nested.push("result changed");
-  assert.deepEqual(projected.attributes.protocolRef, {
-    protocolId: "protocol:synthetic",
-    nested: ["original"],
-  });
   assert.deepEqual(protocolRef.nested, ["original", "source changed"]);
 });

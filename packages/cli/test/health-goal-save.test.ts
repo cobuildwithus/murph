@@ -8,7 +8,9 @@ import { test } from "vitest";
 import {
   initializeVault,
   listGoals,
+  listAuditShardPaths,
   listWriteOperationMetadataPaths,
+  readAuditShardRows,
   parseFrontmatterDocument,
 } from "@murphai/core";
 import { getGeneratedHealthCommonsWebGoalIndex } from "@murphai/health-commons/runtime";
@@ -22,6 +24,13 @@ import {
   requireData,
   runInProcessJsonCli,
 } from "./cli-test-helpers.js";
+
+async function readWriteEvidence(vaultRoot: string) {
+  const audits = (await Promise.all(
+    (await listAuditShardPaths(vaultRoot)).map(relativePath => readAuditShardRows({ vaultRoot, relativePath })),
+  )).flat().map(row => row.value);
+  return { audits, pending: await listWriteOperationMetadataPaths(vaultRoot) };
+}
 
 interface CommandSchemaEnvelope {
   args: {
@@ -235,6 +244,40 @@ test("goal save schema exposes typed fields while goal import-json remains the J
   assert.doesNotMatch(help, /goal upsert/u);
 });
 
+test("goal save and fresh-service readback preserve one exact canonical record", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-cli-goal-readback-");
+  try {
+    await initializeVault({ vaultRoot });
+    const title = "Walk twenty minutes before lunch";
+    const saved = await runInProcessJsonCli<GoalSaveResult>(createGoalCli(), [
+      "goal", "save", title, "--status", "active", "--vault", vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    const { goalId } = requireData(saved.envelope);
+    const before = await listGoals(vaultRoot);
+    const operationsBefore = await readWriteEvidence(vaultRoot);
+    assert.equal(before.length, 1);
+
+    // A new service reads canonical files, independent of the save response or chat.
+    const reader = createGoalCli();
+    const shown = await runInProcessJsonCli<GoalShowResult>(reader, [
+      "goal", "show", goalId, "--vault", vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(requireData(shown.envelope).entity.data.title, title);
+    assert.equal(requireData(shown.envelope).entity.data.status, "active");
+    const listed = await runInProcessJsonCli<GoalListResult>(reader, [
+      "goal", "list", "--limit", "200", "--vault", vaultRoot,
+    ]);
+    assert.equal(listed.exitCode, null);
+    assert.deepEqual(requireData(listed.envelope).items.map(({ id }) => id), [goalId]);
+    assert.deepEqual(await listGoals(vaultRoot), before);
+    assert.deepEqual(await readWriteEvidence(vaultRoot), operationsBefore);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
 test("goal save with a missing id fails closed with or without a title", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-goal-save-missing-id-",
@@ -260,7 +303,7 @@ test("goal save with a missing id fails closed with or without a title", async (
     const replacementSuffix = createdGoal.goalId.endsWith("A") ? "B" : "A";
     const missingGoalId = `${createdGoal.goalId.slice(0, -1)}${replacementSuffix}`;
     const goalsBefore = await listGoals(vaultRoot);
-    const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+    const operationsBefore = await readWriteEvidence(vaultRoot);
     const commands = [
       [
         "goal",
@@ -306,7 +349,7 @@ test("goal save with a missing id fails closed with or without a title", async (
     assert.deepEqual(goalsAfter, goalsBefore);
     assert.equal(goalsAfter[0]?.entity.title, "Keep this goal");
     assert.deepEqual(
-      await listWriteOperationMetadataPaths(vaultRoot),
+      await readWriteEvidence(vaultRoot),
       operationsBefore,
     );
   } finally {

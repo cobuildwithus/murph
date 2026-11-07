@@ -1,5 +1,9 @@
 export type DeviceSyncCompletionContactKind = "imessage" | "telegram";
 
+// Shared with the design catalog so its failure study stays current.
+export const FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL =
+  "Fitbit now connects through Google Health. Open the Google Health app, sign in with your Google Account, and finish setup. Then try again and allow every permission.";
+
 export interface DeviceSyncCompletionContactAction {
   ariaLabel?: string;
   href: string;
@@ -36,9 +40,8 @@ export interface DeviceSyncCompletionSetupGuide {
   voiceMemoSrc?: string | null;
 }
 
-// `kind` chooses the dialog header icon: "device-sync" → watch+check (the
-// wearable connect flow), "connected-app" → connect-link (Composio-backed
-// integrations like Gmail). The model shape itself is shared because the
+// "device-sync" is the wearable connect flow, "connected-app" the Composio-backed
+// integrations like Gmail. The model shape itself is shared because the
 // caller-visible fields (title, detail, retry, contact action) are identical.
 export type CompletionDialogKind = "device-sync" | "connected-app";
 
@@ -47,6 +50,8 @@ export interface DeviceSyncCompletionDialogModel {
   detail: string;
   failed: boolean;
   kind: CompletionDialogKind;
+  // What was connected, when known. A service without a logo shows its initial.
+  logo?: { name: string; src: string | null } | null;
   retryHref: string | null;
   setupGuide?: DeviceSyncCompletionSetupGuide | null;
   title: string;

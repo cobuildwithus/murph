@@ -4,7 +4,7 @@ Workspace-private source-agnostic inbox ingestion for Murph.
 
 This package keeps canonical inbox evidence in the vault and uses local runtime state for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search tables, and attachment job state.
 
-Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of the Telegram polling driver, runtime state, capture persistence, and generic parsed-email normalization used by hosted ingress.
+Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of runtime state, capture persistence, and generic parsed-email normalization used by hosted ingress.
 
 Consumers that only need shared Linq or Telegram webhook parsing, verification, targets, summaries, or sparse minimization should depend on `@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience subpaths.
 
@@ -12,9 +12,9 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 ## Runtime expectations
 
-- Run on Node.js `>=24.14.1`.
+- Run on Node.js `>=24.22.1`.
 - `@murphai/inboxd` resolves runtime paths and opens its SQLite projection database through `@murphai/runtime-state`, storing rebuildable capture/search state under `<vault>/.runtime/projections/inboxd.sqlite`.
-- Inbox daemon/config state lives separately under `<vault>/.runtime/operations/inbox/*.json`.
+- Inbox promotion/config state lives separately under `<vault>/.runtime/operations/inbox/*.json`.
 - Query-owned lexical search state lives separately under `<vault>/.runtime/projections/query.sqlite`.
 - The package writes runtime state next to the vault and expects normal local filesystem read/write access there.
 
@@ -22,6 +22,12 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 - every inbound source normalizes into a single `InboundCapture` envelope
 - canonical source and attachment evidence is persisted under `raw/inbox/<source>/...`; image attachment bytes are normalized to bounded static WebP before storage or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes
+
+Static images retain orientation correction, a 3072 px maximum edge (without
+enlargement), metadata removal, and WebP quality 88. Encoding uses effort 0 to
+reduce foreground import CPU at the cost of larger files and different encoded
+pixels; it is not byte-identical to effort 4. Existing captures are immutable,
+and animated GIF storyboard encoding keeps its separate settings.
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail; inbound message content is retired 14 days after receipt from inline and out-of-line text, provider raw fields, parser bundles, SQLite/FTS projections, and migrated legacy copies while structural capture metadata remains
 - append-only `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records raw inbox media byte expiration, preserving descriptors, hashes, and message relationships while projecting expired bytes as `retention_expired`; images use a 90-day media window, videos use 30 days, and audio keeps 14 days, encrypted hosted snapshots and receipt logs externalize image/video bytes through hosted media references for follow-up turns, explicit canonical durable raw references remain retained, and parser derivatives survive an earlier media-byte pass only until the owning message-content deadline
 - assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection
@@ -32,10 +38,8 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 ## Current scope
 
-- connector contracts for polling and webhook sources
-- a generic normalized chat-poll connector factory for source-specific transports
-- Telegram polling connector ownership, generic parsed-email normalization for hosted ingress, and shared Telegram/Linq normalization primitives
-- source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
+- generic parsed-email normalization for hosted ingress and shared Telegram/Linq normalization primitives
+- capture checkpoints for persisted hosted message projections
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata
 - runtime list, show, and search helpers for future agent/runtime surfaces
@@ -50,7 +54,14 @@ The inbox runtime exposes attachment-job primitives that stay safely outside can
 - `requeueAttachmentParseJobs(...)`
 
 These methods mutate only inbox-local projection state such as `.runtime/projections/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
+`requeueAttachmentParseJobs({ exactAttempt: { jobId, attempt } })` resets only that running job attempt while its attachment is also running, preserving newer attempts and published transcripts.
 
 When combined with `@murphai/parsers`, runtime consumers can drain those queues without mixing parser state into canonical health records.
 
-`@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers `createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the parser package stays focused on parser contracts, registry/toolchain discovery, and parse execution rather than on inbox runtime orchestration.
+
+Expired capture retention also drops a legacy v1 ledger row when an equivalent
+expired v2 row remains in the same shard. Equivalence preserves every identity,
+link, source field and attachment; only the schema, obsolete envelope path and
+retirement timestamp differ. Unknown, unmatched, unpaired and unexpired records
+remain untouched. Cleanup shares the retention capture budget, canonical lock and
+atomic shard rewrite; it introduces no format migration or deduplication store.

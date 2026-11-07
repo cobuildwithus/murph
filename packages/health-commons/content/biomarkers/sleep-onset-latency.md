@@ -14,11 +14,8 @@ aliases:
 categories:
   - sleep
   - wearable-metric
-relations:
+relations: []
 
-  -
-    type: related_protocol
-    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
 measurementContexts:
   - overnight_wearable
   - sleep_diary

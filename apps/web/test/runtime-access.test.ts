@@ -44,6 +44,7 @@ function buildRuntimeAccessTx(
       return [];
     }),
     hostedMember: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => ({
         accountGroupMemberships: [],
         billingStatus: "active",
@@ -177,6 +178,18 @@ function buildReciprocalRuntimeAccessTx(input: {
     tx: tx as unknown as Prisma.TransactionClient,
   };
 }
+
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
 
 describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
   beforeEach(() => {

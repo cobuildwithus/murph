@@ -15,16 +15,11 @@ categories:
   - self-report
   - manual-checkin
 relations:
-
-  -
-    type: related_protocol
-    target: protocol_variant:cold-water-immersion/cold-plunge
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-39879231
-  -
-    type: cites
+  - type: cites
     target: source_artifact:pmid-37866096
+
 measurementContexts:
   - same_day_self_report
   - daily_checkin

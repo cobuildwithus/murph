@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-apob
 slug: lower-apob
-title: Lower My ApoB
-summary: Reduce the number of atherogenic particles with the same durable lifestyle and treatment tools used to lower cardiovascular risk.
+title: Understand My ApoB
+summary: Understand what ApoB measures, how it relates to other lipid results, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:lower-cholesterol
   outcomeKind: biomarker
-  goalPhrase: lower my ApoB
+  goalPhrase: understand my ApoB
   successSignals:
     - id: apob_level
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my ApoB.
+  startPrompt: Hey Murph, help me understand my ApoB.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -88,4 +88,4 @@ ApoB is a risk marker and treatment target, not a diagnosis by itself. Don’t c
 
 ## Related goals
 
-[Lower My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Lower My Triglycerides](/goals/lower-triglycerides) · [Lower My Risk from High Lp(a)](/goals/reduce-risk-from-high-lpa)
+[Understand My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Understand My Triglycerides](/goals/lower-triglycerides) · [Understand My Lp(a) Risk](/goals/reduce-risk-from-high-lpa)

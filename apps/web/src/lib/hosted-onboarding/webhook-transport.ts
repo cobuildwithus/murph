@@ -15,6 +15,7 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   claimHostedLinqDeliveryProviderDispatchTx,
   HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
+  applyHostedLinqSignupSuppressionMilestoneTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   readHostedLinqDeliveryProviderDispatchIntentTx,
@@ -76,9 +77,7 @@ import {
 } from "./linq-group-setup";
 import {
   claimHostedLinqQuotaReplyNotice,
-  markHostedLinqOnboardingLinkNoticeSent,
   readHostedLinqDailyState,
-  releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
   resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
@@ -2076,56 +2075,13 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
 }): Promise<void> {
   const template = input.effect.payload.template;
   try {
-    // A terminal receipt can beat this milestone write (it only just learned
-    // the provider message id); the milestone replays that receipt and this
-    // applies the same daily-state consequence as live receipt ingestion.
-    // Milestone and consequence commit atomically. Group reply availability is
-    // derived from live delivery rows; the shared member/day suppression clears
-    // only after the final live signup delivery fails.
-    const milestone = await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
-      const milestone = await markHostedLinqDeliveryAcceptedTx({
-        idempotencyKey: input.effect.effectId,
-        linqChatId: input.chatId,
-        messageId: input.messageId,
-        ...(input.messageIds ? { messageIds: input.messageIds } : {}),
-        prisma,
-        ...(input.replayingRichLinkPartial
-          ? { replayingRichLinkPartial: true }
-          : {}),
-      });
-      if (milestone.reopenOnboardingLink) {
-        const groupJoinReplyContext =
-          milestone.reopenOnboardingLink.groupJoinReplyContext;
-        if (
-          !groupJoinReplyContext
-          || milestone.reopenOnboardingLink.releaseDailySuppression === true
-        ) {
-          await releaseHostedLinqOnboardingLinkNoticeClaim({
-            memberId: milestone.reopenOnboardingLink.memberId,
-            occurredAt: milestone.reopenOnboardingLink.occurredAt,
-            prisma,
-          });
-        }
-      }
-      const payload = input.effect.payload;
-      if (
-        (
-          milestone.deliveryStatus === "accepted"
-          || milestone.deliveryStatus === "delivered"
-        )
-        &&
-        (
-          payload.template === "invite_signup"
-          || payload.template === "invite_signup_fallback"
-        )
-      ) {
-        await markHostedLinqOnboardingLinkNoticeSent({
-          memberId: payload.memberId,
-          occurredAt: payload.occurredAt,
-          prisma,
-        });
-      }
-      return milestone;
+    const milestone = await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.chatId,
+      messageId: input.messageId,
+      ...(input.messageIds ? { messageIds: input.messageIds } : {}),
+      prisma: input.prisma,
+      ...(input.replayingRichLinkPartial ? { replayingRichLinkPartial: true } : {}),
     });
     if (milestone.restoreOnboardingLink) {
       // A rare delivered-before-accepted race can let receipt ingestion and
@@ -2712,7 +2668,8 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
         if (effect.payload.groupJoinOutreachId?.trim()) {
           return;
         }
-        await releaseHostedLinqOnboardingLinkNoticeClaim({
+        await applyHostedLinqSignupSuppressionMilestoneTx({
+          milestone: "send_failed",
           memberId: effect.payload.memberId,
           occurredAt: effect.payload.occurredAt,
           prisma,
@@ -2754,7 +2711,8 @@ async function markHostedLinqNoticeSentForSideEffect(
   ) {
     return;
   }
-  await markHostedLinqOnboardingLinkNoticeSent({
+  await applyHostedLinqSignupSuppressionMilestoneTx({
+    milestone: "sent",
     memberId: effect.payload.memberId,
     occurredAt: effect.payload.occurredAt,
     prisma,

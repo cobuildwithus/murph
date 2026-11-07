@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-13",
+  "order": 100,
+  "item": {
+    "id": "final-series-reminder-delivery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "The last reminder in a series still arrives when it runs late",
+    "summary": "When a reminder series with an end date runs a little late, its final reminder is no longer dropped at the series end time.",
+    "details": "The final reminder gets the same delivery allowance as earlier ones, and no extra reminders are added. This applies to series set up or changed from now on.",
+    "relevanceTags": ["reminders", "reliability"],
+    "sourcePullRequests": [4132]
+  }
+}

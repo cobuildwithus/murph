@@ -192,7 +192,6 @@ describe("hosted deploy automation helpers", () => {
       "CF_CONTAINER_MAX_INSTANCES",
       "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES",
       "HOSTED_EXECUTION_DEPLOY_TAG",
-      "CF_BOOTSTRAP_SMALL_RUNNER",
     ]);
   });
 
@@ -223,7 +222,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -235,6 +234,7 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
+      images: { binding: string };
       ai?: {
         binding: string;
       };
@@ -250,7 +250,6 @@ describe("hosted deploy automation helpers", () => {
         };
         max_instances: number;
         rollout_active_grace_period: number;
-        rollout_step_percentage: number[];
         ssh: { enabled: boolean };
       }>;
       durable_objects: {
@@ -328,8 +327,7 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 648,
-        rollout_active_grace_period: 300,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_active_grace_period: 1200,
         ssh: { enabled: false },
       },
       {
@@ -338,7 +336,7 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 0,
-        rollout_active_grace_period: 300,
+        rollout_active_grace_period: 1200,
         ssh: { enabled: false },
       },
       {
@@ -348,7 +346,6 @@ describe("hosted deploy automation helpers", () => {
         instance_type: "standard-1",
         max_instances: 1,
         rollout_active_grace_period: 0,
-        rollout_step_percentage: [100],
         ssh: { enabled: false },
       },
       {
@@ -358,26 +355,17 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 100,
-        rollout_active_grace_period: 300,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_active_grace_period: 1200,
         ssh: { enabled: false },
       },
       {
         class_name: "SmallRunnerContainer",
-        image: "../../../Dockerfile.cloudflare-hosted-runner",
-        image_build_context: "..",
-        instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 },
-        max_instances: 10,
-        rollout_active_grace_period: 300,
-        rollout_step_percentage: [10, 25, 50, 100],
-        ssh: { enabled: false },
+        image: "../../../Dockerfile.cloudflare-hosted-runner", image_build_context: "..",
+        instance_type: "standard-1", max_instances: 0,
+        rollout_active_grace_period: 1200, ssh: { enabled: false },
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
-      {
-        class_name: "UserRunnerDurableObject",
-        name: "USER_RUNNER",
-      },
       {
         class_name: "DatabaseHealthDurableObject",
         name: "DATABASE_HEALTH_MONITOR",
@@ -414,8 +402,8 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.analytics_engine_datasets).toEqual([
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
+        binding: "HOSTED_STANDBY_ANALYTICS",
+        dataset: "murph_hosted_standby_inventory",
       },
     ]);
     expect(config.migrations).toEqual([
@@ -452,6 +440,7 @@ describe("hosted deploy automation helpers", () => {
       },
       { new_sqlite_classes: ["NextRunnerContainer"], tag: "v8" },
       { new_sqlite_classes: ["SmallRunnerContainer"], tag: "v9" },
+      { deleted_classes: ["UserRunnerDurableObject"], tag: "v10" },
     ]);
     expect(config).toMatchObject({
       triggers: {
@@ -531,7 +520,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_CRYPTO_ENV).toBe("production");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
     expect(config.vars.HOSTED_ASSISTANT_APPROVAL_POLICY).toBe("never");
-    expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.6-terra");
+    expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-6.1-sol");
     expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
@@ -546,6 +535,7 @@ describe("hosted deploy automation helpers", () => {
       },
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
+    expect(config.images).toEqual({ binding: "GAME_IMAGES" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
@@ -826,7 +816,7 @@ describe("hosted deploy automation helpers", () => {
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
-      { vcpu: 1, memory_mib: 3072, disk_mb: 6000 },
+      expectedDefaultInstanceType,
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
@@ -908,9 +898,8 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
-      HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "false",
       ...expectedRequiredHostedCryptoWorkerVars(),
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
       HOSTED_EXECUTION_STANDBY_MODE: "off",
       HOSTED_EXECUTION_STANDBY_TARGET: "2",
@@ -929,6 +918,26 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
   });
+
+  it.each([undefined, "", "   ", " hbm_testAllowlisted0001,hbm_testOther0002 "])(
+    "renders the optional Worker-only native sleep allowlist: %s",
+    (rawValue) => {
+      const environment = readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        ...(rawValue === undefined ? {} : { MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: rawValue }),
+      });
+      const config = buildHostedWranglerDeployConfig(environment) as { vars: Record<string, string> };
+      const expected = rawValue?.trim() || undefined;
+      for (const vars of [environment.workerVars, config.vars]) {
+        if (expected) expect(vars.MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS).toBe(expected);
+        else expect(vars).not.toHaveProperty("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+      }
+      expect(buildHostedRunnerContainerPlatformEnv(config.vars)).not.toHaveProperty("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+    },
+  );
 
   it("preserves exact Android gate semantics through generated Worker config", () => {
     for (const [rawValue, expectedValue] of [
@@ -970,7 +979,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "exa,hosted-email,linq,mapbox,telegram",
+      "hosted-email,linq,mapbox,telegram",
     );
     expect(environment.runnerReadyTimeoutMs).toBe("20000");
   });
@@ -1084,7 +1093,6 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-number-id",
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
-      VENICE_API_KEY: "venice-key",
     })).toEqual({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -1101,11 +1109,8 @@ describe("hosted deploy automation helpers", () => {
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       MURPH_DATA_API_KEY: "data-api-key",
-      STRAVA_CLIENT_ID: "strava-client-id",
-      STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       OPENAI_API_KEY: "openai-key",
-      VENICE_API_KEY: "venice-key",
     });
   });
 
@@ -1132,7 +1137,7 @@ describe("hosted deploy automation helpers", () => {
     const providerSecretsPayload = buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1174,7 +1179,7 @@ describe("hosted deploy automation helpers", () => {
     expect(buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -1193,7 +1198,7 @@ describe("hosted deploy automation helpers", () => {
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
@@ -1203,7 +1208,7 @@ describe("hosted deploy automation helpers", () => {
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
   });
@@ -1325,64 +1330,4 @@ describe("hosted deploy automation helpers", () => {
     ]);
   });
 
-  it("keeps the canonical R2 deploy surface free of retired migration controls", async () => {
-    const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
-    const docsIndex = await readFile(
-      new URL("../../../agent-docs/index.md", import.meta.url),
-      "utf8",
-    );
-    const deployPreflight = await readFile(
-      new URL("../scripts/deploy-preflight.ts", import.meta.url),
-      "utf8",
-    );
-    const currentSurfaces = [deployGuide, docsIndex, deployPreflight].join("\n");
-
-    expect(deployGuide).toContain("- `CF_BUNDLES_BUCKET`");
-    expect(deployGuide).toContain("- `CF_BUNDLES_PREVIEW_BUCKET`");
-    expect(deployGuide).toContain(
-      "Any Worker release that references the retired OC binding or fallback is below the physical-retirement rollback floor and must not be restored.",
-    );
-    expect(deployPreflight).toContain('"CF_BUNDLES_BUCKET"');
-    expect(deployPreflight).toContain('"CF_BUNDLES_PREVIEW_BUCKET"');
-    expect(currentSurfaces).not.toContain("CF_BUNDLES_RETIRING_OC");
-    expect(currentSurfaces).not.toContain("all four configured R2 bucket names");
-    expect(currentSurfaces).not.toContain("deletion-only binding");
-    expect(currentSurfaces).not.toContain("deletion-only retirement bindings");
-    expect(currentSurfaces).not.toContain("one-time single-region retirement release");
-    expect(currentSurfaces).not.toContain("account-deletion maintenance guard");
-    expect(currentSurfaces).not.toContain("exact retired production and preview OC buckets");
-  });
-
-  it("keeps the daily-report rollback floor after transient mailbox state drains", async () => {
-    const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
-    const groupChallengeContract = await readFile(
-      new URL("../../../agent-docs/product-specs/group-challenge-data-diagnostics.md", import.meta.url),
-      "utf8",
-    );
-    const sectionStart = deployGuide.indexOf("Member-reported daily metrics add the");
-    const sectionEnd = deployGuide.indexOf("The scheduled Linq authority release", sectionStart);
-    const contractStart = groupChallengeContract.indexOf("Member-reported daily metrics use");
-    const contractEnd = groupChallengeContract.indexOf("## Acceptance cases", contractStart);
-    expect(sectionStart).toBeGreaterThan(-1);
-    expect(sectionEnd).toBeGreaterThan(sectionStart);
-    expect(contractStart).toBeGreaterThan(-1);
-    expect(contractEnd).toBeGreaterThan(contractStart);
-
-    const dailyReportRollout = deployGuide.slice(sectionStart, sectionEnd);
-    const dailyReportContract = groupChallengeContract.slice(contractStart, contractEnd);
-    expect(dailyReportRollout).toContain("hard rollback floor");
-    expect(dailyReportRollout).toContain("after the transient mailbox item drains");
-    expect(dailyReportRollout).toMatch(/never roll the runner below this\s+floor afterward/u);
-    expect(dailyReportRollout).toContain("existing meal-photo import");
-    expect(dailyReportRollout).toContain("projection rebuild");
-    expect(dailyReportRollout).toContain("no event rewrite");
-    expect(dailyReportContract).toContain("`apps/cloudflare/DEPLOY.md` is the authoritative rollout and");
-    expect(dailyReportContract).toContain("permanent contracts/query/runner rollback floor");
-    expect(dailyReportContract).toMatch(/independent of retained, pending, unconsumed, or\s+drained mailbox work/u);
-
-    for (const owner of [dailyReportRollout, dailyReportContract]) {
-      expect(owner).not.toContain("rollback floor while any report is retained or unconsumed");
-      expect(owner).not.toContain("until the retained population has drained");
-    }
-  });
 });

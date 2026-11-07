@@ -30,23 +30,14 @@ jobs:
         run: >-
           node --test
           scripts/check-frontend-design-proof.test.mjs
-          scripts/check-pr-architecture-summary.test.mjs
           scripts/check-pr-changelog.test.mjs
-          scripts/check-pr-complexity-summary.test.mjs
           scripts/check-pr-deployment-concerns.test.mjs
+          scripts/check-pr-migration-history.test.mjs
 
-      - name: Require architecture and reuse summary
-        run: node scripts/check-pr-architecture-summary.mjs
+      - name: Protect merged migration history
+        run: node scripts/check-pr-migration-history.mjs
         env:
-          MURPH_GITHUB_TOKEN: ${{ github.token }}
-          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
-
-      - name: Require complexity impact summary
-        run: node scripts/check-pr-complexity-summary.mjs
-        env:
-          MURPH_GITHUB_TOKEN: ${{ github.token }}
           MURPH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
           MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       - name: Require changelog disposition

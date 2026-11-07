@@ -12,11 +12,8 @@ aliases:
 categories:
 - iliotibial-band-syndrome-rehabilitation
 - differential_diagnosis_and_safety_boundary
-relations:
-- type: related_protocol
-  target: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-- type: parent_family
-  target: experiment_family:iliotibial-band-syndrome-rehabilitation
+relations: []
+
 source:
   kind: guideline
   title: Provincial Knee Primary Care Clinical Pathway

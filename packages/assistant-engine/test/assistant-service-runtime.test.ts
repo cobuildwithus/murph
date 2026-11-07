@@ -35,10 +35,8 @@ const seamMocks = vi.hoisted(() => ({
   createAssistantUsageId: vi.fn(),
   isAssistantSessionNotFoundError: vi.fn(),
   local: {
-    openAssistantConversationLocal: vi.fn(),
     sendAssistantNotificationLocal: vi.fn(),
     sendAssistantMessageLocal: vi.fn(),
-    updateAssistantSessionOptionsLocal: vi.fn(),
   },
   markAssistantFirstContactSeen: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
@@ -49,11 +47,7 @@ const seamMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/assistant/local-service.js", () => ({
-  openAssistantConversationLocal:
-    seamMocks.local.openAssistantConversationLocal,
   sendAssistantMessageLocal: seamMocks.local.sendAssistantMessageLocal,
-  updateAssistantSessionOptionsLocal:
-    seamMocks.local.updateAssistantSessionOptionsLocal,
 }));
 vi.mock("../src/assistant/notification-turn.js", () => ({
   sendAssistantNotificationLocal: seamMocks.local.sendAssistantNotificationLocal,
@@ -137,6 +131,7 @@ import {
 } from "../src/assistant/delivery-service.ts";
 import {
   type AssistantGeneratedImageCapturePersistence,
+  type AssistantHostedExecutionContext,
   normalizeAssistantExecutionContext,
   resolveAssistantExecutionDefaultTarget,
   resolveAssistantExecutionOperatorDefaults,
@@ -204,10 +199,10 @@ beforeEach(() => {
           error.code === "ASSISTANT_SESSION_NOT_FOUND"
       )
     );
-  seamMocks.local.openAssistantConversationLocal.mockReset();
+
   seamMocks.local.sendAssistantNotificationLocal.mockReset();
   seamMocks.local.sendAssistantMessageLocal.mockReset();
-  seamMocks.local.updateAssistantSessionOptionsLocal.mockReset();
+
   seamMocks.markAssistantFirstContactSeen
     .mockReset()
     .mockResolvedValue(undefined);
@@ -262,24 +257,13 @@ afterEach(async () => {
 });
 
 describe("assistant service wrapper seam", () => {
-  it("delegates conversation and message flows to the local service", async () => {
-    const conversationResult = {
-      session: createAssistantSession(),
-    };
+  it("delegates message flows to the local service", async () => {
     const messageResult = {
       response: "done",
     };
-    seamMocks.local.openAssistantConversationLocal.mockResolvedValue(
-      conversationResult
-    );
+
     seamMocks.local.sendAssistantMessageLocal.mockResolvedValue(messageResult);
 
-    await expect(
-      assistantService.openAssistantConversation({
-        sessionId: "session-1",
-        vault: "/vault",
-      })
-    ).resolves.toBe(conversationResult);
     await expect(
       assistantService.sendAssistantMessage({
         prompt: "hello",
@@ -287,19 +271,13 @@ describe("assistant service wrapper seam", () => {
       })
     ).resolves.toBe(messageResult);
 
-    expect(seamMocks.local.openAssistantConversationLocal).toHaveBeenCalledWith(
-      {
-        sessionId: "session-1",
-        vault: "/vault",
-      }
-    );
     expect(seamMocks.local.sendAssistantMessageLocal).toHaveBeenCalledWith({
       prompt: "hello",
       vault: "/vault",
     });
   });
 
-  it("delegates notification and session option updates to the local service", async () => {
+  it("delegates notifications to the local service", async () => {
     const notificationInput = {
       channel: "telegram",
       identityId: "identity-1",
@@ -315,45 +293,18 @@ describe("assistant service wrapper seam", () => {
       response: "Welcome to Murph, your personal health assistant.",
       session: createAssistantSession(),
     };
-    const updatedSession = createAssistantSession({
-      providerOptions: createProviderOptions({
-        model: "gpt-5-mini",
-      }),
-    });
     seamMocks.local.sendAssistantNotificationLocal.mockResolvedValue(
       notificationResult
-    );
-    seamMocks.local.updateAssistantSessionOptionsLocal.mockResolvedValue(
-      updatedSession
     );
 
     await expect(
       assistantService.sendAssistantNotification(notificationInput)
     ).resolves.toBe(notificationResult);
-    await expect(
-      assistantService.updateAssistantSessionOptions({
-        providerOptions: {
-          provider: "codex-cli",
-          model: "gpt-5-mini",
-        },
-        sessionId: "session-1",
-        vault: "/vault",
-      })
-    ).resolves.toBe(updatedSession);
 
     expect(
       seamMocks.local.sendAssistantNotificationLocal
     ).toHaveBeenCalledWith(notificationInput);
-    expect(
-      seamMocks.local.updateAssistantSessionOptionsLocal
-    ).toHaveBeenCalledWith({
-      providerOptions: {
-        provider: "codex-cli",
-        model: "gpt-5-mini",
-      },
-      sessionId: "session-1",
-      vault: "/vault",
-    });
+
   });
 });
 
@@ -574,7 +525,6 @@ describe("assistant usage recording seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: "RUNTIME_KEY",
-      credentialSourceHint: null,
       effectiveEnv: undefined,
       headers: null,
       provider: "codex-cli",
@@ -611,7 +561,6 @@ describe("assistant usage recording seam", () => {
         schema: "murph.assistant-usage.v1",
         servedModel: "gpt-5-mini",
         sessionId: "session-test",
-        stripeMeterSource: "murph",
         surface: null,
         tokenPricingBasis: "openai-flex",
         totalTokens: 41,
@@ -673,7 +622,6 @@ describe("assistant usage recording seam", () => {
           gatewayTags: [],
           reportingUserId: null,
           surface: "assistant",
-          stripeMeterSource: "murph" as const,
           triggerKind: "user-message",
         },
       },
@@ -788,7 +736,6 @@ describe("assistant usage recording seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: null,
-      credentialSourceHint: null,
       effectiveEnv: undefined,
       headers: null,
       provider: "codex-cli",
@@ -799,57 +746,6 @@ describe("assistant usage recording seam", () => {
         credentialSource: "member",
         occurredAt: "2026-04-08T10:02:00.000Z",
         turnId: "turn-usage-header-fallback",
-      }),
-    );
-  });
-
-  it("records custom core inference as member-funded without trusting upstream routing metadata", async () => {
-    const recordUsage = vi.fn(async () => undefined);
-    seamMocks.resolveAssistantUsageCredentialSource
-      .mockReset()
-      .mockReturnValue("member");
-
-    await recordAssistantUsageEvent({
-      executionContext: {
-        hosted: {
-          memberId: "member-42",
-          usageRecorder: { recordUsage },
-          userEnvKeys: [],
-        },
-      },
-      providerResult: createProviderResult({
-        providerOptions: createProviderOptions({
-          model: "murph-custom-r7-ab12cd34",
-          modelProvider: "hosted-custom-inference",
-        }),
-        usage: {
-          apiKeyEnv: null,
-          baseUrl: "https://untrusted-upstream.example/v1",
-          inputTokens: 7,
-          outputTokens: 11,
-          providerName: "Untrusted upstream name",
-          requestedModel: "murph-custom-r7-ab12cd34",
-          servedModel: "untrusted-upstream-model",
-          totalTokens: 18,
-        },
-      }),
-      turnId: "turn-custom-inference",
-    });
-
-    expect(
-      seamMocks.resolveAssistantUsageCredentialSource,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      apiKeyEnv: null,
-      credentialSourceHint: "member",
-      provider: "codex-cli",
-    }));
-    expect(recordUsage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseUrl: null,
-        credentialSource: "member",
-        providerName: "hosted-custom-inference",
-        requestedModel: "murph-custom-r7-ab12cd34",
-        servedModel: null,
       }),
     );
   });
@@ -904,7 +800,7 @@ describe("assistant usage recording seam", () => {
       },
       providerResult: createProviderResult({
         providerOptions: createProviderOptions({
-          model: "gpt-5.6-terra-fallback",
+          model: "gpt-6.1-sol-fallback",
         }),
         usage: {
           apiKeyEnv: null,
@@ -933,7 +829,7 @@ describe("assistant usage recording seam", () => {
           memberId: "member-43",
           occurredAt: "2026-04-08T10:05:00.000Z",
           providerName: null,
-          requestedModel: "gpt-5.6-terra-fallback",
+          requestedModel: "gpt-6.1-sol-fallback",
         }),
     );
   });
@@ -1220,6 +1116,102 @@ describe("assistant delivery orchestration seam", () => {
         media,
         message: "Final question?",
       },
+    ]);
+  });
+
+  it("sends each linq walkthrough bubble with its own placed images", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: false,
+      },
+    });
+    const image = (name: string) => ({
+      kind: "image" as const,
+      url: `https://cdn.example.test/${name}.png`,
+      alt: null,
+      source: null,
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "delivery-walkthrough",
+        messageLength: 8,
+        providerMessageId: "provider-walkthrough",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-walkthrough",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    const outcome = await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-base",
+        prompt: "show me",
+        vault: "/vault",
+      },
+      media: [
+        { ...image("reach-forward"), bubble: 1 },
+        { ...image("reach-side"), bubble: 1 },
+        { ...image("hinge"), bubble: 2 },
+        image("hop"),
+      ],
+      response: "First, reaches.\n---\nNext, hinges.\n---\nLast, hops.",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+            threadIsDirect: false,
+          },
+        },
+      }),
+      turnId: "turn-linq-walkthrough",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        media: call[0]?.media,
+        message: call[0]?.message,
+      })),
+    ).toStrictEqual([
+      {
+        deliveryIdempotencyKey: "delivery-base:bubble:0",
+        media: [image("reach-forward"), image("reach-side")],
+        message: "First, reaches.",
+      },
+      {
+        deliveryIdempotencyKey: "delivery-base:bubble:1",
+        media: [image("hinge")],
+        message: "Next, hinges.",
+      },
+      {
+        deliveryIdempotencyKey: "delivery-base",
+        media: [image("hop")],
+        message: "Last, hops.",
+      },
+    ]);
+    expect(outcome.media).toStrictEqual([
+      image("reach-forward"),
+      image("reach-side"),
+      image("hinge"),
+      image("hop"),
     ]);
   });
 
@@ -3646,6 +3638,132 @@ describe("assistant delivery orchestration seam", () => {
 });
 
 describe("assistant execution context normalization", () => {
+  it("keeps absent contexts and absent optional fields distinct", () => {
+    for (const input of [undefined, null, { hosted: null }]) {
+      expect(normalizeAssistantExecutionContext(input)).toEqual({ hosted: null });
+    }
+    const onTypingAccepted = vi.fn();
+    expect(normalizeAssistantExecutionContext({
+      hosted: {
+        memberId: " member-synthetic ",
+        userEnvKeys: [" SYNTHETIC_KEY ", "", "SYNTHETIC_KEY"],
+        actionApprovalPort: null,
+        deviceTool: undefined,
+        dynamicContextPrompts: ["", "  "],
+        channelTypingDependencies: { onTypingAccepted },
+        progressDeliveryDependencies: { signal: new AbortController().signal },
+        releaseSha: "  ",
+        runtimeName: null,
+      },
+    })).toEqual({
+      hosted: {
+        memberId: "member-synthetic",
+        userEnvKeys: ["SYNTHETIC_KEY", "SYNTHETIC_KEY"],
+      },
+    });
+    expect(onTypingAccepted).not.toHaveBeenCalled();
+  });
+
+  it("preserves accessor order, field order, and bound versus forwarded helpers", async () => {
+    const reads: string[] = [];
+    const receivers: unknown[] = [];
+    const request = async function (this: unknown) {
+      receivers.push(this);
+      return {
+        action: "list_accounts" as const,
+        accounts: [],
+        provider: null,
+        sourceProvider: null,
+      };
+    };
+    const deviceTool = {
+      get request() {
+        reads.push("device.request");
+        return request;
+      },
+    };
+    const assertTurnCommitAuthority = async function (this: unknown) {
+      receivers.push(this);
+    };
+    const currentAssistantInputId = () => "input-synthetic";
+    const recordUsage = async () => {};
+    const launcher = { launch: () => "started" as const };
+    const hosted: AssistantHostedExecutionContext = {
+      get memberId() {
+        reads.push("memberId");
+        return " member-synthetic ";
+      },
+      get deviceTool() {
+        reads.push("deviceTool");
+        return deviceTool;
+      },
+      get releaseSha() {
+        reads.push("releaseSha");
+        return " release-synthetic ";
+      },
+      get usageRecorder() {
+        reads.push("usageRecorder");
+        return { recordUsage };
+      },
+      get assertTurnCommitAuthority() {
+        reads.push("assertTurnCommitAuthority");
+        return assertTurnCommitAuthority;
+      },
+      get currentAssistantInputId() {
+        reads.push("currentAssistantInputId");
+        return currentAssistantInputId;
+      },
+      get imageGenerationLauncher() {
+        reads.push("imageGenerationLauncher");
+        return launcher;
+      },
+      get userEnvKeys() {
+        reads.push("userEnvKeys");
+        return [];
+      },
+    };
+    const normalized = normalizeAssistantExecutionContext({ hosted }).hosted;
+    expect(reads).toEqual([
+      "memberId", "deviceTool", "device.request", "device.request",
+      "releaseSha", "usageRecorder",
+      "assertTurnCommitAuthority", "assertTurnCommitAuthority",
+      "currentAssistantInputId", "currentAssistantInputId",
+      "imageGenerationLauncher", "imageGenerationLauncher", "userEnvKeys",
+    ]);
+    expect(Object.keys(normalized!)).toEqual([
+      "assertTurnCommitAuthority", "currentAssistantInputId", "imageGenerationLauncher",
+      "deviceTool", "releaseSha", "usageRecorder", "memberId", "userEnvKeys",
+    ]);
+    expect(normalized?.currentAssistantInputId).toBe(currentAssistantInputId);
+    expect(normalized?.usageRecorder?.recordUsage).toBe(recordUsage);
+    expect(normalized?.imageGenerationLauncher).toBe(launcher);
+    const boundAuthority = normalized?.assertTurnCommitAuthority;
+    expect(boundAuthority).toBeTypeOf("function");
+    await boundAuthority!({ acceptedInputs: [], turnId: "turn-synthetic" });
+    await normalized!.deviceTool!.request({ action: "list_accounts" });
+    expect(receivers).toEqual([hosted, deviceTool]);
+  });
+
+  it("normalizes ports before rejecting a blank member without reading return-only helpers", () => {
+    const reads: string[] = [];
+    const failure = new Error("synthetic port accessor failure");
+    const hosted: AssistantHostedExecutionContext = {
+      memberId: " ",
+      userEnvKeys: [],
+      get deviceTool() {
+        reads.push("deviceTool");
+        return undefined;
+      },
+      get assertTurnCommitAuthority(): never {
+        throw failure;
+      },
+    };
+    expect(normalizeAssistantExecutionContext({ hosted })).toEqual({ hosted: null });
+    expect(reads).toEqual(["deviceTool"]);
+    Object.defineProperty(hosted, "deviceTool", { get() { throw failure; } });
+    expect(() => normalizeAssistantExecutionContext({ hosted })).toThrow(failure);
+  });
+
   it("drops hosted execution context when the hosted member id is blank", () => {
     expect(
       normalizeAssistantExecutionContext({
@@ -3667,8 +3785,8 @@ describe("assistant execution context normalization", () => {
     const createScheduledGroupTools = vi.fn();
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
-      model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol",
+      modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
 
@@ -3768,8 +3886,8 @@ describe("assistant execution context normalization", () => {
 
   it("falls back to the provided target when no hosted default target exists", () => {
     const fallbackTarget = createAssistantModelTarget({
-      model: "gpt-5.6-terra-mini",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol-mini",
+      modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
     if (!fallbackTarget) {
@@ -3791,8 +3909,8 @@ describe("assistant execution context normalization", () => {
 
   it("overlays the hosted default target onto operator defaults without dropping other defaults", () => {
     const hostedDefaultTarget = createAssistantModelTarget({
-      model: "gpt-5.6-terra-mini",
-      modelProvider: "vercel-ai-gateway",
+      model: "gpt-6.1-sol-mini",
+      modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
     if (!hostedDefaultTarget) {
@@ -3807,8 +3925,8 @@ describe("assistant execution context normalization", () => {
             approvalPolicy: "never",
             codexCommand: null,
             codexHome: null,
-            model: "gpt-5.6-terra",
-            modelProvider: "vercel-ai-gateway",
+            model: "gpt-6.1-sol",
+            modelProvider: "hosted-openai",
             oss: false,
             profile: null,
             reasoningEffort: "medium",
@@ -4421,8 +4539,8 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
-        model: "gpt-5.6-terra",
-        modelProvider: "vercel-ai-gateway",
+        model: "gpt-6.1-sol",
+        modelProvider: "hosted-openai",
         reasoningEffort: "medium",
       }),
       resumeState: {
@@ -4434,7 +4552,7 @@ describe("assistant turn finalizer seam", () => {
 
     const saved = await persistAssistantTurnAndSession({
       input: {
-        model: "gpt-5.6-terra-mini",
+        model: "gpt-6.1-sol-mini",
         prompt: "Reply to the inbound message.",
         reasoningEffort: "low",
         turnTrigger: "automation-auto-reply",
@@ -4470,8 +4588,8 @@ describe("assistant turn finalizer seam", () => {
     );
     expect(saved.resumeState?.threadId).toBe("provider-session-stale");
     expect(saved.resumeState?.routeFingerprint).toBe("route-existing");
-    expect(saved.providerOptions.model).toBe("gpt-5.6-terra");
-    expect(saved.target.model).toBe("gpt-5.6-terra");
+    expect(saved.providerOptions.model).toBe("gpt-6.1-sol");
+    expect(saved.target.model).toBe("gpt-6.1-sol");
   });
 
   it("preserves existing provider resume state after active-turn fallback fork", async () => {
@@ -4723,8 +4841,8 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
-        model: "gpt-5.6-terra",
-        modelProvider: "vercel-ai-gateway",
+        model: "gpt-6.1-sol",
+        modelProvider: "hosted-openai",
         reasoningEffort: "low",
       }),
       resumeState: {
@@ -4747,8 +4865,8 @@ describe("assistant turn finalizer seam", () => {
         codexThreadId: "provider-session-high",
         route: createRoute({
           providerOptions: createProviderOptions({
-            model: "gpt-5.6-terra",
-            modelProvider: "vercel-ai-gateway",
+            model: "gpt-6.1-sol",
+            modelProvider: "hosted-openai",
             reasoningEffort: "high",
           }),
           routeId: "route-high",
@@ -4809,8 +4927,8 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: "never",
     provider: "codex-cli",
-    model: "gpt-5.6-terra",
-    modelProvider: "vercel-ai-gateway",
+    model: "gpt-6.1-sol",
+    modelProvider: "hosted-openai",
     reasoningEffort: "medium",
     sandbox: "danger-full-access",
     ...overrides,
@@ -4905,7 +5023,6 @@ function createSharedPlan(input?: {
     cliAccess: {
       env: {},
       rawCommand: "vault-cli" as const,
-      setupCommand: "murph",
     },
     conversationPolicy: {
       audience:

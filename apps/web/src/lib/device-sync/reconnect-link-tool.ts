@@ -1,6 +1,6 @@
 import {
   isDeviceConnectSourceAvailableForConnection,
-  listConfiguredDeviceSyncReconnectTargets,
+  listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncConnectTargetConfigs,
@@ -27,7 +27,6 @@ export interface HostedDeviceReconnectLinkCliArgs {
 
 export type HostedDeviceReconnectLinkTargetResult =
   | { status: "found"; target: DeviceSyncConnectTarget }
-  | { status: "ambiguous"; matches: DeviceSyncConnectTarget[] }
   | { status: "missing" };
 
 export interface HostedDeviceReconnectLinkResult {
@@ -109,27 +108,19 @@ export function resolveHostedDeviceReconnectLinkTarget(
     return { status: "missing" };
   }
 
-  const matches = listConfiguredDeviceSyncReconnectTargets(
+  const target = listConfiguredDeviceSyncConnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(env),
-  ).filter((target) =>
+  ).find((target) =>
     isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
     && (!connectSourceId || target.connectSourceId === connectSourceId)
     && (!connectTarget || target.connectTarget === connectTarget)
     && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
   );
-  const firstMatch = matches[0];
 
-  if (matches.length === 1 && firstMatch) {
+  if (target) {
     return {
       status: "found",
-      target: firstMatch,
-    };
-  }
-
-  if (matches.length > 1) {
-    return {
-      status: "ambiguous",
-      matches,
+      target,
     };
   }
 
@@ -151,12 +142,6 @@ export async function createHostedDeviceReconnectLink(input: {
   if (targetResult.status === "missing") {
     throw new Error(
       "No configured reconnect target matched. Pass --source-provider-slug for Junction-backed sources.",
-    );
-  }
-
-  if (targetResult.status === "ambiguous") {
-    throw new Error(
-      `Reconnect target is ambiguous (${targetResult.matches.length} matches). Pass --source-provider-slug to choose the Junction source.`,
     );
   }
 

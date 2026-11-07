@@ -32,7 +32,6 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -74,13 +73,17 @@ import {
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 1: fresh conversation wake runs before idle shutdown checkpointing", async () => {
+describe("hosted workspace runtime entrypoint", () => {
+  test.each([
+    { followupMinute: 4, timing: { runnerIdleTtlMs: 600_000 }, worker: "current" },
+    { followupMinute: 9, timing: { idleCheckpointDelayMs: 180_000 }, worker: "legacy" },
+  ])("keeps the same invocation at minute $followupMinute with a $worker Worker", async ({ followupMinute, timing }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 600_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -92,15 +95,16 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
       const resultPromise = withRealTimeout(
         runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
+          parseHostedAssistantWorkspaceRuntimeJobInput(createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_fresh_conversation_preempts",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs: undefined,
+              ...timing,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
             },
-          }),
+          })),
           {
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
@@ -169,16 +173,19 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       await waitForFakeTimerScheduled(() => events.join(","));
       assert.equal(checkpointRequests.length, 0);
 
+      await vi.advanceTimersByTimeAsync(followupMinute * 60_000);
+      assert.equal(checkpointRequests.length, 0);
+
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_collapse_fresh_conversation",
-        laneSeq: "1",
-        occurredAt: "2026-04-27T00:00:01.000Z",
+        laneSeq: "2",
+        occurredAt: new Date().toISOString(),
       }));
-      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+      runtimeWakeSignal.notify(Date.now());
 
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       assert.equal(checkpointRequests.length, 0);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.ok(
@@ -186,6 +193,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           < requireEventIndex(events, "snapshot:idle_shutdown"),
       );
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_initial_conversation",
         "mailbox.importItem:mailbox_item_collapse_fresh_conversation",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => [
@@ -195,6 +203,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       ]), [
         ["idle_shutdown", null, null],
       ]);
+      assert.equal(events.filter((event) => event === "workspace.read").length, 1);
+      assert.equal(assistantPhaseCalls, 2);
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
     } finally {
@@ -207,9 +217,9 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-target-refresh-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const phaseObserved = [
       createDeferred<void>(),
       createDeferred<void>(),
@@ -223,13 +233,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
-          availableProviders: ["openai", "venice"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-sol",
-          provider: "openai",
+          model: "gpt-6.1-sol",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -241,12 +249,10 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         result: {
           appliesAt: "next_turn",
           availableModels: [],
-          availableProviders: [],
           availableReasoningEfforts: [],
           configurationAvailable: false,
           dormantSolPreference: false,
-          model: "gpt-5.6-terra",
-          provider: "openai",
+          model: "gpt-6-sol",
           reasoningEffort: "low",
           requiredPlan: null,
           solAvailable: false,
@@ -257,13 +263,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
-          availableProviders: ["openai", "venice"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-terra",
-          provider: "openai",
+          model: "gpt-6-sol",
           reasoningEffort: "low",
           requiredPlan: null,
           solAvailable: true,
@@ -274,13 +278,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
-          availableProviders: ["openai", "venice"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-sol",
-          provider: "openai",
+          model: "gpt-6.1-sol",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -291,13 +293,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
-          availableProviders: ["openai", "venice"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-sol",
-          provider: "openai",
+          model: "gpt-6.1-sol",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -323,12 +323,12 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             forwardedEnv: {
-              HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+              HOSTED_ASSISTANT_MODEL: "gpt-6-sol",
               HOSTED_ASSISTANT_REASONING_EFFORT: "low",
             },
             request: {
               attemptId: "attempt_assistant_target_refresh",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -356,13 +356,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                     return {
                       action: "read",
                       result: {
-                        availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
-                        availableProviders: ["openai", "venice"],
+                        availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
                         availableReasoningEfforts: ["low", "high"],
                         configurationAvailable: true,
                         dormantSolPreference: false,
-                        model: "gpt-5.6-terra",
-                        provider: "openai",
+                        model: "gpt-6-sol",
                         reasoningEffort: "low",
                         solAvailable: true,
                       },
@@ -404,7 +402,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"1".repeat(32)}`,
-                  model: "gpt-5.6-sol",
+                  model: "gpt-6.1-sol",
                   reasoningEffort: "high",
                 });
                 assert.deepEqual(
@@ -424,28 +422,28 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"2".repeat(32)}`,
-                  model: "gpt-5.6-terra",
+                  model: "gpt-6-sol",
                   reasoningEffort: "low",
                 });
               } else if (assistantPhaseCalls === 3) {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"3".repeat(32)}`,
-                  model: "gpt-5.6-terra",
+                  model: "gpt-6-sol",
                   reasoningEffort: "low",
                 });
               } else if (assistantPhaseCalls === 4) {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"4".repeat(32)}`,
-                  model: "gpt-5.6-sol",
+                  model: "gpt-6.1-sol",
                   reasoningEffort: "high",
                 });
               } else if (assistantPhaseCalls === 5) {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"5".repeat(32)}`,
-                  model: "gpt-5.6-sol",
+                  model: "gpt-6.1-sol",
                   reasoningEffort: "high",
                 });
               }
@@ -477,7 +475,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         assert.equal(checkpointRequests.length, 0);
         mailboxItems.push(createMailboxItem({
           id: `mailbox_item_assistant_target_refresh_${nextPhase}`,
-          laneSeq: String(nextPhase - 1),
+          laneSeq: String(nextPhase),
           occurredAt: `2026-04-27T00:00:0${nextPhase - 1}.000Z`,
         }));
         runtimeWakeSignal.notify(Date.parse(TEST_NOW) + nextPhase - 1);
@@ -491,33 +489,33 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       assert.deepEqual(observedTargets, [
         {
           forwardedEffort: "low",
-          forwardedModel: "gpt-5.6-terra",
+          forwardedModel: "gpt-6-sol",
           runtimeEffort: "low",
-          runtimeModel: "gpt-5.6-terra",
+          runtimeModel: "gpt-6-sol",
         },
         {
           forwardedEffort: "high",
-          forwardedModel: "gpt-5.6-sol",
+          forwardedModel: "gpt-6.1-sol",
           runtimeEffort: "high",
-          runtimeModel: "gpt-5.6-sol",
+          runtimeModel: "gpt-6.1-sol",
         },
         {
           forwardedEffort: "high",
-          forwardedModel: "gpt-5.6-sol",
+          forwardedModel: "gpt-6.1-sol",
           runtimeEffort: "high",
-          runtimeModel: "gpt-5.6-sol",
+          runtimeModel: "gpt-6.1-sol",
         },
         {
           forwardedEffort: "low",
-          forwardedModel: "gpt-5.6-terra",
+          forwardedModel: "gpt-6-sol",
           runtimeEffort: "low",
-          runtimeModel: "gpt-5.6-terra",
+          runtimeModel: "gpt-6-sol",
         },
         {
           forwardedEffort: "high",
-          forwardedModel: "gpt-5.6-sol",
+          forwardedModel: "gpt-6.1-sol",
           runtimeEffort: "high",
-          runtimeModel: "gpt-5.6-sol",
+          runtimeModel: "gpt-6.1-sol",
         },
       ]);
       assert.deepEqual(configurationRequests.map((request) => request.action), [
@@ -531,7 +529,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       assert.equal(configurationResponses.length, 0);
       assert.equal(checkpointRequests.length, 0);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 1);
@@ -540,7 +538,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       // attribution comes from the model actually bound to the warm thread.
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: "gpt-5.6-sol",
+          model: "gpt-6.1-sol",
         }),
       );
     } finally {
@@ -553,9 +551,9 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     {
       expectedCheckpointDelayMs: 180_000,
       expectedImmediateRecheck: undefined,
-      expectedWakeReason: "assistant",
+      expectedWakeReason: "mailbox",
       mailboxWakeAt: new Date(Date.parse(TEST_NOW) + 5 * 60_000).toISOString(),
-      scenario: "retains the serviced assistant wake ahead of a future mailbox wake",
+      scenario: "replaces the serviced assistant wake with the computed future mailbox wake",
     },
     {
       expectedCheckpointDelayMs: 0,
@@ -573,7 +571,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const runtimeAbortController = new AbortController();
@@ -591,7 +589,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_due_assistant_waits",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -612,7 +610,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -691,11 +689,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, expectedWakeReason],
+        ["idle_shutdown", mailboxWakeAt, expectedWakeReason],
       ]);
       assert.equal(result.immediateRecheckRequested, expectedImmediateRecheck);
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeAt, mailboxWakeAt);
       assert.equal(result.nextWakeReason, expectedWakeReason);
       assert.equal(assistantPhaseCalls, 2);
     } finally {
@@ -727,7 +725,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_owner_handoff",
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -748,7 +746,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -817,7 +815,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const importObserved = createDeferred<void>();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const runtimeAbortController = new AbortController();
     let firstCheckpointStartedAtMs: number | null = null;
     let assistantPhaseCalls = 0;
@@ -834,7 +832,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -900,12 +898,12 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
       await withRealTimeout(importObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1);
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_collapse_budget_001",
       ]);
@@ -932,7 +930,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantObserved = createDeferred<void>();
     const durableEffectObserved = createDeferred<void>();
     const durableWakeAt = "2026-04-27T00:02:00.000Z";
@@ -948,7 +946,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_durable_followup_waits",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -969,7 +967,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1005,7 +1003,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1);
       await withRealTimeout(durableEffectObserved.promise, 15_000, () => events.join(","));
@@ -1014,7 +1012,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       }
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
       assert.ok(
         requireEventIndex(events, "snapshot:idle_shutdown")
           < requireEventIndex(events, "durable-effect"),
@@ -1043,7 +1041,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_collapse_invariant_shutdown_immediate",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1107,7 +1105,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 60_000;
+    const runnerIdleTtlMs = 60_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -1122,7 +1120,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_due_assistant_serviced",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1142,7 +1140,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1190,7 +1188,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.ok(
@@ -1212,12 +1210,13 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     }
   });
 
-  test("collapse invariant 3b: due device-sync wake committed by checkpoint is returned without assistant service", async () => {
+  test.each([false, true])("collapse invariant 3b: due device-sync wake receives one local service attempt before checkpoint (cleared: %s)", async (cleared) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantObserved = createDeferred<void>();
+    const deviceWakeServiced = createDeferred<void>();
     let assistantPhaseCalls = 0;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -1230,7 +1229,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_device_sync_returned",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1250,16 +1249,36 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
                 workspace: createWorkspaceState({ version: "4" }),
               }),
             }),
-            async runAssistantPhase() {
+            async runAssistantPhase(input) {
               assistantPhaseCalls += 1;
               events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls > 1) {
+                // The live invocation owns the due projection before its floor.
+                // A retained no-progress key must not create another attempt.
+                assert.equal(assistantPhaseCalls, 2);
+                assert.equal(input.workspace?.nextWakeAt, TEST_NOW);
+                assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
+                assert.equal(checkpointRequests.length, 0);
+                deviceWakeServiced.resolve();
+                if (cleared) return {
+                  checkpointReason: "system_mailbox_receipt",
+                  progressed: true,
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                };
+                return {
+                  progressed: false,
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "device-sync.reconcile",
+                };
+              }
               assistantObserved.resolve();
               return {
                 checkpointReason: "system_mailbox_receipt",
@@ -1279,36 +1298,39 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       );
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await withRealTimeout(deviceWakeServiced.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1",
+        "assistant.phase:2",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, "device-sync.reconcile"],
+        ["idle_shutdown", cleared ? null : TEST_NOW, cleared ? null : "device-sync.reconcile"],
       ]);
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.ok(requireEventIndex(events, "assistant.phase:2") < requireEventIndex(events, "snapshot:idle_shutdown"));
+      assert.equal(result.immediateRecheckRequested ?? false, false);
+      assert.equal(result.status, cleared ? "idle" : "scheduled");
+      assert.equal(result.nextWakeAt, cleared ? null : TEST_NOW);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
 
-  test("round4: foreground drain loop terminates with device-sync maintenance and assistant input churn", async () => {
+  test.each(["due", "future"] as const)("round4: foreground drain loop terminates with %s device-sync maintenance and assistant input churn", async (timing) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-drain-loop-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const continuationWakeAt = "2026-04-27T00:00:30.000Z";
+    const continuationWakeAt = new Date(Date.parse(TEST_NOW) + (timing === "due" ? -1_000 : 30_000)).toISOString();
     const mailboxItems: HostedMailboxItem[] = [
       createMailboxItem({
         id: "mailbox_item_round4_drain_loop_001",
@@ -1318,13 +1340,16 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     let assistantPhaseCalls = 0;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
+    // Freeze eligibility without stalling the live foreground import watcher.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_round4_foreground_drain_loop_terminates",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1370,11 +1395,20 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls > 6) {
               throw new Error("Foreground drain loop did not terminate.");
+            }
+
+            if (assistantPhaseCalls > 3) {
+              assert.equal(timing, "due");
+              assert.equal(assistantPhaseCalls, 4);
+              assert.equal(input.workspace?.nextWakeAt, continuationWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
+              assert.equal(checkpointRequests.length, 0);
+              events.push("device.wake.serviced");
             }
 
             if (assistantPhaseCalls <= 2) {
@@ -1413,7 +1447,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         () => `Foreground drain loop did not return. Events: ${events.join(",")}`,
       );
 
-      assert.equal(assistantPhaseCalls, 3);
+      assert.equal(assistantPhaseCalls, timing === "due" ? 4 : 3);
+      assert.equal(events.filter((event) => event === "device.wake.serviced").length, timing === "due" ? 1 : 0);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_round4_drain_loop_001",
         "mailbox.importItem:mailbox_item_round4_drain_loop_002",
@@ -1431,17 +1466,18 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     } finally {
       runtimeAbortController.abort();
       await resultPromise?.catch(() => undefined);
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
 
-  test("round4: committed due assistant wake hidden pre-checkpoint is still serviced, not lost", async () => {
+  test("round4: committed due assistant wake hidden pre-checkpoint is handed to its successor", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-hidden-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 50;
+    const runnerIdleTtlMs = 50;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const assistantThreeObserved = createDeferred<void>();
@@ -1456,7 +1492,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_round4_committed_due_assistant_hidden_then_serviced",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1504,7 +1540,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 setTimeout(() => {
                   mailboxItems.push(createMailboxItem({
                     id: "mailbox_item_round4_hidden_wake_conversation",
-                    laneSeq: "1",
+                    laneSeq: "2",
                     occurredAt: "2026-04-27T00:00:01.000Z",
                   }));
                   runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
@@ -1562,31 +1598,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         "assistant.phase:2:none:none",
       ]);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-      await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
-      );
-      assert.ok(
-        requireEventIndex(events, "mailbox.importItem:mailbox_item_round4_hidden_wake_conversation")
-          < requireEventIndex(events, "snapshot:idle_shutdown"),
-      );
-
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
-
-      assert.deepEqual(checkpointRequests.map((request) => [
-        request.reason,
-        request.nextWakeAt,
-        request.nextWakeReason,
-      ]), [
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(checkpointRequests.map((request) => [request.reason, request.nextWakeAt, request.nextWakeReason]), [
         ["idle_shutdown", TEST_NOW, "assistant"],
-        ["idle_shutdown", null, null],
       ]);
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -1620,9 +1639,9 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
       const events: string[] = [];
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-      const mailboxItems: HostedMailboxItem[] = [];
+      const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-      const idleCheckpointDelayMs = 50;
+      const runnerIdleTtlMs = 50;
       const staleWakeAt = TEST_NOW;
       const assistantOneObserved = createDeferred<void>();
       const assistantTwoObserved = createDeferred<void>();
@@ -1638,7 +1657,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             createWorkspaceRuntimeJobInput({
               request: {
                 attemptId: `attempt_collapse_invariant_stale_${scenario.name}`,
-                idleCheckpointDelayMs,
+                runnerIdleTtlMs,
                 leaseGeneration: "9",
                 userId: TEST_USER_ID,
                 workspaceVersion: "4",
@@ -1684,7 +1703,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                   assistantOneObserved.resolve();
                   mailboxItems.push(createMailboxItem({
                     id: `mailbox_item_collapse_stale_${scenario.name}_conversation`,
-                    laneSeq: "1",
+                    laneSeq: "2",
                     occurredAt: "2026-04-27T00:00:01.000Z",
                   }));
                   setTimeout(() => runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1), 0);
@@ -1718,7 +1737,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         await waitForFakeTimerScheduled(() => events.join(","));
         await vi.advanceTimersByTimeAsync(0);
         await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
         if (vi.getTimerCount() > 0) {
           await vi.runOnlyPendingTimersAsync();
         }
@@ -1757,7 +1776,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 50;
+    const runnerIdleTtlMs = 50;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
@@ -1773,7 +1792,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_collapse_invariant_system_waits_for_checkpoint",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1861,13 +1880,12 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         events.includes("mailbox.importItem:mailbox_item_collapse_system_after_checkpoint"),
         false,
       );
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       if (vi.getTimerCount() > 0) {
         await vi.runOnlyPendingTimersAsync();
       }
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      // Follow-up work preserves the spent window; no second clock advance.
       const result = await resultWithTimeout;
 
       assert.ok(
@@ -1904,7 +1922,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const durableWakeAt = "2026-04-27T00:03:00.000Z";
     const assistantObserved = createDeferred<void>();
 
@@ -1918,7 +1936,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_durable_wake_followup",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1938,7 +1956,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1973,7 +1991,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       if (vi.getTimerCount() > 0) {
         await vi.runOnlyPendingTimersAsync();
       }
@@ -2005,7 +2023,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -2020,7 +2038,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_redacted_status_survives",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2040,7 +2058,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -2098,7 +2116,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
@@ -2124,9 +2142,9 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -2140,7 +2158,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_pre_checkpoint_conversation_wake",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2221,7 +2239,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_entrypoint_pre_checkpoint_conversation_wake",
-        laneSeq: "1",
+        laneSeq: "2",
         occurredAt: "2026-04-27T00:00:01.000Z",
       }));
       runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
@@ -2233,10 +2251,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         "assistant.phase:2:none:none",
       ]);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_initial_conversation",
         "mailbox.importItem:mailbox_item_entrypoint_pre_checkpoint_conversation_wake",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
@@ -2252,13 +2271,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     }
   });
 
-  test("same-key checkpoint-blocked conversation wakes hide due assistant state before checkpoint", async () => {
+  test("checkpoint-blocked conversation wakes preserve save-before-cleanup without another quiet window", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const snapshotTimes: number[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const assistantThreeObserved = createDeferred<void>();
@@ -2273,7 +2293,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_same_key_conversation_wake",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2282,6 +2302,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           {
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
+              snapshotTimes.push(Date.now());
               return {
                 snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
@@ -2319,11 +2340,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               if (assistantPhaseCalls === 1) {
                 assistantOneObserved.resolve();
                 return {
-                  afterCheckpoint: async () => ({
-                    checkpointReason: "provider_cleanup",
-                    nextWakeAt: TEST_NOW,
-                    nextWakeReason: "assistant",
-                  }),
+                  afterCheckpoint: async () => {
+                    events.push("provider.cleanup");
+                    return {
+                      checkpointReason: "provider_cleanup",
+                      nextWakeAt: TEST_NOW,
+                      nextWakeReason: "assistant",
+                    };
+                  },
                   checkpointReason: "canonical_runtime_commit",
                   nextWakeAt: TEST_NOW,
                   nextWakeReason: "assistant",
@@ -2370,7 +2394,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       await waitForFakeTimerScheduled(() => events.join(","));
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_entrypoint_same_key_conversation_wake",
-        laneSeq: "1",
+        laneSeq: "2",
         occurredAt: "2026-04-27T00:00:01.000Z",
       }));
       runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
@@ -2382,27 +2406,16 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         "assistant.phase:2:none:none",
       ]);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-      await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
-      );
-
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
-
-      assert.deepEqual(checkpointRequests.map((request) => [
-        request.reason,
-        request.nextWakeAt,
-        request.nextWakeReason,
-      ]), [
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(checkpointRequests.map((request) => [request.reason, request.nextWakeAt, request.nextWakeReason]), [
         ["idle_shutdown", TEST_NOW, "assistant"],
-        ["idle_shutdown", null, null],
       ]);
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.ok(requireEventIndex(events, "provider.cleanup") < requireEventIndex(events, "snapshot:idle_shutdown"));
+      assert.deepEqual(snapshotTimes, [Date.parse(TEST_NOW) + runnerIdleTtlMs]);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -2423,7 +2436,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_post_checkpoint_projected_wake",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2512,7 +2525,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_post_checkpoint_same_projected_wake",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2597,30 +2610,16 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         },
       );
 
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, postCheckpointWakeAt);
+      assert.equal(assistantPhaseCalls, 1);
       assert.equal(phaseInputIds[0]?.length, 1);
-      assert.deepEqual(phaseInputIds[1], []);
-      assert.deepEqual(
-        events.filter((event) =>
-          event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
-        ),
-        [
-          `assistant.phase:1:${postCheckpointWakeAt}`,
-          "snapshot:idle_shutdown",
-          `assistant.phase:2:${postCheckpointWakeAt}`,
-          "snapshot:idle_shutdown",
-        ],
-      );
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-        "idle_shutdown",
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:") || event.startsWith("snapshot:")), [
+        `assistant.phase:1:${postCheckpointWakeAt}`, "snapshot:idle_shutdown",
       ]);
+      assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
-      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
-      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
     } finally {
       await removeTempRoot(vaultRoot);
     }

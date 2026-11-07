@@ -37,7 +37,12 @@ export function inspectHostedStripeBillingWorkflow(
   requireText(
     "missing-main-push-trigger",
     "  push:\n    branches:\n      - main\n",
-    "Workflow must run the live lane on pushes to main.",
+    "Workflow must run the hermetic lane on pushes to main.",
+  );
+  requireText(
+    "missing-live-schedule",
+    '  schedule:\n    - cron: "23 8 * * 1,4"\n',
+    "Live Stripe proof must run twice weekly on Monday and Thursday (UTC).",
   );
   if (source.includes("pull_request_target")) {
     issues.push({
@@ -62,11 +67,6 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain Starter-to-paid Checkout coverage.",
   );
   requireText(
-    "missing-starter-migration-proof",
-    "apps/web/test/hosted-starter-usage-migration.test.ts",
-    "Hermetic proof must retain the legacy trial-to-Starter migration contract.",
-  );
-  requireText(
     "missing-config-proof",
     "test/stripe-billing-live-config.test.ts",
     "Hermetic proof must retain sandbox authority partition tests.",
@@ -75,6 +75,11 @@ export function inspectHostedStripeBillingWorkflow(
     "missing-support-proof",
     "apps/web/test/hosted-billing-live-support.test.ts",
     "Hermetic proof must retain browser and provider-boundary support tests.",
+  );
+  requireText(
+    "missing-projection-diagnostic-proof",
+    "apps/web/test/hosted-billing-projection-waiter.test.ts",
+    "Hermetic proof must retain bounded projection timeout diagnostics.",
   );
   requireText(
     "missing-hydration-proof",
@@ -94,13 +99,13 @@ export function inspectHostedStripeBillingWorkflow(
   if (source.includes("HOSTED_STRIPE_BILLING_LIVE_CONFIGURED")) {
     issues.push({
       code: "silent-live-config-skip",
-      message: "Main merges must fail preflight when sandbox configuration is absent, not skip behind a marker.",
+      message: "Scheduled runs must fail preflight when sandbox configuration is absent, not skip behind a marker.",
     });
   }
   requireText(
     "missing-live-if",
-    "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
-    "The secret-bearing live job must bypass a skipped PR-only ancestor only for trusted pushes with successful hermetic proof.",
+    "if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}",
+    "The secret-bearing live job must bypass a skipped PR-only ancestor only for protected-main schedules with successful hermetic proof.",
   );
   requireText(
     "missing-dedicated-environment",
@@ -111,11 +116,6 @@ export function inspectHostedStripeBillingWorkflow(
     "missing-sandbox-secret",
     "secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY",
     "Live steps must use only the dedicated sandbox secret.",
-  );
-  requireText(
-    "missing-privy-client-config",
-    "vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID",
-    "The browser lane must render with the existing public Privy client configuration.",
   );
   requireText(
     "missing-live-command",
@@ -164,12 +164,12 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-fail-closed-live-gate",
-    'case "$EVENT_NAME" in\n            push)\n              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]',
-    "Main merges must fail when the live lane is missing, skipped, or unsuccessful.",
+    'case "$EVENT_NAME" in\n            schedule)\n              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]',
+    "Scheduled runs must fail when the live lane is missing, skipped, or unsuccessful.",
   );
   requireText(
     "missing-pr-live-exclusion",
-    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]',
+    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                  echo "Full pull-request proof requires hermetic success and must not start the secret-bearing live job."',
     "Full pull-request proof must fail closed if hermetic proof is absent or the secret-bearing live job starts.",
   );
   requireText(

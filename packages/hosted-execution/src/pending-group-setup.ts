@@ -70,7 +70,7 @@ const hostedRuntimePendingGroupSetupPersonalitySchema = z
 
 export const hostedRuntimePendingGroupSetupStyleSchema = z
   .object({
-    persona: assistantPersonaIdSchema.optional(),
+    persona: assistantPersonaIdSchema.transform(() => "classic" as const).optional(),
     personality: hostedRuntimePendingGroupSetupPersonalitySchema.optional(),
     tone: assistantTonePreferenceSchema.optional(),
     voice: assistantVoiceOptionIdSchema.optional(),

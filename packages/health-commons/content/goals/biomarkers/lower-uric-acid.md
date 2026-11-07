@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-uric-acid
 slug: lower-uric-acid
-title: Lower My Uric Acid
-summary: Lower uric acid for a clear clinical reason using treatment, hydration, weight, and targeted food or alcohol changes.
+title: Understand My Uric Acid
+summary: Understand uric acid results, their relationship to gout, and questions for your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:prevent-gout-attacks
   outcomeKind: biomarker
-  goalPhrase: lower my uric acid
+  goalPhrase: understand my uric acid
   successSignals:
     - id: serum_urate
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my uric acid.
+  startPrompt: Hey Murph, help me understand my uric acid.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -88,4 +88,4 @@ A new rash, facial swelling, fever, or systemic illness after starting allopurin
 
 ## Related goals
 
-[Prevent Gout Attacks](/goals/prevent-gout-attacks) · [Protect My Kidney Function](/goals/protect-kidney-function) · [Lower My Triglycerides](/goals/lower-triglycerides)
+[Track My Gout Flare-Ups](/goals/prevent-gout-attacks) · [Understand My Kidney Health](/goals/protect-kidney-function) · [Understand My Triglycerides](/goals/lower-triglycerides)

@@ -48,6 +48,25 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     } finally { await prisma.hostedMember.deleteMany({ where: { id: memberId } }); }
   }
 
+  it("admits a suspended owner only for deletion and still honors revocation", () => fixture(async ({ memberId, token, adapter }) => {
+    const prisma = getPrisma();
+    const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma,
+      credential: token, transport: "native" as const };
+    const original = await readHostedAuthSession(configuration);
+    expect(original.session?.member.id).toBe(memberId);
+    await prisma.hostedMember.update({ where: { id: memberId }, data: { suspendedAt: new Date() } });
+    await expect(readHostedAuthSession(configuration)).rejects.toMatchObject({ code: "HOSTED_MEMBER_SUSPENDED" });
+    const retry = await readHostedAuthSession({ ...configuration, purpose: "account-deletion" });
+    expect(retry.session?.member.id).toBe(memberId);
+    expect(retry.session?.member.suspendedAt).toBeInstanceOf(Date);
+    if (!retry.session) throw new Error("Expected deletion session");
+    await expect(prisma.$transaction((tx) => assertHostedAuthSessionCurrentTx({
+      credential: token, memberId, sessionId: retry.session!.sessionId, proof: retry.session!.proof, prisma: tx,
+    }))).rejects.toMatchObject({ code: "HOSTED_MEMBER_SUSPENDED" });
+    await adapter.delete({ model: "session", where: [{ field: "token", value: token }] });
+    expect((await readHostedAuthSession({ ...configuration, purpose: "account-deletion" })).session).toBeNull();
+  }));
+
   it("atomically limits concurrent pre-authentication requests without retaining raw selectors", async () => {
     const prisma = getPrisma(); const key = `synthetic-limit-${randomUUID()}`;
     const digest = authLookupKey("verification", "rate-limit", key); const id = `arl_${digest}`;
