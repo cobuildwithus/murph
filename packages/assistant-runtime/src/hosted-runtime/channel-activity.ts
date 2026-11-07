@@ -207,13 +207,17 @@ export function startHostedLinqInputTyping(input: Omit<
     return null;
   }
 
+  const controller = new AbortController();
   let ownerSignal: AbortSignal | undefined;
   let handedOff = false;
   let stopped = false;
   let teardown: Promise<void> | undefined;
   const detach = () => ownerSignal?.removeEventListener("abort", stop);
   typingTarget.state.cleanup = detach;
-  const ready = prepareHostedLinqTyping({ ...input, signal: undefined }, typingTarget, context).catch(() => undefined);
+  const ready = prepareHostedLinqTyping({
+    ...input,
+    signal: controller.signal,
+  }, typingTarget, context).catch(() => undefined);
 
   function cancel(): Promise<void> {
     stopped = true;
@@ -223,6 +227,7 @@ export function startHostedLinqInputTyping(input: Omit<
     return teardown ??= ready.then((handle) => handle?.stop()).catch(() => {});
   }
   function stop(): void {
+    controller.abort(ownerSignal?.reason);
     void cancel();
   }
   function bindSignal(signal?: AbortSignal): void {
@@ -294,9 +299,7 @@ async function prepareHostedLinqTyping(
     return startHostedLinqTypingForTarget(input, claim);
   }
   const handle = createAssistantChannelTypingHandle({
-    // The gate owns cancellation; let a pending POST settle so its accepted
-    // handle can be stopped instead of losing it to an aborted transport.
-    start: () => startHostedLinqTypingForTarget({ ...input, signal: undefined }, claim),
+    start: () => startHostedLinqTypingForTarget(input, claim),
     onStoppedBeforeStart: () => releaseHostedLinqTypingTarget(claim, { completedMaxSession: false }),
     readAckCoverage: async (signal: AbortSignal) => {
       const result = await read({

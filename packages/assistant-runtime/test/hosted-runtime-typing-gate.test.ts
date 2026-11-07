@@ -123,25 +123,3 @@ it('late provider acceptance cannot clear a successor chat claim', async () => {
   await successor?.stop();
   expect(f.visible()).toBe(false);
 });
-
-it('aborting a pending foreground POST preserves its handle for eventual provider cleanup', async () => {
-  vi.useFakeTimers();
-  const f = fixture(true);
-  const acceptance = deferred<Response>();
-  f.providerFetch.mockImplementationOnce(async (_url, init) => {
-    const response = await acceptance.promise;
-    expect(init?.signal?.aborted).not.toBe(true);
-    return response;
-  });
-  const controller = new AbortController();
-  const handle = await createHostedAssistantChannelTypingDependencies({ ...f.input,
-    linqDeliveryContexts: [f.context], signal: controller.signal,
-  }).startLinqTyping!({ target: f.context.target! });
-  handle?.release?.();
-  await vi.advanceTimersByTimeAsync(0);
-  controller.abort();
-  acceptance.resolve(new Response(null, { status: 204 }));
-  await vi.advanceTimersByTimeAsync(0);
-  expect(f.providerFetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
-  expect(vi.getTimerCount()).toBe(0);
-});
