@@ -107,10 +107,22 @@ export type HostedIdleMaintenanceOutcome =
       threadContextTokensBefore: number | null;
     } & HostedIdleMaintenanceWake);
 
+export function resolveHostedIdleMaintenanceWork(input: {
+  foregroundWorkPending: boolean;
+  nextWakeAt: string | null;
+  nowMs: number;
+}): { pendingWork: boolean; foregroundWorkPending: boolean } {
+  return {
+    pendingWork: input.foregroundWorkPending || (input.nextWakeAt !== null
+      && Date.parse(input.nextWakeAt) - input.nowMs < HOSTED_IDLE_COMPACT_TIMEOUT_MS),
+    foregroundWorkPending: input.foregroundWorkPending,
+  };
+}
+
 // One idle-checkpoint maintenance step: bounded media retention, abortable
 // canonical archive work, and opportunistic fail-open thread compaction.
-// Runs only on TTL idle shutdown (never deploy evacuation). A pending wake
-// aborts it immediately; the engine kills the warm process before returning,
+// Runs only on TTL idle shutdown (never deploy evacuation). A fresh wake
+// notification aborts it immediately; the engine kills the warm process before returning,
 // so the idle checkpoint that snapshots the Codex home never captures a rollout
 // mid-teardown. Future idle-time maintenance belongs here as additional plain
 // statements.
@@ -124,6 +136,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  foregroundWorkPending: boolean;
   processingMode?: HostedWorkspaceInvocationProcessingMode;
   persistGeneratedImageRetention?: (<T>(write: () => Promise<T>) => Promise<T>) | null;
   protectedAttachmentIds?: readonly string[];
@@ -318,24 +331,19 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         wakeInterrupted,
       });
     }
-    if (input.pendingWork) {
-      // The checkpoint is on a prompt-return path (mailbox budget exhausted or
-      // an imminent projected wake); retention is bounded and privacy-critical,
-      // but archive or Codex compaction would delay member-visible work.
+    if (input.foregroundWorkPending) {
       return attachInboxMediaRetentionWake(
         { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null },
         retentionWake,
       );
     }
-    // Finite content-retention wakes must not rescan unrelated canonical
-    // history. Ordinary idle checkpoints remain the archive owner.
-    if (input.vaultRoot && input.processingMode !== "inbox_media_retention") {
-      await maintainHostedIdleStorage({
-        memberId: input.memberId,
-        signal: abortController.signal,
-        vaultRoot: input.vaultRoot,
-      });
-    }
+    await maintainHostedIdleStorage({
+      memberId: input.memberId,
+      pendingWork: input.pendingWork,
+      processingMode: input.processingMode,
+      signal: abortController.signal,
+      vaultRoot: input.vaultRoot,
+    });
     if (abortController.signal.aborted) {
       return buildInterruptedMaintenanceOutcome({
         retentionWake,
@@ -419,9 +427,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
 
 async function maintainHostedIdleStorage(input: {
   memberId: string;
+  pendingWork: boolean;
+  processingMode?: HostedWorkspaceInvocationProcessingMode;
   signal: AbortSignal;
-  vaultRoot: string;
+  vaultRoot?: string | null;
 }): Promise<void> {
+  // Pending work keeps the short retention slice even when compaction is
+  // allowed. Finite retention wakes must not rescan canonical history either.
+  if (input.pendingWork || !input.vaultRoot || input.processingMode === "inbox_media_retention") return;
   const archiveSignal = AbortSignal.any([
     input.signal,
     AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),

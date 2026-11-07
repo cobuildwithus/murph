@@ -191,7 +191,8 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
         }),
         memberId: TEST_USER_ID,
         model: null,
-        pendingWork: false,
+        pendingWork: true,
+        foregroundWorkPending: false,
         providerName: null,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -206,6 +207,10 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
         threadContextTokensBefore: null,
       });
       expect(idleMaintenanceMock).toHaveBeenCalledTimes(1);
+      expect(idleMaintenanceMock).toHaveBeenCalledWith(expect.objectContaining({
+        pendingWork: true,
+        foregroundWorkPending: false,
+      }));
       const callArg = idleMaintenanceMock.mock.calls[0]?.[0] as {
         protectedAttachmentIds?: readonly string[];
         protectedCaptureIds?: readonly string[];

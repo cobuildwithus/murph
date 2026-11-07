@@ -104,6 +104,19 @@ The live ownership split is:
   renew the idle window; host wake admission stays open until invocation return.
   Background system work stays quiesced, and due assistant or deferred device
   wakes remain successor work.
+  Scheduled wakes do not gate idle compaction; owner handoff, pending durable
+  checkpoint effects, follow-up checkpoints and exhausted invocation budgets do.
+  Near or overdue wakes still bound retention and skip canonical archive and
+  meal-media work; without a replacement retention wake, pending work or shutdown
+  preserves the previous retention retry regardless of compaction's outcome.
+  A scheduled wake, including a member-facing retry, waits for a running
+  compaction within the reserved budget. Cron freshness is unchanged, and a wake
+  that passes it during compaction expires like any other late wake.
+  Fresh wake notifications and shutdown still abort compaction, and failure
+  still permits checkpoint publication and successor work. Compaction uses the
+  existing timeout before snapshot publication, starts no cold process and does
+  not re-dirty the runtime; completion clears warm thread vitals until a new turn.
+
   Required projection, receipt, and acknowledgement effects keep their existing
   save-before-effect ordering and may require a follow-up checkpoint. An empty
   service of a presented assistant wake replaces the carried wake with its

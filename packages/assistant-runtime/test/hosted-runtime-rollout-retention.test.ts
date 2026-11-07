@@ -92,7 +92,7 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
 
   const maintain = (vault: string) => runHostedIdleCheckpointMaintenance({
     vaultRoot: vault, credentialSource: "platform", memberId: "synthetic-member",
-    model: null, providerName: null, pendingWork: false, recordUsage: null,
+    model: null, providerName: null, pendingWork: false, foregroundWorkPending: false, recordUsage: null,
     resolveAssistantSessionId: null, shutdownSignal: null, wakeSignal: null,
   });
   await maintain(vaultRoot);
