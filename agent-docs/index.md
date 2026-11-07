@@ -1,4 +1,4 @@
-ReviewGPT runs only for risky changes, at any size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
+ReviewGPT runs for risky behavior and core architecture, not for size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
 Checkpoint step timings, the archive plan/build split, and unconditional residue
 pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
 
