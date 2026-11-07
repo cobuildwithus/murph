@@ -9617,7 +9617,9 @@ function selectHostedIdleCheckpointWake(input: {
 } {
   const preservePreviousRetentionWake =
     (input.pendingWork
-      || ("reason" in input.idleMaintenance && input.idleMaintenance.reason === "shutdown"))
+      || ("reason" in input.idleMaintenance
+        && (input.idleMaintenance.reason === "pending_work"
+          || input.idleMaintenance.reason === "shutdown")))
     && !input.idleMaintenance.nextWakeAt;
 
   return {

@@ -107,8 +107,9 @@ The live ownership split is:
   Scheduled wakes do not gate idle compaction; owner handoff, pending durable
   checkpoint effects, follow-up checkpoints and exhausted invocation budgets do.
   Near or overdue wakes still bound retention and skip canonical archive and
-  meal-media work; without a replacement retention wake, pending work or shutdown
-  preserves the previous retention retry regardless of compaction's outcome.
+  meal-media work; without a replacement retention wake, pending work, wake
+  interruption or shutdown preserves the previous retention retry regardless of
+  compaction's outcome.
   A scheduled wake, including a member-facing retry, waits for a running
   compaction within the reserved budget. Cron freshness is unchanged, and a wake
   that passes it during compaction expires like any other late wake.
