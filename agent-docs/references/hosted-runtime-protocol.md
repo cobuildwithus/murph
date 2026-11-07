@@ -4206,19 +4206,30 @@ byte-count, and completion diagnostics through the existing structured logger.
 Read-wait includes event-loop scheduling delay and must not be called pure network
 latency. The existing persisted restore timing fields keep their current meaning.
 
-True idle-shutdown maintenance also compacts closed
+True idle-shutdown maintenance also compacts
 `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` shards in place before snapshot
-planning. The core owner streams each raw shard into deterministic level-6
-gzip, validates all rows and the exact decompressed byte receipt, publishes the
-archive exclusively, and only then removes the raw representation. Pending
+planning. Closed plain/gzip shards and current-month plain shards of at least
+4 MiB are eligible for lossless quality-5 Brotli. The core owner validates all
+rows and the exact decompressed byte receipt before publishing the archive and
+removing the source. Pending
 foreground work skips this pass, and a runner wake, shutdown, or 30-second pass
 budget aborts it. A timeout or ordinary compaction failure is logged in
-aggregate and does not suppress the checkpoint; remaining raw months are the
-next pass's durable worklist. If interruption lands after archive publication
-but before raw removal, startup removes the raw copy only after independently
-validating an exact, newline-terminated raw/gzip match. A conflicting closed
-pair fails closed before mailbox or assistant work. No compaction queue,
-marker, or second persistence owner is introduced.
+aggregate and does not suppress the checkpoint; remaining old representations
+are the next pass's worklist. Readers and amendment planning repair encountered
+identical duplicate representations under the canonical lock, with complete
+independent validation; conflicts fail closed. Startup performs no archive sweep.
+No compaction queue, marker, or second persistence owner is introduced.
+
+Snapshot publication externalizes an unambiguous integration-ingest Brotli shard
+only when its month is older than the UTC month of now minus 10 days. This keeps
+closed months inline for 10 full days, exceeding the routine 7-day lookback.
+Existing cold references remain cold; a thawed month waits for the same cutoff
+before publishing its amended hash. The current/future-month rollback guard uses
+the true current month. Inline closed shards remain readable and included in full
+exports. This timing change has no wire/schema change or additional rollback
+floor: compatible older runners simply externalize sooner. Existing cold-history
+reader/preserver and media compatibility floors still apply; no coordinated Web
+or Worker consumer rollout is needed for this delay.
 
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser

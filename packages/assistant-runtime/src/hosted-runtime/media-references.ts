@@ -94,6 +94,8 @@ export { isHostedMealMediaV2Path } from "@murphai/runtime-state/node";
 export type { HostedMediaReference, HostedMediaReferenceCatalogue } from "@murphai/runtime-state/node";
 
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
+// Must exceed the routine 7-day lookback so month-start polls do not thaw and re-upload history.
+const COLD_INGEST_DELAY_MS = 10 * 24 * 60 * 60 * 1000;
 
 export interface PublishHostedWorkspaceMediaReferencesResult {
   pendingPhotoMediaIds: string[];
@@ -244,13 +246,15 @@ async function prepareHostedWorkspaceMediaReferences(input: {
     existingCatalogue.entries.map((entry) => [entry.relativePath, entry]),
   );
   const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal, input.includeColdIngests === true);
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const now = Date.now();
+  const currentMonth = new Date(now).toISOString().slice(0, 7);
+  const coldIngestCutoffMonth = new Date(now - COLD_INGEST_DELAY_MS).toISOString().slice(0, 7);
   const ingestPaths = input.includeColdIngests
     ? new Set(await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory))
     : new Set<string>();
   for (const relativePath of ingestPaths) {
     const month = hostedColdIngestMonth(relativePath);
-    if (!month || month >= currentMonth || existingByPath.has(relativePath)) continue;
+    if (!month || month >= coldIngestCutoffMonth || existingByPath.has(relativePath)) continue;
     const logicalPath = relativePath.slice(0, -3);
     if ([logicalPath, `${logicalPath}.gz`, `${logicalPath}.zip`].some((sibling) => ingestPaths.has(sibling))) continue;
     candidates.push({ relativePath, mediaKind: "integration-ingest", expiresAt: null,
