@@ -25,6 +25,7 @@ import {
 import {
   buildHostedVaultShareProjectionScopeKey,
   hostedVaultShareReadAuthorityScopes,
+  HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY,
@@ -1266,7 +1267,7 @@ async function readHostedGroupSharedSnapshots(input: {
     }));
     const snapshots = await decryptHostedVaultShareProjectionSnapshots({
       entries: shares, prisma, nowMs: now.getTime(),
-      requestedHistoryDays: options.history || input.retainedHistory ? 90 : 7,
+      requestedHistoryDays: input.retainedHistory ? HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS : options.history ? 90 : 7,
     });
     for (const [index, share] of shares.entries()) {
       readableGrantIds.add(share.id);

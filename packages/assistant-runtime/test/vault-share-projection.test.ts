@@ -6608,6 +6608,63 @@ describe("readProjectableProfileName", () => {
 
 
 describe("canonical history capture", () => {
+  const boardNowMs = Date.parse("2026-09-17T23:00:00.000Z");
+  const boardDate = (age: number) => new Date(boardNowMs - age * 86_400_000).toISOString().slice(0, 10);
+  const metricEvents = (metric: string, unit: string, providers: readonly string[], ages: number, junctionOnlyAge?: number) =>
+    Array.from({ length: ages }, (_, age) => [...providers, ...(age === junctionOnlyAge ? [""] : [])].map((provider) => ({
+      schemaVersion: "murph.event.v1", id: `evt_${metric}_${age}_${provider || "junction"}`, kind: "observation",
+      occurredAt: `${boardDate(age)}T12:00:00.000Z`, recordedAt: `${boardDate(age)}T12:01:00.000Z`, dayKey: boardDate(age),
+      source: "device", title: metric, metric, value: 60, unit,
+      ...(provider ? { dataOrigin: { aggregatorProvider: "junction", originConfidence: "high", sourceProviderSlug: provider, version: 1 } } : {}),
+      externalRef: { system: "junction", resourceType: "steps", resourceId: `${metric}-${age}-${provider}` },
+    }))).flat();
+  async function captureMetric(kind: "hrv-days.v0" | "steps-days.v0", events: readonly Record<string, unknown>[]) {
+    const vaultRoot = await createActivitySessionVault(events);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(boardNowMs);
+    const scope = hostedVaultShareProjectionKindToScope(kind);
+    try {
+      const result = await captureHostedVaultShareProjectionBestEffort({
+        generationTokensByProjectionScopeKey: { [buildHostedVaultShareProjectionScopeKey(scope)]: GENERATION_TOKEN },
+        hasDeferredProjectionWork: false, projectionScopes: [scope],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION, vaultRoot,
+      });
+      if (result.outcome !== "captured") throw new Error("Expected a capture.");
+      return result.capture.snapshots[0]!.records;
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+  const dates = (records: readonly { occurredAt: string }[]) => new Set(records.map((record) => record.occurredAt.slice(0, 10)));
+
+  it("publishes 180 dates for a board metric and stops there", async () => {
+    const records = await captureMetric("steps-days.v0", metricEvents("steps", "count", ["garmin", "oura"], 182));
+    expect(records).toHaveLength(360);
+    expect(dates(records).has(boardDate(179))).toBe(true);
+    expect(dates(records).has(boardDate(180))).toBe(false);
+  });
+
+  it("leaves every other metric on 90 dates", async () => {
+    const records = await captureMetric("hrv-days.v0", metricEvents("hrv-rmssd", "ms", ["garmin"], 182));
+    expect(records).toHaveLength(90);
+    expect(dates(records).has(boardDate(89))).toBe(true);
+    expect(dates(records).has(boardDate(90))).toBe(false);
+  });
+
+  it("publishes the complete 90 dates when 180 would pass the record ceiling", async () => {
+    const providers = ["coros", "garmin", "oura", "polar", "whoop"];
+    const records = await captureMetric("steps-days.v0", metricEvents("steps", "count", providers, 180));
+    expect(records).toHaveLength(450);
+    expect(new Set(records.map((record) => record.source?.source))).toEqual(new Set(providers));
+    expect(dates(records).has(boardDate(90))).toBe(false);
+  });
+
+  it("keeps the 90 dates when an older date has no public source", async () => {
+    const records = await captureMetric("steps-days.v0", metricEvents("steps", "count", ["garmin"], 180, 120));
+    expect(records).toHaveLength(90);
+    expect(dates(records).has(boardDate(89))).toBe(true);
+  });
+
   it("queries and captures all 90 dates and eight sources under an already-active plain grant without regrant", async () => {
     const nowMs = Date.parse("2026-09-17T23:00:00.000Z");
     const providers = ["coros", "fitbit", "garmin", "oura", "polar", "strava", "suunto", "whoop"];

@@ -2118,6 +2118,31 @@ describe("plain-grant group history reads", () => {
       members: expect.objectContaining({ where: { id: "participant_a" } }),
     } }));
   });
+  it("gives the chat reader only its own window from a 180-day board snapshot", async () => {
+    const read = async (history?: { fromDate: string; throughDate: string }) => {
+      const { prisma } = fixture(STEPS_SCOPE, records(180));
+      const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID, projectionScopes: [STEPS_SCOPE],
+        ...(history ? { participantId: "participant_a", history } : {}) });
+      if (result.status !== "ok") throw new Error("expected ok");
+      return result.members[0]?.projections[0]?.records ?? [];
+    };
+    await expect(read()).resolves.toHaveLength(7);
+    await expect(read({ fromDate: date(89), throughDate: date(0) })).resolves.toHaveLength(90);
+    await expect(read({ fromDate: date(179), throughDate: date(90) })).resolves.toEqual([]);
+  });
+  it("opens the retained dates only to a 180-day request, and only on a timezoned snapshot", async () => {
+    const share = { ...shareRow({ id: "history", memberId: "member_a", projectionScope: STEPS_SCOPE }), projectionScope: STEPS_SCOPE };
+    installCiphertexts({
+      board: serializeHostedVaultShareProjectionSnapshot({ share, records: records(180), memberTimeZone: "UTC" }),
+      legacy: serializeHostedVaultShareProjectionSnapshot({ share, records: records(7) }),
+    });
+    const decrypt = (ciphertext: string, requestedHistoryDays?: 7 | 90 | 180) =>
+      decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext }], requestedHistoryDays });
+    await expect(decrypt("board", 180)).resolves.toEqual([records(180)]);
+    await expect(decrypt("board", 90)).resolves.toEqual([records(90)]);
+    await expect(decrypt("board")).resolves.toEqual([records(90)]);
+    await expect(decrypt("legacy", 180)).resolves.toEqual([null]);
+  });
   it("does not turn an unshared metric into a history permission", async () => {
     const { prisma } = fixture();
     const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
