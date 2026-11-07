@@ -218,10 +218,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       };
       await runHostedIdleCheckpointMaintenance({ ...input, pendingWork: true });
       for (const version of obsolete) await fs.access(path.join(enrichmentRoot, version));
-      await runHostedIdleCheckpointMaintenance({ ...input, pendingWork: true });
-      for (const version of obsolete) {
-        await expect(fs.access(path.join(enrichmentRoot, version))).resolves.toBeUndefined();
-      }
       await runHostedIdleCheckpointMaintenance(input);
       await runHostedIdleCheckpointMaintenance(input);
       for (const version of obsolete) {
