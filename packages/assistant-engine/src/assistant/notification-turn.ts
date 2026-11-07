@@ -1,5 +1,5 @@
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
-import type { HostedGameChatBootstrapResult, HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
+import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -219,6 +219,7 @@ export type AssistantNotificationPromptProfile =
 
 export type AssistantNotificationResponsePolicy =
   | HostedGameGroupMissedCheckInPolicy
+  | HostedGameEveningCheckInPolicy
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
@@ -464,7 +465,7 @@ export async function sendAssistantNotificationLocal(
       let savedGameRecapChatLine: string | null = null
       const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
       const groupMissedTurn = responsePolicy.kind === 'game_group_missed_check_in'
-      const textOnlyGameTurn = gameRecapTurn || groupMissedTurn
+      const textOnlyGameTurn = textOnlyGameNotification(gameRecapTurn, responsePolicy)
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
@@ -2118,10 +2119,14 @@ function runtimeOwnsNotificationPresentation(result: ExecutedAssistantProviderTu
   return result.responseCard != null || result.providerAuthoredResponse != null && result.response !== result.providerAuthoredResponse
 }
 
+function textOnlyGameNotification(gameRecapTurn: boolean, policy: AssistantNotificationResponsePolicy): boolean {
+  return gameRecapTurn || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in'
+}
+
 function assertAssistantNotificationSkipAllowed(
   policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
-  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in') {
+  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in') {
     return
   }
 

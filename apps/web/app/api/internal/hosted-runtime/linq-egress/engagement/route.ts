@@ -105,7 +105,9 @@ export const POST = withJsonError(async (request: Request) => {
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
 
   const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
-    ? { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
+    ? "memberIds" in gameChatPlayers
+      ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers.audience, eveningPolicy: gameChatPlayers.policy }
+      : { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
     : gameChatPlayers && "memberIds" in gameChatPlayers
     ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
 
@@ -241,7 +243,8 @@ export const POST = withJsonError(async (request: Request) => {
     });
     // App-requested proposals may start a new room with no inbound history.
     // Only the current proposal and freshly proven exact audience qualify.
-    if (!requestedGameProposal && !requestedAskReply && await isHostedLinqProactivityPaused({
+    const gamePauseExempt = requestedGameProposal && !idempotencyKey?.startsWith("game-evening:");
+    if (!gamePauseExempt && !requestedAskReply && await isHostedLinqProactivityPaused({
       answeredMailboxItemIds,
       replyToMessageId,
       service: health.service,

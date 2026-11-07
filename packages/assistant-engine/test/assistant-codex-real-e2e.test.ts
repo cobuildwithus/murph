@@ -47625,6 +47625,59 @@ describeRealCodex('real Codex game bootstrap e2e', () => {
 
 describeRealCodex('real Codex game progress and photo journeys', () => {
   it.each([
+    { name: 'game evening check-in one open player', count: 1, covered: false },
+    { name: 'game evening check-in two open players', count: 2, covered: false },
+    { name: 'game evening check-in already covered stays quiet', count: 1, covered: true },
+  ])('$name', async ({ name, count, covered }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-evening-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameEveningCheckInInstructions, gameEveningCheckInPolicySchema } = await import('@murphai/hosted-execution/runtime-control')
+    const events: unknown[] = []
+    const players = [
+      { memberId: 'player_ava', playerName: 'Ava', tasks: [{ gameId: 'game_pushups', task: '20 pushups' }] },
+      { memberId: 'player_bea', playerName: 'Bea', tasks: [{ gameId: 'game_walk', task: 'a 20 minute walk' }] },
+    ].slice(0, count)
+    const policy = gameEveningCheckInPolicySchema.parse({ kind: 'game_evening_check_in', roomId: 'synthetic-group',
+      eventId: 'game-evening:synthetic-group:2030-03-04', date: '2030-03-04', expiresAt: '2030-03-05T02:30:00.000Z',
+      conversationLaneSeq: '9', batch: players.map((player) => ({ gameId: player.tasks[0]!.gameId, termsVersion: 1,
+        memberIds: [player.memberId], dayIndex: 0 })) })
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const result = await sendAssistantNotificationLocal({ onTraceEvent: event => events.push(event.rawEvent),
+        actorId: null, bindingDeliveryTarget: 'synthetic-group-thread', channel: 'linq', identityId: null,
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-group-thread', deliveryIdempotencyKey: policy.eventId,
+        deliveryDedupeToken: policy.eventId,
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: policy.roomId, userEnvKeys: [] } },
+        instructions: buildGameEveningCheckInInstructions({ date: policy.date,
+          transcript: covered ? [{ memberId: 'player_ava', playerName: 'Ava', text: "I'll do my pushups today." }] : [], players }),
+        responsePolicy: policy, threadId: 'synthetic-group-thread', threadIsDirect: false,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver',
+        vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const actions = readCapabilityRoutingActions(events)
+      expect(actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])(?:game_lore|read_game|update_game)$/u.test(action.tool))).toEqual([])
+      if (covered) {
+        expect(result.decision.kind).toBe('skip'); expect(intents).toHaveLength(0); expect(result.response).toBeNull()
+      } else {
+        expect(result.decision.kind).toBe('send_message'); expect(intents).toHaveLength(1)
+        expect(intents[0]?.message).toBe(result.response)
+        for (const player of players) { expect(result.response).toContain(player.playerName); expect(result.response).toMatch(new RegExp(player.tasks[0]!.task.includes('pushups') ? 'pushups' : 'walk', 'iu')) }
+        expect(result.response).toMatch(/\?/u)
+        expect((result.response?.match(/\?/gu) ?? [])).toHaveLength(1)
+        expect(result.response).not.toMatch(/vs\.|—| - |player_|game_|time zones?|reminder was scheduled|score|weight|body|lazy/iu)
+        expect((result.response ?? '').length).toBeLessThan(300)
+      }
+      process.stdout.write(`[game-evening-check-in] ${JSON.stringify({ scenario: name, reply: result.response, decision: result.decision.kind, intents: intents.length })}\n`)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
+  }, 360_000)
+
+  it.each([
     { name: 'group hosting parity: ten-player combined misses', count: 10, explained: 0 },
     { name: 'group hosting parity: partially explained misses omit those people', count: 10, explained: 2 },
     { name: 'group hosting parity: all explained misses stay silent', count: 10, explained: 10 },

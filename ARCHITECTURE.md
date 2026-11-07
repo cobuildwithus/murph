@@ -6706,6 +6706,22 @@ receipt is skipped unless its mailbox item already exists, and a published one
 leaves the sweep without being skipped. Final egress refuses either past the same
 deadline, which also bounds outbox retries.
 
+`evening-check-in.ts` reuses the room collector, rule state and lifecycle
+publication path for pair, group and mixed rooms. The five-minute room sweep
+stays inside the minute drain's budget. Real audience membership and current
+profile zones gate the room before the latest scheduled 8pm horizon; posting and
+per-game opt-outs affect the addressed set only. One `game_evening` receipt per
+room/date owns the claim, with the room as payload owner. Its immutable event
+key survives delivery metadata rewrites and identifies each of the previous
+three accepted evenings for the unanswered-send pause. The encrypted
+`game_evening_check_in` policy freezes addressed game/day/member sets, terms
+versions, expiry and conversation watermark. The bounded same-day transcript
+stops at that watermark. Publication and dispatch recheck the frozen witness
+under game and mailbox locks; an expired or changed witness is stale. Recovery
+signals an existing mailbox item without replacing it. The runner parses this
+policy and allows a skip, with no game host tools or lore. Egress checks the
+28-day inactivity pause separately after validating evening currentness.
+
 The minute drain handles up to ten lifecycle receipts a pass, four at a time. It
 takes the oldest due receipt of each chat before applying that limit, so a chat
 with a long backlog takes one slot and hides no other chat. That query reads

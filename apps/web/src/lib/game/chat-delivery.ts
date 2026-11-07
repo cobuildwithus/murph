@@ -26,6 +26,7 @@ export { isExactGameChat, requireExactGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
 import { readGroupMissedDayDeliveryAuthority } from "./group-missed-day";
+import { readGameEveningDeliveryAuthority } from "./evening-check-in";
 
 /** Called after the game transaction. All provider and crypto work stays outside game locks. */
 export async function deliverGameChangeProposal(gameId: string, proposalId: string, now = new Date()): Promise<boolean> {
@@ -90,7 +91,12 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 }
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
-export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameNoticeAudience | NonNullable<Awaited<ReturnType<typeof readGroupMissedDayDeliveryAuthority>>> | undefined> {
+export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameNoticeAudience | NonNullable<Awaited<ReturnType<typeof readGroupMissedDayDeliveryAuthority>>> | NonNullable<Awaited<ReturnType<typeof readGameEveningDeliveryAuthority>>> | undefined> {
+  if (key?.startsWith("game-evening:")) {
+    const authority = await readGameEveningDeliveryAuthority(key, containerMemberId, target);
+    if (!authority) throw new Error("Game evening authority is unavailable.");
+    return authority;
+  }
   if (/^game-missed:[^:]+:group:/u.test(key ?? "")) {
     const authority = await readGroupMissedDayDeliveryAuthority(key!, containerMemberId, target);
     if (!authority) throw new Error("Game missed-day authority is unavailable.");

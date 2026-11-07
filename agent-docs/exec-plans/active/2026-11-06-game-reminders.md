@@ -138,6 +138,9 @@ sending. APNs expiry matches the window. The payload gains a sound.
   following the missed-day pattern, and independent of who has posted. The
   addressed players are filtered afterwards. The window is 30 minutes from that
   horizon, ending any retry.
+- Room timing uses the frozen game zones, so the horizon stays stable. If everyone
+  in a room travels together it's off by that offset, and their profile zones still
+  decide whether the room is close enough.
 - Receipt: template `game_evening`, event `game-evening:<roomId>:<date>`,
   `payloadOwnerMemberId` the room. `readOldestReceiptPerChat` uses that owner for
   the new families so rooms don't share one queue slot.

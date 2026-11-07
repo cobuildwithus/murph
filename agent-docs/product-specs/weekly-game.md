@@ -536,6 +536,19 @@ resulting avatar. No private photo is shared with the subject or other players.
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
+- **Evening room check-ins.** At the latest local 8pm among the room's eligible
+  scheduled game/player slots, Murph may ask one short question in the existing
+  room naming each still-open player's own task. The half-hour window and one
+  room/date claim never move earlier when someone posts; a late item is dropped.
+  Pair, group and mixed rooms share this path. Every actual recipient must be a
+  joined member with a known current game-profile time zone, and the widest
+  clock gap must be strictly under three hours. Unjoined or unresolved recipients
+  stop the room check-in. A player switched off for a game is not addressed.
+  Murph stays quiet about someone who already said they will or will not do it.
+  Three consecutive accepted scheduled evening sends without a player message
+  pause future evenings until someone writes. Skips and failures do not count.
+  The 28-day iMessage inactivity pause still applies. The feature is off unless
+  `MURPH_GAME_EVENING_CHECK_IN_ENABLED` is exactly `true`.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with
