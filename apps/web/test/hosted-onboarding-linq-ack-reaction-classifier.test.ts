@@ -77,7 +77,7 @@ describe("linq ack reaction classifier", () => {
       message,
       signal: new AbortController().signal,
     });
-    expect(decision).toMatchObject({ emoji: "📊", kind: "my_data" });
+    expect(decision).toMatchObject({ emoji: "👀", kind: "my_data" });
     const [url, init] = fetchStub.mock.calls[0]!;
     expect(String(url)).toBe("https://api.openai.com/v1/decisions");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk-test");
