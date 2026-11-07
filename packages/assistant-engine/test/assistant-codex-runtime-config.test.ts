@@ -1598,7 +1598,14 @@ describe('assistant codex runtime', () => {
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
       assistantConfigurationTool,
-      currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
+      currentUserActionScope: () => ({
+        acceptedInputIds: [`ain_${'a'.repeat(32)}`],
+        conversationId: null,
+        conversationScope: 'direct',
+        inboundMailboxItemIds: [],
+        originSessionId: 'session-test',
+        recipientKey: null,
+      }),
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: 'low',

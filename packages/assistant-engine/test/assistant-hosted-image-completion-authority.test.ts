@@ -51,13 +51,11 @@ const EXACT_MEDIA: AssistantVaultImageResponseMedia = {
 
 describe('hosted image completion effect authority', () => {
   it('preserves schema visibility without granting style, personalization, or group mutation authority', async () => {
-    let currentAssistantInputId = COMPLETION_INPUT_ID
     let acceptedInputIds: readonly string[] = [COMPLETION_INPUT_ID]
     const groupTool = { request: vi.fn() }
     const personalizationTool = { request: vi.fn() }
     const hostedToolContext = createAssistantHostedToolContext({
       executionContext: {
-        currentAssistantInputId: () => currentAssistantInputId,
         groupTool,
         memberId: 'member-completion-authority',
         personalizationTool,
@@ -76,7 +74,6 @@ describe('hosted image completion effect authority', () => {
         completionAssistantInputId: COMPLETION_INPUT_ID,
         exactMedia: [EXACT_MEDIA],
       })
-    expect(hostedToolContext.currentAssistantInputId?.()).toBeNull()
     expect(hostedToolContext.currentInvocationScope?.()).toBeNull()
     expect(hostedToolContext.currentUserActionScope?.()).toBeNull()
     expect(hostedToolContext.currentProductFeedbackAcceptedInputIds?.())
@@ -164,15 +161,9 @@ describe('hosted image completion effect authority', () => {
     expect(personalizationTool.request).not.toHaveBeenCalled()
     expect(groupTool.request).not.toHaveBeenCalled()
 
-    currentAssistantInputId = LATER_INPUT_ID
-    expect(hostedToolContext.currentHostedImageCompletionEffectScope?.())
-      .toMatchObject({ completionAssistantInputId: COMPLETION_INPUT_ID })
-    expect(hostedToolContext.currentAssistantInputId?.()).toBeNull()
-
     acceptedInputIds = [COMPLETION_INPUT_ID, LATER_INPUT_ID]
     expect(hostedToolContext.currentHostedImageCompletionEffectScope?.())
       .toBeNull()
-    expect(hostedToolContext.currentAssistantInputId?.()).toBe(LATER_INPUT_ID)
     expect(hostedToolContext.currentInvocationScope?.()).toMatchObject({
       origin: {
         assistantInputId: LATER_INPUT_ID,
@@ -400,7 +391,6 @@ describe('hosted image completion effect authority', () => {
       }
       const hostedToolContext = createAssistantHostedToolContext({
         executionContext: {
-          currentAssistantInputId: () => storedCompletion.inputId,
           memberId: 'member-completion-physical-note',
           physicalNotes: { send },
           privateImageUrlPublisher: { publishPrivateImageUrl },

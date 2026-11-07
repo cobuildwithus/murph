@@ -79,14 +79,12 @@ describe('assistant return contact kind', () => {
   it('lets one subscription action claim only the terminal eligible input', () => {
     const firstInputId = `ain_${'a'.repeat(32)}`
     const currentInputId = `ain_${'b'.repeat(32)}`
-    let acceptedInputIds = [firstInputId, currentInputId]
     const hostedToolContext = createAssistantHostedToolContext({
       executionContext: {
-        currentAssistantInputId: () => currentInputId,
         memberId: 'member-subscription-claim',
         userEnvKeys: [],
       },
-      getUserActionAcceptedInputIds: () => acceptedInputIds,
+      getUserActionAcceptedInputIds: () => [firstInputId, currentInputId],
       messageInput: createMessageInput({
         channel: 'linq',
         hostedDeliveryIdempotency: null,
@@ -97,24 +95,6 @@ describe('assistant return contact kind', () => {
     expect(hostedToolContext.claimSubscriptionAssistantInputId?.())
       .toBe(currentInputId)
     expect(hostedToolContext.claimSubscriptionAssistantInputId?.()).toBeNull()
-
-    acceptedInputIds = [currentInputId, firstInputId]
-    expect(hostedToolContext.currentAssistantInputId?.()).toBe(currentInputId)
-    const nextHostedToolContext = createAssistantHostedToolContext({
-      executionContext: {
-        currentAssistantInputId: () => currentInputId,
-        memberId: 'member-subscription-claim',
-        userEnvKeys: [],
-      },
-      getUserActionAcceptedInputIds: () => acceptedInputIds,
-      messageInput: createMessageInput({
-        channel: 'linq',
-        hostedDeliveryIdempotency: null,
-      }),
-      session: createAssistantSession(),
-    })
-    expect(nextHostedToolContext.claimSubscriptionAssistantInputId?.())
-      .toBeNull()
   })
 
   it('reuses one Clinical Records connect intent within a hosted tool context', async () => {
