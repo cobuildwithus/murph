@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { resolveHostedRuntimeAiUsageGate } from "../hosted-orchestration/runtime-usage-decision";
+
 import {
   classifyHostedLinqAckReaction,
   HOSTED_LINQ_ACK_REACTION_CLASSIFY_TIMEOUT_MS,
@@ -41,7 +43,9 @@ type HostedLinqAckReactionOutcome =
   | "reacted"
   | "reacted_unconfirmed"
   | "skipped_empty"
-  | "store_error";
+  | "store_error"
+  | "usage_denied"
+  | "usage_error";
 
 /**
  * Text plus image URLs from the raw Linq event. The mailbox envelope drops the
@@ -73,26 +77,34 @@ type HostedLinqAckReactionGateInput = {
   event: { event_type: string } | null;
   instantFirstTurnOwnsReply: boolean;
   response: { reason?: string | null };
-  wakeHandoff?: { conversationIsGroup?: boolean; linqChatId?: string | null } | null;
+  wakeHandoff?: { conversationIsGroup?: boolean; linqChatId?: string | null; userId?: string } | null;
   wakeHandoffResult?: { started?: boolean } | null;
 };
 
-/** Only an ordinary direct member turn whose wake was handed off qualifies. */
+/** Handoff proves accepted input; groups also check usage after response. */
 function isHostedLinqAckReactionTurn(input: HostedLinqAckReactionGateInput): boolean {
-  return input.response.reason === "wake-appended-active-member"
-    && input.wakeHandoffResult?.started === true
-    && !input.instantFirstTurnOwnsReply
-    && input.wakeHandoff?.conversationIsGroup === false;
+  if (input.wakeHandoffResult?.started !== true || input.instantFirstTurnOwnsReply) return false;
+  return input.wakeHandoff?.conversationIsGroup === false
+    ? input.response.reason === "wake-appended-active-member"
+    : input.wakeHandoff?.conversationIsGroup === true
+      && input.response.reason === "wake-appended-thread-route"
+      && Boolean(input.wakeHandoff.userId?.trim());
 }
 
-/** The member's own direct iMessage; SMS cannot show a custom tapback. */
+/** Text only: an attachment or a substring such as Murphy cannot opt in. */
+export function namesMurphInHostedLinqMessage(event: HostedLinqMessageReceivedEvent): boolean {
+  return event.data.message.parts.some((part) =>
+    part.type === "text" && /\bmurph\b/i.test(part.value),
+  );
+}
+
+/** An inbound iMessage; named groups pass the same classifier as direct chats. */
 function readHostedLinqAckReactionEvent(
   event: { event_type: string } | null,
 ): HostedLinqMessageReceivedEvent | null {
   if (event?.event_type !== "message.received") return null;
   const message = event as HostedLinqMessageReceivedEvent;
-  return message.data.chat?.is_group !== true
-    && !message.data.is_from_me
+  return !message.data.is_from_me
     && message.data.service?.trim().toLowerCase() === "imessage"
     ? message
     : null;
@@ -130,15 +142,20 @@ export function maybeScheduleHostedLinqAckReaction(input: HostedLinqAckReactionG
     const messageReceivedAt = input.webhookReceivedAt;
     if (!schedule || !messageReceivedAt || !isHostedLinqAckReactionTurn(input)) return false;
     const event = readHostedLinqAckReactionEvent(input.event);
-    const target = event ? readHostedLinqAckReactionTarget(input, event) : null;
+    if (!event) return false;
+    const isGroup = input.wakeHandoff?.conversationIsGroup === true;
+    if ((event.data.chat?.is_group === true) !== isGroup) return false;
+    if (isGroup && !namesMurphInHostedLinqMessage(event)) return false;
+    const target = readHostedLinqAckReactionTarget(input, event);
     const apiKey = target ? getHostedOnboardingEnvironment().linqAckReactionOpenAiApiKey : null;
-    if (!event || !target || !apiKey) return false;
+    if (!target || !apiKey) return false;
     const prisma = input.prisma;
     // The route falls back to `void task()` when after() is unavailable, so the
     // task must never reject.
     schedule(() => runHostedLinqAckReactionBestEffort({
       apiKey,
       event,
+      ...(isGroup ? { groupMemberId: input.wakeHandoff?.userId } : {}),
       ...target,
       messageReceivedAt,
       prisma,
@@ -161,6 +178,7 @@ export async function runHostedLinqAckReactionBestEffort(input: {
   classify?: typeof classifyHostedLinqAckReaction;
   deadlineMs?: number;
   event: HostedLinqMessageReceivedEvent;
+  groupMemberId?: string;
   linqChatId: string;
   messageId: string;
   messageReceivedAt: Date;
@@ -189,6 +207,12 @@ export async function runHostedLinqAckReactionBestEffort(input: {
   const message = readHostedLinqAckReactionMessage(input.event);
   if (!message) {
     finish("skipped_empty");
+    return;
+  }
+
+  const usageFailure = await readHostedLinqAckReactionUsageFailure({ ...input, deadlineAt });
+  if (usageFailure) {
+    finish(usageFailure.outcome, usageFailure);
     return;
   }
 
@@ -233,7 +257,7 @@ export async function runHostedLinqAckReactionBestEffort(input: {
       messageReceivedAt: input.messageReceivedAt,
       prisma: input.prisma,
       reaction: decision.emoji,
-      skipLiveConversation: HOSTED_LINQ_ACK_REACTION_QUICK_KINDS.includes(decision.kind),
+      skipLiveConversation: shouldSkipLiveConversation(input.event, decision),
     });
   } catch (error) {
     finish("store_error", { error });
@@ -294,6 +318,43 @@ export async function runHostedLinqAckReactionBestEffort(input: {
     return;
   }
   finish("provider_ambiguous", { httpStatus: result.status });
+}
+
+/** Groups lack early typing, so even quick named asks keep their acknowledgment. */
+function shouldSkipLiveConversation(
+  event: HostedLinqMessageReceivedEvent,
+  decision: HostedLinqAckReactionDecision,
+): boolean {
+  return event.data.chat?.is_group !== true
+    && HOSTED_LINQ_ACK_REACTION_QUICK_KINDS.includes(decision.kind);
+}
+
+/** Advisory group availability only; runtime admission remains authoritative. */
+async function readHostedLinqAckReactionUsageFailure(input: {
+  deadlineAt: number;
+  event: HostedLinqMessageReceivedEvent;
+  groupMemberId?: string;
+  prisma: Pick<PrismaClient, "$transaction">;
+}): Promise<{ outcome: "expired" | "usage_denied" | "usage_error"; error?: unknown } | null> {
+  if (input.event.data.chat?.is_group === true) {
+    const groupMemberId = input.groupMemberId;
+    if (!groupMemberId || !namesMurphInHostedLinqMessage(input.event)) {
+      return { outcome: "usage_denied" };
+    }
+    try {
+      const usage = await input.prisma.$transaction((tx) => resolveHostedRuntimeAiUsageGate({
+        mode: "read_only",
+        prisma: tx,
+        userId: groupMemberId,
+      }), { maxWait: 250, timeout: 1_000 });
+      if (usage.status !== "allowed") return { outcome: "usage_denied" };
+    } catch (error) {
+      return { outcome: "usage_error", error };
+    }
+  }
+  return input.deadlineAt - Date.now() < HOSTED_LINQ_ACK_REACTION_MIN_SEND_MS
+    ? { outcome: "expired" }
+    : null;
 }
 
 /** A 4xx other than a timeout means Linq refused before sending anything. */

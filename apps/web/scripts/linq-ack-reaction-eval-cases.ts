@@ -20,6 +20,15 @@ export interface HostedLinqAckReactionEvalBurst {
 }
 
 export const HOSTED_LINQ_ACK_REACTION_EVAL_CASES: readonly HostedLinqAckReactionEvalCase[] = [
+  // Group-shaped asks and mentions; the classifier request stays unchanged.
+  { text: "murph can u compare our sleep this week", expect: "my_data" },
+  { text: "murph remind us at 8", expect: "reminder" },
+  { text: "hey murph make us a meal plan", expect: "make" },
+  { text: "lol murph is so dumb", expect: "none" },
+  { text: "did murph text you too", expect: "none" },
+  { text: "murph said i slept 5 hours", expect: "none" },
+  { text: "ok murph", expect: "none" },
+  { text: "thanks murph", expect: "none" },
   { text: "can u remind me to take my meds at 9 tonight", expect: "reminder" },
   { text: "yo set an alarm or whatever for 5:45 tmrw i have a 6am lift", expect: "reminder" },
   { text: "every weekday at noon remind me to get up and walk", expect: "reminder" },

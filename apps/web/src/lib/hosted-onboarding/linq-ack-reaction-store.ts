@@ -9,7 +9,7 @@ import {
 } from "./contact-privacy";
 
 /**
- * Burst state for the Web "on it" emoji tapback (one row per direct chat).
+ * Burst state for the Web "on it" emoji tapback (one row per eligible chat).
  *
  * A burst is the member's messages after the chat's latest
  * `hosted_linq_delivery.attempted_at`: the runtime dispatch fence writes that
