@@ -2620,6 +2620,7 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
     return { preparedSenderMemberId };
   }
   const access = await readHostedRuntimeAiAccessDecision({
+    sponsorshipOnly: true,
     memberId: memberLookup.core.id,
     now: new Date(),
     prisma: input.prisma,

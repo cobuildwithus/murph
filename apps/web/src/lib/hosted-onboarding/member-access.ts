@@ -96,6 +96,7 @@ const hostedRuntimeAiPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSe
 
 export const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedRuntimeAiPersonAccessSelect,
+  usageCreditBalanceUsdMicros: true,
   threadContainer: {
     select: {
       owner: {
@@ -600,10 +601,12 @@ export async function readActiveHostedFamilySponsorship(input: {
 /**
  * Runtime entitlement guard. Usage accounting is a separate mandatory gate,
  * so model-capable work proceeds only when both access and usage allow it.
- * This function denies inactive access; starter usage exhaustion is enforced
- * by the usage gate.
+ * Lapsed people may spend their own existing credit. Sponsorship never uses
+ * that credit; starter usage exhaustion is enforced by the usage gate.
  */
 export async function readHostedRuntimeAiAccessDecision(input: {
+  /** Room funding/creation must retain strict eligibility, never personal credit. */
+  sponsorshipOnly?: boolean;
   memberId: string;
   memberState?: HostedRuntimeAiMemberAccessState;
   /**
@@ -662,6 +665,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
     ...(input.noticeSeed === undefined ? {} : { noticeSeed: input.noticeSeed }),
     now,
     person: member,
+    personalCreditBalanceUsdMicros: input.sponsorshipOnly ? 0n : member.usageCreditBalanceUsdMicros,
   });
 }
 
@@ -672,6 +676,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
  * falling back to the owner-only sweep approximation.
  */
 export async function readHostedRuntimeAiAllowedMemberIds(input: {
+  sponsorshipOnly?: boolean;
   memberIds: readonly string[];
   now?: Date;
   prisma?: Pick<
@@ -724,6 +729,7 @@ export async function readHostedRuntimeAiAllowedMemberIds(input: {
         memberId: member.id,
         now,
         person: member,
+        personalCreditBalanceUsdMicros: input.sponsorshipOnly ? 0n : member.usageCreditBalanceUsdMicros,
       }).allowed) {
         allowedMemberIds.add(member.id);
       }
@@ -763,6 +769,7 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
   noticeSeed?: string;
   now: Date;
   person: HostedRuntimeAiPersonAccessState;
+  personalCreditBalanceUsdMicros?: bigint | null;
 }): HostedRuntimeAiAccessDecision {
   if (isHostedMemberSuspended(input.person.suspendedAt)) {
     return buildHostedRuntimeInactiveAccessDecision(input.now);
@@ -777,7 +784,9 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
     && membership.group.billingStatus === HostedBillingStatus.active
     && !isHostedMemberSuspended(membership.group.suspendedAt)
   );
-  if (sponsored || hasHostedMemberOwnActiveAccess(input.person)) {
+  if (sponsored || hasHostedMemberOwnActiveAccess(input.person)
+    || (isHostedLapsedBillingStatus(input.person.billingStatus)
+      && (input.personalCreditBalanceUsdMicros ?? 0n) > 0n)) {
     return { allowed: true };
   }
 

@@ -699,6 +699,14 @@ changes purchased or referral credit, or counts as a new Starter enrollment.
 A stale retry cannot append another grant, and a later operator reset is
 eligible only after the prior credit is consumed and the locked canonical
 direct-Starter gate is fully exhausted again.
+- Lapsed personal billing may consume only its existing balance after consent
+  and suspension checks, with zero direct included allowance regardless of stale
+  paid metadata. Valid Family funding retains precedence over credit-only use.
+  The read-only, admission and settlement owners must agree on funding. Personal
+  credit never supplies room sponsorship, lifecycle eligibility, a new grant or
+  new-purchase eligibility. Exhaustion tells the member once at settlement, and
+  later input gets the billing-inactive notice; already-admitted spend remains
+  accountable to its frozen beneficiary.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal
