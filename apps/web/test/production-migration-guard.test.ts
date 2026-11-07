@@ -1111,6 +1111,20 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("permits the additive every-evening reminder preference", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "game-reminder-cadence-migration-"));
+    const migrationId = "20261107010000_game_reminder_every_day";
+    const sql = await readFile(new URL(`../prisma/migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
+    try {
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, "20261107010001_unreviewed_cadence", sql);
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).length, 1);
+    } finally {
+      await rm(migrationsDir, { recursive: true, force: true });
+    }
+  });
+
   test("blocks newly introduced backdated destructive Prisma migrations", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

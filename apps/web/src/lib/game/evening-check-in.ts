@@ -67,6 +67,13 @@ async function readRoom(roomId: string, gameIds?: readonly string[], now = new D
   return { games, audience, memberIds, zones };
 }
 
+/** A private check-in is only eligible when the room's own check-in cannot cover this game. */
+export async function roomCoversEveningGame(roomId: string | null, gameId: string, now: Date): Promise<boolean> {
+  if (!roomId || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return false;
+  const room = await readRoom(roomId, undefined, now).catch(skipUnprovableRoom);
+  return Boolean(room?.games.some(game => game.row.id === gameId));
+}
+
 async function readPairAudience(roomId: string): Promise<readonly string[] | null> {
   try { return await requireExactGameChat(roomId); }
   catch (error) {
@@ -98,7 +105,8 @@ function addressedBatch(games: Games, date: string, now: Date): HostedGameEvenin
   return games.flatMap(({ row, state }) => {
     const byDay = new Map<number, string[]>();
     for (const player of remainingPlayers(state)) {
-      const dayIndex = reminderOpenDay(state, player, now);
+      const seat = row.players.find(seat => seat.memberId === player.memberId);
+      const dayIndex = reminderOpenDay(state, player, now, seat?.reminderEveryDay);
       if (dayIndex === null || row.players.find(seat => seat.memberId === player.memberId)?.reminderOff
         || addDays(player.dayOne!, dayIndex) !== date) continue;
       byDay.set(dayIndex, [...byDay.get(dayIndex) ?? [], player.memberId]);

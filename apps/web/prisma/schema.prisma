@@ -2824,6 +2824,7 @@ model GameInvitee {
 
 model GamePlayer {
   reminderOff        Boolean     @default(false) @map("reminder_off")
+  reminderEveryDay   Boolean     @default(false) @map("reminder_every_day")
   gameId             String      @map("game_id")
   memberId           String?     @map("member_id")
   seat               Int

@@ -106,6 +106,7 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
         currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No media') } }
       const availability = {
         allowFinishWithoutReply: true, automationAvailable: true,
+        myGameRemindersAvailable: scope === 'direct',
         personalizationAvailable: scope === 'direct', groupSharedReadAvailable: scope === 'group', gameReadAvailable: scope === 'group', gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
         imageGenerationAvailable: false, progressUpdatesAvailable: true, progressUpdateMode: scope,
         productFeedbackAvailable: true, usageDiagnosticsAvailable: scope === 'direct',
@@ -137,7 +138,8 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
           ...scenario.turnInput, dynamicTools: tools, groupConversation: scope === 'group',
           hostedToolContext: scope === 'group' ? context : null,
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-          developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+          developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
+            ...(scope === 'direct' && phase === 'head' ? [gameTools.GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE] : [])].join('\n\n'),
           prompt: [layers.dynamicTurnContextPrompt, 'Read the current games and summarize their tasks.'].join('\n\n'),
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
         })

@@ -27,6 +27,8 @@ export const hostedGameCreateTermsSchema = z.object({
   startsOn: date.optional(),
 }).strict();
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("set_reminder"), minutes: z.number().int().min(0).max(1439).optional(), gameId: gameId.optional(), on: z.boolean().optional() }).strict()
+    .refine(value => value.minutes !== undefined || value.on !== undefined, "Choose a time or on/off setting."),
   z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional(), groupWord: z.string().trim().min(1).max(40).optional() }).strict(),
   z.object({ operation: z.literal("edit_terms"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200), tasks: z.array(hostedGameCreateTermsSchema.shape.tasks.element).min(1).max(10) }) }).strict(),
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
@@ -75,6 +77,9 @@ export const hostedGameRecapSchema = z.object({
 }).strict();
 export type HostedGameRecap = z.infer<typeof hostedGameRecapSchema>;
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
+    minutes: z.number().int().min(0).max(1439).optional(), gameId: gameId.optional(), on: z.boolean().optional(),
+    everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
@@ -127,7 +132,7 @@ export const hostedGameChatStateSchema = z.object({
 }).strict()).max(10), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
 export type HostedGameChatState = z.infer<typeof hostedGameChatStateSchema>;
 export const hostedGameToolResponseSchema = z.object({
-  action: z.enum(["read_game", "update_game", "game_photo", "write_recap"]),
+  action: z.enum(["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"]),
   result: z.object({
     status: z.enum(["ok", "unavailable", "rejected"]),
     state: hostedGameChatStateSchema.optional(),
@@ -137,6 +142,11 @@ export const hostedGameToolResponseSchema = z.object({
     recapGame: z.unknown().optional(),
     recapOutcome: z.string().optional(),
     recap: hostedGameRecapSchema.optional(),
+    reaches: z.enum(["push", "text", "none"]).optional(),
+    reminders: z.object({ minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
+      games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,
+        today: z.enum(["posted", "open", "off", "upcoming"]), otherFirstNames: z.array(z.string()),
+        on: z.boolean(), everyDay: z.boolean() }).strict()).max(20) }).strict().optional(),
     // Exact server-authored delivery text; recap.chatLine and lore stay bare.
     chatLine: z.string().max(2048).optional(),
     loreGuidance: z.string().optional(),

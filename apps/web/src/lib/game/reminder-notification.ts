@@ -35,7 +35,7 @@ async function readOpenGames(memberIds: string[], now: Date) {
       try {
         const state = toRuleState(seat.game, seat.entries);
         const player = state.players.find(player => player.memberId === profile.memberId);
-        const day = player ? reminderOpenDay(state, player, new Date(now.getTime() + Number(seat.game.devClockOffsetMs))) : null;
+        const day = player ? reminderOpenDay(state, player, new Date(now.getTime() + Number(seat.game.devClockOffsetMs)), seat.reminderEveryDay) : null;
         return day === null || !player ? [] : [{ row: seat.game, state, player, day }];
       } catch { return []; }
     });
