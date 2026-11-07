@@ -6,7 +6,7 @@ Last verified: 2026-11-06
 
 This is the shared inventory and finding ledger for the state-machine audit of
 `cobuildwithus/murph` at `c32c522e20fd61e61a65b9053b94f5d848b909e1` and `cobuildwithus/murph-ios` at
-`184180816f448371cd4de03d7132aa5563cdb0a7`. The iOS baseline is the weekly game
+`60e694036454108a30a05e77e78a390eb25c5e06`. The iOS baseline is the weekly game
 application, with retained companion authentication, health and capture bridges.
 Both remote main heads were fetched with an explicit main refspec and compared
 with `git ls-remote`. The initial Murph discovery used stale tracking revision
@@ -56,8 +56,9 @@ or resource-lifecycle defect.
 
 | ID | Priority and impact | Related issue | State and proof |
 | --- | --- | --- | --- |
-| SM-03 | P2: delayed Home successes/errors or offline snapshots undo accepted game actions | [iOS #473](https://github.com/cobuildwithus/murph-ios/issues/473) | Fixed locally in `624c8e6`; 276 simulator tests pass; independent review complete |
-| SM-05 | P2: delayed game activation overwrites explicit reminder preferences, including opt-out | [Murph #4732](https://github.com/cobuildwithus/murph/issues/4732) | Fixed locally; 40 PostgreSQL tests pass, including both lock orders and 1,000-game load proof |
+| SM-03 | P2: delayed Home successes/errors or offline snapshots undo accepted game actions | [iOS #473](https://github.com/cobuildwithus/murph-ios/issues/473) | Fixed locally; 285 simulator tests pass with latest reminder integration; original independent review complete |
+| SM-06 | P2: reminder operations cross account boundaries or competing saves undo accepted settings | [iOS #477](https://github.com/cobuildwithus/murph-ios/issues/477) | Fixed locally; six new regressions and three existing reminder tests pass |
+| SM-05 | P2: delayed game activation overwrites explicit reminder preferences, including opt-out | [Murph #4732](https://github.com/cobuildwithus/murph/issues/4732) | Fixed locally; 42 PostgreSQL tests pass, including both lock orders and 1,000-game load proof |
 | SM-02 | P2: diagnostic callback claims readiness or completion after its conditional write lost to terminalization | [Murph #4730](https://github.com/cobuildwithus/murph/issues/4730) | Fixed locally; see verification ledger |
 | SM-04 | P3: shutdown during warmup setup still launches a child and misclassifies cancellation | [Murph #4731](https://github.com/cobuildwithus/murph/issues/4731) | Fixed locally; six lifecycle tests and Cloudflare typecheck pass |
 | SM-01 | Historical P2: old parser cancellation could reset a replacement attempt | [Murph #4729](https://github.com/cobuildwithus/murph/issues/4729), closed; [upstream fix #4656](https://github.com/cobuildwithus/murph/pull/4656) | Already fixed in latest main; redundant local patch removed |
@@ -135,15 +136,17 @@ Independent review proved two additional variants at the same projection owner:
 | Schedule | Baseline invalid state | Correction |
 | --- | --- | --- |
 | Initial Home computes `GAME_DISABLED`; invite admission and fresh Home finish; release old denial | Access becomes denied despite the newly admitted game | Apply success-path revision/profile/block guards to non-auth errors; current-token 401 still reaches authentication |
-| Delete/create accepted, then offline relaunch before another Home fetch | Pre-command retained snapshot restores deleted shot/unused retake or loses new invite/link | Existing `show(Home)` updates the existing member-scoped cache through `updateKeptHome` |
+| Delete/create accepted, then offline relaunch before another Home fetch | Pre-command retained snapshot restores deleted shot/unused retake or loses new invite/link | Accepted `show(Game)` merge or removal updates the member-scoped cache through `updateKeptHome` |
 | Two posts overlap; one accepted answer merges only its own entry; recovery fetch fails; relaunch | Accepted partial post disappears from retained snapshot | Existing `keep(postedDay)` updates that same cache writer |
 
 Cache updates preserve the absent-cache block tombstone, reply redaction,
 account scoping and backup exclusion. Only a fresh authorized Home read can
 recreate a removed snapshot. Seven new tests and extended existing overlap/cache
 tests exercise these paths without mocking revisions. The server remains
-canonical; cached state is advisory. The iOS change is committed locally as
-`624c8e6`, with no push, merge or device deployment.
+canonical; cached state is advisory. The original correction is commit `624c8e6`;
+shipping integration narrows these added cache writes to accepted game merges,
+removals and partial posts. Generic `show(Home)` only presents a projection;
+fresh authorized reads retain their existing cache writer.
 
 ### SM-04 — cancellation must be observed after asynchronous warmup setup
 
@@ -189,6 +192,36 @@ seat are inserted, and retries add none. No artificial application cap was added
 The added settings operation is one set-based database insert before player
 writes; activation adds only a bounded two-key fact lookup. No
 network or encryption work was added to these database transactions.
+
+### SM-06 — reminder operations must retain their account and attempt
+
+Owners: iOS `Game/Live/LiveGameService.swift::loadReminders/saveReminders` and
+`Game/Prototype/GamePrototype.swift::changeReminders/reset`. This machine arrived
+with iOS main `60e6940`; its states and transition table are in IOS-21.
+
+| Reproduced schedule | Baseline invalid state | Required ownership |
+| --- | --- | --- |
+| Hold member A's GET; switch to B and load B; release A | A's settings replace B's projection | Match token, session generation and edit revision before applying a read |
+| Open settings as A; account source changes to B; submit A's edit | Account observation supplies B's credential to A's PUT | Capture owner before observation; reject a changed owner before sending |
+| Hold A's PUT; switch to B, load and begin B's save; fail A | A's prior settings replace B's settings | Only the original token/session/attempt can roll back or release its save |
+| Sign out with nondefault settings | Old member's preferences remain visible | Reset preference projection and pending attempt with account state |
+| Hold first PUT; issue an identical second edit that succeeds; fail first | Both writes run, then the earlier failure undoes the accepted local edit | Admit one PUT at a time; release its slot on settlement so explicit retry can run |
+
+Four account-boundary regressions failed five assertions on the integrated
+baseline; the overlap regression failed two. Six new transport-based tests also
+cover ordinary success/failure, retry and an old completion arriving during the
+new member's save. The authenticated service now owns optimistic display and
+rollback, using existing session/change revisions and one in-flight UUID.
+Controls derive busy state from that UUID; completion releases only its own
+attempt. There is no new persistent queue, authentication owner or dependency.
+
+A shipping follow-up found another supported schedule at this same owner:
+Settings starts its first GET with default values still editable. Toggling a
+channel before that GET settles sends a full default snapshot, overwriting the
+member's saved time and exclusions; the stale-read fence then discards the
+correct read. Native remediation and focused proof for this initial-load case
+are still in progress. The native PR will include its final lifecycle and UI
+evidence before merge; the 285-test result above predates that follow-up.
 
 ## Web client machines
 
@@ -1354,15 +1387,43 @@ Invariants: extension never receives host product session; derived grant is memb
 | Submitted | Server acceptance | Render confirmed returned snapshot |
 | Submitted | Failure/stale/expired authority | Keep correction/retry state; never label optimistic edit saved |
 
+### IOS-21: daily reminder preferences
+
+Owners: `Game/Live/LiveGameService.swift::loadReminders/saveReminders`,
+`Game/Prototype/GamePrototype.swift::changeReminders/reset`,
+`Game/GameNotificationsScreen.swift`. The server owns time, push/text preferences,
+text eligibility and per-game exclusions; the client has no durable save queue.
+
+| States / owner | Invariant |
+| --- | --- |
+| Default/unknown; reading; current member projection | A read belongs to its original token/session and cannot cross a newer edit |
+| One save in flight with optimistic projection | Original account survives admission; service owns display/rollback; overlapping PUTs are rejected |
+| Accepted; failed with prior projection restored | Only the matching attempt settles busy state; failure permits explicit retry |
+| Account reset | Values and attempt are cleared; old completions cannot restore data or release a newer save |
+
+| From | Event and guard | To / effect |
+| --- | --- | --- |
+| Default/current | Admitted settings read; no pending save | Capture token, generation and change revision; GET |
+| Reading | Same token, generation and revision | Apply current settings; otherwise discard stale/failed result |
+| Current | Edit; original owner survives account observation; no pending save | Assign UUID, advance revision, show optimistic edit and PUT requested settings |
+| Saving | Further edit or settings load | Controls disabled; service refuses another PUT and skips GET |
+| Saving | Current token/generation/attempt succeeds | Keep edit; clear only its attempt |
+| Saving | Current token/generation/attempt fails | Restore prior settings; report failure; clear attempt for retry |
+| Any | Sign-out/member replacement | Reset projection/attempt; old work loses publication and rollback authority |
+
+SM-06 reproduces account-crossing and overlapping-save failures. Prototype saves
+remain immediate; server preferences remain canonical after any transport error.
+
 ## Verification and review ledger
 
 | Finding / check | Baseline evidence | Corrected evidence |
 | --- | --- | --- |
 | SM-01 parser cancellation | Two failing cancellation interleavings on stale discovery revision; already fixed upstream before current audit baseline | Latest upstream parser suites 54 passed; inbox suites 25 passed; real SQLite owner preserves replacement attempt and recovered output; no local parser patch |
 | SM-02 diagnostic transition loss | 6 new lifecycle cases failed; ordinary-success case passed | Lifecycle, feedback sanitizer and runtime route: 16 passed across 3 files |
-| SM-03 iOS stale game projections | Four original tests fail with eight assertions; review adds red stale-denial, offline delete/create, and partial-post assertions | 276/276 tests across nine simulator suites; build and tracked SwiftFormat pass; independent reviewer has no outstanding findings; local commit `624c8e6` |
+| SM-03 iOS stale game projections | Four original tests fail with eight assertions; review adds red stale-denial, offline delete/create, and partial-post assertions | Original 276 tests and independent review passed; all 285 tests across ten simulator suites pass after latest-main integration and narrowed cache writes |
 | SM-04 warmup cancellation | New case failed (1 failed, 5 passed): canceled preparation spawned child and returned timed_out | Six tests pass; direct synthetic proof returns aborted without starting child; Cloudflare typecheck passes |
 | SM-05 reminder choice | Real PostgreSQL: two new recovery cases fail, six existing cases pass | Activation 14 passed; ordinary reminders 28 passed; both lock orders, optional fields, feature-disabled saves, replay, and 1,000-game constant-query proof |
+| SM-06 iOS reminder ownership | Four account-boundary tests fail five assertions; overlap test fails two | Six new tests plus three existing reminder tests pass, included in the 285-test run; new-member pending save, ordinary success/failure and retry covered |
 | Web types | Not a baseline comparison | `pnpm --dir apps/web typecheck` passed |
 | Complexity | Existing member-message handler hotspot 21 | Guard passed for five authored source files; hotspot unchanged; reminder helper maximum 4 |
 | Changelog | Internal diagnostics/warmup need no public note; duplicate upstream parser note removed | Member-visible reminder correction has `game-reminder-choices-stay-saved`; production archive rendering: four tests pass |
@@ -1392,14 +1453,18 @@ database. PostgreSQL blocking evidence establishes the actual lock wait before
 each concurrent completion; operation/pool instrumentation checks the 1,000-game
 case. This is real local database contention proof, not a production send.
 
-SM-03 used local Xcode build-for-testing/test-without-building with the
+SM-03 and SM-06 used local Xcode build-for-testing/test-without-building with the
 MurphCompanion unit suites: GameAPIClient 85, GameAccess 32, GameAttemptOwners 48,
 GameBlockCache 11, GamePendingReplies 16, GamePendingShots 38, GamePostReply 28,
-GameProfilePhoto 12 and GameSafety 6. Seven tests are new; existing overlap and
-privacy cases gained restart assertions. Four initial API failures reproduced
+GameProfilePhoto 12, GameReminderSettings 9 and GameSafety 6. The original SM-03
+lane has 276 tests, including seven new cases and extended overlap/privacy
+restart assertions. SM-06 adds six new cases to three existing reminder tests,
+bringing the lane to 285. Four initial API failures reproduced
 on unchanged production source; a per-test temporary pending store corrected
-fixture leakage. The final 276 tests, tracked SwiftFormat and independent local
-review passed. No physical-device or hosted-backend proof is claimed.
+fixture leakage. The integrated 285 tests, build and tracked SwiftFormat pass.
+The original correction passed independent review; final review and visual proof
+for the shipping integration are separate pending checks. No physical-device or
+hosted-backend proof is claimed.
 
 Local JavaScript verification ran on Node 24.14.1 and emitted the repository's
 24.22.1 minimum-version warning. These are local check results, distinct from
@@ -1407,8 +1472,8 @@ required CI, native simulator proof, deployment and live provider verification.
 
 ## Inspection dispositions and maintenance
 
-- The inventory covers 87 active grouped families: 12 web-client, 27 package/runtime,
-  28 hosted-backend and 20 native-iOS families, plus two retired interface entries.
+- The inventory covers 88 active grouped families: 12 web-client, 27 package/runtime,
+  28 hosted-backend and 21 native-iOS families, plus two retired interface entries.
   Each active family has a state owner, invariants and transitions.
   Related display or retry microstates stay with
   their owner rather than becoming invented independent durable machines.
@@ -1446,8 +1511,17 @@ immutable field facts remain necessary evidence of explicit choice. Diagnostic
 CAS checks and their one shared durable-winner read remain the minimum behavior
 needed by the demonstrated failures.
 
-Native cache-write ownership is being narrowed to accepted mutations so fresh
-Home reads and cached presentation do not perform redundant writes. The original
-completed audit plan remains historical evidence; the active shipping plan and
-PRs own release progression. Merge, deployment and native upload are distinct
-outcomes and are not yet claimed here.
+Native cache-write ownership is narrowed to accepted game merges, removals and
+partial posts; generic Home presentation no longer writes the cache. Existing
+fresh-read, profile and receipt writers remain at their owners, and mutation
+writes preserve the absent-cache block tombstone. Latest iOS main `60e6940` also
+introduced the reminder machine, whose confirmed account/attempt failures are
+fixed locally under SM-06.
+
+At this update, [Murph PR #4733](https://github.com/cobuildwithus/murph/pull/4733)
+is ready for review at `735d5cb` with CI running. Required ReviewGPT is pending;
+an available managed-browser route was recovered after the default lanes failed.
+The iOS PR is pending.
+The original completed audit plan remains historical evidence; the active
+shipping plan and PRs own release progression. No merge, deployment or native
+upload is claimed here.

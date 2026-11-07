@@ -42,3 +42,9 @@ The user explicitly requested shipping both repositories and prioritizing archit
 - Reminder simplification: activation 14 + diagnostic 16 tests pass, including 4 real PostgreSQL lock-order/optional-field cases and the 1,000-game bounded-query test. Focused lint and diff checks pass.
 - Prior proof remains: ordinary reminders 28, warmup 6, upstream parser/inbox 54+25, and native 276; rerun affected compiled graphs for the new candidate.
 - Final typechecks, native tests/review, exact-head hosted checks, final Murph ReviewGPT and deployment/upload proof remain in progress.
+
+## Shipping progress
+
+- Murph PR #4733 is open and ready; source checks passed and hosted CI is running. The first review startup did not submit a request. A working dedicated browser was located through the canonical managed-browser connection options; retry retains round 1 and the exact pushed source.
+- Native reconciliation exposed reminder account/overlap bugs (#477), grouped at the same settings owner. The integrated candidate passed 285 tests and independent local review identified one remaining initial-load/default overwrite schedule; its minimal correction and UI proof are in progress.
+- Native build 1.1.24 (86) is reserved after current main/documented uploaded build 85. Xcode developer-account setup remains necessary for signed upload; no App Review submission is included.
