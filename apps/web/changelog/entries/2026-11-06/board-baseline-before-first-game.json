@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "board-baseline-before-first-game",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A fairer before and after on your board",
+    "summary": "Your 1v1 board now compares this week with the 60 days before your first game, so your change can show up by about Day 5.",
+    "details": "Days when a device sent no steps no longer count, so a gap can't look like a big jump or win a crown. Heart rate, sleep, steps and VO2 max now share up to 180 days.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4709]
+  }
+}
