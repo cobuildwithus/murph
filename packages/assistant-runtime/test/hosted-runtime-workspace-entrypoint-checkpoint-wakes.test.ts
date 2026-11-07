@@ -78,10 +78,11 @@ import {
 describe("hosted workspace runtime entrypoint", () => {
   test.each([
     { name: "foreground prerequisite", startAfterMs: 0, expectedMs: 0 },
+    { name: "accepted settlement", startAfterMs: 0, expectedMs: 0 },
     { name: "background claim bound", startAfterMs: 480_000, expectedMs: 480_000 },
     { name: "ordinary durable effect", startAfterMs: null, expectedMs: 600_000 },
     { name: "background claim within the quiet window", startAfterMs: 720_000, expectedMs: 600_000 },
-  ])("honors the publication deadline for a $name", async ({ startAfterMs, expectedMs }) => {
+  ])("honors the publication deadline for a $name", async ({ name, startAfterMs, expectedMs }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-publication-deadline-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -113,7 +114,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase() {
             if (++pass > 1) return { progressed: false };
             started.resolve();
-            return { progressed: true, checkpointReason: "outbox_sending", afterDurableCheckpoint: durableEffect };
+            return { progressed: true, checkpointReason: name === "accepted settlement" ? "outbox_receipt" : "outbox_sending", afterDurableCheckpoint: durableEffect };
           },
         }), 15_000, () => events.join(","));
       await started.promise;
