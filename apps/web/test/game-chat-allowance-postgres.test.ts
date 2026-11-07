@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
 import { claimHostedRuntime, retireHostedRuntime, releaseHostedRuntimeAfterRetirement } from "@/src/lib/hosted-execution/runtime-owner";
+import { readStrictHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { recordHostedAiUsageRecordsAndSendLimitNotices } from "@/src/lib/hosted-execution/usage";
 
@@ -30,7 +31,7 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
     const previous = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
     try {
-      await prisma.hostedMember.createMany({ data: ids.map(id => ({ id, billingStatus: "not_started" })) });
+      await prisma.hostedMember.createMany({ data: ids.map(id => ({ id, billingStatus: "canceled" })) });
       for (const memberId of [primary, alternate]) {
         await prisma.hostedThreadContainer.create({ data: { memberId, ownerMemberId: first,
           participants: { create: [first, second].map(participantMemberId => ({ participantMemberId,
@@ -46,6 +47,12 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
         chatContainerMemberId: primary, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed",
         players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC" })) },
       } });
+      for (const memberId of [primary, alternate]) {
+        expect(await readStrictHostedMemberAccess({ memberId, now, prisma })).toBe(true);
+      }
+      for (const memberId of [first, second]) {
+        expect(await readStrictHostedMemberAccess({ memberId, now, prisma })).toBe(false);
+      }
       const claims = await Promise.all([primary, alternate].map(userId => claimHostedRuntime({ prisma, userId, now, processingMode: "default" })));
       const owners = claims.map(claim => {
         if (claim.status === "blocked" || !claim.owner.attemptId) throw new Error("Expected admitted game room.");
@@ -79,6 +86,7 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
       await prisma.game.update({ where: { id: gameId }, data: { status: "settled", settledAt: new Date(now.getTime() - 8 * 86_400_000), chatContainerMemberId: null } });
       await prisma.hostedThreadContainerParticipant.updateMany({ where: { containerMemberId: alternate }, data: { removedAt: now } });
       await expect(readHostedAiUsageGate({ memberId: alternate, now, prisma })).resolves.toMatchObject({ allowed: false });
+      expect(await readStrictHostedMemberAccess({ memberId: alternate, now, prisma })).toBe(false);
       records[1] = usage(alternate, now);
       await record(1);
       await record(1); // Exact callback replay must not spend twice.

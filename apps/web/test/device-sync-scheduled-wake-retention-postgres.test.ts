@@ -97,6 +97,20 @@ describe.skipIf(!runPostgresProof)(
       return { client, memberId, connectionId, now, options, signal, read };
     }
 
+    it.each(["canceled", "paused", "unpaid", "past_due"] as const)("selects %s device work before the page limit", async (billingStatus) => {
+      const blocked = await seedDueBudgetConnection();
+      const f = await seedDueBudgetConnection();
+      await f.client.hostedMember.update({ where: { id: blocked.memberId }, data: { suspendedAt: f.now } });
+      await f.client.hostedMember.update({ where: { id: f.memberId }, data: { billingStatus } });
+      const select = () => f.options.store.listDueReconcileConnectionsForSweep({
+        dueAt: f.now, limit: 1, recoveryBucketStartedAt: f.now,
+      });
+      expect(await select()).toMatchObject([{ connectionId: f.connectionId, userId: f.memberId }]);
+      await f.client.hostedConsentGrant.create({ data: { memberId: f.memberId, scope: "launch.health-data", status: "revoked",
+        documentVersionsJson: {}, source: "web_onboarding", grantedAt: f.now, revokedAt: f.now } });
+      expect(await select()).toEqual([]);
+    });
+
     it("waits for pool checkout without returning an open transaction to the pool", async () => {
       const f = await seedDueBudgetConnection();
       const client = createPrismaClient({ databaseUrl, poolMax: 1 });

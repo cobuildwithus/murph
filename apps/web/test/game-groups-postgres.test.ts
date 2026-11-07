@@ -15,7 +15,7 @@ import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-deliver
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
 import { requestGameRecapRegeneration } from "@/src/lib/game/recap-regeneration";
 import { markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
-import { readGameChatAudience, readGroupGameChatAuthority } from "@/src/lib/game/chat-membership";
+import { readGameChatAudience, readGroupGameChatAuthority, readGroupGameNoticeAuthority } from "@/src/lib/game/chat-membership";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import type { HostedGameRecap, HostedGameUpdate } from "@murphai/hosted-execution/runtime-control";
 import { hostedGameChatStateSchema } from "@murphai/hosted-execution/runtime-control";
@@ -2615,4 +2615,188 @@ describe.skipIf(!enabled)("surviving group authority", () => {
     if (["contact", "invitation"].includes(kind)) expect(result).toMatchObject({ error: { message: "Only an addressed invitee can agree." } });
     expect(await db.gamePlayer.count({ where: { gameId: f.group.id, memberId: f.actor.id } })).toBe(0);
   }, 60_000);
+});
+
+/** Each recovery isolates one receipt while retaining the real sweep and authority owners. */
+async function recoverBlockedGroupNotice(receiptId: string, now = caseNow) {
+  await db.hostedLinqDelivery.update({ where: { id: receiptId }, data: { attemptedAt: new Date("1600-01-01"), retryAfterAt: new Date(0) } });
+  await parkOtherLifecycleReceipts(receiptId);
+  const { drainGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+  return drainGameChatLifecycle({ prisma: db, now });
+}
+async function blockedGroupNotice(kind: "talk" | "challenge") {
+  const f = await talkGroup(4, true);
+  let eventId: string;
+  if (kind === "talk") {
+    const command = f.command(2);
+    await ok(f.people[2].id, command, caseNow);
+    eventId = `game-talk:${f.group.id}:${command.proposalId}`;
+  } else {
+    await groupPhoto(f.group.id, f.people[0].id);
+    const photo = await groupPhoto(f.group.id, f.people[1].id);
+    await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: photo.id }, caseNow);
+    eventId = `game-challenge:${f.group.id}:${photo.id}`;
+  }
+  const { createHostedLinqDeliveryIdempotencyLookupKey } = await import("@/src/lib/hosted-onboarding/linq-observability-identifiers");
+  const receipt = () => db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)! } });
+  const block = (type: "block" | "unblock") => ok(f.people[0].id, { type, memberId: f.people[1].id }, caseNow);
+  const dispatch = () => db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
+    containerMemberId: f.context.chatContainerMemberId, audience: f.context.chatAudience, now: caseNow }));
+  return { ...f, eventId, receipt, block, dispatch };
+}
+
+describe.skipIf(!enabled)("group block keeps the room", () => {
+  beforeEach(async () => {
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.withmurph.ai");
+    vi.spyOn(await import("@/src/lib/game/service"), "reserveDueGameMissedDayCheckIns").mockResolvedValue(0);
+  });
+
+  it("keeps the authority answer when a block commits after its block read", async () => {
+    const f = await blockedGroupNotice("talk");
+    const game = await gameRow(f.group.id), room = f.context.chatContainerMemberId;
+    const late = new Proxy(db, { get(target, property, receiver) {
+      if (property !== "gameBlock") return Reflect.get(target, property, receiver);
+      return new Proxy(target.gameBlock, { get(blocks, operation, blockReceiver) {
+        if (operation !== "findFirst") return Reflect.get(blocks, operation, blockReceiver);
+        return async (args: Parameters<typeof blocks.findFirst>[0]) => {
+          const result = await blocks.findFirst(args);
+          await f.block("block");
+          return result;
+        };
+      } });
+    } });
+    expect(await readGroupGameNoticeAuthority(game, room, f.context.chatAudience, late)).toEqual(f.context.chatAudience);
+    await expect(readGroupGameNoticeAuthority(game, room, f.context.chatAudience, db)).rejects.toMatchObject({ reason: "blocked" });
+  });
+
+  it("keeps the live game and every waiting receipt byte-identical", async () => {
+    const f = await blockedGroupNotice("talk");
+    await groupPhoto(f.group.id, f.people[0].id);
+    const photo = await groupPhoto(f.group.id, f.people[1].id);
+    await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: photo.id }, caseNow);
+    await reserveGameChatLifecycleTx({ gameId: f.group.id, kind: "change_cancelled", proposalId: "synthetic-change", tx: db, now: caseNow });
+    await markGameChatGenerationQueuedTx(f.eventId, db, f.context.chatContainerMemberId);
+    await markGameChatGenerationQueuedTx(`game-started:${f.group.id}`, db, f.context.chatContainerMemberId);
+    const receipts = () => db.hostedLinqDelivery.findMany({ where: { source: "game_lifecycle", OR: [{ sourceRef: f.group.id }, { sourceRef: { startsWith: `${f.group.id}:` } }] }, orderBy: { id: "asc" } });
+    const game = await gameRow(f.group.id), before = await receipts();
+    expect(new Set(before.map(row => row.status))).toEqual(new Set(["awaiting_generation", "generation_queued"]));
+    await f.block("block");
+    expect(await gameRow(f.group.id)).toEqual(game);
+    expect(await receipts()).toEqual(before);
+    expect((await receipts()).some(row => row.skipReason === "game_blocked")).toBe(false);
+  });
+
+  it.each([ ["talk", false], ["talk", true], ["challenge", false], ["challenge", true] ] as const)("waits and resumes %s, published=%s", async (kind, published) => {
+    const f = await blockedGroupNotice(kind);
+    if (published) {
+      expect(await recoverBlockedGroupNotice((await f.receipt()).id)).toMatchObject({ attempted: 1, queued: 1 });
+      lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-blocked-notice", consumedAt: null });
+    }
+    const status = (await f.receipt()).status;
+    lifecycleProof.append.mockClear(); lifecycleProof.signal.mockClear();
+    await f.block("block");
+    expect(await recoverBlockedGroupNotice((await f.receipt()).id)).toMatchObject({ attempted: 1, queued: 0 });
+    expect(await f.receipt()).toMatchObject({ status, skipReason: null, skippedAt: null });
+    expect(lifecycleProof.append).not.toHaveBeenCalled(); expect(lifecycleProof.signal).not.toHaveBeenCalled();
+    const { readGameProposalDeliveryPlayers } = await import("@/src/lib/game/chat-delivery");
+    await expect(readGameProposalDeliveryPlayers(f.eventId, f.context.chatContainerMemberId)).rejects.toMatchObject({ reason: "blocked" });
+    await expect(f.dispatch()).rejects.toMatchObject({ reason: "blocked" });
+    await f.block("unblock");
+    expect(await recoverBlockedGroupNotice((await f.receipt()).id)).toMatchObject({ attempted: 1, queued: 1 });
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(published ? 0 : 1);
+    expect(lifecycleProof.signal).toHaveBeenCalledOnce();
+    expect(await f.dispatch()).toBe(true);
+  });
+
+  it("preserves a challenge when the block commits during publication", async () => {
+    const f = await blockedGroupNotice("challenge");
+    lifecycleProof.prepare.mockImplementationOnce(async () => { await f.block("block"); return {}; });
+    expect(await recoverBlockedGroupNotice((await f.receipt()).id)).toMatchObject({ attempted: 1, queued: 0 });
+    expect(lifecycleProof.prepare).toHaveBeenCalledOnce(); expect(lifecycleProof.append).not.toHaveBeenCalled();
+    expect(await f.receipt()).toMatchObject({ status: "awaiting_generation", skippedAt: null, skipReason: null });
+    await f.block("unblock");
+    expect(await recoverBlockedGroupNotice((await f.receipt()).id)).toMatchObject({ queued: 1 });
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+  });
+
+  it.each(["talk", "challenge"] as const)("supersedes an ended %s even while a block stands", async kind => {
+    const f = await blockedGroupNotice(kind);
+    await f.block("block");
+    await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM game WHERE id = ${f.group.id} FOR UPDATE`;
+      await tx.game.update({ where: { id: f.group.id }, data: { status: kind === "talk" ? "void" : "settled" } });
+    });
+    await recoverBlockedGroupNotice((await f.receipt()).id);
+    expect(await f.receipt()).toMatchObject({ status: "skipped", skipReason: "game_lifecycle_superseded" });
+    expect(lifecycleProof.append).not.toHaveBeenCalled();
+    await expect(f.dispatch()).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it("still supersedes an outsider audience without a block", async () => {
+    const f = await blockedGroupNotice("talk");
+    chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
+    await recoverBlockedGroupNotice((await f.receipt()).id);
+    expect(await f.receipt()).toMatchObject({ status: "skipped", skipReason: "game_lifecycle_superseded" });
+    expect(lifecycleProof.append).not.toHaveBeenCalled();
+  });
+
+  it.each(["before settlement", "while waiting", "after publication"])("resumes the recap after a block %s", async timing => {
+    const g = await leaverChatGame();
+    await entry(g.game.id, g.people[0].id, 0);
+    prepareGroupLifecycle(g.room);
+    const block = (type: "block" | "unblock") => ok(g.people[0].id, { type, memberId: g.people[1].id }, caseNow);
+    if (timing === "before settlement") await block("block");
+    await settle(g.game.id, g.people[0].id);
+    // Keep this fixture inside the existing seven-day funding window.
+    await db.game.update({ where: { id: g.game.id }, data: { settledAt: new Date() } });
+    const receipt = () => db.hostedLinqDelivery.findFirstOrThrow({ where: { sourceRef: g.game.id, template: "game_recap" } });
+    if (timing === "after publication") {
+      expect(await recoverBlockedGroupNotice((await receipt()).id)).toMatchObject({ queued: 1 });
+      lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-blocked-recap", consumedAt: null });
+    }
+    const before = await receipt();
+    if (timing !== "before settlement") await block("block");
+    expect(await receipt()).toEqual(before);
+    expect(await readGameRecapMaterial(g.game.id, g.room, g.members)).toBeNull();
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    const origin = { kind: "game_recap" as const, gameId: g.game.id, eventId: `game-recap:${g.game.id}` };
+    const read = () => handleGameChatTool({ memberId: g.room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game", origin } });
+    if (timing === "after publication") {
+      expect(await read()).toMatchObject({ result: { status: "unavailable", error: "recap_authority_unavailable" } });
+      expect(await receipt()).toEqual(before);
+    }
+    lifecycleProof.append.mockClear(); lifecycleProof.signal.mockClear();
+    expect(await recoverBlockedGroupNotice(before.id)).toMatchObject({ queued: 0 });
+    expect(await receipt()).toMatchObject({ status: before.status, skipReason: null, skippedAt: null });
+    expect(lifecycleProof.append).not.toHaveBeenCalled(); expect(lifecycleProof.signal).not.toHaveBeenCalled();
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).has(g.room)).toBe(false);
+    await block("unblock");
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).get(g.room)).toBe(g.room);
+    expect(await recoverBlockedGroupNotice(before.id)).toMatchObject({ queued: 1 });
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(timing === "after publication" ? 0 : 1);
+    expect(lifecycleProof.signal).toHaveBeenCalledOnce();
+    expect(await read()).toMatchObject({ result: { status: "ok" } });
+    const sealInput = await queuedGroupRecap(g);
+    const recap = { ...sealInput.recap, superlatives: g.people.map((p, i) => ({ memberId: p.id,
+      title: `Route finder ${i + 1}`, line: "Brought a walking task to the week." })) };
+    expect(await handleGameChatTool({ memberId: g.room, multiplayer: true, runtimeIdentity: null,
+      request: { action: "write_recap", origin, recap, priorChatLines: [] } })).toMatchObject({ result: { status: "ok" } });
+    expect((await readGame(g.game.id, g.people[0].id, true))?.recap).toMatchObject({ pages: recap.pages });
+    expect(await db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: g.room,
+      audience: g.context.chatAudience, deliveryIdempotencyKey: origin.eventId }))).toBe(true);
+  });
+
+  it("calls off the pair beside an intact group shared by the same players", async () => {
+    const f = await blockedGroupNotice("talk");
+    const pairId = randomUUID();
+    const pair = await ok(f.people[0].id, { type: "createGame", gameId: pairId, inviteeFirstName: "Teammate",
+      terms: { tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose our next outing" }] } });
+    await ok(f.people[1].id, join(pair!.inviteToken!));
+    await db.game.update({ where: { id: pairId }, data: { chatContainerMemberId: f.context.chatContainerMemberId } });
+    const before = await f.receipt(), game = await gameRow(f.group.id);
+    await f.block("block");
+    expect(await gameRow(pairId)).toMatchObject({ status: "void", chatContainerMemberId: null });
+    expect(await db.hostedLinqDelivery.findFirst({ where: { sourceRef: pairId, template: "game_started" } })).toMatchObject({ status: "skipped", skipReason: "game_blocked" });
+    expect(await gameRow(f.group.id)).toEqual(game); expect(await f.receipt()).toEqual(before);
+  });
 });

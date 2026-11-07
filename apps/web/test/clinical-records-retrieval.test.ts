@@ -22,7 +22,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
-  readHostedRuntimeAiAccessDecision: vi.fn(),
+  readClinicalTransportAccess: vi.fn(),
   openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   openClinicalDocumentTicket: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision }));
+vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.readClinicalTransportAccess }));
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
@@ -65,7 +65,7 @@ describe("Clinical Records retrieval control plane", () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+    mocks.readClinicalTransportAccess.mockResolvedValue(true);
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -284,7 +284,7 @@ describe("Clinical Records retrieval control plane", () => {
 
   it("fences egress when consent is withdrawn after initial admission", async () => {
     const harness = createHarness(["Observation"]);
-    harness.hooks.afterRequestUpsert = async () => { mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: false }); };
+    harness.hooks.afterRequestUpsert = async () => { mocks.readClinicalTransportAccess.mockResolvedValue(false); };
     const fetchImpl = vi.fn();
     await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: queryObservationPageRequest("revoked") }))
       .resolves.toMatchObject({ status: "unavailable", errorCode: "member-processing-inactive", retryable: false });

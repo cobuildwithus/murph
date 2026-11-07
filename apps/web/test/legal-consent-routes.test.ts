@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
-  readHostedRuntimeAiAccessDecision: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   reconcileHostedHealthDataRuntimeConsent: vi.fn(),
   recordHostedLaunchConsentDecline: vi.fn(),
@@ -75,7 +75,7 @@ vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
-  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -137,7 +137,7 @@ describe("legal consent routes", () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue(memberAuth);
     mocks.readHostedConsentStatus.mockResolvedValue(currentStatus);
     mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.reconcileHostedHealthDataRuntimeConsent.mockResolvedValue({
       consentState: "revoked",
       processingAllowed: false,

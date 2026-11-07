@@ -588,6 +588,10 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
   }));
 
   async function nativeTelegramFixture(f: Parameters<Parameters<typeof withInitialPasskeyMember>[0]>[0]) {
+    // Delivery/race cases need a welcome-eligible member; OTP issuance alone
+    // creates a not-started account. Keep real access predicates in this suite.
+    await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { billingStatus: "active" } });
+    provider.signal.mockResolvedValue({ signalAccepted: true, workflowId: "synthetic" });
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
     vi.stubEnv("HOSTED_AUTH_TELEGRAM_CLIENT_ID", "123456789");
     vi.stubEnv("TELEGRAM_BOT_USERNAME", "synthetic_murph_bot");
@@ -625,6 +629,17 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(isHostedMemberMessagingSetupRequired({ identity: await readHostedMemberIdentity(f), routing })).toBe(false);
     expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(401);
     expect(provider.telegram).toHaveBeenCalledTimes(1);
+  }));
+
+  it.each(["canceled", "paused", "unpaid", "past_due"] as const)("native Telegram links a %s member without a signup welcome", (billingStatus) => withInitialPasskeyMember(async (f) => {
+    const t = await nativeTelegramFixture(f);
+    await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { billingStatus } });
+    const completed = await completeNativeTelegram(nativeRequest(f.token, t.body));
+    expect(await completed.json()).toMatchObject({ ok: true, linked: true, telegramAwaitingInbound: true });
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBe("123456789");
+    expect((await readHostedMemberRoutingState(f))?.telegramThreadId).toBeNull();
+    expect(provider.telegram).not.toHaveBeenCalled();
+    expect(await f.prisma.hostedMailboxItem.count({ where: { userId: f.memberId, kind: "conversation.message" } })).toBe(0);
   }));
 
   it.each([

@@ -1,3 +1,5 @@
+ReviewGPT runs only for risky changes, at any size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
+
 Runtime logs are diagnostic only: an accepted-attempt failure log no longer triggers a recheck, and its historical rows stay parseable; [the hosted runtime protocol](references/hosted-runtime-protocol.md) owns that contract, and [the removal plan](exec-plans/completed/2026-11-06-sm-f11b-log-triggered-wake.md) records the drain evidence.
 
 Native invocation receipts no longer store or rebuild the completion recheck bit, while the SQLite column and wire boolean stay for older controllers; [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#runtime-completion-consolidation) owns the remaining drain, and [the plan](exec-plans/completed/2026-11-06-sm-f11a-completion-recheck-bit.md) records the evidence.
@@ -17,8 +19,9 @@ invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
 and [Architecture](../ARCHITECTURE.md#weekly-game). Local proof is recorded in
 the [execution record](exec-plans/completed/2026-11-06-game-deletion-progress-survivors.md).
 Recap generation retirement and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
-A pair recap generation a block already ended answers the same terminal value, while group generations and block rows stay uncertain; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule.
+A pair recap generation a block already ended answers the same terminal value, and a block row stays uncertain. A group block keeps the game in its room with its receipts, so waiting notices and the recap send once it lifts; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule. The group block change is recorded in [its plan](exec-plans/completed/2026-11-06-group-block-keeps-room.md).
 
+A second rematch ask never agrees to the first: it gets the open-rematch conflict, and the member answers the offer on Home; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own the rule.
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
 Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
 
@@ -356,6 +359,11 @@ Deterministic edits and clinical acquisition with AI denied are owned by
 [Hosted runtime protocol](references/hosted-runtime-protocol.md) and
 [Architecture · Hosted Clinical Records](../ARCHITECTURE.md#hosted-clinical-records).
 Implementation and replay proof: [model-free actions](exec-plans/completed/2026-11-06-lapsed-actions.md).
+
+Product and worker access after billing lapse, strict room funding and lifecycle
+eligibility, and returning-member activation proof are owned by
+[Architecture](../ARCHITECTURE.md); local evidence and the caller audit are in
+[the worker access plan](exec-plans/completed/2026-11-06-lapsed-worker.md).
 
 # Murph Agent Docs Index
 
@@ -1951,6 +1959,6 @@ its controller drain gate and rollback floor are in `../apps/cloudflare/DEPLOY.m
 
 Ordinary reminder input replay is recorded in the [execution plan](exec-plans/completed/2026-11-06-automation-input-replay.md).
 
-Typed companion VO2 input, its consumer-first local commit boundary and backend
-proof are tracked in [the active plan](exec-plans/active/2026-11-06-companion-vo2-reading-input.md).
+Typed companion VO2 input, its consumer-first release and backend proof are
+recorded in the [execution plan](exec-plans/completed/2026-11-06-companion-vo2-reading-input.md).
 The measurement action and rollback floor are owned by `../ARCHITECTURE.md`.

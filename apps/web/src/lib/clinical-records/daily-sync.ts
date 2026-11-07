@@ -6,7 +6,7 @@ import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
-import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
+import { readClinicalTransportAccess } from "./transport-access";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
 import { readHostedConsentStatus } from "../legal/consent";
@@ -53,7 +53,7 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
 }
 
 export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date }): Promise<boolean> {
-  if (!(await readHostedRuntimeAiAccessDecision({ memberId: input.memberId })).allowed) return false;
+  if (!await readClinicalTransportAccess({ memberId: input.memberId })) return false;
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
     const root = await unwrapHostedDomainRootForWeb({ domain: getHostedCryptoDomainForLane("mailbox-payload"),
@@ -62,7 +62,8 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
     input.abortSignal?.throwIfAborted();
     const wake = await prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, input.memberId, { timeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS });
-      if (await readHostedMemberSuspensionAfterLockTx(tx, input.memberId) !== "active") return null;
+      if (await readHostedMemberSuspensionAfterLockTx(tx, input.memberId) !== "active"
+        || !await readClinicalTransportAccess({ memberId: input.memberId, prisma: tx })) return null;
       if (!(await readHostedConsentStatus({ memberId: input.memberId, prisma: tx })).launchGranted) return null;
       const connection = await tx.clinicalRecordConnection.findFirst({
         where: { id: input.connectionId, memberId: input.memberId },

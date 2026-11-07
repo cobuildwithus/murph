@@ -632,10 +632,10 @@ describe("hosted orchestration reconciliation facts", () => {
 
   it.each([null, FIXED_NOW, "2026-05-20T12:14:00.000Z"])("preserves inactive workspace retention clocks for retention-only workflow dispatch (%s)", async (retentionWakeAt) => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
-      billingStatus: "canceled",
+      billingStatus: "not_started",
     }));
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
-      billingStatus: "canceled",
+      billingStatus: "not_started",
     }));
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       inboxMediaRetentionWakeAt: retentionWakeAt,
@@ -1795,10 +1795,10 @@ describe("hosted orchestration reconciliation facts", () => {
 
   it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
-      billingStatus: "paused",
+      billingStatus: "not_started",
     }));
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
-      billingStatus: "paused",
+      billingStatus: "not_started",
     }));
 
     const response = await reconciliationRoute.GET(

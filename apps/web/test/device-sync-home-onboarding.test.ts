@@ -218,7 +218,7 @@ describe("shouldShowHomeDeviceSyncStep", () => {
       billingStatus: "incomplete",
       suspendedAt: null,
       threadContainer: null,
-    });
+    }).mockResolvedValueOnce(null); // No activation proof for this incomplete member.
 
     const { shouldShowHomeDeviceSyncStep } = await import(
       "@/src/lib/device-sync/home-onboarding"
