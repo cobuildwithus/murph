@@ -19,6 +19,11 @@ import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
+import { assertHostedDirectAssistantNotificationRouteAuthority, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
+import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
+import { resolveHostedRuntimeAiUsageGate } from "../hosted-orchestration/runtime-usage-decision";
+import { readGamePushRoutes } from "./push-delivery";
+import { gameReminderReach } from "./reminders";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
@@ -141,7 +146,7 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; dayOutcome?: GameDayOutcome }
+  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome }
   | { ok: false; error: GameError; status: number };
 
 const SYSTEM_ACTOR = "system";
@@ -166,8 +171,28 @@ export async function readGameReminders(memberId: string, db: Db = getPrisma()):
     db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
     db.gamePlayer.findMany({ where: { memberId, reminderOff: true, game: { status: "live" } }, select: { gameId: true }, orderBy: { gameId: "asc" } }),
   ]);
+  const canText = await canTextGameReminders(memberId, db);
   return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
-    canText: false, offGameIds: seats.map(seat => seat.gameId) };
+    canText, offGameIds: seats.map(seat => seat.gameId) };
+}
+
+/** A game never grants private AI access or creates a new direct route. */
+export async function canTextGameReminders(memberId: string, db: Db = getPrisma()): Promise<boolean> {
+  if (process.env.MURPH_GAME_PRIVATE_REMINDERS_ENABLED !== "true") return false;
+  const [access, usage, destination] = await Promise.all([
+    readHostedRuntimeAiAccessDecision({ memberId, prisma: db }),
+    resolveHostedRuntimeAiUsageGate({ userId: memberId, mode: "read_only", prisma: db }),
+    resolveHostedAssistantNotificationDestination({ memberId, prisma: db }),
+  ]);
+  if (!access.allowed || usage.status !== "allowed" || destination?.conversationShape !== "direct-member"
+    || destination.route.delivery.kind !== "thread" || !destination.route.threadIsDirect
+    || (destination.route.channel !== "linq" && destination.route.channel !== "telegram")) return false;
+  try {
+    await assertHostedDirectAssistantNotificationRouteAuthority({ authority: {
+      channel: destination.route.channel, containerMemberId: memberId, threadId: destination.route.delivery.target,
+    }, prisma: db, requireThreadDelivery: true });
+    return true;
+  } catch { return false; }
 }
 
 // ------------------------------------------------------------------- writes
@@ -202,17 +227,7 @@ export async function runGameCommand(input: {
       return { game: null, ok: true, profile: await setProfile({ actor, beforeMutationTx: input.beforeMutationTx }, command) };
     }
     if (command.type === "setReminders") {
-      const reminders = await commandTransaction(input, async tx => {
-        const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
-          reminderMinutes: command.minutes, reminderPush: command.push, reminderText: command.text,
-        } });
-        if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
-        const where = { memberId: actor, game: { status: "live" } };
-        await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.offGameIds } }, data: { reminderOff: true } });
-        await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.offGameIds } }, data: { reminderOff: false } });
-        return readGameReminders(actor, tx);
-      });
-      return { game: null, ok: true, reminders };
+      return { game: null, ok: true, reminders: await saveGameReminders(input, command) };
     }
     const chatAudience = input.chatAudience ?? (input.multiplayer && input.chatContainerMemberId ? await readGameChatAudience(input.chatContainerMemberId) : undefined);
     // A recap receipt is the viewer's own; it touches no game state, so it skips the game write path.
@@ -221,6 +236,7 @@ export async function runGameCommand(input: {
     const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
     await deliverAppGameNegotiation(command, gameId, input.chatContainerMemberId);
     await deliverCreatedRematch(command, input.chatContainerMemberId);
+    await activatePrivateAfterGameCommand(command, gameId, input.now ?? new Date());
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
     return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
   } catch (error) {
@@ -229,6 +245,31 @@ export async function runGameCommand(input: {
     }
     throw error;
   }
+}
+
+async function activatePrivateAfterGameCommand(command: GameCommand, gameId: string | null, now: Date): Promise<void> {
+  if (!gameId || !["join", "respondChange", "negotiate", "editTerms", "proposeChange"].includes(command.type)) return;
+  try { await (await import("./private-kickoff")).activatePrivateGamePlayers(gameId, now); }
+  catch { /* The lifecycle sweep recovers an unmarked activation. */ }
+}
+
+async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], command: Extract<GameCommand, { type: "setReminders" }>): Promise<GameReminders> {
+  return commandTransaction(input, async tx => {
+    const actor = input.actorMemberId;
+    if (command.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
+    const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
+      reminderMinutes: command.minutes, reminderPush: command.push, reminderText: command.text,
+    } });
+    if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+    const where = { memberId: actor, game: { status: "live" } };
+    await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.offGameIds } }, data: { reminderOff: true } });
+    await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.offGameIds } }, data: { reminderOff: false } });
+    if (command.everyDayGameIds) {
+      await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.everyDayGameIds } }, data: { reminderEveryDay: true } });
+      await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.everyDayGameIds } }, data: { reminderEveryDay: false } });
+    }
+    return readGameReminders(actor, tx);
+  });
 }
 
 async function deliverAppGameNegotiation(command: GameCommand, gameId: string | null, chatContainerMemberId?: string): Promise<void> {
@@ -284,6 +325,7 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
   if (input.multiplayer && input.chatContainerMemberId && !input.chatAudience) input = { ...input, chatAudience: await readGameChatAudience(input.chatContainerMemberId) };
   const { update, ...context } = input;
   try {
+    if (update.operation === "set_reminder") return await setGameChatReminder(input, update);
     let command: unknown;
     if (update.operation === "create") command = await gameChatCreateCommand(input, update);
     else if (update.operation === "edit_terms") {
@@ -305,6 +347,34 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
     if (error instanceof GameRuleError) return { ok: false, error: error.error, status: GAME_ERROR_STATUS[error.error.code] };
     throw error;
   }
+}
+
+async function setGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "set_reminder" }>): Promise<GameCommandResult> {
+  await requireSelectedGameChatReminder(input, update);
+  const current = await readGameReminders(input.actorMemberId);
+  const seats = await getPrisma().gamePlayer.findMany({ where: { memberId: input.actorMemberId, leftAt: null, game: { status: "live" } },
+    select: { gameId: true, reminderEveryDay: true }, take: 1001 });
+  if (seats.length > 1000) reject("INVALID_REQUEST", "Too many open games to save reminders.");
+  const off = new Set(current.offGameIds);
+  if (update.gameId && update.on !== undefined) update.on ? off.delete(update.gameId) : off.add(update.gameId);
+  const { update: _update, ...context } = input;
+  const result = await runGameCommand({ ...context, command: { type: "setReminders", minutes: update.minutes ?? current.minutes,
+    push: current.push, text: current.text && current.canText, offGameIds: [...off],
+    everyDayGameIds: seats.filter(seat => seat.reminderEveryDay).map(seat => seat.gameId) } });
+  if (!result.ok) return result;
+  const [route] = await readGamePushRoutes(getPrisma(), [input.actorMemberId], true);
+  const selectedOn = update.gameId ? !result.reminders?.offGameIds.includes(update.gameId) : seats.some(seat => !result.reminders?.offGameIds.includes(seat.gameId));
+  const reaches = result.reminders ? gameReminderReach(result.reminders, selectedOn, Boolean(route)) : "none";
+  return { ...result, reaches };
+}
+
+async function requireSelectedGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "set_reminder" }>): Promise<void> {
+  if (process.env.MURPH_GAME_PRIVATE_REMINDERS_ENABLED !== "true") reject("INVALID_REQUEST", "Game chat reminders aren't available yet.");
+  if (update.on !== undefined && !update.gameId) reject("INVALID_REQUEST", "Choose which game to turn on or off.");
+  if (!update.gameId) return;
+  const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { players: true, invitees: true } });
+  if (!row || row.status !== "live" || !row.players.some(seat => seat.memberId === input.actorMemberId && !seat.leftAt)
+    || !await gameChatContextCurrent(row, input)) reject("NOT_A_PLAYER", "Choose one of your live games in this chat.");
 }
 
 async function gameChatEditCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "edit_terms" }>): Promise<unknown> {
@@ -949,6 +1019,8 @@ async function joinGame(context: CommandContext, target: { id: string; createdBy
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
   if (target.maxPlayers !== 10) await maintainPair(target.createdBy!, actor);
   await accept(context, body, target.id, target.createdBy);
+  try { await (await import("./private-kickoff")).activatePrivateGamePlayers(target.id, context.now ?? new Date()); }
+  catch { /* The committed join remains; lifecycle recovery can retry. */ }
   return target.id;
 }
 

@@ -1,5 +1,7 @@
 export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
-export { gameEveningCheckInPolicySchema, type HostedGameEveningCheckInPolicy } from "./game-group-missed.ts";
+export { gameEveningCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, gamePrivateKickoffPolicySchema,
+  buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions,
+  type HostedGameEveningCheckInPolicy, type HostedGamePrivateEveningCheckInPolicy, type HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";

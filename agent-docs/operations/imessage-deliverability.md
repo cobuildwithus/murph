@@ -313,6 +313,15 @@ Game evening room check-ins validate their frozen game and chat witness but do
 not inherit the game-proposal inactivity exemption. They stay subject to the
 28-day pause, the three-accepted-evening unanswered pause and the half-hour
 send deadline.
+Private game evening check-ins also require saved text consent, current private
+AI access and usage, an existing deliverable direct thread, an open game not
+covered by a room check-in, and an unchanged frozen member/date/game witness.
+Their half-hour deadline, three-accepted-evening unanswered pause and 28-day
+pause apply at publication and dispatch. New-person and changed-rhythm game
+offers use the same existing direct thread, wait until 09:00 local after an
+overnight start, and expire 24 hours after game start. They are bounded
+output-only notifications; a reply resumes ordinary direct coaching and may
+write only the replying member's reminder setting.
 Engagement never substitutes for route, consent, or AI-usage authorization.
 
 Deploy the runtime reader for `automation_engagement_paused` delivery blocks

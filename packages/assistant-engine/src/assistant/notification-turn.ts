@@ -1,5 +1,5 @@
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
-import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
+import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -220,6 +220,8 @@ export type AssistantNotificationPromptProfile =
 export type AssistantNotificationResponsePolicy =
   | HostedGameGroupMissedCheckInPolicy
   | HostedGameEveningCheckInPolicy
+  | HostedGamePrivateEveningCheckInPolicy
+  | HostedGamePrivateKickoffPolicy
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
@@ -2121,12 +2123,13 @@ function runtimeOwnsNotificationPresentation(result: ExecutedAssistantProviderTu
 
 function textOnlyGameNotification(gameRecapTurn: boolean, policy: AssistantNotificationResponsePolicy): boolean {
   return gameRecapTurn || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in'
+    || policy.kind === 'game_private_evening_check_in' || policy.kind === 'game_private_kickoff'
 }
 
 function assertAssistantNotificationSkipAllowed(
   policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
-  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in') {
+  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in' || policy.kind === 'game_private_evening_check_in' || policy.kind === 'game_private_kickoff') {
     return
   }
 

@@ -3,13 +3,19 @@ import { attemptsUsed, currentTerms, dayIndexAt, eligibleFromDay, entriesForDay,
   needsPostToday, scorePlayer, type RulePlayer, type RuleState } from "./rules";
 import { addDays } from "./time";
 
+export function gameReminderReach(input: { push: boolean; text: boolean; canText: boolean }, selectedOn: boolean, hasPushRoute: boolean): "push" | "text" | "none" {
+  if (!selectedOn) return "none";
+  if (input.text && input.canText) return "text";
+  return input.push && hasPushRoute ? "push" : "none";
+}
+
 /** Posting eligibility first; count games add urgency without requiring a perfect game. */
-export function reminderOpenDay(state: RuleState, player: RulePlayer, now: Date): number | null {
+export function reminderOpenDay(state: RuleState, player: RulePlayer, now: Date, everyDay = false): number | null {
   if (player.leftAt || !needsPostToday(state, player.memberId, now)) return null;
   const day = dayIndexAt(player, now)!;
   if (day < eligibleFromDay(state, player) || entriesForDay(state.entries, player.memberId, day).some(entry => entry.attempt === 0)
     || attemptsUsed(state.entries, player.memberId, day) >= GAME_POSTS_PER_DAY) return null;
-  if ("count" in currentTerms(state.game.terms).schedule) {
+  if (!everyDay && "count" in currentTerms(state.game.terms).schedule) {
     const shortfall = scorePlayer(state, player).misses;
     let opportunities = 0;
     for (let next = day; next < state.game.lengthDays; next += 1) if (isScheduledDay(state, next)) opportunities += 1;

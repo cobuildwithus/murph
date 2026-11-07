@@ -1,4 +1,4 @@
-import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
+import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
 import type {
   HostedDataKeyEnvelopeV1,
   HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
@@ -257,6 +257,8 @@ export function isHostedRetiredAssistantNotificationProfile(
 export type HostedExecutionAssistantNotificationResponsePolicy =
   | HostedGameGroupMissedCheckInPolicy
   | HostedGameEveningCheckInPolicy
+  | HostedGamePrivateEveningCheckInPolicy
+  | HostedGamePrivateKickoffPolicy
   | { kind: "allow_send_or_skip" }
   | { kind: "require_send" }
   | { kind: "require_game_rematch"; gameId: string; eventId: string; termsVersion: number }
