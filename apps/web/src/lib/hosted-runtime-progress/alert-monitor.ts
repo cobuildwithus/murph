@@ -405,6 +405,8 @@ async function readHostedRuntimeProgressObservation(input: {
 
 // Fresh suffix arrivals do not inherit the paused head's age. Import must
 // cover every live pending row already at the stall boundary.
+// Deliberately use default ownership here: imported deterministic work can be
+// dormant behind enrichment or an old runner. The usage gate below owns exemption.
 function isImportedDefaultOwnedSystemHead(
   row: HostedRuntimeProgressHealthRow,
   now: Date,

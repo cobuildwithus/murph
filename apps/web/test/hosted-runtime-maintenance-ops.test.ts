@@ -1,3 +1,4 @@
+import { activeHostedMemberAccessWhere } from "@/src/lib/hosted-onboarding/member-access";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 vi.mock("server-only", () => ({}));
@@ -874,62 +875,7 @@ describe("hosted runtime maintenance ops", () => {
 });
 
 function activeCheckpointedWorkspaceWhere() {
-  const personAccess = [
-    { billingStatus: HostedBillingStatus.active },
-    {
-      accountGroupMemberships: {
-        some: {
-          group: {
-            billingStatus: HostedBillingStatus.active,
-            suspendedAt: null,
-          },
-          status: "active",
-        },
-      },
-    },
-  ];
-  return {
-    member: {
-      OR: [
-        {
-          suspendedAt: null,
-          threadContainer: { isNot: null },
-          chatHostedGames: { some: {
-            OR: [
-              { status: { in: ["negotiating", "live"] } },
-              { status: "settled", settledAt: {
-                gt: new Date("2026-10-15T12:00:00.000Z"),
-                lte: new Date("2026-10-22T12:00:00.000Z"),
-              } },
-            ],
-            AND: [{ players: { some: { seat: 0 } } }, { players: { some: { seat: 1 } } }, {}],
-            players: { every: {
-              seat: { in: [0, 1] },
-              profile: { member: { suspendedAt: null, consentGrants: { none: { scope: "launch.health-data", status: "revoked" } } } },
-            } },
-          } },
-        },
-        {
-          OR: personAccess,
-          threadContainer: null,
-        },
-        {
-          threadContainer: {
-            is: {
-              owner: {
-                OR: personAccess,
-                suspendedAt: null,
-              },
-            },
-          },
-        },
-      ],
-      suspendedAt: null,
-    },
-    snapshotRef: {
-      not: Prisma.DbNull,
-    },
-  };
+  return { member: activeHostedMemberAccessWhere(), snapshotRef: { not: Prisma.DbNull } };
 }
 
 function workspaceRow(userId: string, version: string) {

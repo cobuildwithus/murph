@@ -259,8 +259,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   advances the existing checkpoint deadline after foreground work, so waiting
   does not consume the request's ten-minute validity. An exact foreground reply
   prerequisite may also advance it; no later pass may rearm the deadline while
-  that reply waits. Internal assistant, maintenance, retention, cleanup,
-  projection, and scheduled wakes must not shorten it. A background delivery
+  that reply waits. Dispatching a transport-idempotent Linq reply boundary with a
+  follow-up or direct nutrition invitation also advances publication to now to
+  preserve its settlement state, even if delivery fails; runner loss
+  before publication finishes can still lose that obligation. Internal assistant,
+  maintenance, retention, cleanup, projection, and scheduled wakes must not shorten
+  it. A background delivery
   claim waiting for publication keeps that window within eight minutes of the
   claim, so stale-send recovery cannot judge a live, unsent claim. Only the exact
   assistant retry or follow-up wake projected directly by the current foreground
@@ -695,6 +699,14 @@ changes purchased or referral credit, or counts as a new Starter enrollment.
 A stale retry cannot append another grant, and a later operator reset is
 eligible only after the prior credit is consumed and the locked canonical
 direct-Starter gate is fully exhausted again.
+- Lapsed personal billing may consume only its existing balance after consent
+  and suspension checks, with zero direct included allowance regardless of stale
+  paid metadata. Valid Family funding retains precedence over credit-only use.
+  The read-only, admission and settlement owners must agree on funding. Personal
+  credit never supplies room sponsorship, lifecycle eligibility, a new grant or
+  new-purchase eligibility. Exhaustion tells the member once at settlement, and
+  later input gets the billing-inactive notice; already-admitted spend remains
+  accountable to its frozen beneficiary.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal

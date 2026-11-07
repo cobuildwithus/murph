@@ -65,6 +65,20 @@ process-local permission cache substitutes for current checks.
 - every durable local SQLite store should carry an explicit `PRAGMA user_version` migration seam
 - hosted execution v2 snapshots canonical `vault/**`, durable operational runtime state under `vault/.runtime/operations/**` except explicit unsafe/process-local exclusions, the exact freshness-validated query SQLite cache triplet, the hosted operator-home directory marker, session-referenced active Codex rollout JSONL files, and the exact Codex read artifacts `.codex-hosted/memories/{raw_memories.md,MEMORY.md,memory_summary.md}`. They do **not** snapshot operator config, assistant JSONL event logs, device-sync control/token stores, parser executable-selector config, any other rebuildable projections, caches, tmp state, secrets, quarantine/repair payloads, locks, pid files, sockets, Codex auth/credential/key/cert files, Codex cache/tmp/log/history files, Codex prompt-history files, Codex skills/extensions/Git state, arbitrary Codex memory descendants, Codex memory/state SQLite databases or sidecars, unreferenced Codex sessions, or archived Codex sessions. Hosted assistant config is recreated from trusted platform runtime env after restore. Hosted Codex continuity diagnostics stay count/byte/counter only plus keyed rollout-relative hashes when the hosted log fingerprint secret is configured.
 - hosted foreground execution must not publish separate Codex continuity artifacts or workspace pointers; provider-native continuity is captured by idle-shutdown v2 workspace snapshots only
+- hosted tar snapshot plans omit directories strictly below `raw/inbox/` and
+  `derived/inbox/` only when they have no included file descendant. Ancestry uses
+  filesystem path separators before archive-path normalization, preserving the
+  archive's rejection of physical-path/archive-path mismatches. Path-excluded
+  cold files do not count. Both inbox roots and every other previously included
+  directory remain, including non-empty parents whose entries preserve
+  permissions. Restore replaces the durable root, so omitted empty trees
+  disappear without live deletion. Capture and parser publication writers
+  recreate parents; cold materialization creates parents with `0700` and files
+  with `0600`. The archive
+  format and restore consumer are unchanged: existing v2 runners can restore
+  these snapshots, with no coordinated rollout or new rollback floor. Rolling
+  back the planner merely resumes archiving any empty directories present at
+  the next checkpoint. Portable delta tombstones remain file-only.
 - hosted execution also treats incur CLI config autodiscovery as local-only convenience: `~/.config/murph/config.json` is not part of the hosted bundle contract, and hosted assistant/provider turns explicitly opt out of reading it
 - non-assistant operational portability metadata lives in subsystem descriptor manifests aggregated by `@murphai/runtime-state`; hosted snapshots still include durable operational paths by default unless the denylist classifies them as unsafe or process-local
 - legacy hosted-bundle snapshots may externalize large raw artifacts under `vault/raw/**` into separate encrypted content-addressed objects. Direct-R2 v2 snapshots include restored workspace bytes in the encrypted archive instead of producing artifact sidecars.

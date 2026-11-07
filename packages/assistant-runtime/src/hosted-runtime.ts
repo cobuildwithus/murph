@@ -1,3 +1,4 @@
+import { getHostedSystemMailboxModelFreeRouteActions } from "./hosted-runtime/mailbox-routing.ts";
 import { createHostedMealMediaBudget, createHostedMealMediaMaintenance, needsHostedMealMediaCheckpoint, withHostedMealMediaRetry, mergeHostedMealMediaRetry, type HostedMealMediaBudget } from "./hosted-runtime/meal-media-maintenance.ts";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -25,7 +26,7 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+  getHostedSystemMailboxModelFreeKinds,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   detectVaultMetadataFormatVersion,
@@ -114,7 +115,7 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import {
-  resolveHostedCurrentInputIdForAcceptedInputs,
+  readHostedAcceptedInputContext,
 } from "./hosted-runtime/turn-input.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
@@ -452,14 +453,6 @@ export {
 
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
-const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
-  "apply-member-channels-update",
-  "apply-runtime-control-request",
-  "dispatch-assistant-notification",
-  "import-group-journal-fact",
-  "import-reported-daily-metric",
-  "run-device-sync-wake",
-] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 // Admission normally takes seconds; fail open if no provider/pass close follows.
@@ -1085,6 +1078,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
       vaultRoot: input.vaultRoot,
     }),
     input.systemMailboxWakes ?? resolveHostedSystemMailboxWakeCandidates({
+      assistantExecutionBlocked: input.assistantExecutionBlocked,
       now: () => now.toISOString(),
       state: input.systemMailboxState,
       vaultRoot: input.vaultRoot,
@@ -1233,6 +1227,7 @@ async function resolveHostedRuntimeStatusCheckpointWakes(input: {
   vaultRoot: string;
 }) {
   const systemMailboxWakes = await resolveHostedSystemMailboxWakeCandidates({
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     ...(input.assistantExecutionBlocked
       ? { allowedRouteActions: ["run-assistant-ask"] as const }
       : {}),
@@ -2104,6 +2099,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const assistantExecutionBlocked =
       systemMailboxProcessingMode
       && input.request.assistantExecutionBlocked === true;
+    const modelFreeRouteActions = getHostedSystemMailboxModelFreeRouteActions(assistantExecutionBlocked);
+    const modelFreeWakeKinds = getHostedSystemMailboxModelFreeKinds(assistantExecutionBlocked);
     let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
       runtimeEnv: baseRuntimeEnv,
     });
@@ -2157,6 +2154,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : foregroundWorkspacePort;
         const progressStatusStartedAt = performance.now();
         const redactedStatus = await withHostedMailboxProgressStatus({
+          assistantExecutionBlocked,
           workspaceVersion: (BigInt(expectedWorkspaceVersion) + 1n).toString(),
           redactedStatus: {
             ...checkpointRequestBuilder.readRedactedStatus(),
@@ -2252,6 +2250,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         nextWakeReason: activeWorkspace?.nextWakeReason ?? null,
       };
       const recoveryCheckpoint = await checkpointHostedRuntimeDirtyWorkspace({
+        assistantExecutionBlocked,
         assertRuntimeNotAborted,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
@@ -2362,6 +2361,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
+      assistantExecutionBlocked,
       awaitBackgroundMaintenanceBarrier: async (barrier) => {
         if (!startExactDetachedAssistantAsk) {
           if (
@@ -2779,6 +2779,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           status: "start",
         });
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+          assistantExecutionBlocked,
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
           expectedUserId: input.request.userId,
@@ -2985,6 +2986,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     }
     const workspaceSystemWork = createHostedWorkspaceSystemWork({
       preparation: {
+        assistantExecutionBlocked,
         operatorHomeRoot: restored.operatorHomeRoot,
         runtime: foregroundRuntime,
         runtimeEnv: invocationRuntimeEnv,
@@ -3029,7 +3031,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     });
     systemWork = workspaceSystemWork;
     await workspaceSystemWork.recover(
-      systemMailboxProcessingMode ? HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS : undefined,
+      systemMailboxProcessingMode ? modelFreeRouteActions : undefined,
     );
     let systemMailboxForegroundRecheckRequested = false;
     const returnSystemMailboxProcessingModeAfterInitialImport = async () => {
@@ -3340,6 +3342,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           status: "start",
         });
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+          assistantExecutionBlocked,
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
           checkpointSignal,
@@ -3656,6 +3659,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           immediateRecheckRequested: recheckOwner !== null,
           nextWake: returnedWake,
           redactedStatus: await withHostedMailboxProgressStatus({
+            assistantExecutionBlocked,
             workspaceVersion: readExpectedWorkspaceVersion(),
             mailboxState: latestMailboxImport.state,
             redactedStatus: currentRedactedStatus,
@@ -3703,6 +3707,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             },
             write: async () => {
               const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+                assistantExecutionBlocked,
                 allowedRouteActions: inputItem.allowedRouteActions,
                 allowedWakeKinds: inputItem.allowedWakeKinds,
                 excludedRouteActions: HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
@@ -3922,6 +3927,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : runtimeAbortController.signal;
             try {
               const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+                assistantExecutionBlocked,
                 item: recordInput.item,
                 operatorHomeRoot: restored.operatorHomeRoot,
                 runtime: foregroundRuntime,
@@ -4239,7 +4245,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         // carries both cleanup and the next bounded pass. Never restart after it.
         await finishIndependentSystemWorkAfterCheckpoint(false);
         workspaceSystemWork.resume();
-        workspaceSystemWork.kick(HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS);
+        workspaceSystemWork.kick(modelFreeRouteActions);
         const foregroundArrived = await workspaceSystemWork.waitForCompletion(
           options.runtimeWakeSignal ?? null,
           async (notification) => {
@@ -4274,8 +4280,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
 
         const modelFreePass = await runSystemMailboxLifecycleItem({
-          allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-          allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+          allowedRouteActions: modelFreeRouteActions,
+          allowedWakeKinds: modelFreeWakeKinds,
           stagePrefix: "system_mailbox.model_free",
         });
         assertRuntimeNotAborted();
@@ -4478,7 +4484,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         status: "start",
       });
       try {
-        let currentAssistantInputId: string | null = null;
         let acceptedForegroundPriorityInputNeedsOpaqueQuietWindow = false;
         const initialMailboxAssistantInputIds =
           passInput.initialMailboxImport?.importResult.assistantInputIds ?? [];
@@ -4522,7 +4527,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             recordForegroundConversationInputsFromImport(
               phaseInput.initialMailboxImport,
             );
-            currentAssistantInputId = null;
             const acceptedAssistantInputIds = new Set<string>();
             const releaseAcceptedImageGenerationInputs = async (
               inputIds: readonly string[],
@@ -4570,7 +4574,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     }
                   : {}),
                 foregroundCausalOnly: passInput.foregroundCausalOnly === true,
-                currentAssistantInputId: () => currentAssistantInputId,
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,
                 deviceSyncMessagingReturnTarget,
@@ -4591,9 +4594,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       "Runtime ownership changed; retrying the turn in a fresh invocation.",
                     );
                   }
-                  const acceptedInputsOnlyAssistant = acceptedInputs.every(
-                    (acceptedInput) => acceptedInput.source === "assistant-input",
-                  );
                   const assistantInputIds = acceptedInputs
                     .filter((acceptedInput) => acceptedInput.source === "assistant-input")
                     .map((acceptedInput) => acceptedInput.id);
@@ -4602,7 +4602,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     acceptedAssistantInputIds.add(assistantInputId);
                   }
                   const acceptedInputContext =
-                    await resolveHostedCurrentInputIdForAcceptedInputs({
+                    await readHostedAcceptedInputContext({
                       assistantInputIds,
                       vaultRoot: restored.vaultRoot,
                     });
@@ -4622,9 +4622,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       }],
                     });
                   }
-                  currentAssistantInputId = acceptedInputsOnlyAssistant
-                    ? acceptedInputContext.currentInputId
-                    : null;
                   if (acceptedInputContext.conversationActivityReceivedAtEpochMs !== null) {
                     notifyHostedConversationActivityObservedBestEffort(
                       options.onConversationActivityObserved,
@@ -4662,14 +4659,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     if (acceptedInputContext.foregroundPriorityInputAccepted) {
                       deviceImportAdmissionOpenedAt = Date.now();
                     }
-                    currentAssistantInputId = null;
                   };
                 },
                 signal: passSignal,
               });
             } finally {
               closeDeviceImportAdmission();
-              currentAssistantInputId = null;
               // A reply can acquire terminal evidence before a later phase error.
               // Release invocation-local image status from that durable truth in
               // both success and failure paths; evidence read errors retain it.
@@ -7352,6 +7347,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 progressed: systemMailboxProgressedSinceCheckpoint,
               });
             checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+              assistantExecutionBlocked,
               assertRuntimeNotAborted,
               checkpointRequestBuilder,
               handledConversationMailboxSelection,
@@ -8731,6 +8727,7 @@ function resolveHostedSystemMailboxCheckpointProgressGeneration(input: {
 }
 
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
+  assistantExecutionBlocked?: boolean;
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   handledConversationMailboxSelection?: HostedConversationMailboxHandledItemSelection;
@@ -8767,6 +8764,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     });
   input.assertRuntimeNotAborted();
   const redactedStatus = await withHostedMailboxProgressStatus({
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     workspaceVersion: (BigInt(input.checkpointRequestBuilder.latestWorkspace()?.version ?? "0") + 1n).toString(),
     redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
     vaultRoot: input.vaultRoot,
@@ -8862,6 +8860,7 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
 
   const localImportedSeq = BigInt(input.importedSeq);
   const localProgress = await readHostedSystemMailboxProgress({
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     importedSeq: input.importedSeq,
     vaultRoot: input.vaultRoot,
   });
@@ -8886,6 +8885,7 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
 }
 
 async function withHostedMailboxProgressStatus(input: {
+  assistantExecutionBlocked?: boolean;
   workspaceVersion: string;
   mailboxState?: HostedMailboxImportState;
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
@@ -8898,6 +8898,7 @@ async function withHostedMailboxProgressStatus(input: {
   const systemMailboxState = input.systemMailboxState
     ?? await readHostedSystemMailboxState(input.vaultRoot);
   const systemMailboxProgress = await readHostedSystemMailboxProgress({
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     importedSeq: mailboxState.watermarks.system,
     state: systemMailboxState,
     vaultRoot: input.vaultRoot,

@@ -659,23 +659,20 @@ function createHostedToolContext(input: {
     actionApprovalPort: null,
     assistantConfigurationTool: input.assistantConfigurationTool,
     computerToolsAvailable: false,
-    currentAssistantInputId: () => input.assistantInputId ?? null,
     currentAssistantTarget: () => ({
       model: input.currentModel,
       reasoningEffort: input.currentReasoningEffort,
     }),
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentUserActionScope: () => input.conversationScope
-      ? {
-          acceptedInputIds: input.assistantInputId ? [input.assistantInputId] : [],
-          conversationId: null,
-          conversationScope: input.conversationScope,
-          inboundMailboxItemIds: [],
-          originSessionId: "session-test",
-          recipientKey: null,
-        }
-      : null,
+    currentUserActionScope: () => ({
+      acceptedInputIds: input.assistantInputId ? [input.assistantInputId] : [],
+      conversationId: null,
+      conversationScope: input.conversationScope ?? "direct",
+      inboundMailboxItemIds: [],
+      originSessionId: "session-test",
+      recipientKey: null,
+    }),
     sendVaultFile: vi.fn(async () => ({
       approvalUrl: "https://murph.test/approve/unused",
       filename: "unused.pdf",

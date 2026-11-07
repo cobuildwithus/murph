@@ -215,31 +215,6 @@ test('sendAssistantMessageLocal keeps every group prompt accepted before provide
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
 })
 
-test('sendAssistantMessageLocal exposes hosted current-input authority to dynamic tools', async () => {
-  const assistantInputId = 'ain_44444444444444444444444444444444'
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
-
-  await sendAssistantMessageLocal({
-    executionContext: {
-      hosted: {
-        currentAssistantInputId: () => assistantInputId,
-        memberId: 'member-hosted',
-        userEnvKeys: [],
-      },
-    },
-    prompt: 'Use the current hosted input authority.',
-    vault: '/vaults/test',
-  })
-
-  const hostedToolContext =
-    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.ok(hostedToolContext)
-  assert.equal(
-    hostedToolContext.currentAssistantInputId?.(),
-    assistantInputId,
-  )
-})
-
 // Hosted-runner turns always run queue-only (the outbox owns final-reply
 // delivery), including interactive auto-replies where a member is actively
 // waiting. Progress delivery stays wired there for explicit model progress and

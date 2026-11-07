@@ -1,3 +1,7 @@
+ReviewGPT runs only for risky changes, at any size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
+Checkpoint step timings, the archive plan/build split, and unconditional residue
+pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 Runtime logs are diagnostic only: an accepted-attempt failure log no longer triggers a recheck, and its historical rows stay parseable; [the hosted runtime protocol](references/hosted-runtime-protocol.md) owns that contract, and [the removal plan](exec-plans/completed/2026-11-06-sm-f11b-log-triggered-wake.md) records the drain evidence.
 
 Native invocation receipts no longer store or rebuild the completion recheck bit, while the SQLite column and wire boolean stay for older controllers; [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#runtime-completion-consolidation) owns the remaining drain, and [the plan](exec-plans/completed/2026-11-06-sm-f11a-completion-recheck-bit.md) records the evidence.
@@ -17,8 +21,9 @@ invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
 and [Architecture](../ARCHITECTURE.md#weekly-game). Local proof is recorded in
 the [execution record](exec-plans/completed/2026-11-06-game-deletion-progress-survivors.md).
 Recap generation retirement and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
-A pair recap generation a block already ended answers the same terminal value, while group generations and block rows stay uncertain; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule.
+A pair recap generation a block already ended answers the same terminal value, and a block row stays uncertain. A group block keeps the game in its room with its receipts, so waiting notices and the recap send once it lifts; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule. The group block change is recorded in [its plan](exec-plans/completed/2026-11-06-group-block-keeps-room.md).
 
+A second rematch ask never agrees to the first: it gets the open-rematch conflict, and the member answers the offer on Home; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own the rule.
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
 Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
 
@@ -351,6 +356,19 @@ Product access after billing lapses, kept separate from AI usage, is owned by
 [Companion App](product-specs/companion-app.md) and [Architecture](../ARCHITECTURE.md).
 The caller audit and local proof are in the
 [execution record](exec-plans/completed/2026-11-06-lapsed-member-access.md).
+
+Deterministic edits and clinical acquisition with AI denied are owned by
+[Hosted runtime protocol](references/hosted-runtime-protocol.md) and
+[Architecture · Hosted Clinical Records](../ARCHITECTURE.md#hosted-clinical-records).
+Implementation and replay proof: [model-free actions](exec-plans/completed/2026-11-06-lapsed-actions.md).
+
+Product and worker access after billing lapse, strict room funding and lifecycle
+eligibility, and returning-member activation proof are owned by
+[Architecture](../ARCHITECTURE.md); local evidence and the caller audit are in
+[the worker access plan](exec-plans/completed/2026-11-06-lapsed-worker.md).
+
+Lapsed personal credit spending, strict room sponsorship and billing notices are
+owned by [Architecture](../ARCHITECTURE.md) and [the invariants](../docs/contracts/00-invariants.md).
 
 # Murph Agent Docs Index
 
@@ -1141,7 +1159,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Group newsletter behavior. | Group newsletter behavior | Medium | 2026-08-22 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group diagnostics, plain metric permissions with 90-date retention, source coverage, and consumer-first rollout limits. | Group challenge diagnostics | High | 2026-09-18 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group diagnostics, plain metric permissions with 90-date retention (180 for the four pair-board metrics), source coverage, and consumer-first rollout limits. | Group challenge diagnostics | High | 2026-09-18 |
 | `agent-docs/exec-plans/completed/2026-09-17-group-three-month-history.md` | Completed 90-day group-sharing implementation, consent proof, review and rollout constraints. | Historical implementation evidence | Low | 2026-09-18 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Group challenge standings response card. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships. | Hosted group self-awareness | High | 2026-08-29 |
@@ -1160,7 +1178,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status and closed provider rejection categories with composed sanitizer proof. | Testing and CI truth | High | 2026-11-02 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted-only phone-call guard PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status and closed provider rejection categories with composed sanitizer proof. | Testing and CI truth | High | 2026-11-02 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
@@ -1946,11 +1964,14 @@ its controller drain gate and rollback floor are in `../apps/cloudflare/DEPLOY.m
 
 Ordinary reminder input replay is recorded in the [execution plan](exec-plans/completed/2026-11-06-automation-input-replay.md).
 
-Typed companion VO2 input, its consumer-first local commit boundary and backend
-proof are tracked in [the active plan](exec-plans/active/2026-11-06-companion-vo2-reading-input.md).
+Typed companion VO2 input, its consumer-first release and backend proof are
+recorded in the [execution plan](exec-plans/completed/2026-11-06-companion-vo2-reading-input.md).
 The measurement action and rollback floor are owned by `../ARCHITECTURE.md`.
 
 Obsolete clinical extraction cache cleanup and unused hot snapshot producer removal
 are recorded in [dead runtime weight](exec-plans/completed/2026-11-06-dead-runtime-weight.md).
 `../ARCHITECTURE.md` owns cache retention; staged-operation expiry remains excluded
 because age and canonical lock ownership do not prove abandonment.
+Deferred device cron history deletion and the thin-session safety check
+are recorded in [the retention assessment](exec-plans/completed/2026-11-06-retire-settled-device-cron.md).
+The current family policies remain in `docs/contracts/06-hosted-workspace-file-count.md`.

@@ -42,7 +42,7 @@ vi.mock("@/src/lib/browser-vault/loader", () => ({
   parseBrowserVaultSessionResponse: (value: unknown) => value, decodeReadyBrowserVaultSession: edge.decode,
 }));
 
-import { assertActiveHostedMemberAccessAllowed, readHostedRuntimeAiAccessDecision } from "@/src/lib/hosted-onboarding/member-access";
+import { assertActiveHostedMemberAccessAllowed, readActiveHostedMemberAccessState, readHostedRuntimeAiAccessDecision } from "@/src/lib/hosted-onboarding/member-access";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { recordCompanionHeartbeat, readRuntimeCompanionPresence } from "@/src/lib/companion/presence";
 import { registerCompanionPushRoute } from "@/src/lib/companion/push-route";
@@ -184,6 +184,16 @@ describe("lapsed member product access with real guards and companion services",
     db.hostedThreadContainer.findUnique.mockResolvedValue({ memberId: member.id });
     await expect(recordCompanionHeartbeat(member.id, "foreground")).rejects.toThrow("private member conversation");
     expect(db.hostedMember.update).not.toHaveBeenCalled(); expect(db.companionPushRoute.upsert).not.toHaveBeenCalled();
+  });
+
+  it("skips the activation lookup when Family already sponsors an incomplete member", async () => {
+    const sponsored = { ...member, billingStatus: HostedBillingStatus.incomplete, accountGroupMemberships: [{
+      status: "active", group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+    }] };
+    db.hostedMember.findUnique.mockImplementation(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : sponsored);
+    await expect(assertActiveHostedMemberAccessAllowed({ memberId: member.id })).resolves.toBeUndefined();
+    await expect(readActiveHostedMemberAccessState({ memberId: member.id })).resolves.not.toBeNull();
+    expect(db.hostedMember.findUnique.mock.calls.filter(([query]) => query.where.OR)).toEqual([]);
   });
 
   it("does not widen synthetic-container authority", async () => {

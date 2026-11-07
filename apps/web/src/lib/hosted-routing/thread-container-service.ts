@@ -489,7 +489,7 @@ async function hasHostedThreadContainerOwnerAuthorityTx(input: {
     });
     if (game?.players.length === 2) return true;
   }
-  return (await readHostedRuntimeAiAccessDecision({ memberId: input.ownerMemberId, prisma: input.prisma })).allowed;
+  return (await readHostedRuntimeAiAccessDecision({ sponsorshipOnly: true, memberId: input.ownerMemberId, prisma: input.prisma })).allowed;
 }
 
 export async function ensureHostedThreadContainerRouteTx(input: {

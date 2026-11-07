@@ -79,7 +79,7 @@ async function fixture(joined = false) {
   mocks.route.mockResolvedValue({ containerMemberId: room });
   const read = () => readPairBoard(a, b);
   const raw = () => readHostedGroupBoardData({ groupId, runtimeMemberId: room, viewerId: a, otherId: b, now: new Date() });
-  const share = async (memberId: string, kind: HostedVaultShareFixedProjectionKind, published = false, legacy = false, sources = 1) => {
+  const share = async (memberId: string, kind: HostedVaultShareFixedProjectionKind, published = false, legacy = false, sources = 1, days = 90) => {
     const projectionScope = hostedVaultShareProjectionKindToScope(kind);
     const grant = await db.$transaction(tx => grantHostedVaultShareTx({ tx, grantorMemberId: memberId, destinationMemberId: room, projectionScope, now: new Date() }));
     if (published) {
@@ -87,8 +87,8 @@ async function fixture(joined = false) {
       const values = { "resting-heart-rate-days.v0": ["resting-heart-rate", "bpm", 65], "sleep-duration-days.v0": ["total-sleep-minutes", "minutes", 430], "steps-days.v0": ["steps", "steps", 8000], "vo2-max-days.v0": ["estimated-vo2-max", "mL/kg/min", 42] } as const;
       if (!(kind in values)) throw new Error("Fixture snapshot kind not supported");
       const metric = values[kind as keyof typeof values];
-      const ciphertext = await encryptHostedVaultShareProjectionSnapshot({ share: authority, ...(legacy ? {} : { memberTimeZone: "UTC" }), records: Array.from({ length: 90 }, (_, i) => Array.from({ length: sources }, (_, sourceIndex) => {
-        const date = addDays(today(), i - 89);
+      const ciphertext = await encryptHostedVaultShareProjectionSnapshot({ share: authority, ...(legacy ? {} : { memberTimeZone: "UTC" }), records: Array.from({ length: days }, (_, i) => Array.from({ length: sources }, (_, sourceIndex) => {
+        const date = addDays(today(), i - days + 1);
         return { data: { date, metricKey: metric[0], unit: metric[1], value: metric[2] }, source: resolveHostedVaultShareDataSource(`source-${sourceIndex}`)!, recordKey: `${date}.source-${sourceIndex}`, occurredAt: `${date}T00:00:00.000Z` };
       })).flat() });
       await db.hostedVaultShare.update({ where: { id: grant.id }, data: { projectionSnapshotCiphertext: ciphertext } });
@@ -315,10 +315,28 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     mocks.decrypt.mockClear();
     const board = await f.read();
     expect(board?.people).toHaveLength(2);
-    expect(mocks.decrypt.mock.calls).toEqual([[4, 90], [4, 90]]);
+    expect(mocks.decrypt.mock.calls).toEqual([[4, 180], [4, 180]]);
     for (const person of board!.people) for (const metric of Object.values(person.numbers)) {
       expect(metric.state).toBe("available");
       if (metric.state === "available") expect(metric.daily).toHaveLength(metric.unit === "steps" ? 89 : 90);
+    }
+  });
+  it("reads the pre-game baseline from a 180-day snapshot, keeps daily at 90, and serves a 90-day snapshot as today", async () => {
+    const f = await fixture(true);
+    const dayOne = addDays(today(), -100);
+    await db.gamePlayer.updateMany({ where: { gameId: f.gameId }, data: { dayOne: new Date(`${dayOne}T00:00:00Z`) } });
+    await f.share(f.a, "resting-heart-rate-days.v0", true, false, 1, 180);
+    await f.share(f.b, "resting-heart-rate-days.v0", true);
+    const board = await f.read();
+    expect(board?.window.from).toBe(addDays(today(), -89));
+    const [mine, theirs] = board!.people.map(person => person.numbers.restingHeartRate);
+    expect(mine).toMatchObject({ comparison: { sinceFirstGame: true,
+      baseline: { from: addDays(dayOne, -60), through: addDays(dayOne, -1), days: 60 } } });
+    expect(theirs).toMatchObject({ comparison: { sinceFirstGame: false, baseline: { from: board?.window.from, days: 7 } } });
+    for (const number of [mine, theirs]) {
+      if (number?.state !== "available") throw new Error("Expected a number");
+      expect(number.daily).toHaveLength(90);
+      expect(number.daily[0]?.date).toBe(board?.window.from);
     }
   });
   it("uses the latest chat-bound pair game; an unbound newer game doesn't hide the board", async () => {

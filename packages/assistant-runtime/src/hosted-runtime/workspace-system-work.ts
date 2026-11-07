@@ -28,7 +28,7 @@ export const HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS = [
 export function createHostedWorkspaceSystemWork(input: {
   preparation: Pick<
     Parameters<typeof prepareHostedSystemMailboxItemForCheckpoint>[0],
-    "now" | "operatorHomeRoot" | "runtime" | "runtimeEnv" | "signal" | "vaultRoot"
+    "assistantExecutionBlocked" | "now" | "operatorHomeRoot" | "runtime" | "runtimeEnv" | "signal" | "vaultRoot"
   >;
   runnerInput: HostedWorkspaceRunnerInput;
   onCompleted(
@@ -44,6 +44,7 @@ export function createHostedWorkspaceSystemWork(input: {
     preparation: HostedSystemMailboxCheckpointPreparation,
   ): Promise<void> => {
     const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      assistantExecutionBlocked: input.preparation.assistantExecutionBlocked,
       ...(input.preparation.now ? { now: input.preparation.now } : {}),
       vaultRoot: input.preparation.vaultRoot,
     });

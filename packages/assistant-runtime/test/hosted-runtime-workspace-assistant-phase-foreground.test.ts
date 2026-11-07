@@ -350,6 +350,73 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it.each(["foreground", "general"] as const)("composes direct %s publication effects with continuing system-mailbox work", async (entry) => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const nextWakeAt = "2026-04-27T00:10:00.000Z";
+    const manualRuntimeItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "apply-runtime-control-request" as const,
+      wake: { eventId: "evt_direct_effect_composition", kind: "runtime.manual-requested" as const, occurredAt: now, userId: "member_synthetic_phase" },
+    };
+    const effect = { ...createDeliveryEffect(), publishBeforeDispatch: true };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: manualRuntimeItem, itemId: manualRuntimeItem.itemId, status: "processed",
+      metrics: { bootstrapResult: null, conversationMetrics: null, mailboxLane: "runtime-control", redactedLogEntries: [] },
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      recorded: 1, failed: 0, nextWakeAt: "2026-04-27T00:30:00.000Z", nextWakeReason: "assistant",
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: entry === "foreground" ? [effect.effectId] : [],
+      assistantAutomationProgressed: true, nextWakeAt, redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ now: () => now }));
+    expect(result.afterDurableCheckpoint).toBeDefined();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    const post = await result.afterCheckpoint?.();
+    expect(post).toMatchObject({
+      checkpointReason: "outbox_sending", nextWakeAt,
+      redactedStatus: { hostedSystemMailboxRecorded: 1, hostedSystemMailboxPrepared: 0 },
+    });
+    expect(post?.afterDurableCheckpoint).toBeUndefined();
+    await runHostedWorkspaceDurableCheckpointEffects(result.afterDurableCheckpoint);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a yielded inline delivery wake beside a continuing system-mailbox callback", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const manualRuntimeItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "apply-runtime-control-request" as const,
+      wake: { eventId: "evt_inline_yield", kind: "runtime.manual-requested" as const, occurredAt: now, userId: "member_synthetic_phase" },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: manualRuntimeItem, itemId: manualRuntimeItem.itemId, status: "processed",
+      metrics: { bootstrapResult: null, conversationMetrics: null, mailboxLane: "runtime-control", redactedLogEntries: [] },
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      recorded: 1, failed: 0, nextWakeAt: "2026-04-27T00:30:00.000Z", nextWakeReason: "assistant",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([createDeliveryEffect()]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async (input) => {
+      input.onBackgroundDeliveryYield?.({ yieldedEffectCount: 1 });
+      return [];
+    });
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ now: () => now }));
+    expect(result).toMatchObject({
+      checkpointReason: "assistant_runtime_commit", nextWakeAt: now,
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      redactedStatus: { hostedOutboxDeliveryYielded: 1 },
+    });
+    const post = await result.afterCheckpoint?.();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledOnce();
+    expect(post).toMatchObject({
+      nextWakeAt: now, nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      redactedStatus: { hostedOutboxDeliveryYielded: 1, hostedSystemMailboxRecorded: 1 },
+    });
+  });
+
   it("continues through a manual runtime-control receipt so automation can schedule a wake", async () => {
     const nextWakeAt = "2026-04-27T00:45:00.000Z";
     const manualRuntimeItem = {
@@ -2899,7 +2966,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.checkpointReason).not.toBe("provider_cleanup");
   });
 
-  it("preserves scheduled cleanup wake after foreground non-fast delivery without provider ids", async () => {
+  it("preserves scheduled cleanup wake after foreground inline delivery without provider ids", async () => {
     const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
     const baseDeliveryEffect = createDeliveryEffect();
     const deliveryEffect = {
@@ -2956,7 +3023,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
       nextWakeAt: providerCleanupWakeAt,
       progressed: true,
     }));
@@ -2965,7 +3032,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
 
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -4952,12 +5019,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
       nextWakeAt: providerCleanupWakeAt,
       progressed: true,
     }));
 
-    const postCheckpoint = await result.afterCheckpoint?.();
+    const postCheckpoint = { ...result, ...await result.afterCheckpoint?.() };
 
     // Not-yet-due cleanup state must wait for its scheduled wake; the
     // background delivery pass records outbound ids instead of draining hot.

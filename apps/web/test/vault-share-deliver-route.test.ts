@@ -1224,6 +1224,27 @@ describe("vault-share deliver route", () => {
     });
   });
 
+  it.each([
+    ["steps-days.v0", "steps", 179],
+    ["hrv-days.v0", "hrv-rmssd", 89],
+  ] as const)("retains %s through day %i and no further", async (projectionKind, metricKey, lastDay) => {
+    const projectionScope = hostedVaultShareProjectionKindToScope(projectionKind);
+    const share = { ...ACTIVE_SHARE, projectionKind, projectionScope, projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope) };
+    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+    const record = (daysAgo: number) => {
+      const date = new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+      return { data: { date, metricKey, unit: "count", value: 40 }, occurredAt: `${date}T00:00:00.000Z`, recordKey: date };
+    };
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY, projectionKind, memberTimeZone: "UTC", records: [record(lastDay), record(lastDay + 1)],
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledExactlyOnceWith({
+      ...deliveryEffectControls(), memberTimeZone: "UTC", records: [record(lastDay)], share,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+  });
+
   it("delivers only the in-window records when an offer mixes stale and fresh records", async () => {
     const freshRecord = recentRecord(1);
     const response = await deliverRoute.POST(

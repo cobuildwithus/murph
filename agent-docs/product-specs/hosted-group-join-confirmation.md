@@ -218,7 +218,7 @@ have current game-owner authority for the bound pair chat. Membership alone
 never grants a health scope.
 
 Join disclosure names the audience and surface: the people in the group can
-see the selected numbers over the last 90 days and compare their changes, in
+see the selected numbers, going back up to 180 days, and compare their changes, in
 the chat and in the Murph app. Unchecking a number and saving stops sharing it.
 The app read captures and revalidates both viewer membership and exact grants
 around decryption. It reads only two people and four scopes, at most eight

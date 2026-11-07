@@ -8625,7 +8625,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
-            mailboxPort: createMailboxPort({ events, items: [] }),
+            mailboxPort: {
+              ...createMailboxPort({ events, items: [] }),
+              async recordMemberActionOutcome(outcome) {
+                assert.ok(checkpointRequests.length > 0);
+                assert.equal(outcome.status, "rejected");
+              },
+            },
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -8646,7 +8652,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(fetchSnapshotCalls, processingMode === "default" ? 0 : 1);
       assert.equal(result.status, "scheduled");
       const checkpoint = checkpointRequests.at(-1)!;
-      const genericReason = assistantExecutionBlocked ? "assistant" : "device-sync.reconcile";
+      const genericReason = "device-sync.reconcile";
       if (processingMode === "system_mailbox") {
         assert.equal(result.nextWakeReason, genericReason);
         assert.equal(checkpoint.nextWakeReason, genericReason);
@@ -8664,13 +8670,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(checkpoint.redactedStatus?.hostedMailboxSystemModelFreeWakeVersion,
         (BigInt(checkpoint.expectedWorkspaceVersion) + 1n).toString());
       if (assistantExecutionBlocked) {
-        assert.equal(checkpoint.nextDefaultProcessingWakeAt, TEST_NOW);
-        assert.equal(checkpoint.nextDefaultProcessingWakeReason, "assistant");
+        assert.equal(checkpoint.nextDefaultProcessingWakeAt, null);
+        assert.equal(checkpoint.nextDefaultProcessingWakeReason, null);
+        assert.equal(state.pending.some((item) => item.itemId === "mailbox_item_retained_member_action"), false);
       }
       assert.doesNotThrow(() => parseHostedWorkspaceCheckpointRequest(checkpoint));
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "0",
+        assistantExecutionBlocked ? "1" : "0",
       );
     } finally {
       vi.useRealTimers();

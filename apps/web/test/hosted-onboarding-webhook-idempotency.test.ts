@@ -1805,6 +1805,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         suspendedAt: null,
         threadContainer: null,
       })
+      // The new product projection also denies before the home-route lock.
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
         accountGroupMemberships: [],
         billingStatus: HostedBillingStatus.active,
@@ -1827,11 +1829,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(5);
     const exactAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
     const refreshedAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[3]!;
     const selectedMemberLockIndex = prisma.$queryRaw.mock.calls.findIndex(([sql]) =>
       sql.join(" ").toLowerCase().includes('from "hosted_member"'),
     );
@@ -1843,7 +1845,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(selectedMemberLockOrder).toBeLessThan(exactAccessReadOrder);
     expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
-    expect(refreshedAccessReadOrder).toBeLessThan(
+    const finalStrictReadOrder = prisma.hostedMember.findUnique.mock.invocationCallOrder[4]!;
+    expect(refreshedAccessReadOrder).toBeLessThan(finalStrictReadOrder);
+    expect(finalStrictReadOrder).toBeLessThan(
       mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]!,
     );
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();

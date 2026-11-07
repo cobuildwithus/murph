@@ -90,6 +90,7 @@ export async function readHostedGroupMembershipInventory(input: {
   }
 
   const allowedRuntimeMemberIds = await readHostedRuntimeAiAllowedMemberIds({
+    sponsorshipOnly: true,
     memberIds: runtimeMemberIds,
     now: input.now,
     prisma: input.prisma,

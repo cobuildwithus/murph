@@ -4,7 +4,9 @@ import {
   buildHostedVaultShareProjectionScopeKey as key,
   filterHostedVaultShareHistoryRecords as clip,
   getHostedVaultShareProjectionMaxRecords,
+  HOSTED_VAULT_SHARE_BOARD_PROJECTION_KINDS,
   hostedVaultShareHistoryDateWindow,
+  hostedVaultShareRetainedHistoryDays,
   hostedVaultShareReadAuthorityScopes,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
@@ -90,6 +92,21 @@ describe("plain metric shared history", () => {
     }
     assert.equal(clip({ records: records(90), scope: STEPS, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 7 }).length, 56);
     assert.equal(clip({ records: records(90), scope: STEPS, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 90 }).length, 720);
+  });
+
+  it("retains 180 dates for the four board metrics alone, and clips only when asked", () => {
+    const board: readonly string[] = HOSTED_VAULT_SHARE_BOARD_PROJECTION_KINDS;
+    assert.equal(board.length, 4);
+    for (const { projectionKind } of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+      assert.equal(hostedVaultShareRetainedHistoryDays(projectionKind), board.includes(projectionKind) ? 180 : 90);
+    }
+    const window = hostedVaultShareHistoryDateWindow({ nowMs: NOW, timeZone: "UTC", historyDays: 180 });
+    assert.equal(Date.parse(window.through) - Date.parse(window.from), 179 * 86_400_000);
+    const values = records(181, 1);
+    assert.equal(clip({ records: values, scope: STEPS, timeZone: "UTC", nowMs: NOW }).length, 90);
+    assert.equal(clip({ records: values, scope: STEPS, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 180 }).length, 180);
+    assert.equal(deliver(STEPS, records(180, 4)).records.length, 720);
+    assert.throws(() => deliver(STEPS, records(180, 5)));
   });
 
   it("admits all 720 source/dates and rejects overflow without truncation", () => {

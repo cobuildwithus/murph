@@ -2317,6 +2317,7 @@ type ExecuteMurphDynamicToolRequestInput = {
   nextUsageOrdinal: () => number
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   deliveryContextOrdinal?: number | null
+  providerTurnSteered?: boolean
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
@@ -2685,7 +2686,7 @@ async function executeSendPhysicalNoteDynamicTool(
       : await readAssistantHostedImageCompletion({
           assistantInputId:
             completionEffectScope?.completionAssistantInputId
-            ?? hostedToolContext.currentAssistantInputId?.()
+            ?? hostedToolContext.currentUserActionScope?.()?.acceptedInputIds.at(-1)
             ?? null,
           vault: vaultRoot,
         })
@@ -3238,8 +3239,6 @@ async function executeGenerateImageDynamicTool(
     input.hostedToolContext?.imageGenerationLauncher ?? null
   const userActionScope =
     input.hostedToolContext?.currentUserActionScope?.() ?? null
-  const invocationScope =
-    input.hostedToolContext?.currentInvocationScope?.() ?? null
   const explicitOriginAssistantInputId = request.messageRef
     && userActionScope?.acceptedInputIds.includes(request.messageRef)
     ? await authorizeDynamicToolEffectOrigin({
@@ -3257,21 +3256,10 @@ async function executeGenerateImageDynamicTool(
     )
   }
   const originAssistantInputId = explicitOriginAssistantInputId
-    ?? (invocationScope?.origin.kind === 'accepted_input'
-      ? invocationScope.origin.assistantInputId
-      : invocationScope === null
-        ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
-        : null)
+    ?? userActionScope?.acceptedInputIds.at(-1)
     ?? null
   const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
-  const acceptedInvocationSessionId =
-    invocationScope?.origin.kind === 'accepted_input'
-      ? invocationScope.originSessionId ?? null
-      : null
-  const imageGenerationScopeId =
-    acceptedInvocationSessionId ??
-    userActionScope?.originSessionId ??
-    null
+  const imageGenerationScopeId = userActionScope?.originSessionId ?? null
   const usesDetachedImageGeneration = Boolean(
     imageGenerationLauncher && originAssistantInputId,
   )
@@ -3916,6 +3904,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'subscription':
       return await executeSubscriptionTool({
         hostedToolContext: hostedContext,
+        providerTurnSteered: input.providerTurnSteered === true,
         request: input.request.request,
       })
     case 'personalization':
@@ -4487,8 +4476,18 @@ async function executeIMessageContactTool(input: {
 
 async function executeSubscriptionTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
+  providerTurnSteered: boolean
   request: HostedRuntimeSubscriptionToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
+  // Steering leaves queued calls and running code cells alive, and nothing here
+  // can tell which were authored before the follow-up. Billing stays fail-closed.
+  if (input.providerTurnSteered) {
+    return toolTextResult(
+      false,
+      'no change was made because a newer message joined this turn; ask the member to confirm the plan change in a new message',
+      'conflict',
+    )
+  }
   const subscriptionTool = input.hostedToolContext?.subscriptionTool ?? null
   const assistantInputId = subscriptionTool
     ? input.hostedToolContext?.claimSubscriptionAssistantInputId?.() ?? null
@@ -4576,12 +4575,7 @@ function resolveHostedAssistantPersonalizationToolAuthority(
       occurrenceAt: invocationScope.origin.occurrenceAt,
     }
   }
-  // Legacy single-input contexts have no accepted-input scope accessor.
-  // A present accessor is authoritative even when it returns no inputs.
-  if (hostedToolContext.currentUserActionScope) return null
-  const assistantInputId =
-    hostedToolContext.currentAssistantInputId?.() ?? null
-  return assistantInputId ? { assistantInputId } : null
+  return null
 }
 
 async function executePersonalizationTool(input: {
@@ -4633,11 +4627,11 @@ async function executeAssistantConfigurationTool(input: {
       'unavailable',
     )
   }
-  const conversationScope =
-    input.hostedToolContext?.currentUserActionScope?.()?.conversationScope ?? null
+  const userActionScope =
+    input.hostedToolContext?.currentUserActionScope?.() ?? null
   if (
     input.request.action === 'update' &&
-    conversationScope === 'group' &&
+    userActionScope?.conversationScope === 'group' &&
     input.request.reasoningEffort !== undefined
   ) {
     return toolTextResult(
@@ -4665,8 +4659,7 @@ async function executeAssistantConfigurationTool(input: {
       }))
     }
 
-    const assistantInputId =
-      input.hostedToolContext?.currentAssistantInputId?.() ?? null
+    const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
     if (!assistantInputId) {
       return toolTextResult(
         false,

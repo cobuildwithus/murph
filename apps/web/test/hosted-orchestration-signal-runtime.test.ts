@@ -265,10 +265,10 @@ describe("hosted runtime Temporal signaling", () => {
   });
 
   it.each([false, true])(
-    "requires committed checkpoint=%s to hand off a pointer after billing pauses",
+    "requires committed checkpoint=%s to hand off a pointer after suspension",
     async (hasCommittedCheckpoint) => {
       mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
-        billingStatus: "paused",
+        suspendedAt: new Date(),
       }));
       const signal = signalHostedMailboxAppendRuntime({
         client: buildClient(),
@@ -985,7 +985,7 @@ describe("hosted runtime Temporal signaling", () => {
 
   it("does not upsert workspace or start workflow for inactive users on explicit signals", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
-      billingStatus: "canceled",
+      billingStatus: "not_started",
     }));
 
     await expect(signalHostedBrowserVaultRefreshRuntime({

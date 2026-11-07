@@ -9,6 +9,24 @@ afterEach(() => {
 });
 
 describe("hosted workspace snapshot enumeration races", () => {
+  it("keeps empty inbox roots and unrelated empty directories", async () => {
+    const durableRoot = await mkdtemp(path.join(tmpdir(), "empty-inbox-roots-"));
+    const vaultRoot = path.join(durableRoot, "vault");
+    try {
+      for (const relativePath of ["raw/inbox/empty/deep", "derived/inbox/empty/deep", "raw/captures/empty"]) {
+        await mkdir(path.join(vaultRoot, relativePath), { recursive: true });
+      }
+      const { collectHostedWorkspaceSnapshotArchivePlan } = await import("../src/hosted-bundles.ts");
+      const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot, vaultRoot });
+      expect(plan.entries.map(entry => entry.relativePath)).toEqual([
+        "", "derived", "derived/inbox", "raw", "raw/captures", "raw/captures/empty", "raw/inbox",
+      ]);
+      expect(plan.fileCount).toBe(0);
+    } finally {
+      await rm(durableRoot, { recursive: true, force: true });
+    }
+  });
+
   it("includes retired repair progress without parsing it", async () => {
     const durableRoot = await mkdtemp(path.join(tmpdir(), "retired-progress-snapshot-"));
     const vaultRoot = path.join(durableRoot, "vault");

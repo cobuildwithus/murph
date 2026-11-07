@@ -133,7 +133,9 @@ Adding anyone outside the original audience or losing a still-playing person
 from the text detaches the game. Creation and Same again still require the exact
 audience. Leaving a waiting invitation voids it, as does an active game falling
 below two remaining players. Group blocks mask content symmetrically without
-changing scores or ending the game. Explicit player reports identify their subject;
+changing scores or ending the game. The game keeps its chat, and nothing is sent
+there while the block stands. Waiting notices and the recap send once it lifts
+if they are still current. Explicit player reports identify their subject;
 posts remain counted when their reporter hides them.
 
 Exactly one winner's prize is shared by a proper subset tied for the highest
@@ -639,9 +641,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   audience or storage failures and claimed provider work keep their uncertainty.
   A pair receipt skipped as `game_blocked` also permanently ends the generation,
   even after unblock: its room cannot be restored. A block row alone leaves an
-  unskipped generation temporary. Group generations skipped for a block stay
-  non-terminal because a group block does not end the game. Nothing yet restores
-  a settled group's room, so such a generation retries without being able to send.
+  unskipped generation temporary. A group block keeps the room and skips no
+  generation. Waiting work completes after the block lifts if still current.
+  Older group receipts already skipped for a block are terminal.
   A dry run can answer `would_regenerate` for stale work without changing rows;
   execution retires it before reserving a clean generation, even without a stored
   story. Unpublished work gets its first clean witness at publication.
@@ -680,10 +682,13 @@ resulting avatar. No private photo is shared with the subject or other players.
   changes. It never creates or discovers a chat for a rematch, and it drops the
   notice if the rematch is no longer invited before delivery. Only that player
   can accept or negotiate it; anyone else holding the link is refused with
-  `NOT_A_PLAYER`. When both players ask for a rematch of the same game, the
-  second ask accepts the first on its terms. Otherwise it must follow the
-  same rematch chain: an open rematch of that game is refused with
-  `ALREADY_IN_A_GAME`, and a settled descendant makes it `REMATCH_OUTDATED`.
+  `NOT_A_PLAYER`. A rematch must follow the same chain: an open rematch of that
+  game is refused with `ALREADY_IN_A_GAME`, and a settled descendant makes it
+  `REMATCH_OUTDATED`. This includes the other player's open offer, whichever
+  ask arrived first and even on identical terms, because asking for a rematch
+  never agrees to one. The refused player reads the offer on Home and answers
+  with Shake on it or Suggest changes. Repeating your own create with the same
+  game id returns that game.
   Independent games and their rematches do not conflict. The pair's ten-open-game
   cap still applies, including to addressed rematches.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
@@ -717,12 +722,13 @@ resulting avatar. No private photo is shared with the subject or other players.
   within 24 hours and can take the post down, end the games, or suspend the
   account. The reporter can block in the same step. For every report kind, a
   retry recovers the stored report and its alert repeats what was accepted.
-- **Block.** Blocking someone ends every open or live game with them (no
-  winner, nothing owed), stops Murph texting their shared chat about the game,
+- **Block.** Blocking someone ends every open or live two-player game with them
+  (no winner, nothing owed), stops Murph texting their shared chat about the game,
   and refuses invites and rematches between them either way. Each sees the
   other the way they'd see a player who left; the blocker no longer sees them
   or their past posts at all, and unblocks from Settings. Games that ended stay
-  ended.
+  ended. A group game keeps its room and scores, stays silent during the block,
+  and sends still-current waiting notices and its recap after the block lifts.
 - **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
   slurs and explicit sexual words are refused with "This can't be posted."
 
@@ -956,7 +962,9 @@ introduces the agreed challenge in one natural message and offers optional
 reminders for the first few days. Acceptance never schedules reminders. Groups
 use the same offer after the second acceptance activates play; other addressed
 people may still join. A strictly earlier live game suppresses a later kickoff's
-offer. Simultaneous starts each offer, and settled games do not suppress it.
+offer. Players 3 or more hours apart at kickoff get no offer and no mention of
+reminders, because one message in their chat can't suit them all; the gap is the
+widest between any two seated players' clocks at that instant. Simultaneous starts each offer, and settled games do not suppress it.
 There is no room reminder claim. A bare yes needs a time and number of days;
 one person or a majority cannot consent for another. Existing automations save
 only the requesting member's exact game/member IDs, time, timezone and bounded

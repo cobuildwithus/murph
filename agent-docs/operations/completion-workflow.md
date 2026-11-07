@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-09-11
+Last verified: 2026-11-06
 
 Use `agent-workflow-routing.md` for task scope, checkout, and plan/commit choice.
 Use `verification-and-runtime.md` for checks. This document owns completion;
@@ -52,7 +52,7 @@ alone does not authorize a narrower product or another state owner.
    and commit through `scripts/finish-task`; mark Draft before pushing and verify
    the resulting head.
    Include every public-safe Frog entry created or modified during the task in that same scoped commit.
-   A behavior-changing final edit needs the applicable checks and next review;
+   A behavior-changing final edit needs the applicable checks and follows the review loop's step 7;
    explanatory docs and isolated proof additions follow the review loop's exemptions.
 8. Refresh and verify the remote-tracking base using the explicit-refspec
    procedure in `verification-and-runtime.md`, then prove mergeability with
@@ -90,15 +90,16 @@ screenshots to material claims; there is no screenshot quota.
 
 Run final ReviewGPT when the implementation changes:
 
-- interacting owners, packages, apps, or runtime protocols;
+- runtime protocols between apps or services;
 - state ownership, schemas, migrations, ordering, concurrency, retries, or idempotency;
 - auth, privacy, secrets, billing, health safety, public APIs, external effects,
   hosted execution, deploy boundaries, or another trust boundary;
-- a large or high-risk refactor; or
+- a high-risk refactor of any of those; or
 - the user explicitly requests final ReviewGPT or a final cross-cutting bug hunt.
 
 Otherwise skip it for docs/process text, low-risk tooling or tests, static
-content, prompt-primary work, and frontend-only presentation/interaction.
+content, prompt-primary work, and frontend-only presentation/interaction, at
+any size. Size alone is never a reason to run it.
 Prompt and frontend exemptions do not cover independently sensitive behavior,
 server actions/routes, backend changes, persistence, or production configuration.
 They also do not waive the parent-owned evidence above.

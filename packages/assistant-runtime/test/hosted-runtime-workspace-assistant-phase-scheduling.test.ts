@@ -566,22 +566,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("exposes current-input authority with hosted personalization", async () => {
+  it("exposes hosted personalization", async () => {
     const assistantPersonalizationToolPort = {
       request: vi.fn(),
     };
-    const currentAssistantInputId = () =>
-      "ain_33333333333333333333333333333333";
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      currentAssistantInputId,
       runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
     }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
-          currentAssistantInputId,
           personalizationTool: assistantPersonalizationToolPort,
         }),
       },
@@ -591,7 +587,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
-            currentAssistantInputId,
             personalizationTool: assistantPersonalizationToolPort,
           }),
         }),
@@ -1725,18 +1720,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
       progressed: true,
     }));
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-
-    const postCheckpoint = await result.afterCheckpoint?.();
-
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      nextWakeAt: dueAt,
-      nextWakeReason: "mailbox",
-    }));
+    expect(result.afterCheckpoint).toBeUndefined();
   });
 
   it("keeps fresh conversation input ahead of a due model-free mailbox row", async () => {

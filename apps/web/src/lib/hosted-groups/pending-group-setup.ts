@@ -225,6 +225,7 @@ export async function armHostedPendingGroupSetupTx(input: {
       prisma: input.tx,
     }))
     || !(await readHostedRuntimeAiAccessDecision({
+      sponsorshipOnly: true,
       memberId: ownerMemberId,
       now,
       prisma: input.tx,
@@ -386,6 +387,7 @@ export async function readHostedPendingGroupSetupCandidatesForParticipantsTx(
     prisma: input.tx,
   });
   const allowedMemberIds = await readHostedRuntimeAiAllowedMemberIds({
+    sponsorshipOnly: true,
     memberIds: rows.map((row) => row.ownerMemberId),
     now,
     prisma: input.tx,
@@ -496,6 +498,7 @@ export async function prepareHostedPendingGroupSetupForParticipants(input: {
   const preparedFacts = await (async () => {
     try {
       const allowedMemberIds = await readHostedRuntimeAiAllowedMemberIds({
+        sponsorshipOnly: true,
         memberIds: ownerMemberIds,
         now,
         prisma: input.prisma,
@@ -982,6 +985,7 @@ async function readHostedPendingGroupSetupLiveClaimFacts(input: {
   const rows = await readHostedPendingGroupSetupCandidateRows(input);
   const ownerMemberIds = rows.map((row) => row.ownerMemberId);
   const allowedMemberIds = await readHostedRuntimeAiAllowedMemberIds({
+    sponsorshipOnly: true,
     memberIds: ownerMemberIds,
     now: input.now,
     prisma: input.prisma,

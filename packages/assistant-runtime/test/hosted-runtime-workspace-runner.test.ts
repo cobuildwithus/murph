@@ -10868,6 +10868,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const events: string[] = [];
+    const durableEffect = Object.assign(vi.fn(async () => {}), {
+      checkpointStartByMs: Date.parse(TEST_NOW),
+    });
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
@@ -10898,6 +10901,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async runAssistantPhase() {
           events.push("assistant");
           return {
+            afterDurableCheckpoint: durableEffect,
             afterCheckpoint: async () => {
               events.push("optional:post-assistant-cleanup");
               throw Object.assign(new Error("provider cleanup unavailable"), {
@@ -10916,6 +10920,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
+      assert.deepEqual(result.afterDurableCheckpoint, [durableEffect]);
+      assert.equal(result.afterDurableCheckpoint[0]?.checkpointStartByMs, Date.parse(TEST_NOW));
+      expect(durableEffect).not.toHaveBeenCalled();
       assert.equal(result.assistantPhaseResult?.progressed, true);
       assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(events, [

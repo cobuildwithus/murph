@@ -183,6 +183,12 @@ landing; record the chosen posture here so the decision is reviewable.
   remains included in encrypted hosted checkpoints. This changes only download
   packaging, not live vault state or the separate hosted tar snapshot classifier.
 
+- Hosted tar snapshots omit empty descendants of `raw/inbox` and `derived/inbox`,
+  counting only files included in that archive. Both roots and all other
+  previously included directory entries remain to preserve restore permissions.
+  The [runtime-state contract](../../packages/runtime-state/README.md#contract)
+  owns materialization and rollback compatibility; no live deletion is needed.
+
 - One generated send may create one direct regular file with no sidecars in that
   exact runtime directory only when the same assistant turn establishes the
   delivery obligation and calls `send_vault_file`. Runtime adoption tightens
@@ -239,15 +245,20 @@ landing; record the chosen posture here so the decision is reviewable.
   state, so no rotation or compaction seam is planned.
 
 - `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` is canonical monthly-sharded
-  provider/import evidence and is included in hosted snapshots. On a true idle
-  shutdown, each valid closed raw month is replaced by one `.jsonl.gz` file;
-  the current and future UTC months remain appendable JSONL. The transition
-  does not add a sidecar, manifest, queue, or compaction-state file, so steady
-  state remains exactly one physical file per elapsed month while reducing the
-  bytes walked, archived, uploaded, restored, and stored. Exact raw-plus-gzip
-  crash residue is reconciled before foreground work; a non-identical pair is
-  retained and fails closed rather than increasing the accepted steady-state
-  file count.
+  provider/import evidence. True idle-shutdown maintenance converts valid closed
+  plain/gzip shards to `.jsonl.br`; current-month plain shards are also eligible
+  at 4 MiB and remain appendable through the verified amendment writer. Smaller
+  current shards and future months remain untouched. New hosted cold references
+  wait 10 full days after month end, exceeding the routine 7-day lookback. Until
+  then, closed shards stay inline in checkpoints and full exports. Eligible
+  unambiguous Brotli months use the existing media-reference catalogue and may be
+  absent locally after restore; already-cold months remain cold. A thawed month
+  observes the same delay before returning with its new hash. No new sidecar,
+  queue, or state owner is introduced: each local month has one representation.
+  Readers and amendment planning repair encountered identical duplicates under
+  the canonical lock; conflicting pairs fail closed and startup does not sweep
+  archives. See [vault layout](01-vault-layout.md) for the complete representation
+  and export contract.
 
 - `derived/captures/generated-image-lookups.json`
   (`murph.capture-lookup.v1`) is a compact derived index for generated-image
@@ -320,6 +331,31 @@ landing; record the chosen posture here so the decision is reviewable.
   `container_rollout=immediate` and drain old input-store writers before first
   publication. After publication, the index-aware runner is the rollback floor;
   an older writer would not maintain its candidate set.
+
+- `.runtime/operations/assistant/cron/runs/cron_device_activity_*.jsonl`
+  remains subject to existing generic cron history retention (200 records,
+  90 days) and response redaction. The proposed fourteen-day whole-file policy
+  is deferred: a disabled device job with old settled rows and no pending or
+  running state can still be manually claimed and append another run under the
+  same id. Occurrence-specific ids and atomic job-store replacement do not
+  prevent a claim after an unlocked eligibility read. Existing maintenance
+  continues without a cron lock, with its unchanged cadence and cancellation
+  behavior. No device-specific deletion or generic-limit exemption ships.
+  The writer counterexample and session assessment are recorded in
+  `agent-docs/exec-plans/completed/2026-11-06-retire-settled-device-cron.md`.
+
+- `.runtime/operations/assistant/sessions/*.json` and `transcripts/*.jsonl`
+  retain their current lifecycle: native resumes expire under their existing
+  policy and transcript content is bounded/redacted, but whole sessions are
+  not age-deleted. The approved narrow candidate (0–1 turns, idle at least
+  90 days, no resume, no references) is deferred: runtime maintenance's lock
+  does not fence cron pin publication or canonical automation reference writes.
+  An unreferenced scan followed by deletion can race a new reference. A future
+  bounded implementation must first prove reference publication/deletion
+  serialization, pending-input and private-completion protection, and coupled
+  session/transcript/routing cleanup. Receipts and terminal evidence retaining
+  ids are not themselves a safety proof. The reader assessment is recorded in
+  `agent-docs/exec-plans/completed/2026-11-06-retire-settled-device-cron.md`.
 
 - `.runtime/operations/assistant/state/session-routing.sqlite` is one portable,
   rebuildable projection per workspace. It stores hashed exact alias and

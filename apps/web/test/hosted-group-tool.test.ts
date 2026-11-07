@@ -409,7 +409,7 @@ const EXPLICIT_COMPREHENSIVE_ACCESS_OFFER_SCOPES =
     projectionKind,
   }));
 const COMPLETE_ACCESS_OFFER_MESSAGE =
-  "Like or heart this message to share your Murph profile (name, email, and time zone), sleep, activity, workouts, heart and fitness, nutrition, and health source connections (Apple Health sharing includes when the Murph app last checked in; health values include source names, and sleep stages include each source's recorded time; nutrition totals come from your meals in Murph, including meals imported from connected apps; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.";
+  "Like or heart this message to share your Murph profile (name, email, and time zone), sleep, activity, workouts, heart and fitness, nutrition, and health source connections (Apple Health sharing includes when the Murph app last checked in; health values include source names, and sleep stages include each source's recorded time; nutrition totals come from your meals in Murph, including meals imported from connected apps; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.";
 const GROUP_RUNTIME_LINQ_THREAD = {
   authority: {
     accountLookupKey: "hplk_group_runtime",
@@ -529,7 +529,7 @@ describe("hosted group access-offer defaults", () => {
       joinUrl: "https://www.withmurph.ai/groups/join/example",
       projectionScopes: [WORKOUTS_SCOPE],
     })).toBe(
-      "Like or heart this message to share your Murph profile name and workout details (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/example anytime.",
+      "Like or heart this message to share your Murph profile name and workout details (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/example anytime.",
     );
   });
 });
@@ -3193,7 +3193,7 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "sleep-times.v0",
       },
       {
-        description: "Shares 90 days of total sleep duration by source. Includes today and the previous 89 days. Only available data is shared. Apple Health sharing includes when the Murph app last checked in.",
+        description: "Shares 180 days of total sleep duration by source. Includes today and the previous 179 days. Only available data is shared. Apple Health sharing includes when the Murph app last checked in.",
         label: "Sleep duration",
         projectionKind: "sleep-duration-days.v0",
         projectionScope: SLEEP_DURATION_SCOPE,
@@ -3860,7 +3860,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:v3:[a-f0-9]{40}$/u),
         message:
-          "Like or heart this message to share your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -4011,7 +4011,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name and daily protein (health values include their source names; nutrition totals come from your meals in Murph, including meals imported from connected apps; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name and daily protein (health values include their source names; nutrition totals come from your meals in Murph, including meals imported from connected apps; health sharing covers up to 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
   });
@@ -4041,7 +4041,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           message:
-            `Like or heart this message to share your Murph profile name and ${displayLabel} (Apple Health sharing includes when the Murph app last checked in; health values include source names, and sleep stages include each source's recorded time; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.`,
+            `Like or heart this message to share your Murph profile name and ${displayLabel} (Apple Health sharing includes when the Murph app last checked in; health values include source names, and sleep stages include each source's recorded time; health sharing covers up to 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.`,
         }),
       );
       const offeredScopes = [{ projectionKind: requestedProjectionKind }];
@@ -4640,7 +4640,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name, steps, and health source connection status (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, steps, and health source connection status (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4678,7 +4678,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name, running minutes, and health source connection status (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, running minutes, and health source connection status (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4768,7 +4768,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name, sleep timing, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, sleep timing, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
   });
@@ -4800,7 +4800,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
   });
@@ -4836,7 +4836,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name and recent running distance and session count (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name and recent running distance and session count (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
   });
@@ -4861,7 +4861,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name and recent running session count (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name and recent running session count (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
   });
@@ -4892,7 +4892,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name, sleep timing, sleep duration, activity minutes, workout summaries, heart-rate zones, resting heart rate, and daily protein (Apple Health sharing includes when the Murph app last checked in; health values include their source names; nutrition totals come from your meals in Murph, including meals imported from connected apps; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, sleep timing, sleep duration, activity minutes, workout summaries, heart-rate zones, resting heart rate, and daily protein (Apple Health sharing includes when the Murph app last checked in; health values include their source names; nutrition totals come from your meals in Murph, including meals imported from connected apps; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
   });
@@ -4924,7 +4924,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share your Murph profile name, sleep, activity, workouts, and heart and fitness (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers 90 days, including today and the previous 89 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
+          "Like or heart this message to share your Murph profile name, sleep, activity, workouts, and heart and fitness (Apple Health sharing includes when the Murph app last checked in; health values include their source names; health sharing covers up to 180 days, including today and the previous 179 days; only available data is shared; older provider history is not fetched) with this group.\nYour other sharing stays the same. Manage sharing at https://www.withmurph.ai/groups/join/abc123 anytime.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({

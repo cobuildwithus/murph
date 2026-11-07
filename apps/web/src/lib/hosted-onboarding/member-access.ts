@@ -28,28 +28,16 @@ import {
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { hasHostedRecoverableBilling, isHostedLapsedBillingStatus } from "./lifecycle";
+import { activeHostedPersonAccessWhere, strictHostedPersonAccessWhere, hostedMemberActivationProofWhere } from "./member-access-projections";
+export { activeHostedPersonAccessWhere, strictHostedPersonAccessWhere, activeHostedPersonAccessSql, strictHostedPersonAccessSql } from "./member-access-projections";
 import type { HostedOnboardingReadClient } from "./shared";
 
 /**
- * The owner of hosted AI/runtime access and the separate product guard below.
- *
- * `hosted_member.billing_status=active` records direct AI/runtime access, backed
- * by either starter usage or a paid subscription. Access can additionally be
- * sponsored through the edges
- * that already exist in the data model:
- *
- * - an active membership in an active, unsuspended account group (family), or
- * - for synthetic thread-container members, the container owner's access,
- *   an active current participant, or an eligible exact-pair game. Game access
- *   never activates either player's private assistant. Duplicate rooms share
- *   the announcement room's existing allowance while game-sponsored.
- *
- * Owners cannot themselves be containers, so the derivation depth is at most
- * two. Boolean gates select only the matching member ID; callers that need
- * access state load the related rows.
- * Every runtime, webhook, page, and egress gate must use this module; the
- * paid-billing predicate in `entitlement.ts` is for surfaces that genuinely
- * mean "this member's own subscription".
+ * Product admission retains its historical "Active" names. Real people keep
+ * access after billing lapses; returning incomplete members need activation
+ * proof. This never grants AI usage, welcome eligibility or referral credit.
+ * Synthetic rooms still require strict own-active/Family owner or participant
+ * sponsorship, or exact-pair game funding. AI usage is a separate mandatory gate.
  */
 
 const hostedSponsorAccessMembershipSelect =
@@ -108,6 +96,7 @@ const hostedRuntimeAiPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSe
 
 export const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedRuntimeAiPersonAccessSelect,
+  usageCreditBalanceUsdMicros: true,
   threadContainer: {
     select: {
       owner: {
@@ -150,6 +139,8 @@ export type HostedMemberPersonAccessState = Prisma.HostedMemberGetPayload<{
 }>;
 
 export type HostedMemberAccessState = HostedMemberPersonAccessState & {
+  /** Existing activation evidence, needed only for incomplete own product access. */
+  activationProof?: boolean;
   threadContainer?: {
     owner: HostedMemberPersonAccessState;
   } | null;
@@ -203,7 +194,7 @@ const HOSTED_HEALTH_DATA_CONSENT_SETTINGS_URL =
 // Lapsed paid billing recovers from the Subscription controls.
 const HOSTED_BILLING_RECOVERY_URL = "https://withmurph.ai/settings#subscription";
 
-function hasActiveHostedPersonAccess(person: HostedMemberPersonAccessState): boolean {
+export function hasStrictHostedPersonAccess(person: HostedMemberPersonAccessState): boolean {
   if (isHostedMemberSuspended(person.suspendedAt)) {
     return false;
   }
@@ -228,10 +219,12 @@ export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): bo
   // access source. Async gates must use `readActiveHostedMemberAccess`, which
   // adds participant-aware access after this owner-only pure shortcut.
   if (member.threadContainer) {
-    return hasActiveHostedPersonAccess(member.threadContainer.owner);
+    return hasStrictHostedPersonAccess(member.threadContainer.owner);
   }
 
-  return hasActiveHostedPersonAccess(member);
+  return hasStrictHostedPersonAccess(member)
+    || isHostedLapsedBillingStatus(member.billingStatus)
+    || (member.billingStatus === HostedBillingStatus.incomplete && member.activationProof === true);
 }
 
 export function hasActiveHostedThreadContainerAccess(input: {
@@ -239,7 +232,7 @@ export function hasActiveHostedThreadContainerAccess(input: {
   owner: HostedMemberPersonAccessState;
 }): boolean {
   return !isHostedMemberSuspended(input.container.suspendedAt)
-    && hasActiveHostedPersonAccess(input.owner);
+    && hasStrictHostedPersonAccess(input.owner);
 }
 
 export async function hasActiveHostedThreadContainerAccessWithParticipants(input: {
@@ -334,6 +327,16 @@ export function hostedRuntimeMemberEligibleSql(): Prisma.Sql {
   `;
 }
 
+/** Strict effective eligibility for lifecycle and monetary decisions about people. */
+export async function readStrictHostedPersonAccess(input: {
+  memberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  return await (input.prisma ?? getPrisma()).hostedMember.findUnique({
+    select: { id: true }, where: { ...strictHostedPersonAccessWhere(), id: input.memberId },
+  }) !== null;
+}
+
 /**
  * Set-based projection of the pure access branch for queries that must select
  * access-holding members in the database (pagination, counts, sweeps). It
@@ -342,35 +345,14 @@ export function hostedRuntimeMemberEligibleSql(): Prisma.Sql {
  * for authoritative single-member gates.
  */
 export function activeHostedMemberAccessWhere(now = new Date(), includeGames = true): Prisma.HostedMemberWhereInput {
-  const personAccess: Prisma.HostedMemberWhereInput["OR"] = [
-    { billingStatus: HostedBillingStatus.active },
-    {
-      accountGroupMemberships: {
-        some: {
-          group: {
-            billingStatus: HostedBillingStatus.active,
-            suspendedAt: null,
-          },
-          status: "active",
-        },
-      },
-    },
-  ];
-
   return {
     OR: [
       ...(includeGames && isGameEnabled() ? [activeGameChatAccessWhere(now)] : []),
-      {
-        OR: personAccess,
-        threadContainer: null,
-      },
+      activeHostedPersonAccessWhere(),
       {
         threadContainer: {
           is: {
-            owner: {
-              OR: personAccess,
-              suspendedAt: null,
-            },
+            owner: strictHostedPersonAccessWhere(),
           },
         },
       },
@@ -392,7 +374,7 @@ export function activeHostedMemberAccessWithParticipantsWhere(now = new Date(), 
             participants: {
               some: {
                 ...activeHostedThreadContainerParticipantWhere({ now }),
-                participant: activeHostedMemberAccessWhere(now, includeGames),
+                participant: strictHostedPersonAccessWhere(),
               },
             },
           },
@@ -417,6 +399,24 @@ export async function readActiveHostedMemberAccess(input: {
   return member !== null || (await readGameChatAccessIds({ memberIds: [input.memberId], now: input.now, prisma })).has(input.memberId);
 }
 
+/** Strict personal or existing room sponsorship for spending subsidies. This
+ * preserves room/game eligibility without treating lapsed product access as funding. */
+export async function readStrictHostedMemberAccess(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const member = await prisma.hostedMember.findUnique({
+    select: { id: true },
+    where: { id: input.memberId, OR: [
+      strictHostedPersonAccessWhere(),
+      { threadContainer: { isNot: null }, AND: [activeHostedMemberAccessWithParticipantsWhere(input.now, false)] },
+    ] },
+  });
+  return member !== null || (await readGameChatAccessIds({ memberIds: [input.memberId], now: input.now, prisma })).has(input.memberId);
+}
+
 /** Ordinary paid/participant-funded rooms retain their own balance. Only a
  * game-sponsored room borrows its game's canonical announcement-room balance. */
 export async function readGameChatAllowanceBeneficiary(input: {
@@ -428,10 +428,27 @@ export async function readGameChatAllowanceBeneficiary(input: {
   const now = input.now ?? new Date();
   const ownAccess = await input.prisma.hostedMember.findUnique({
     select: { id: true },
-    where: { ...activeHostedMemberAccessWithParticipantsWhere(now, false), id: input.memberId },
+    where: { ...activeHostedMemberAccessWithParticipantsWhere(now, false), id: input.memberId, threadContainer: { isNot: null } },
   });
   if (ownAccess) return null;
   return (await readGameChatFundingRooms({ memberIds: [input.memberId], now, prisma: input.prisma })).get(input.memberId) ?? null;
+}
+
+/** Sponsored members already have access, so this read stays off the mailbox fetch path. */
+function needsHostedActivationProof(member: HostedMemberAccessState): boolean {
+  return !member.threadContainer
+    && member.billingStatus === HostedBillingStatus.incomplete
+    && !hasStrictHostedPersonAccess(member);
+}
+
+async function hasHostedMemberActivationProof(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  return await input.prisma.hostedMember.findUnique({
+    select: { id: true },
+    where: { ...hostedMemberActivationProofWhere(), id: input.memberId },
+  }) !== null;
 }
 
 export async function readActiveHostedMemberAccessState(input: {
@@ -441,7 +458,7 @@ export async function readActiveHostedMemberAccessState(input: {
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedMemberAccessState | null> {
   const prisma = input.prisma ?? getPrisma();
-  const member = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
+  const member: HostedMemberAccessState | null = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
     select: hostedMemberAccessSelect,
     where: {
       id: input.memberId,
@@ -452,6 +469,9 @@ export async function readActiveHostedMemberAccessState(input: {
     return null;
   }
 
+  if (needsHostedActivationProof(member)) {
+    member.activationProof = await hasHostedMemberActivationProof({ memberId: input.memberId, prisma });
+  }
   const active = member.threadContainer
     ? await hasActiveHostedThreadContainerAccessWithParticipants({
       container: member,
@@ -507,7 +527,7 @@ export async function readActiveHostedMemberAccessIds(input: {
         where: {
           ...activeHostedThreadContainerParticipantWhere({ now }),
           containerMemberId: { in: containerMemberIds },
-          participant: activeHostedMemberAccessWhere(now),
+          participant: strictHostedPersonAccessWhere(),
         },
       });
   if (
@@ -520,13 +540,17 @@ export async function readActiveHostedMemberAccessIds(input: {
     participantRows.map((row) => row.containerMemberId),
   );
 
+  const incompleteIds = members.filter(member => !member.threadContainer && member.billingStatus === HostedBillingStatus.incomplete).map(member => member.id);
+  const activatedMemberIds = new Set(incompleteIds.length === 0 ? [] : (await prisma.hostedMember.findMany({
+    select: { id: true }, where: { ...hostedMemberActivationProofWhere(), id: { in: incompleteIds } },
+  })).map(member => member.id));
   const activeMemberIds = new Set<string>();
   for (const member of members) {
     if (isHostedMemberSuspended(member.suspendedAt)) {
       continue;
     }
     if (!member.threadContainer) {
-      if (hasActiveHostedMemberAccess(member)) {
+      if (hasActiveHostedMemberAccess({ ...member, activationProof: activatedMemberIds.has(member.id) })) {
         activeMemberIds.add(member.id);
       }
       continue;
@@ -577,10 +601,12 @@ export async function readActiveHostedFamilySponsorship(input: {
 /**
  * Runtime entitlement guard. Usage accounting is a separate mandatory gate,
  * so model-capable work proceeds only when both access and usage allow it.
- * This function denies inactive access; starter usage exhaustion is enforced
- * by the usage gate.
+ * Lapsed people may spend their own existing credit. Sponsorship never uses
+ * that credit; starter usage exhaustion is enforced by the usage gate.
  */
 export async function readHostedRuntimeAiAccessDecision(input: {
+  /** Room funding/creation must retain strict eligibility, never personal credit. */
+  sponsorshipOnly?: boolean;
   memberId: string;
   memberState?: HostedRuntimeAiMemberAccessState;
   /**
@@ -639,6 +665,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
     ...(input.noticeSeed === undefined ? {} : { noticeSeed: input.noticeSeed }),
     now,
     person: member,
+    personalCreditBalanceUsdMicros: input.sponsorshipOnly ? 0n : member.usageCreditBalanceUsdMicros,
   });
 }
 
@@ -649,6 +676,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
  * falling back to the owner-only sweep approximation.
  */
 export async function readHostedRuntimeAiAllowedMemberIds(input: {
+  sponsorshipOnly?: boolean;
   memberIds: readonly string[];
   now?: Date;
   prisma?: Pick<
@@ -701,6 +729,7 @@ export async function readHostedRuntimeAiAllowedMemberIds(input: {
         memberId: member.id,
         now,
         person: member,
+        personalCreditBalanceUsdMicros: input.sponsorshipOnly ? 0n : member.usageCreditBalanceUsdMicros,
       }).allowed) {
         allowedMemberIds.add(member.id);
       }
@@ -740,6 +769,7 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
   noticeSeed?: string;
   now: Date;
   person: HostedRuntimeAiPersonAccessState;
+  personalCreditBalanceUsdMicros?: bigint | null;
 }): HostedRuntimeAiAccessDecision {
   if (isHostedMemberSuspended(input.person.suspendedAt)) {
     return buildHostedRuntimeInactiveAccessDecision(input.now);
@@ -754,12 +784,14 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
     && membership.group.billingStatus === HostedBillingStatus.active
     && !isHostedMemberSuspended(membership.group.suspendedAt)
   );
-  if (sponsored || hasHostedMemberOwnActiveAccess(input.person)) {
+  if (sponsored || hasHostedMemberOwnActiveAccess(input.person)
+    || (isHostedLapsedBillingStatus(input.person.billingStatus)
+      && (input.personalCreditBalanceUsdMicros ?? 0n) > 0n)) {
     return { allowed: true };
   }
 
-  // Only a member with an existing provider subscription can recover billing.
-  // A genuine first-time member remains on the starter-usage signup journey.
+  // Lapsed people remain product members even when no provider reference is
+  // retained. Only unfinished signup stays on the first-contact journey.
   const recoverable = hasHostedRecoverableBilling({
     billingStatus: input.person.billingStatus,
     hasExistingSubscription: Boolean(
@@ -898,7 +930,7 @@ export async function hasAnyActiveHostedThreadContainerParticipant(input: {
         now: input.now ?? new Date(),
       }),
       containerMemberId: input.containerMemberId,
-      participant: activeHostedMemberAccessWhere(input.now),
+      participant: strictHostedPersonAccessWhere(),
     },
   });
 
@@ -910,7 +942,7 @@ export async function hasAnyActiveHostedThreadContainerParticipant(input: {
  * members retain app access after billing lapses, without changing billing or
  * granting usage. Suspension and unfinished activation still block access;
  * synthetic containers retain their existing owner-based behavior. This is
- * not a spending or runtime gate: those callers must also check AI usage.
+ * not a spending gate: model-capable work must also check AI usage.
  */
 export async function assertActiveHostedMemberAccessAllowed(input: {
   memberId: string;
@@ -926,8 +958,10 @@ export async function assertActiveHostedMemberAccessAllowed(input: {
 
   if (member) {
     assertHostedMemberNotSuspended(member);
-    if (hasActiveHostedMemberAccess(member)
-      || (!member.threadContainer && isHostedLapsedBillingStatus(member.billingStatus))) {
+    const activationProof = needsHostedActivationProof(member)
+      ? await hasHostedMemberActivationProof({ memberId: input.memberId, prisma })
+      : false;
+    if (hasActiveHostedMemberAccess({ ...member, activationProof })) {
       return;
     }
   }

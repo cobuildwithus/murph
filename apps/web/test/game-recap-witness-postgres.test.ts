@@ -263,18 +263,26 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
       expect(JSON.stringify(await receipt(f))).toBe(queued);
     });
 
-    it("keeps published group work uncertain after a real block and unblock", async () => {
+    it("keeps published group work queued during a real block", async () => {
       const f = await published();
       await f.db.game.update({ where: { id: f.gameId }, data: { maxPlayers: 10 } });
       publication.audience.mockResolvedValue({ memberIds: f.players });
+      const queued = await receipt(f);
       expect(await runGameCommand({ actorMemberId: f.players[0]!, multiplayer: true, command: { type: "block", memberId: f.players[1]! } })).toMatchObject({ ok: true });
-      expect(await receipt(f)).toMatchObject({ status: "skipped", skipReason: "game_blocked" });
+      expect(await receipt(f)).toEqual(queued);
+      expect((await receipt(f)).status).toBe("generation_queued");
       const before = await rows(f);
       for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action, recap, true)).toEqual(unavailable(action));
       expect(await rows(f)).toEqual(before);
-      expect(await runGameCommand({ actorMemberId: f.players[0]!, multiplayer: true, command: { type: "unblock", memberId: f.players[1]! } })).toMatchObject({ ok: true });
-      // Retained, not recovered: the block unbound this game and nothing rebinds a settled group.
-      for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action, recap, true)).toEqual(unavailable(action));
+    });
+
+    it("ends an older group generation already skipped for a block", async () => {
+      const f = await published();
+      await f.db.game.update({ where: { id: f.gameId }, data: { maxPlayers: 10, chatContainerMemberId: null } });
+      await f.db.hostedLinqDelivery.update({ where: { id: (await receipt(f)).id },
+        data: { status: "skipped", skipReason: "game_blocked", skippedAt: new Date(), retryAfterAt: null } });
+      const before = await rows(f);
+      for (const action of ["read_game", "write_recap"] as const) expect(await tool(f, action, recap, true)).toEqual(terminal(action));
       expect(await rows(f)).toEqual(before);
     });
 

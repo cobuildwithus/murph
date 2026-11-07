@@ -2844,12 +2844,20 @@ Current product admission, delivery and native runtime safety rules remain.
 - Closed integration-ingest Brotli months may be absent after a hosted restore.
   The existing media-reference catalogue is their inventory; referenced bytes are
   verified before a history reader proceeds, or the read fails retryably. Idle
-  maintenance never fetches absent history. The separate producer release also
-  stops archiving the current ingest month. Snapshot reconciliation keeps cold references even after materialization;
+  maintenance never fetches absent history. New cold references require a month
+  older than the UTC month of now minus 10 days. This keeps a newly closed month
+  inline for 10 full days, exceeding the routine 7-day provider lookback and
+  avoiding repeated thaw/re-upload cycles. Compression is separate: current-month
+  shards may still compact at 4 MiB. Snapshot reconciliation keeps cold references even after materialization;
   it never applies image/video TTLs or prunes canonical cold objects. Receipt replay
   still resolves only the preimages it needs; ordinary startup does not fetch cold
   months. Historical device imports remain writable when no cold reference exists.
-  Explicitly referenced cold objects are immutable in the reader release; writes
+  The thaw-capable writer verifies referenced bytes and removes the local
+  reference before amendment, preserving the old remote object for older snapshots.
+  A month thawed inside the delay stays inline until eligible, then externalizes
+  with its new hash. Already-cold months remain cold inside the delay. The
+  current/future-month clock-rollback guard still uses the true current month.
+  In the older reader-only release, writes to referenced months
   fail retryably with `HOSTED_COLD_HISTORY_UNAVAILABLE`, remain queued beyond the
   retry ceiling, and acknowledge no unpublished payload IDs. Each cold deferral
   refreshes the existing five-attempt ordinary transport allowance, just like
@@ -2861,7 +2869,21 @@ Current product admission, delivery and native runtime safety rules remain.
   before the separate producer commit. Once sparse checkpoints exist, rollback
   may reach that retry-aware reader commit, where writes wait for thaw support to
   return. Never use earlier non-retryable readers or the catalogue-dropping parser.
-- Closed event-ledger and integration-ingest months compact only in the abortable hosted idle-shutdown lane and share its existing 30-second archive budget. Core publishes a fully validated deterministic gzip before deleting raw bytes, and normal readers and amendments stream bounded gzip output. A foreground wake aborts archive work before later maintenance, while a timeout, malformed shard, or ordinary archive failure leaves that source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, so no cursor, repair queue, or second maintenance owner exists. Integration-ingest startup repair removes only an independently valid, newline-terminated, byte-identical raw/gzip pair; every mismatch remains a fail-closed representation conflict.
+  The 10-day delay adds no schema, rollout ordering requirement, or rollback floor:
+  deploy the runner within those existing compatibility floors. A compatible older
+  runner simply externalizes sooner; mixed versions retain the same inline bytes
+  and cold-reference format. Full exports and history readers remain complete.
+  Reclaiming superseded remote objects is separate work.
+- Event-ledger and integration-ingest compaction share the abortable hosted
+  idle-shutdown lane's existing 30-second archive budget. Core validates lossless
+  Brotli before removing the source; gzip remains readable. Current integration
+  shards become eligible at 4 MiB, while current event shards stay plain. A
+  foreground wake aborts the pass; ordinary archive failures leave the source
+  intact and do not block checkpointing. Remaining old representations are the
+  worklist. Readers and amendment planning repair only encountered, independently
+  validated identical duplicate representations under the canonical lock; startup
+  performs no archive sweep. Conflicts fail closed. See the
+  [vault layout contract](../docs/contracts/01-vault-layout.md) for archive rules.
 - Closed event-ledger months retain the reader-first gzip rollback floor. Core and query resolve one bounded plain-or-gzip representation through the logical `.jsonl` path, reject ambiguous pairs, and preserve decompressed base receipts across local writes, hosted receipt replay, retry, and rollback. Event append operations and receipts remain representation-neutral; the canonical write owner selects plain versus gzip from the logical path while holding the existing write lock. Backdated writes atomically replace and verify the archive; the current UTC month remains plain. The deployed reader-compatible core/query/CLI/runner release must drain before hosted idle maintenance creates its first event archive. Once any event `.jsonl.gz` exists, that reader-compatible release is the rollback floor; use a forward fix or losslessly restore plain JSONL with a compatible binary before downgrading.
 - Ordinary group automations reuse canonical cron occurrence state for both conversation and optional group-email effects. Current-chat output finishes through the ordinary conversation outbox and route retry policy. Every hosted scheduled Telegram occurrence resolves its exact destination and direct/group audience through the existing Web route assertion before tools or model work, including saved routes without directness. It persists that route authority with the outbox intent and rechecks it before delivery-provider entry. Missing route or audience authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. When a turn uses `send_email`, the accepted generic group-email parent enters the same canonical pending-delivery field used by ordinary queued notifications, even when later turn work fails. A restart before that cron write derives the parent from its automation-id and occurrence-scoped outbox key before admitting the provider. Web marks the parent sent only after live authorization revalidation and durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. An automation that never calls the email effect has no email settlement expectation. No newsletter recognition, injected contract, migration queue, repair state, or second scheduler exists.
 - Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0 and keeps admission open for one four-second in-memory draft window. A genuinely quiet window closes atomically. Input accepted during the window selects provider request 1 in the same thread; input already live-steered and committed during request 0 also selects request 1 and keeps admission open through its first completed response. Request 1 is final; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
@@ -3336,9 +3358,26 @@ Current product admission, delivery and native runtime safety rules remain.
   barrier. Generic non-idempotent transport work remains excluded from the hot
   pass, and generic notifications or unrelated pending outbox work cannot
   hitchhike. Fresh conversation input retains priority.
-  A Linq reply boundary carrying a parked file-approval cycle or post-acceptance
-  settlement obligation publishes its prepared claims and obligations before
-  any reply bubble can consume the input. A crash after publication but before
+  A finished reply has one route: its effects drain inline before the phase
+  returns, and only `publishBeforeDispatch` effects wait for publication. Once a
+  provider has accepted a send, one boundary keeps the accepted outcome: a later
+  cleanup, staging or wake-projection failure logs
+  `assistant_after_checkpoint_failed` and leaves a prompt recovery wake.
+  A Linq reply boundary carrying a parked file-approval cycle publishes its
+  prepared claims and obligations before any reply bubble can consume the input.
+  Follow-up requests and direct nutrition invitations send first only when every
+  send in their reply boundary is transport-idempotent. Otherwise, the whole
+  obligation boundary publishes first, including earlier reply bubbles. Before
+  a send-first drain, the existing durable-effect deadline requests immediate
+  workspace publication; rejection or later drain failure preserves the request.
+  Accepted risk: a runner that dies after Linq acceptance and before publication
+  finishes can lose the follow-up or the nutrition invitation memory. Immediate
+  publication reduces the normal exposure from the idle window of up to ten
+  minutes to publication time, roughly seven to twelve seconds; it does not
+  guarantee completion within that time. Non-idempotent retries, durable-pending
+  claims and Telegram vault files keep publish-first. Already-published sending
+  and confirmation-pending records recover under their original identities.
+  A crash after publication but before
   non-idempotent provider entry can still leave an ambiguous unsent effect.
   Fresh Telegram and email first sends stay outside this fence by owner
   decision and can still repeat through input replay.

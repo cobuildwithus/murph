@@ -126,7 +126,8 @@ it("serves only the documented four saved series and comparison fields, includin
   ] as const) {
     const metricThrough = name === "steps" ? stepsThrough : through;
     expect(body.numbers[name]).toEqual({
-      unit, latest: { date: metricThrough, value: current }, stale: false,
+      unit, latest: { date: metricThrough, value: current, observedAt: `${metricThrough}T12:00:00.000Z` }, stale: false,
+      reported: false,
       source: "Garmin",
       daily: [
         ...name === "steps" ? [{ date: addDaysToIsoDate(from, -30), value: 300 }] : [],
@@ -140,7 +141,8 @@ it("serves only the documented four saved series and comparison fields, includin
     });
   }
   expect(body.numbers.vo2Max).toEqual({
-    unit: "ml/kg/min", latest: { date: through, value: 48.3 }, stale: false,
+    unit: "ml/kg/min", latest: { date: through, value: 48.3, observedAt: `${through}T12:00:00.000Z` }, stale: false,
+    reported: false,
     source: "Garmin",
     daily: [{ date: from, value: 42.2 }, { date: "2026-08-13", value: 44.2 }, { date: "2026-10-29", value: 46.3 }, { date: through, value: 48.3 }],
     comparison: {
@@ -166,7 +168,7 @@ it("uses local today across midnight and DST, retaining canonical daily dates", 
   shards = await splitBrowserVaultReplica({ ...fixture(), meals: { schemaVersion: 1, timeZone: "Asia/Tokyo", days: [] } });
   const east = await (await GET(request())).json();
   expect(east.window).toEqual({ from: "2025-11-06", through: "2026-11-05" });
-  expect(east.numbers.steps.latest).toEqual({ date: "2026-11-04", value: 100 });
+  expect(east.numbers.steps.latest).toEqual({ date: "2026-11-04", value: 100, observedAt: "2026-11-04T12:00:00.000Z" });
 });
 
 it.each([
@@ -193,7 +195,7 @@ it.each([
   });
   expect(body.numbers.steps.daily).toHaveLength(days);
   expect(body.numbers.steps.daily.every((point: { date: string }) => point.date <= settledThrough)).toBe(true);
-  expect(body.numbers.restingHeartRate.latest).toEqual({ date: "2026-11-05", value: 59 });
+  expect(body.numbers.restingHeartRate.latest).toEqual({ date: "2026-11-05", value: 59, observedAt: "2026-11-05T12:00:00.000Z" });
   expect(body.numbers.restingHeartRate.daily).toEqual([{ date: "2026-11-05", value: 59 }]);
 });
 
@@ -284,7 +286,7 @@ it("requires distinct covered dates, ignores summary/comparator rows, and keeps 
   ]));
   const body = await (await GET(request())).json();
   expect(body.numbers.steps.daily).toHaveLength(6);
-  expect(body.numbers.steps.latest).toEqual({ date: stepsThrough, value: 300 });
+  expect(body.numbers.steps.latest).toEqual({ date: stepsThrough, value: 300, observedAt: `${stepsThrough}T13:00:00Z` });
   expect(body.numbers.steps.source).toBe("WHOOP");
   expect(body.numbers.vo2Max.source).toBeNull();
   expect(body.numbers.steps.comparison).toBeNull();
@@ -301,7 +303,7 @@ it("keeps a day's summary over a later raw reading, and raw readings on days wit
   ]));
   const body = await (await GET(request())).json();
   expect(body.numbers.sleep.daily).toEqual([{ date: from, value: 400 }, { date: through, value: 480 }]);
-  expect(body.numbers.sleep.latest).toEqual({ date: through, value: 480 });
+  expect(body.numbers.sleep.latest).toEqual({ date: through, value: 480, observedAt: `${through}T00:00:00.000Z` });
 });
 
 it("uses catalog stale thresholds and returns null for data older than a year or in unsupported units", async () => {
@@ -365,4 +367,67 @@ it("does not expose the core display name in Numbers", async () => {
   const response = await GET(request());
   expect(response.status).toBe(200);
   expect(await response.text()).not.toMatch(/displayName|Avery/u);
+});
+
+
+it.each(["app", "chat", "device"] as const)("reports the canonical provenance for a real %s measurement", async source => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { addMeasurement, initializeVault } = await import("@murphai/core");
+  const { readVault, listMetricPoints } = await import("@murphai/query");
+  const { createBrowserVaultReplica } = await import("@murphai/query/browser");
+  const vaultRoot = await mkdtemp(join(tmpdir(), "numbers-provenance-"));
+  const observedAt = `${through}T15:10:00.000Z`;
+  try {
+    await initializeVault({ vaultRoot, timezone: "America/New_York" });
+    const draft = { occurredAt: observedAt, source: source === "device" ? "device" as const : "manual" as const,
+      title: "VO2 max", measurements: [{ metric: "estimated-vo2-max", value: 42.5, unit: "ml/kg/min" }] };
+    await addMeasurement(source === "app"
+      ? { vaultRoot, onExisting: "keep", draft: { ...draft, id: "evt_01JSHY3D0V5A8XJQF8M0Q0Q0A4" } }
+      : { vaultRoot, draft });
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot),
+      metricPoints: await listMetricPoints(vaultRoot, { metricKey: "estimated-vo2-max", limit: null }),
+      generatedAt: savedAt, sourceBundleHash: "f".repeat(64) });
+    shards = await splitBrowserVaultReplica(replica);
+    const body = await (await GET(request())).json();
+    expect(body.numbers.vo2Max).toMatchObject({ reported: source !== "device",
+      latest: { date: through, value: 42.5, observedAt } });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+it.each([
+  { reverseIds: false, reverseInput: false }, { reverseIds: true, reverseInput: false },
+  { reverseIds: false, reverseInput: true }, { reverseIds: true, reverseInput: true },
+])("selects the newest real same-day reading regardless of ID and input order %j", async ({ reverseIds, reverseInput }) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { addMeasurement, initializeVault } = await import("@murphai/core");
+  const { readVault, listMetricPoints } = await import("@murphai/query");
+  const { createBrowserVaultReplica } = await import("@murphai/query/browser");
+  const vaultRoot = await mkdtemp(join(tmpdir(), "numbers-order-"));
+  const ids = ["evt_01JSHY3D0V5A8XJQF8M0Q0Q0A4", "evt_01JSHY3D0V5A8XJQF8M0Q0Q0A5"];
+  if (reverseIds) ids.reverse();
+  const readings = [
+    { id: ids[0]!, occurredAt: `${through}T12:00:00.000Z`, value: 42.5 },
+    { id: ids[1]!, occurredAt: `${through}T15:00:00.000Z`, value: 47.5 },
+  ];
+  if (reverseInput) readings.reverse();
+  try {
+    await initializeVault({ vaultRoot, timezone: "America/New_York" });
+    for (const { id, occurredAt, value } of readings) {
+      await addMeasurement({ vaultRoot, onExisting: "keep", draft: { id, occurredAt, source: "manual", title: "VO2 max",
+        measurements: [{ metric: "estimated-vo2-max", value, unit: "ml/kg/min" }] } });
+    }
+    const points = await listMetricPoints(vaultRoot, { metricKey: "estimated-vo2-max", limit: null });
+    if (reverseInput) points.reverse();
+    shards = await splitBrowserVaultReplica(await createBrowserVaultReplica({ vault: await readVault(vaultRoot),
+      metricPoints: points, generatedAt: savedAt, sourceBundleHash: "f".repeat(64) }));
+    const body = await (await GET(request())).json();
+    expect(body.numbers.vo2Max).toMatchObject({ reported: true,
+      latest: { date: through, value: 47.5, observedAt: `${through}T15:00:00.000Z` },
+      daily: [{ date: through, value: 47.5 }],
+    });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });

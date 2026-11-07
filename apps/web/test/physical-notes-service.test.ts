@@ -46,7 +46,7 @@ vi.mock("@/src/lib/hosted-groups/participant-action-authority", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveAccess,
-  readActiveHostedMemberAccess: mocks.readActiveAccess,
+  readStrictHostedMemberAccess: mocks.readActiveAccess,
 }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},

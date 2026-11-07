@@ -45,31 +45,33 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
       text: string;
       values: unknown[];
     };
-    expect(query.text).toContain('"connection"."status" = \'active\'');
-    expect(query.text).toContain('"connection"."connected_at"');
-    expect(query.text).toContain('"connection"."next_reconcile_at" <= $1');
-    expect(query.text).toContain('join "hosted_member" as "member"');
-    expect(query.text).toContain('"member"."suspended_at" is null');
-    // Access is the resolver projection: own active billing OR active
-    // membership in an active, unsuspended account group.
-    expect(query.text).toContain('"member"."billing_status" = \'active\'');
-    expect(query.text).toContain('from "hosted_account_group_membership" as "membership"');
-    expect(query.text).toContain('"membership"."status" = \'active\'');
-    expect(query.text).toContain('"account_group"."billing_status" = \'active\'');
-    expect(query.text).toContain('"account_group"."suspended_at" is null');
-    expect(query.text).toContain('from "hosted_consent_grant" as "consent_grant"');
-    expect(query.text).toContain('"consent_grant"."member_id" = "member"."id"');
-    expect(query.text).toContain('"consent_grant"."scope" = $2');
-    expect(query.text).toContain('"consent_grant"."status" = \'revoked\'');
-    expect(query.text).toContain("not exists");
-    expect(query.text).not.toContain('from "device_sync_dirty_connection" as "dirty"');
-    expect(query.text).not.toContain('from "device_sync_dirty_payload" as "payload"');
-    expect(query.text).toContain('from "device_sync_signal" as "signal"');
-    expect(query.text).toContain('"signal"."connection_id" = "connection"."id"');
-    expect(query.text).toContain('"signal"."kind" = \'reconcile_due\'');
-    expect(query.text).toContain('"signal"."next_reconcile_at" = "connection"."next_reconcile_at"');
-    expect(query.text).toContain('"signal"."created_at" >= $3');
-    expect(query.text).toContain(
+    expect(query.text.toLowerCase()).toContain('"connection"."status" = \'active\'');
+    expect(query.text.toLowerCase()).toContain('"connection"."connected_at"');
+    expect(query.text.toLowerCase()).toContain('"connection"."next_reconcile_at" <= $1');
+    expect(query.text.toLowerCase()).toContain('join "hosted_member" as "member"');
+    expect(query.text.toLowerCase()).toContain('"member"."suspended_at" is null');
+    // Product eligibility (including returning people) and consent precede LIMIT.
+    expect(query.text).toContain("'canceled', 'paused', 'unpaid', 'past_due'");
+    expect(query.text).toContain('"hosted_mailbox_item" AS "activation"');
+    expect(query.text.indexOf('"member"."billing_status" IN')).toBeLessThan(query.text.toLowerCase().lastIndexOf("limit"));
+    expect(query.text.toLowerCase()).toContain('"member"."billing_status" = \'active\'');
+    expect(query.text.toLowerCase()).toContain('from "hosted_account_group_membership" as "membership"');
+    expect(query.text.toLowerCase()).toContain('"membership"."status" = \'active\'');
+    expect(query.text.toLowerCase()).toContain('"account_group"."billing_status" = \'active\'');
+    expect(query.text.toLowerCase()).toContain('"account_group"."suspended_at" is null');
+    expect(query.text.toLowerCase()).toContain('from "hosted_consent_grant" as "consent_grant"');
+    expect(query.text.toLowerCase()).toContain('"consent_grant"."member_id" = "member"."id"');
+    expect(query.text.toLowerCase()).toContain('"consent_grant"."scope" = $2');
+    expect(query.text.toLowerCase()).toContain('"consent_grant"."status" = \'revoked\'');
+    expect(query.text.toLowerCase()).toContain("not exists");
+    expect(query.text.toLowerCase()).not.toContain('from "device_sync_dirty_connection" as "dirty"');
+    expect(query.text.toLowerCase()).not.toContain('from "device_sync_dirty_payload" as "payload"');
+    expect(query.text.toLowerCase()).toContain('from "device_sync_signal" as "signal"');
+    expect(query.text.toLowerCase()).toContain('"signal"."connection_id" = "connection"."id"');
+    expect(query.text.toLowerCase()).toContain('"signal"."kind" = \'reconcile_due\'');
+    expect(query.text.toLowerCase()).toContain('"signal"."next_reconcile_at" = "connection"."next_reconcile_at"');
+    expect(query.text.toLowerCase()).toContain('"signal"."created_at" >= $3');
+    expect(query.text.toLowerCase()).toContain(
       'order by\n        "connection"."next_reconcile_at" asc,\n        "connection"."updated_at" asc,\n        "connection"."id" asc',
     );
     expect(query.values).toEqual([

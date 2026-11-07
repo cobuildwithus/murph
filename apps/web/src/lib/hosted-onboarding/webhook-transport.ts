@@ -1723,6 +1723,7 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
   });
 
   const access = await readHostedRuntimeAiAccessDecision({
+    sponsorshipOnly: true,
     memberId: payload.memberId,
     now: input.now,
     prisma: input.prisma,

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "keep-using-remaining-credit",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep using your remaining credit",
+    "summary": "Your private conversations with Murph can continue on your remaining usage credit after your subscription ends.",
+    "details": "When your credit runs out, Murph stops replying until you restart your plan. Your credit does not cover group chats, and buying more needs an active paid plan.",
+    "relevanceTags": ["billing", "conversations"],
+    "sourcePullRequests": [4708]
+  }
+}

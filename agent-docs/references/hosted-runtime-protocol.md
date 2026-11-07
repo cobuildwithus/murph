@@ -1026,8 +1026,8 @@ gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
 in the maintenance lane rather than extending reply ownership.
 
 After a bounded background automation pass, the live post-pass cron status is
-the assistant cron owner's authoritative continuation. A fast pre-checkpoint
-delivery or a deferred post-checkpoint delivery/provider-cleanup drain may
+the assistant cron owner's authoritative continuation. Inline delivery or a
+deferred provider-cleanup drain may
 consume the workspace wake that admitted the pass, but each path must carry the
 independently recomputed cron candidate through the existing post-delivery
 reconciliation wake. The later `idle_shutdown` snapshot therefore persists
@@ -1050,8 +1050,44 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-`system_mailbox` admits eligible model-free work through the existing kind and
-exact-notification policy. Device, clinical, and Environment attempts belong to
+`system_mailbox` derives eligible kinds and runner routes from one shared policy
+in `orchestration-control.ts`, with the existing exact-notification restrictions.
+`classifyHostedSystemMailboxExecutionClass` defaults `assistantExecutionBlocked`
+to false. Member actions, member preferences and clinical acquisition become
+model-free only when that flag is true. Otherwise they retain default ownership,
+including the conversation-prefetch check before a queued action can mutate the
+vault. The runner passes its invocation flag through recovery, execution filters,
+wake selection, import/checkpoint projections and post-checkpoint receipts.
+Canonical use cases, ordered selection, checkpoint-before-outcome publication
+and replay receipts remain unchanged. Clinical enrichment and meal-photo
+estimation retain their model owner; capture/import can proceed without them.
+
+Mailbox store helpers have no allowance authority: their optional flag defaults
+to false. Reconciliation initially uses that default and broadens its frontier
+only after the existing canonical gate reports AI denial. It still honors a
+current runner model-free wake projection and searches beyond the imported
+watermark for fresh independent rows. The progress monitor deliberately keeps
+default ownership so imported heads dormant behind enrichment, or left pending
+by an old runner, remain eligible for its existing usage-denial exemption.
+Actual AI-allowed stalls and unimported aged rows remain alertable.
+
+No wire field or processing mode changes. New Web with an old runner can admit
+fresh work that the runner leaves pending. Once that runner publishes a current
+empty model-free projection, imported rows stay dormant rather than repeatedly
+relaunching. A checkpoint without a current projection retains the existing
+legacy handled-prefix fallback; it needs a compatible runner checkpoint to
+establish the stronger suppression evidence. Old Web with a new runner can
+withhold a wake until another eligible invocation imports the work. Both orders,
+including old warm containers, preserve AI blocking. Runner-first avoids
+runner-side delay when release coordination permits. The normal merge deploys
+Web first; then dispatch the compatible runner from main through manual
+murph-cloud before relying on the full outcome. Merging alone does not ship it.
+The private Temporal worker consumes existing frontier and wake facts, not raw
+kinds or route mappings; no worker protocol change is required. Rolling back
+either side can delay work again but grants no AI permission. Verify fresh and
+restored edits plus handled/wake projections after both deploys.
+
+Device, clinical, and Environment attempts belong to
 the fenced workspace and use existing mailbox claims; the invocation's policy
 still decides which families are allowed. Device and Environment work can start
 without assistant preparation. A conversation or canonically due assistant
@@ -2004,8 +2040,11 @@ conversation candidates above the effective floor must still have
 live-row semantics. An imported `default_owned` system head, including
 `member.action.requested`, is an intentional pause only while the
 canonical read-only usage gate reports `ai_usage_limit_exceeded`. The monitor
-classifies head ownership with the shared execution classifier, so
-model-free notifications and device heads remain alertable. Import must cover
+classifies head ownership with the shared execution classifier's default
+AI-allowed policy, including member preferences and clinical acquisition. It does
+not opt into blocked execution: enrichment can pin the frontier after acquisition
+finishes, and an old runner can leave these imported rows pending. Model-free
+notifications and device heads remain alertable. Import must cover
 the head and every live pending row already at least 15 minutes old,
 with the highest aged sequence derived in the same bounded mailbox scan. Fresh
 unimported suffix rows do not inherit the paused head's age; an unimported row
@@ -3466,7 +3505,8 @@ transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
 `system_mailbox` path, which imports system work, may run one bounded
 model-free deterministic device-sync, member-channel reconciliation,
-operator-maintenance, browser-vault refresh, or reported-metric item, and exits
+operator-maintenance, browser-vault refresh, reported-metric, member-action,
+member-preference, or clinical-acquisition item, and exits
 before foreground assistant admission. Other system items retain their default
 owner and are not consumed by this recovery mode.
 It binds that effective processing mode into the same fence so controller
@@ -3831,7 +3871,7 @@ same-room successor up to the existing cumulative cap. All candidates still
 pass the existing replyability, same-conversation, route, capacity, and
 exact-successor checks without broad pending-index discovery or mutation.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
-must resume before post-checkpoint delivery or background drains continue. A
+must resume before delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
@@ -4002,7 +4042,7 @@ drained through hosted provider-cleanup after the next successful runtime-owned
 idle-floor workspace checkpoint. The first deferred cleanup wake is
 scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
 the warm idle window; actual cleanup failures use the provider-cleanup retry
-delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
+delay. Delivery and provider-cleanup drains recompute cleanup
 wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
 On an established default invocation, container preparation overlaps the ordinary
@@ -4166,19 +4206,30 @@ byte-count, and completion diagnostics through the existing structured logger.
 Read-wait includes event-loop scheduling delay and must not be called pure network
 latency. The existing persisted restore timing fields keep their current meaning.
 
-True idle-shutdown maintenance also compacts closed
+True idle-shutdown maintenance also compacts
 `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` shards in place before snapshot
-planning. The core owner streams each raw shard into deterministic level-6
-gzip, validates all rows and the exact decompressed byte receipt, publishes the
-archive exclusively, and only then removes the raw representation. Pending
+planning. Closed plain/gzip shards and current-month plain shards of at least
+4 MiB are eligible for lossless quality-5 Brotli. The core owner validates all
+rows and the exact decompressed byte receipt before publishing the archive and
+removing the source. Pending
 foreground work skips this pass, and a runner wake, shutdown, or 30-second pass
 budget aborts it. A timeout or ordinary compaction failure is logged in
-aggregate and does not suppress the checkpoint; remaining raw months are the
-next pass's durable worklist. If interruption lands after archive publication
-but before raw removal, startup removes the raw copy only after independently
-validating an exact, newline-terminated raw/gzip match. A conflicting closed
-pair fails closed before mailbox or assistant work. No compaction queue,
-marker, or second persistence owner is introduced.
+aggregate and does not suppress the checkpoint; remaining old representations
+are the next pass's worklist. Readers and amendment planning repair encountered
+identical duplicate representations under the canonical lock, with complete
+independent validation; conflicts fail closed. Startup performs no archive sweep.
+No compaction queue, marker, or second persistence owner is introduced.
+
+Snapshot publication externalizes an unambiguous integration-ingest Brotli shard
+only when its month is older than the UTC month of now minus 10 days. This keeps
+closed months inline for 10 full days, exceeding the routine 7-day lookback.
+Existing cold references remain cold; a thawed month waits for the same cutoff
+before publishing its amended hash. The current/future-month rollback guard uses
+the true current month. Inline closed shards remain readable and included in full
+exports. This timing change has no wire/schema change or additional rollback
+floor: compatible older runners simply externalize sooner. Existing cold-history
+reader/preserver and media compatibility floors still apply; no coordinated Web
+or Worker consumer rollout is needed for this delay.
 
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
@@ -4750,6 +4801,35 @@ finished event has a false frontier boolean, the gap remains in runtime
 selection, mapping, or batch rotation. The fields never imply that exact-row
 stamping or the contiguous floor advanced; durable consumption remains that
 proof.
+
+Finished snapshot timing is sequential: `snapshotLeaseReadBeforeSnapshotElapsedMs`,
+`snapshotSessionStartElapsedMs`, `snapshotRuntimeSymlinkPruneElapsedMs`,
+`snapshotTerminalWriteOperationPruneElapsedMs`, `snapshotGeneratedDeliveryPruneElapsedMs`,
+`snapshotPendingInputCompactionElapsedMs`, `snapshotAssistantRuntimeResiduePruneElapsedMs`,
+`snapshotMediaReferencesPublishElapsedMs`, `snapshotArchivePlanElapsedMs`,
+`snapshotArchiveBuildElapsedMs`, `snapshotLeaseReadBeforeUploadElapsedMs`,
+`snapshotDirectR2UploadElapsedMs`, `snapshotLeaseReadBeforeCheckpointElapsedMs`,
+`snapshotSessionCompleteElapsedMs`, and `snapshotTemporaryCleanupElapsedMs` account
+for the checkpoint window. Residue timing includes its provider-cleanup recovery
+read. Archive-plan timing includes tree walking, validation and size diagnostics;
+archive-build timing now covers only tar, compression and encryption. Historical
+archive-build timings included planning. Sum these sequential fields against
+`snapshotElapsedMs`, allowing a small remainder for synchronous bookkeeping and
+existing diagnostic calls. Presign and PUT timings are nested within direct-upload
+timing and must not be added again. A throwing step records elapsed time before
+the existing failure or best-effort cleanup handler runs; no new event is emitted.
+
+Every finished event reports `assistantRuntimeResiduePruneAttemptedCount` and
+`assistantRuntimeResiduePruneCompletedCount` as zero or one, plus the existing
+per-category residue removal counts even when zero. A skipped prune has zero
+elapsed time; attempted but incomplete pruning means removal counts are unknown,
+and the zero defaults must not be interpreted as proof that nothing was removed.
+`prunedAssistantRuntimeResidueFileCount` sums known returned runtime-residue and
+generated-delivery removals. These diagnostics remain numeric and carry no paths
+or identifiers. Existing readers accept the additive fields; old producers omit
+them. No coordinated rollout or state migration is needed, and reverting the
+producer only removes the added measurements. Compare archive-build timings
+across versions only after accounting for the new archive-plan split.
 
 The retained fleet path selects no `checkpoint.snapshot_plan` or
 `checkpoint.snapshot_started` event. After v2 snapshot construction acquires

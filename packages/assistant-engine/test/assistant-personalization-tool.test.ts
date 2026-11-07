@@ -79,7 +79,6 @@ describe('assistant personalization tool', () => {
       env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
       hostedToolContext: {
         computerToolsAvailable: false,
-        currentAssistantInputId: () => `ain_${'2'.repeat(32)}`,
         currentUserActionScope: () => ({
           acceptedInputIds: [`ain_${'1'.repeat(32)}`, `ain_${'2'.repeat(32)}`],
           conversationId: 'conversation_personalization', conversationScope: 'direct',
@@ -205,8 +204,14 @@ describe('assistant personalization tool', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      currentAssistantInputId: () =>
-        'ain_11111111111111111111111111111111',
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['ain_11111111111111111111111111111111'],
+        conversationId: 'conversation_personalization',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: [],
+        originSessionId: 'session_personalization',
+        recipientKey: null,
+      }),
       personalizationTool,
       sendVaultFile: vi.fn(async () => ({
         approvalUrl: 'https://murph.test/approve/unused',
@@ -267,7 +272,6 @@ describe('assistant personalization tool', () => {
       fetchImpl: fetch,
       hostedToolContext: {
         computerToolsAvailable: false,
-        currentAssistantInputId: () => null,
         currentHostedDeliveryContext: () => null,
         currentHostedMailboxItemIds: () => [],
         personalizationTool,
