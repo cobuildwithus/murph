@@ -24,6 +24,7 @@ export type ApplePushMessage =
 export type ApplePushResult = "sent" | "unregistered" | "failed";
 
 export interface ApplePushRequest {
+  sound?: "default";
   collapseId: string;
   data: Record<string, string>;
   expiresAt: Date;
@@ -79,7 +80,8 @@ export async function sendApplePush(
       body: JSON.stringify({
         ...request.data,
         aps: message.kind === "alert"
-          ? { alert: message.title ? { body: message.body, title: message.title } : { body: message.body }, "content-available": 1 }
+          ? { alert: message.title ? { body: message.body, title: message.title } : { body: message.body }, "content-available": 1,
+            ...(request.sound ? { sound: request.sound } : {}) }
           : { "content-available": 1 },
       }),
       headers: {

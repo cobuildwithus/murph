@@ -286,3 +286,15 @@ describe("post reply commands", () => {
     }
   });
 });
+
+
+describe("game reminder command", () => {
+  const command = { type: "setReminders", minutes: 1140, push: true, text: false, offGameIds: ["game_one"] };
+  it("parses the whole state and deduplicates game ids", () => {
+    expect(parseGameCommand({ ...command, offGameIds: ["game_one", "game_one"], actor: "foreign" })).toEqual(command);
+  });
+  it.each([{ minutes: -1 }, { minutes: 1440 }, { minutes: 1.5 }, { minutes: "1140" }, { push: undefined },
+    { push: "true" }, { text: true }, { text: undefined }, { offGameIds: undefined }, { offGameIds: [null] }])("refuses invalid preferences %o", invalid => {
+    expect(codeOf(() => parseGameCommand({ ...command, ...invalid }))).toBe("INVALID_REQUEST");
+  });
+});

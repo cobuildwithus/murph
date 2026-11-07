@@ -6214,6 +6214,33 @@ is the rollback floor once replies or reply reports exist. Recovery uses a
 forward fix retaining reads, playback, deletion and review. No Worker, runner,
 assistant or legal-version change is part of this release.
 
+### Daily game reminders
+
+`setReminders` in the game command owner stores profile timing/channel preferences
+and live-seat opt-outs in one database-only transaction. The separate bearer
+settings endpoint keeps Home unchanged; `canText` is false. Push registration
+owns `game_reminders` capability, default false and cleared by old game clients.
+Wearable refreshes preserve it only for the same address.
+
+The minute lifecycle drain runs `sendDueGameReminders` alongside missed-day
+reservation. Thirty minute shards page five members at a time, at most 200
+per run, with a
+20-second start budget bounded by the drain's real deadline and abort signal.
+Each projection admits at most 20 live seats per member and 1,095 own attempts
+per seat, skipping overflow. Reads batch seats and own histories; peer posts
+and blocks need two bounded reads only for single-game wording. Only final own
+task words are opened, at most 20 fields per attempt, outside transactions.
+`reminderOpenDay` composes game rules and score credit; profile time controls the
+30-minute window while frozen seat time controls game days.
+
+The unique `game-reminder:<sha256(member, localDate)>` event key owns a daily
+member-wide claim, regardless of its anchor game. A fresh projection after the
+claim builds task title, body and target immediately before `deliverGamePush`.
+That owner rechecks current route, session, permission, capability and expiry.
+No retry releases the claim; only content-free outcomes are recorded. The push
+alone requests default sound. Deploy the additive defaulted columns and Web
+before enabling capability in native clients. No runner change is needed.
+
 ### Weekly game post notifications
 
 The posting transaction includes the candidate in the canonical entry snapshot
@@ -6231,7 +6258,7 @@ participation, real day, candidate, reporter mask, block mask and milestone.
 Group completion is suppressed if any eligible peer is blocked. A stale send,
 crash or uncertain provider result never releases its claims. Recipients are
 processed sequentially; provider work stays outside transactions. No names or
-content enter pushes. Pair copy continues to derive from permanent
+content enter post pushes. Daily reminders may include the recipient's own task words. Pair copy continues to derive from permanent
 `hasUnlockedDay`; group completion derives from live submitted artifacts.
 Missed-day chat uses the separate canonical room collector described below;
 it does not create additional push receipts.
