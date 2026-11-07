@@ -107,15 +107,15 @@ describe.skipIf(!RUN_LIVE)("hosted Linq ack reaction, live", () => {
   it("reacts to ordinary requests within about a second of receipt", async () => {
     const requests = [
       ["remind me to take my meds at 9", "⏰"],
-      ["how did i sleep last night", "📊"],
-      ["what's my resting heart rate been this week", "📊"],
+      ["how did i sleep last night", "👀"],
+      ["what's my resting heart rate been this week", "👀"],
       ["can you find a good high protein breakfast at starbucks", "🔎"],
       ["make me a 4 week half marathon plan", "📝"],
       ["add a gym session to my calendar tomorrow at 7am", "📅"],
       ["make me a song about leg day", "🎶"],
       ["draw me as a superhero lifting weights", "🎨"],
       ["remind me to stretch before bed", "⏰"],
-      ["what were my steps yesterday", "📊"],
+      ["what were my steps yesterday", "👀"],
       ["change my step goal to 9k", "👍"],
     ] as const;
     const results = await Promise.all(requests.map(([text]) => inbound(`live-${randomUUID()}`, text)));

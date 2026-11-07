@@ -54,7 +54,7 @@ export const HOSTED_LINQ_ACK_REACTION_EMOJI: Readonly<
   do: HOSTED_LINQ_ACK_REACTION_LIKE,
   look: "👀",
   make: "📝",
-  my_data: "📊",
+  my_data: "👀",
   picture: "🎨",
   reminder: "⏰",
   research: "🔎",
