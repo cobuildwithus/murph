@@ -3,9 +3,7 @@ import {
   parseHostedEmailRouteResolutionCallbackRequest,
 } from "@murphai/hosted-execution/hosted-email";
 import {
-  isHostedEmailAuthenticatedSenderVerdictAccepted,
   resolveHostedEmailDirectSenderLookupAddress,
-  resolveHostedEmailInboundSenderAddress,
 } from "@murphai/runtime-state";
 
 import {
@@ -43,15 +41,31 @@ export const POST = withJsonError(async (request: Request) => {
     await readOptionalJsonObject(request),
   );
 
+  const senderAddress = resolveHostedEmailDirectSenderLookupAddress({
+    authenticatedSender: body.authenticatedSender,
+    envelopeFrom: body.envelopeFrom,
+    hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
+    headerFrom: body.headerFrom,
+  });
+  if (!senderAddress) {
+    return jsonOk({ userId: null });
+  }
+
   const prisma = getPrisma();
-  const aliasKey = body.aliasKey?.trim() ?? "";
-  const groupId = body.groupId?.trim() ?? "";
+  const aliasKey = body.aliasKey ?? "";
+  const groupId = body.groupId ?? "";
 
   if (aliasKey) {
     const candidateMemberId = await readHostedMemberIdByReplyAliasLookupKey({
       prisma,
       replyAliasLookupKey: aliasKey,
     });
+    const senderMember = candidateMemberId
+      ? await lookupHostedMemberByVerifiedEmailAddress({ address: senderAddress, prisma, projection: "core" })
+      : null;
+    if (!candidateMemberId || senderMember?.core.id !== candidateMemberId) {
+      return jsonOk({ userId: null });
+    }
     const memberId = await resolveHostedEmailRouteMemberUserId({
       memberId: candidateMemberId,
       prisma,
@@ -67,15 +81,6 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   if (groupId) {
-    const senderAddress = resolveHostedEmailInboundSenderAddress({
-      envelopeFrom: body.envelopeFrom,
-      hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
-      headerFrom: body.headerFrom,
-    });
-    if (!senderAddress) {
-      return jsonOk({ userId: null });
-    }
-
     const senderMember = await lookupHostedMemberByVerifiedEmailAddress({
       address: senderAddress,
       prisma,
@@ -129,22 +134,10 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(body.authenticatedSender)) {
-    return jsonOk({ userId: null });
-  }
-
-  const senderAddress = resolveHostedEmailDirectSenderLookupAddress({
-    authenticatedSender: body.authenticatedSender,
-    envelopeFrom: body.envelopeFrom,
-    hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
-    headerFrom: body.headerFrom,
+  const candidateMemberId = await readHostedMemberIdByAuthorizedDirectPublicSenderAddress({
+    address: senderAddress,
+    prisma,
   });
-  const candidateMemberId = senderAddress
-    ? await readHostedMemberIdByAuthorizedDirectPublicSenderAddress({
-      address: senderAddress,
-      prisma,
-    })
-    : null;
   const userId = await resolveHostedEmailRouteMemberUserId({
     memberId: candidateMemberId,
     prisma,
