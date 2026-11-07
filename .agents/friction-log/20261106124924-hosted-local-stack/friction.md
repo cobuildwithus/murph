@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local stack tunnel assertion depends on the Vitest launch directory'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4681'
 ---
 
 ## Expected Behavior

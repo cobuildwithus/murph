@@ -1,6 +1,7 @@
 ---
 title: 'Prepared live runtime omits the production CLI prompt contract'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4551'
 ---
 
 ## Expected Behavior

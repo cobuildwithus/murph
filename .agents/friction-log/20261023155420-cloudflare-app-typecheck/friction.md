@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare app typecheck fails on ungenerated Web Prisma client'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4338'
 ---
 
 ## Expected Behavior

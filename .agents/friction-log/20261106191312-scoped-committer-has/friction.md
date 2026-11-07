@@ -1,6 +1,7 @@
 ---
 title: 'Scoped committer has no amend mode for an owned local commit'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4716'
 ---
 
 ## Expected Behavior

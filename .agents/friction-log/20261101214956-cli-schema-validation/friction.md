@@ -1,6 +1,7 @@
 ---
 title: 'CLI schema validation hides actionable authored retry guidance'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4440'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Recap browser test expects obsolete not-found punctuation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4432'
 ---
 
 ## Expected Behavior

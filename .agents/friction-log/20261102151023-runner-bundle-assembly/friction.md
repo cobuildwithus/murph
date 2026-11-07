@@ -1,6 +1,7 @@
 ---
 title: 'Runner bundle assembly cannot request offline dependency resolution'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4474'
 ---
 
 ## Expected Behavior

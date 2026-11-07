@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare artifact tests race CLI verification in the same checkout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4472'
 ---
 
 ## Expected Behavior

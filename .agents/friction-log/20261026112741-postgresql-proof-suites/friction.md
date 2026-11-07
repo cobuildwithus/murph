@@ -1,6 +1,7 @@
 ---
 title: 'PostgreSQL proof suites accept different local database names'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4369'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Native container read failures lose diagnostic boundaries'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4324'
 ---
 
 ## Expected Behavior

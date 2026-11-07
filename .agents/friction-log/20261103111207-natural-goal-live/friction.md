@@ -1,6 +1,7 @@
 ---
 title: 'Natural goal live journey can pass without Commons artifacts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4515'
 ---
 
 ## Expected Behavior

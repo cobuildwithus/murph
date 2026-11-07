@@ -1,6 +1,7 @@
 ---
 title: 'CLI parallel test wrapper advertises an unusable each helper'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4301'
 ---
 
 ## Expected Behavior

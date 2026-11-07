@@ -1,6 +1,7 @@
 ---
 title: 'Game PostgreSQL fixtures leave lifecycle receipts that starve later drain proofs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4584'
 ---
 
 ## Expected Behavior
