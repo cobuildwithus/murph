@@ -251,6 +251,42 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Active Max member can switch to a lower plan at renewal"
+        state="active-max-switch-plan"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canManageBilling
+            canSwitchToEdge
+            canSwitchToPulse
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_max_monthly"
+            currentPeriodEnd={new Date("2026-12-07T20:00:00.000Z")}
+            showMaxPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Canceled member can choose a new plan through Checkout"
+        state="canceled-plan-restart"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="canceled"
+            canManageBilling
+            canStartDirectPlan
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_max_monthly"
+            showMaxPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Max stays active until the scheduled Edge downgrade"
         state="active-max-scheduled-edge"
       >
@@ -575,7 +611,7 @@ function StudyState(props: {
   state: string;
 }) {
   return (
-    <div className="flex flex-col gap-3" data-design-state={props.state}>
+    <div className="flex flex-col gap-3" data-design-state={props.state} id={`group-member-plan-${props.state}`}>
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>

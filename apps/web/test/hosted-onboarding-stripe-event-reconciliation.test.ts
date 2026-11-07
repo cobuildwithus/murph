@@ -3302,6 +3302,36 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
+  it.each([true, false])("keeps only exact replacement identity pending beyond the normal retry budget (matches=%s)", async (matches) => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionUpdatedEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue({
+      id: "sub_restarted", customer: "cus_existing", status: "active",
+      metadata: {
+        memberId: "member_123", replacesSubscriptionId: "sub_canceled",
+        checkoutAttemptId: "attempt_restart", checkoutIntentHash: "intent_restart",
+      },
+    });
+    mocks.findMemberForStripeSubscription.mockResolvedValue(null);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue({
+      core: { id: "member_123", billingStatus: "canceled" },
+      billingRef: {
+        memberId: "member_123", stripeSubscriptionId: "sub_canceled",
+        stripeCustomerId: "cus_existing", checkoutAttemptId: "attempt_restart",
+        checkoutIntentHash: matches ? "intent_restart" : "other_intent",
+      },
+    });
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 100;
+    await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
+      .resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]?.status).toBe(matches ? HostedStripeEventStatus.failed : HostedStripeEventStatus.poisoned);
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
   it("does not let an unowned subscription handler rediscover a member without its lock", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionUpdatedEvent();

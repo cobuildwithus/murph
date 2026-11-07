@@ -243,6 +243,27 @@ describe("hosted onboarding stripe billing lookup", () => {
     });
   });
 
+  it.each(["canceled", "active"] as const)("ignores the old cancellation after replacement Checkout binds, even while billing is %s", async (billingStatus) => {
+    const snapshot = makeMemberSnapshot({
+      billingRef: makeBillingRef({
+        stripeCustomerId: "cus_existing",
+        stripeSubscriptionId: "sub_restarted",
+      }),
+      core: makeHostedMemberCoreState({ billingStatus }),
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(snapshot);
+    mocks.lookupHostedMemberStripeBillingRefByStripeCustomerId.mockResolvedValue({
+      ...snapshot, matchedBy: "stripeCustomerId",
+    });
+    await expect(findMemberForStripeSubscription({
+      prisma: {} as never,
+      subscription: makeStripeSubscription({
+        id: "sub_canceled", customer: "cus_existing", status: "canceled",
+        metadata: { memberId: "member_123" },
+      }),
+    })).resolves.toBeNull();
+  });
+
   it("does not let subscription customer lookup rebind a member that already has a different subscription", async () => {
     const core = makeHostedMemberCoreState({
       billingStatus: "active",
@@ -526,7 +547,7 @@ function makeBillingRef(
 }
 
 function makeHostedMemberCoreState(overrides?: Partial<{
-  billingStatus: "active" | "incomplete";
+  billingStatus: "active" | "incomplete" | "canceled";
   id: string;
 }>) {
   return {
@@ -572,12 +593,13 @@ function makeStripeSubscription(
     customer: string;
     id: string;
     metadata: Record<string, string>;
+    status: Stripe.Subscription.Status;
   }>,
 ): Stripe.Subscription {
   return {
     customer: overrides?.customer ?? "cus_123",
     id: overrides?.id ?? "sub_123",
     metadata: overrides?.metadata ?? {},
-    status: "active",
+    status: overrides?.status ?? "active",
   } as Stripe.Subscription;
 }

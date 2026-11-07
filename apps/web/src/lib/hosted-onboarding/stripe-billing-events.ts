@@ -588,6 +588,7 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     checkoutAttemptId,
     checkoutIntentHash,
     checkoutSessionId: input.session.id,
+    replacesSubscriptionId: normalizeNullableString(input.session.metadata?.replacesSubscriptionId),
     currentCheckoutOffer:
       input.currentCheckoutOffer ?? HOSTED_STANDARD_CHECKOUT_OFFER,
     eventCreatedAt: dispatchContext.eventCreatedAt,

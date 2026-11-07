@@ -1,0 +1,51 @@
+# Restore billing plan selection and renewal switches
+
+Status: active
+Created: 2026-11-07
+Updated: 2026-11-07
+
+## Goal
+
+Restore a usable selected-plan Checkout for terminally canceled direct members, and distinguish renewal switches from payment-method management.
+
+## Scope and constraints
+
+Website only. Keep Stripe authoritative for billing and renewal timing. Retain the existing customer and checkout attempt owner; verify terminal subscription ownership before admitting replacement Checkout. Never alter live subscriptions, cards, or payments while developing. No new persisted state, dependency, or background job.
+
+## Product UX
+
+- Outcome: a canceled member chooses a plan and reviews its actual Stripe Checkout instead of reaching a payment-method-only Portal page.
+- Entry and promise: Settings presents eligible plan choices. A paid Max member can schedule Edge at renewal with a visible confirmation; cancellation is unnecessary. Portal stays clearly labeled as billing management.
+- Affected people: canceled direct members, active Max and Edge members, pending or delinquent billing, sponsored/Family owners, stale or concurrently changing subscription authority.
+- Proof: focused UI, route, service, store and webhook tests, plus synthetic rendering. Verify expired/replayed Checkout, rejected nonterminal subscriptions, customer mismatch, concurrent owner changes and existing Family/effect guards.
+- Done when: exact-target Checkout and renewal-schedule journeys work without duplicate subscription admission or optimistic entitlement changes.
+
+## Tasks
+
+1. Prove canceled-state dead end and trace existing downgrade paths.
+2. Restore terminal-canceled checkout through existing authority owners and test races.
+3. Remove misleading plan-choice Portal fallbacks and make renewal switches explicit.
+4. Verify saved-payment-method reuse without deleting existing cards.
+5. Complete focused proof, review, changelog and draft PR; report separate deployment gaps.
+
+## Findings
+
+- Canceled accounts are navigation-recoverable but were denied new checkout, leaving generic Portal fallback under Choose Pulse/Edge.
+- Max-to-Edge already uses a Stripe renewal schedule. Preserve this owner and prove the composed plan-card action.
+- Card count and the cause of the original failed downgrade remain unverified. Do not invent a duplicate-card cleanup fix.
+
+## Verification
+
+- UI and downgrade paths: 124 focused tests passed; after presentation-only extraction, the 78 component tests passed again.
+- Scoped web UI lint and diff whitespace checks passed. Combined authored-source complexity guard passed with no debt increase.
+- Native browser inspection: real production billing component in synthetic account study, desktop plan grid and narrow stacked cards at 400% browser zoom. Canceled Choose Edge remains distinct from Manage billing; active Max shows renewal switch copy and Switch to Edge/Pulse.
+- Backend final suite: 278 tests across service, Settings page, Stripe lookup, Checkout completion and event reconciliation passed after event-ordering and completion-replay corrections. Final web typecheck and scoped lint passed (existing unused-variable warnings only).
+- Exact-head CI, external billing review and hosted preview publication remain pending. No live billing changes performed.
+
+## Deployment contract
+
+The Web app owns both checkout admission and Stripe reconciliation. Workflow input is an immutable event ID; old in-flight workflows cannot consume later-created replacement events. A minute cron also processes due receipts. Promote new checkout, webhook and cron admissions together and allow old invocations to drain. Once recovery checkout is enabled, do not roll back the consumer below replacement-aware code. If new-request routing cannot guarantee this, deploy the consumer before the producer. No schema, persistent flag or iOS release is needed.
+
+## Remaining evidence limits
+
+Live Stripe Dashboard is not signed in. Historical card count and original failed downgrade cannot be verified, and no card cleanup is claimed. Checkout keeps the existing customer and existing saved-card consent policy. UI tests use synthetic provider responses; no real subscription, payment, card or entitlement was changed.

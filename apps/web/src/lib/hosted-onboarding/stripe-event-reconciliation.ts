@@ -96,6 +96,7 @@ import {
   HostedStripeCheckoutLoserCleanupPendingError,
   refundHostedExactOrdinaryInvoicePayment,
 } from "./stripe-checkout-loser-cleanup";
+import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -1444,6 +1445,25 @@ function unwrapHostedStripeOperationalError(error: unknown): unknown {
   return current;
 }
 
+async function throwHostedStripeBillingOwnerUnavailable(input: {
+  prisma: PrismaClient;
+  subscription: Stripe.Subscription | null;
+}): Promise<never> {
+  const metadata = input.subscription?.metadata;
+  if (metadata?.replacesSubscriptionId && metadata.memberId && metadata.checkoutAttemptId && metadata.checkoutIntentHash) {
+    const member = await readHostedMemberBillingSnapshot({ memberId: metadata.memberId, prisma: input.prisma });
+    const ref = member?.billingRef;
+    if (member?.core.billingStatus === "canceled"
+      && ref?.stripeSubscriptionId === metadata.replacesSubscriptionId
+      && ref.stripeCustomerId === coerceStripeObjectId(input.subscription?.customer)
+      && ref.checkoutAttemptId === metadata.checkoutAttemptId
+      && ref.checkoutIntentHash === metadata.checkoutIntentHash) {
+      throw new HostedStripeSubscriptionIdentityPendingError("Replacement subscription is waiting for its reserved Checkout completion.");
+    }
+  }
+  throw new Error("Canonical Stripe billing owner was unavailable for locked processing.");
+}
+
 async function processHostedStripeEventWithDiscoveredMemberLock(
   stripeEvent: Stripe.Event,
   prisma: PrismaClient,
@@ -1499,7 +1519,10 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
         result: buildEmptyHostedStripeEventProcessingResult(),
       };
     }
-    throw new Error("Canonical Stripe billing owner was unavailable for locked processing.");
+    await throwHostedStripeBillingOwnerUnavailable({
+      prisma,
+      subscription: processingContext.canonicalSubscription,
+    });
   }
 
   const preparedFamilyCryptoDomainRoots = processingContext.canonicalSubscription
