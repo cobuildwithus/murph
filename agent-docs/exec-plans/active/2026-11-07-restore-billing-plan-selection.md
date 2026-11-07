@@ -40,7 +40,8 @@ Website only. Keep Stripe authoritative for billing and renewal timing. Retain t
 - Scoped web UI lint and diff whitespace checks passed. Combined authored-source complexity guard passed with no debt increase.
 - Native browser inspection: real production billing component in synthetic account study, desktop plan grid and narrow stacked cards at 400% browser zoom. Canceled Choose Edge remains distinct from Manage billing; active Max shows renewal switch copy and Switch to Edge/Pulse.
 - Backend final suite: 278 tests across service, Settings page, Stripe lookup, Checkout completion and event reconciliation passed after event-ordering and completion-replay corrections. Final web typecheck and scoped lint passed (existing unused-variable warnings only).
-- Draft PR: https://github.com/cobuildwithus/murph/pull/4735. Exact-head CI, external billing review and hosted preview publication remain pending. No live billing changes performed.
+- PR: https://github.com/cobuildwithus/murph/pull/4735. All 36 code/build checks passed on the initial candidate. Hosted design evidence and final external billing review remain release gates. No live billing changes performed.
+- Preview build succeeded, but an existing Telegram welcome study loaded the full hosted environment merely to format a public bot URL. Reuse the narrow username parser so synthetic rendering requires no privacy secrets; preserve full runtime validation for webhook and authenticated paths.
 
 ## Deployment contract
 

@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
+
+import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url");
 
@@ -298,6 +300,39 @@ describe("readHostedOnboardingEnvironment", () => {
         HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://user:pass@join.example.test",
       })),
     ).toThrow(/must not include embedded credentials/u);
+  });
+});
+
+describe("public Telegram bot links", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("formats the public bot link without contact privacy keys", () => {
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", undefined);
+    vi.stubEnv("MURPH_TELEGRAM_USERNAME_OVERRIDE", " @murphdevelopment_bot ");
+    vi.stubEnv("TELEGRAM_BOT_USERNAME", "murph_bot");
+
+    expect(buildHostedTelegramBotLink()).toBe("https://t.me/murphdevelopment_bot");
+    expect(() => readHostedOnboardingEnvironment(process.env))
+      .toThrow(/HOSTED_CONTACT_PRIVACY_KEYS/u);
+  });
+
+  it("retains legacy fallback, start trimming/encoding and empty-start behavior", () => {
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", undefined);
+    vi.stubEnv("MURPH_TELEGRAM_USERNAME_OVERRIDE", "not valid");
+    vi.stubEnv("TELEGRAM_BOT_USERNAME", " @murph_bot ");
+
+    expect(buildHostedTelegramBotLink(" invite token+123 "))
+      .toBe("https://t.me/murph_bot?start=invite+token%2B123");
+    expect(buildHostedTelegramBotLink("   ")).toBe("https://t.me/murph_bot");
+    expect(buildHostedTelegramBotLink(null)).toBe("https://t.me/murph_bot");
+  });
+
+  it.each([undefined, "", "  ", "invalid username"])("returns null for missing or invalid username %s", (username) => {
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", undefined);
+    vi.stubEnv("MURPH_TELEGRAM_USERNAME_OVERRIDE", undefined);
+    vi.stubEnv("TELEGRAM_BOT_USERNAME", username);
+
+    expect(buildHostedTelegramBotLink("start-token")).toBeNull();
   });
 });
 
