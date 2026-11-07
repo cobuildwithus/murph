@@ -176,7 +176,7 @@ export async function readGameReminders(memberId: string, db: Db = getPrisma()):
     canText, offGameIds: seats.map(seat => seat.gameId) };
 }
 
-/** A game never grants private AI access or creates a new direct route. */
+/** A game never grants private AI access or creates a new direct route. Linq only: its egress holds the final game and pause checks. */
 export async function canTextGameReminders(memberId: string, db: Db = getPrisma()): Promise<boolean> {
   if (process.env.MURPH_GAME_PRIVATE_REMINDERS_ENABLED !== "true") return false;
   const [access, usage, destination] = await Promise.all([
@@ -186,7 +186,7 @@ export async function canTextGameReminders(memberId: string, db: Db = getPrisma(
   ]);
   if (!access.allowed || usage.status !== "allowed" || destination?.conversationShape !== "direct-member"
     || destination.route.delivery.kind !== "thread" || !destination.route.threadIsDirect
-    || (destination.route.channel !== "linq" && destination.route.channel !== "telegram")) return false;
+    || destination.route.channel !== "linq") return false;
   try {
     await assertHostedDirectAssistantNotificationRouteAuthority({ authority: {
       channel: destination.route.channel, containerMemberId: memberId, threadId: destination.route.delivery.target,

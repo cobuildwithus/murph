@@ -6,7 +6,7 @@ vi.mock("@/src/lib/game/service", async original => ({
 }));
 import { getPrisma } from "@/src/lib/prisma";
 import { sealGameText } from "@/src/lib/game/crypto";
-import { activatePrivateGamePlayers, isPrivateKickoffCurrentTx, privateKickoffEventId, reconcilePrivateGameActivations } from "@/src/lib/game/private-kickoff";
+import { activatePrivateGamePlayers, isPrivateKickoffCurrentTx, privateKickoffEventId, publishPrivateKickoff, reconcilePrivateGameActivations } from "@/src/lib/game/private-kickoff";
 import { readMyGameReminderProjection } from "@/src/lib/game/direct-tool";
 import { runGameCommand } from "@/src/lib/game/service";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -113,6 +113,16 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     expect(await receipt(invalidZone, c)).toBeNull();
   });
 
+  it("waits for morning when a queued offer reaches publication after 9pm", async () => {
+    const a = await member("Alex"), b = await member("Sam");
+    const start = new Date("2026-11-06T20:59:00Z");
+    const id = await game([a, b], { startedAt: start });
+    await activatePrivateGamePlayers(id, start);
+    expect((await receipt(id, a))?.retryAfterAt).toEqual(start);
+    expect(await publishPrivateKickoff(id, a, new Date("2026-11-06T21:05:00Z"))).toBe(false);
+    expect((await receipt(id, a))?.retryAfterAt).toEqual(new Date("2026-11-07T09:00:00Z"));
+  });
+
   it("projects only the requesting member's task and own status", async () => {
     const a = await member("Alex"), b = await member("Sam");
     const id = await game([a, b]);
@@ -136,6 +146,9 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: a } }, data: { leftAt: now } });
     expect(await current()).toBe(false);
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: a } }, data: { leftAt: null } });
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "someone-else");
+    expect(await current()).toBe(false);
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     await db.game.update({ where: { id }, data: { status: "settled" } });
     expect(await current()).toBe(false);
     expect(await db.$transaction(tx => isPrivateKickoffCurrentTx(policy, tx, new Date(policy.expiresAt)))).toBe(false);

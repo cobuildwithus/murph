@@ -121,7 +121,7 @@ export async function publishPrivateEveningCheckIn(memberId: string, date: strin
   if (games.length !== policy.batch.length) return false;
   const destination = await resolveHostedAssistantNotificationDestination({ memberId });
   if (!destination || destination.conversationShape !== "direct-member" || destination.route.delivery.kind !== "thread"
-    || (destination.route.channel !== "linq" && destination.route.channel !== "telegram")) return false;
+    || destination.route.channel !== "linq") return false;
   const bound = bindHostedAssistantNotificationDestination({ destination, memberId });
   const instructions = buildGamePrivateEveningInstructions({ tasks: games.map(game => game.task) });
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma: db, envelope: buildHostedExecutionAssistantNotificationRequestedWake({
@@ -129,7 +129,7 @@ export async function publishPrivateEveningCheckIn(memberId: string, date: strin
       deliveryDedupeToken: eventId, deliveryIdempotencyKey: eventId, deliveryDispatchMode: "queue-only" },
   }) });
   const appended = await db.$transaction(async tx => {
-    await assertHostedDirectAssistantNotificationRouteAuthority({ authority: { channel: destination.route.channel as "linq" | "telegram",
+    await assertHostedDirectAssistantNotificationRouteAuthority({ authority: { channel: "linq",
       containerMemberId: memberId, threadId: destination.route.delivery.target }, prisma: tx, requireThreadDelivery: true });
     if (!await isPrivateEveningCurrentTx(policy, tx, now)) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });

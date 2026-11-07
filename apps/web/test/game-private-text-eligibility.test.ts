@@ -16,7 +16,7 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async ori
 import { canTextGameReminders, readGameReminders, runGameCommand } from "@/src/lib/game/service";
 import { getPrisma } from "@/src/lib/prisma";
 
-const route = { actorId: null, channel: "telegram", delivery: { kind: "thread", target: "synthetic-chat" },
+const route = { actorId: null, channel: "linq", delivery: { kind: "thread", target: "synthetic-chat" },
   identityId: "synthetic-identity", threadId: "synthetic-chat", threadIsDirect: true };
 
 describe("private game text eligibility", () => {
@@ -34,13 +34,15 @@ describe("private game text eligibility", () => {
     const memberId = "member-synthetic";
     expect(await canTextGameReminders(memberId)).toBe(true);
     expect(m.assertRoute).toHaveBeenCalledWith(expect.objectContaining({ requireThreadDelivery: true,
-      authority: { channel: "telegram", containerMemberId: memberId, threadId: "synthetic-chat" } }));
+      authority: { channel: "linq", containerMemberId: memberId, threadId: "synthetic-chat" } }));
     vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "TRUE");
     expect(await canTextGameReminders(memberId)).toBe(false);
     vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "true");
     m.access.mockResolvedValueOnce({ allowed: false });
     expect(await canTextGameReminders(memberId)).toBe(false);
     m.usage.mockResolvedValueOnce({ status: "exhausted" });
+    expect(await canTextGameReminders(memberId)).toBe(false);
+    m.destination.mockResolvedValueOnce({ conversationShape: "direct-member", route: { ...route, channel: "telegram" } });
     expect(await canTextGameReminders(memberId)).toBe(false);
     m.destination.mockResolvedValueOnce(null);
     expect(await canTextGameReminders(memberId)).toBe(false);

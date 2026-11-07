@@ -119,8 +119,9 @@ export async function reconcilePrivateGameActivations(now = new Date(), options:
 
 export async function isPrivateKickoffCurrentTx(policy: HostedGamePrivateKickoffPolicy, tx: Prisma.TransactionClient, now: Date): Promise<boolean> {
   if (!enabled() || now >= new Date(policy.expiresAt) || !await canTextGameReminders(policy.memberId, tx)) return false;
-  const game = await tx.game.findUnique({ where: { id: policy.gameId }, select: { status: true, players: { where: { memberId: policy.memberId, leftAt: null }, select: { memberId: true } } } });
-  return game?.status === "live" && game.players.length === 1;
+  const game = await tx.game.findUnique({ where: { id: policy.gameId }, select: { status: true, invitees: { select: { memberId: true } },
+    players: { select: { memberId: true, leftAt: true } } } });
+  return game?.status === "live" && isGameOn(game) && game.players.some(player => player.memberId === policy.memberId && !player.leftAt);
 }
 
 export async function readPrivateKickoffDeliveryAuthority(eventId: string, memberId: string) {
@@ -132,6 +133,14 @@ export async function readPrivateKickoffDeliveryAuthority(eventId: string, membe
 
 export async function publishPrivateKickoff(gameId: string, memberId: string, now: Date): Promise<boolean> {
   const db = getPrisma(), eventId = privateKickoffEventId(gameId, memberId);
+  // A receipt reserved just before 9pm can reach here after it.
+  const zone = await db.gameProfile.findUnique({ where: { memberId }, select: { timeZone: true } });
+  const due = zone && morningAfter(now, zone.timeZone);
+  if (!due) return false;
+  if (due > now) {
+    await db.hostedLinqDelivery.updateMany({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)!, status: "awaiting_generation" }, data: { retryAfterAt: due } });
+    return false;
+  }
   const marker = await db.gameEvent.findUnique({ where: { commandKey: activationKey(gameId, memberId) }, select: { payload: true } });
   const kind = marker?.payload && typeof marker.payload === "object" && !Array.isArray(marker.payload) ? marker.payload.messageKind : null;
   if (kind !== "new_person" && kind !== "new_rhythm") return false;
@@ -145,7 +154,7 @@ export async function publishPrivateKickoff(gameId: string, memberId: string, no
   if (!own) return false;
   const destination = await resolveHostedAssistantNotificationDestination({ memberId });
   if (!destination || destination.conversationShape !== "direct-member" || destination.route.delivery.kind !== "thread"
-    || (destination.route.channel !== "linq" && destination.route.channel !== "telegram")) return false;
+    || destination.route.channel !== "linq") return false;
   const bound = bindHostedAssistantNotificationDestination({ destination, memberId });
   const instructions = buildGamePrivateKickoffInstructions({ messageKind: kind, task: own.task, otherFirstNames: own.otherFirstNames });
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma: db, envelope: buildHostedExecutionAssistantNotificationRequestedWake({
@@ -153,7 +162,7 @@ export async function publishPrivateKickoff(gameId: string, memberId: string, no
       deliveryDedupeToken: eventId, deliveryIdempotencyKey: eventId, deliveryDispatchMode: "queue-only" },
   }) });
   const appended = await db.$transaction(async tx => {
-    await assertHostedDirectAssistantNotificationRouteAuthority({ authority: { channel: destination.route.channel as "linq" | "telegram",
+    await assertHostedDirectAssistantNotificationRouteAuthority({ authority: { channel: "linq",
       containerMemberId: memberId, threadId: destination.route.delivery.target }, prisma: tx, requireThreadDelivery: true });
     if (!await isPrivateKickoffCurrentTx(policy, tx, now)) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });

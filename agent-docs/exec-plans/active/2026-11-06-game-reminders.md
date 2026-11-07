@@ -167,6 +167,8 @@ Order: additive Web support with producers off, then the runner, then enable.
   tied to the room. Results say whether the saved reminder will reach the player.
 - New game reminder requests go to `setReminders`, not ordinary room automations,
   once that path is live. Bounded legacy automations expire on their own.
+- Private messages are Linq only. Telegram has no final game or pause check at
+  egress, so `canText` is false there and the push still goes.
 - Private check-in: `game_private_evening`, event per member and date, for open
   games no room check-in covers, when `reminder_text` and `canText` hold, on an
   existing thread (`requireThreadDelivery: true`). Same witness and pause rules.
