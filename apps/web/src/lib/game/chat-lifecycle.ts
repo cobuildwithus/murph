@@ -4,8 +4,9 @@ import { groupGameRecapPlayers } from "./recap-cohort";
 
 import { isPairRoster, isGameMemberSet } from "./roster";
 import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
+import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
-import { parseGameRecapEventId, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { openGameTexts } from "./crypto";
 import { readCurrentGameTalk, readGameTalkReceiptIdentity, prepareGameTalkAudience, type GameNoticeAudience } from "./talk";
@@ -24,8 +25,9 @@ import { parsePendingGameChange } from "./changes";
 import { deliverGameChangeProposal, readGameProposalDeliveryPlayers } from "./chat-delivery";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { currentTerms, parseStoredTerms, gameChallengeKey, isGameInviteExpired } from "./rules";
-import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
+import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx, prepareGroupMissedDay, readGroupMissedDayDeliveryAuthority } from "./group-missed-day";
+import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority } from "./evening-check-in";
 import { isMissedCheckInExpired } from "./missed-check-in";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { deriveHostedOnboardingTimingErrorName, logHostedOnboardingDiagnostic, logHostedOnboardingWarning } from "../hosted-onboarding/logging";
@@ -54,7 +56,7 @@ const LIFECYCLE_FROZEN_BATCH = 1;
  * process (for example one written by a newer build before a rollback) must
  * never become the oldest due row that every sweep picks and skips.
  */
-const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_challenge"];
+const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_evening", "game_challenge"];
 
 /** The existing minute sweep recovers accepted intent even if the app never returns. */
 export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now?: Date; signal?: AbortSignal } = {}): Promise<{ attempted: number; queued: number; deferred: number }> {
@@ -68,6 +70,8 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   const { reserveDueGameMissedDayCheckIns } = await import("./service");
   const [missed] = await Promise.allSettled([
     reserveDueGameMissedDayCheckIns(now),
+    import("./evening-check-in").then(({ reserveDueGameEveningCheckIns }) => reserveDueGameEveningCheckIns(now,
+      { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch((error: unknown) => logLifecycleItemFailure("game_evening", error)),
     import("./reminder-notification").then(({ sendDueGameReminders }) => sendDueGameReminders(now,
       { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch(() => {}),
   ]);
@@ -125,7 +129,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   return { attempted, queued, deferred: attempted - queued };
 }
 
-type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey" | "createdAt" | "payloadOwnerMemberId">;
+type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey" | "createdAt" | "attemptedAt" | "payloadOwnerMemberId">;
 
 /** One line per failed item. The class or fixed code says what broke; messages can carry identifiers, so they stay out. */
 function logLifecycleItemFailure(template: string | null, error: unknown): void {
@@ -137,7 +141,8 @@ function logLifecycleItemFailure(template: string | null, error: unknown): void 
  * Workers run in parallel, so a later notice must not overtake an earlier one in the same chat: the oldest due receipt of
  * each chat, then the limit, so a chat with a long backlog takes one slot and hides no other chat. Its own queue still
  * moves one receipt a pass. `payloadOwnerMemberId` is unset on most receipts until they publish, so the chat comes from the
- * game binding, or the room in a group check-in's reference. Receipts with no known chat are NULL here and collapse into
+ * game binding. Group missed-day and evening receipts carry the room owner; older group receipts can fall back to their
+ * room reference. Receipts with no known chat are NULL here and collapse into
  * one shared slot. The query reads every due row, so its cost grows with the backlog, with no provider or crypto work in
  * it. Only the outer limit may cut rows: a limit before the dedupe would let one chat's backlog hide every other chat.
  */
@@ -146,7 +151,7 @@ export async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date):
     WITH oldest AS (
       SELECT DISTINCT ON (chat) id, attempted_at FROM (
         SELECT due.id, due.attempted_at,
-          CASE WHEN due.template = 'game_group_missed' THEN split_part(due.source_ref, ':', 1) ELSE game.chat_container_member_id END AS chat
+          CASE WHEN due.template IN ('game_group_missed', 'game_evening') THEN COALESCE(due.payload_owner_member_id, split_part(due.source_ref, ':', 1)) ELSE game.chat_container_member_id END AS chat
         FROM hosted_linq_delivery due LEFT JOIN game ON game.id = split_part(due.source_ref, ':', 1)
         WHERE due.source = 'game_lifecycle' AND due.template = ANY(${LIFECYCLE_TEMPLATES}::text[]) AND due.source_ref IS NOT NULL
           AND ((due.status = 'awaiting_generation' AND (due.retry_after_at IS NULL OR due.retry_after_at <= ${now}::timestamp))
@@ -159,6 +164,7 @@ export async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date):
 }
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
+  if (receipt.template === "game_evening") return processEveningCheckInIntent(receipt, now);
   if (receipt.template === "game_group_missed") return processGroupMissedDayIntent(receipt, now);
   if (receipt.template === "game_talk") return processGameTalkIntent(receipt, now, prisma);
   if (receipt.template === "game_challenge") return processGameChallengeIntent(receipt, now, prisma);
@@ -181,6 +187,25 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, kind), now, kind)
     : deliverGameChatLifecycle(gameId, kind, undefined, now);
+}
+
+async function processEveningCheckInIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
+  const parts = /^([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(receipt.sourceRef ?? "");
+  if (!parts) return false;
+  const [, roomId, date] = parts;
+  const eventId = gameEveningEventId(roomId, date);
+  if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
+  const expiresAt = new Date(receipt.createdAt.getTime() + 30 * 60_000);
+  if (now >= expiresAt) {
+    const published = receipt.status === "generation_queued";
+    if (!published && await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: roomId })) return false;
+    await getPrisma().hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: receipt.status },
+      data: published ? { retryAfterAt: null } : { status: "skipped", skippedAt: now, skipReason: "game_evening_expired", retryAfterAt: null } });
+    return false;
+  }
+  return receipt.status === "generation_queued"
+    ? recoverGameNotificationWake(receipt.id, roomId, eventId, now, "missed")
+    : deliverGameEveningLifecycle(roomId, date, now);
 }
 
 async function processPairMissedDayIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
@@ -282,12 +307,7 @@ async function isGroupRematchRevisionCurrent(game: Pick<Game, "maxPlayers" | "te
 /** Publishing and the first signal can fail separately; retry the pointer only. */
 async function recoverGameNotificationWake(receiptId: string, gameId: string, eventId: string, now: Date, kind: GameChatLifecycleKind | "proposal"): Promise<boolean> {
   const prisma = getPrisma();
-  if (/^game-missed:[^:]+:group:/u.test(eventId)) {
-    const authority = await readGroupMissedDayDeliveryAuthority(eventId, gameId);
-    const current = authority && await prisma.$transaction(tx => isGroupMissedDayBatchCurrentTx(authority.policy, authority.audience, tx, now));
-    if (!current) return supersedeMissedDay(eventId, now);
-    return recoverGameNotificationPointer(receiptId, gameId, eventId);
-  }
+  if (isRoomCheckInEvent(eventId)) return recoverRoomCheckInWake(receiptId, gameId, eventId, now);
   const notice = parseGameResolutionNotice(eventId);
   const resolution = notice ? await readGameChangeResolution(prisma, notice.gameId, notice.proposalId) : null;
   const game = notice ? resolution?.game : await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { take: 11 } } });
@@ -302,6 +322,24 @@ async function recoverGameNotificationWake(receiptId: string, gameId: string, ev
   const room = game.chatContainerMemberId;
   return recoverGameNotificationPointer(receiptId, room, eventId, game.maxPlayers === 10 ? undefined
     : async () => requireExactChat(room, await readPairGamePhones(lifecyclePlayerMemberIds(game, kind), prisma)));
+}
+
+function isRoomCheckInEvent(eventId: string): boolean {
+  return eventId.startsWith("game-evening:") || /^game-missed:[^:]+:group:/u.test(eventId);
+}
+
+async function recoverRoomCheckInWake(receiptId: string, roomId: string, eventId: string, now: Date): Promise<boolean> {
+  const prisma = getPrisma();
+  if (eventId.startsWith("game-evening:")) {
+    const authority = await readGameEveningDeliveryAuthority(eventId, roomId);
+    const current = authority && await prisma.$transaction(tx => isEveningBatchCurrentTx(authority.policy, authority.memberIds, authority.audience, tx, now));
+    if (!current) return supersedeMissedDay(eventId, now);
+    return recoverGameNotificationPointer(receiptId, roomId, eventId);
+  }
+  const authority = await readGroupMissedDayDeliveryAuthority(eventId, roomId);
+  const current = authority && await prisma.$transaction(tx => isGroupMissedDayBatchCurrentTx(authority.policy, authority.audience, tx, now));
+  if (!current) return supersedeMissedDay(eventId, now);
+  return recoverGameNotificationPointer(receiptId, roomId, eventId);
 }
 
 async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string, verifyRoster?: () => Promise<unknown>): Promise<boolean> {
@@ -515,6 +553,42 @@ async function deliverGroupMissedDayLifecycle(roomId: string, firstMissedDate: s
   return queued || supersedeMissedDay(eventId, now);
 }
 
+async function deliverGameEveningLifecycle(roomId: string, date: string, now: Date): Promise<boolean> {
+  const eventId = gameEveningEventId(roomId, date);
+  const existing = await readHostedMailboxItemByDedupeKey({ userId: roomId, dedupeKey: eventId });
+  if (existing) {
+    if (!await isHostedMailboxItemConsumed({ item: existing }) && await readGameEveningDeliveryAuthority(eventId, roomId)) {
+      await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: existing.id });
+    }
+    return true;
+  }
+  const prepared = await prepareGameEveningCheckIn(roomId, date, now);
+  if (!prepared) return supersedeMissedDay(eventId, now);
+  const { readGameMissedCheckInWords } = await import("./service");
+  const { readGameChatTranscript } = await import("./chat-tool");
+  const { names, tasks } = await readGameMissedCheckInWords(prepared.games, date);
+  const midnight = prepared.zones.map(zone => resolveFloatingIsoTimestampInTimeZone(`${date}T00:00:00`, zone))
+    .flatMap(value => value ? [new Date(value.timestamp).getTime()] : []);
+  if (!midnight.length) return false;
+  const transcript = await readGameChatTranscript({ containerMemberId: roomId,
+    playerNamesByMemberId: [...names].map(([memberId, name]) => ({ memberId, name })),
+    since: new Date(Math.min(...midnight)), throughConversationLaneSeq: prepared.policy.conversationLaneSeq });
+  const idsByName = new Map([...names].map(([id, name]) => [name, id]));
+  const players = [...names].flatMap(([memberId, playerName]) => {
+    const ownTasks = prepared.policy.batch.flatMap(game => game.memberIds.includes(memberId)
+      ? [{ gameId: game.gameId, task: tasks.get(game.gameId)?.get(memberId) ?? "" }] : []);
+    return ownTasks.length ? [{ memberId, playerName, tasks: ownTasks }] : [];
+  });
+  const instructions = buildGameEveningCheckInInstructions({ date,
+    transcript: transcript.map(message => ({ ...message, memberId: idsByName.get(message.playerName)! })), players });
+  const destination = await resolveHostedAssistantNotificationDestination({ memberId: roomId });
+  if (!destination || destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") return false;
+  const queued = await enqueueGameLifecycle({ game: prepared.games[0]!.row, gameId: roomId, containerMemberId: roomId,
+    kind: "missed", eventId, instructions, destination, players: prepared.memberIds, audience: prepared.audience,
+    eveningPolicy: prepared.policy, now });
+  return queued || supersedeMissedDay(eventId, now);
+}
+
 /** The game names the pair. Stored participant rows can be the stale evidence a roster read must repair. */
 async function readPairGamePhones(players: readonly string[], prisma: PrismaClient): Promise<string[]> {
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
@@ -603,6 +677,7 @@ async function resolutionInstructions(game: Pick<Game, "id" | "maxPlayers">, kin
 
 /** Rechecks, inside the append transaction, that the notice still describes the current game and room. */
 async function isGameLifecycleAppendCurrentTx(input: Parameters<typeof enqueueGameLifecycle>[0], tx: Prisma.TransactionClient): Promise<boolean> {
+  if (input.eveningPolicy) return isEveningBatchCurrentTx(input.eveningPolicy, input.players, input.audience, tx, input.now ?? new Date());
   if (input.groupMissedPolicy) return !!input.audience && await isGroupMissedDayBatchCurrentTx(input.groupMissedPolicy, input.audience, tx, input.now ?? new Date());
   const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: lifecycleStatuses(input.kind, input.game.maxPlayers) }, chatContainerMemberId: input.containerMemberId },
     include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
@@ -624,6 +699,7 @@ async function enqueueGameLifecycle(input: {
   containerMemberId: string; gameId: string; kind: GameChatLifecycleKind; eventId: string; instructions: string;
   players: readonly string[];
   groupMissedPolicy?: HostedGameGroupMissedCheckInPolicy;
+  eveningPolicy?: HostedGameEveningCheckInPolicy;
   now?: Date;
   destination: NonNullable<Awaited<ReturnType<typeof resolveHostedAssistantNotificationDestination>>>;
 }): Promise<boolean> {
@@ -642,7 +718,7 @@ async function enqueueGameLifecycle(input: {
   const bound = bindHostedAssistantNotificationDestination({ destination: input.destination, memberId: input.containerMemberId });
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma, envelope: buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: input.eventId, memberId: input.containerMemberId, occurredAt: new Date().toISOString(),
-    notification: { ...bound, instructions: input.instructions, responsePolicy: input.groupMissedPolicy ?? (input.kind === "recap"
+    notification: { ...bound, instructions: input.instructions, responsePolicy: input.eveningPolicy ?? input.groupMissedPolicy ?? (input.kind === "recap"
       ? { kind: "require_game_recap", gameId: input.gameId, eventId: input.eventId,
           ...(input.game.maxPlayers === 10
             ? { pairFingerprint: gameGroupLoreFingerprint(input.game.audienceKey!), loreAccess: "read" }

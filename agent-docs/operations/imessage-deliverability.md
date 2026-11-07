@@ -309,6 +309,10 @@ and its bound room are revalidated against the fresh exact two-player provider
 audience. This allows the requested proposal in a newly created chat with no
 inbound history. Cancelled, replaced or expired proposals cannot qualify;
 provider health, route, runtime access and dispatch deduplication still apply.
+Game evening room check-ins validate their frozen game and chat witness but do
+not inherit the game-proposal inactivity exemption. They stay subject to the
+28-day pause, the three-accepted-evening unanswered pause and the half-hour
+send deadline.
 Engagement never substitutes for route, consent, or AI-usage authorization.
 
 Deploy the runtime reader for `automation_engagement_paused` delivery blocks
