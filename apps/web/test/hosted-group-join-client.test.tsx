@@ -307,13 +307,13 @@ test("keeps every exact description one tap away in Details", async () => {
   );
   cleanupRender = cleanup;
 
-  expect(container.textContent).toContain("Your name and what you pick from the last 90 days.");
+  expect(container.textContent).toContain("Your name and what you pick, going back up to 180 days.");
   expect(container.textContent).not.toContain("Shares ");
 
   const drawer = await openDetails(container, window);
   expect(drawer.textContent).toContain("What they’ll see");
   expect(drawer.textContent).toContain(
-    "Your name and what you pick from the last 90 days, in the chat and the Murph app. Everything else stays private.",
+    "Your name and what you pick, going back up to 180 days, in the chat and the Murph app. Everything else stays private.",
   );
   const groups = groupJoinPermissionsForDisplay(
     comprehensiveGroupJoinPermissions,
@@ -590,9 +590,9 @@ test.each([false, true])(
       alreadyActiveMember ? [true, false] : [true, true],
     );
     const drawer = await openDetails(container, window);
-    expect(drawer.textContent).toContain("Shares 90 days of total sleep duration");
-    expect(drawer.textContent).toContain("Shares 90 days of step counts");
-    expect(drawer.textContent).toContain("from the last 90 days");
+    expect(drawer.textContent).toContain("Shares 180 days of total sleep duration");
+    expect(drawer.textContent).toContain("Shares 180 days of step counts");
+    expect(drawer.textContent).toContain("going back up to 180 days");
     expect(drawer.textContent).toContain("in the chat and the Murph app");
     expect(drawer.textContent).not.toMatch(/seven days|7 days|expand history|history checkbox/i);
     expect(container.textContent).not.toMatch(/seven days|7 days|expand history|history checkbox/i);

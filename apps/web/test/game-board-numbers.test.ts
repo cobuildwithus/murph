@@ -124,6 +124,145 @@ describe("pair board numbers", () => {
   });
 });
 
+describe("pair board baseline", () => {
+  const first = "2030-01-21"; // Day 1, with its 60 pre-game days reaching behind `window`
+  const preGameFrom = addDays(first, -60);
+  const preGame = (value = 70) => rows("restingHeartRate", "oura", preGameFrom, 60, value);
+  const readings = (from: string, count: number, value = 60) => rows("restingHeartRate", "oura", from, count, value);
+  it("compares with the mean of the full 60 days before Day 1 and keeps daily inside the window", () => {
+    const number = available([...rows("restingHeartRate", "oura", "2029-11-01", 3, 200), ...preGame(), ...readings(first, 60)], "restingHeartRate", first);
+    expect(number).toMatchObject({ state: "available", latest: { date: "2030-03-21", value: 60 }, comparison: {
+      baseline: { from: preGameFrom, through: addDays(first, -1), value: 70, days: 60 },
+      current: { from: "2030-03-15", through: "2030-03-21", value: 60, days: 7 },
+      delta: -10, improvement: 10, sinceFirstGame: true } });
+    if (number.state !== "available") throw new Error("Expected a number");
+    expect(number.daily).toHaveLength(80);
+    expect(number.daily[0]?.date).toBe(window.from);
+  });
+  it("keeps the current week on or after Day 1, so the chip can appear on the fourth reading", () => {
+    expect(available([...preGame(), ...readings(first, 3)], "restingHeartRate", first)).toMatchObject({ comparison: null });
+    expect(available([...preGame(), ...readings(first, 4)], "restingHeartRate", first)).toMatchObject({ comparison: {
+      baseline: { through: addDays(first, -1) }, current: { from: first, through: addDays(first, 3), days: 4 }, sinceFirstGame: true } });
+    expect(available([...preGame(), ...readings(first, 10)], "restingHeartRate", first)).toMatchObject({ comparison: {
+      current: { from: addDays(first, 3), through: addDays(first, 9), days: 7 } } });
+    expect(available(preGame(), "restingHeartRate", first)).toMatchObject({ latest: { date: addDays(first, -1) }, comparison: null });
+  });
+  it("falls back to the first week when the pre-game days are under the minimum", () => {
+    const records = [...rows("restingHeartRate", "oura", addDays(first, -3), 3, 200), ...readings(first, 7, 70)];
+    expect(available([...records, ...readings("2030-03-25", 7)], "restingHeartRate", first)).toMatchObject({ comparison: {
+      baseline: { from: first, through: addDays(first, 6), value: 70, days: 7 }, current: { days: 7, value: 60 }, sinceFirstGame: true } });
+    expect(available(readings(first, 13), "restingHeartRate", first)).toMatchObject({ comparison: null });
+    expect(available(readings(first, 14), "restingHeartRate", first)).toMatchObject({ comparison: {
+      baseline: { through: addDays(first, 6) }, current: { from: addDays(first, 7) } } });
+  });
+  it("starts the fallback at the first real reading, for every metric, and names that date", () => {
+    const connected = addDays(first, 4);
+    const expected = { baseline: { from: connected, through: addDays(connected, 6), days: 7 }, current: { from: addDays(connected, 7) }, sinceFirstGame: false };
+    expect(available(readings(connected, 14), "restingHeartRate", first)).toMatchObject({ comparison: expected });
+    expect(available(readings(connected, 13), "restingHeartRate", first)).toMatchObject({ comparison: null });
+    expect(available(rows("sleep", "oura", connected, 14, 420, "minutes"), "sleep", first)).toMatchObject({ comparison: expected });
+    expect(available(rows("steps", "garmin", connected, 14, 8000, "count"), "steps", first)).toMatchObject({ comparison: expected });
+    expect(available(rows("vo2Max", "garmin", connected, 16, 40, "mL/kg/min"), "vo2Max", first)).toMatchObject({ comparison: { baseline: { from: connected }, sinceFirstGame: false } });
+  });
+  it("keeps today's results on a snapshot that holds only the window's 90 days", () => {
+    const week = [...rows("restingHeartRate", "oura", window.from, 90, 70)];
+    expect(available(week, "restingHeartRate", first)).toMatchObject({ comparison: {
+      baseline: { from: preGameFrom, through: addDays(first, -1), days: 20 }, sinceFirstGame: true } });
+    const older = "2029-12-20"; // Day 1 before the snapshot starts, with nothing to read before it
+    expect(available(week, "restingHeartRate", older)).toMatchObject({ comparison: {
+      baseline: { from: window.from, through: "2030-01-07", days: 7 }, sinceFirstGame: false } });
+    const edge = "2030-01-03"; // two pre-game days in the snapshot, under the minimum
+    expect(available(week, "restingHeartRate", edge)).toMatchObject({ comparison: { baseline: { from: edge, days: 7 }, sinceFirstGame: true } });
+  });
+  it("clips a baseline at the retained edge and leaves a first game beyond reach to the oldest week", () => {
+    const records = rows("restingHeartRate", "oura", "2029-10-03", 180, 70);
+    expect(available(records, "restingHeartRate", "2029-11-01")).toMatchObject({ comparison: {
+      baseline: { from: "2029-10-03", through: "2029-10-31", days: 29 }, sinceFirstGame: true } });
+    expect(available(records, "restingHeartRate", "2029-07-01")).toMatchObject({ comparison: {
+      baseline: { from: "2029-10-03", through: "2029-10-09", days: 7 }, sinceFirstGame: false } });
+  });
+  it("gives a source with no reading inside the window no row", () => {
+    const old = rows("restingHeartRate", "garmin", preGameFrom, 40, 90);
+    expect(available(old, "restingHeartRate", first)).toEqual({ state: "pending", reason: "no_readings" });
+    expect(available([...old, ...readings(first, 2)], "restingHeartRate", first)).toMatchObject({
+      latest: { value: 60 }, daily: [{ value: 60 }, { value: 60 }] });
+  });
+  it("keeps VO2's median and two-reading minimum, on the same pre-game window and a clipped 14-day current", () => {
+    const vo2 = (from: string, value: number, count = 1) => rows("vo2Max", "garmin", from, count, value, "mL/kg/min");
+    const before = [...vo2(addDays(first, -50), 40), ...vo2(addDays(first, -20), 44)];
+    expect(available([...before, ...vo2(addDays(first, 1), 45, 2)], "vo2Max", first)).toMatchObject({ comparison: {
+      baseline: { from: preGameFrom, through: addDays(first, -1), days: 2, value: 42 },
+      current: { from: first, through: addDays(first, 2), days: 2, value: 45 }, sinceFirstGame: true } });
+    expect(available([...before, ...vo2(addDays(first, 1), 45)], "vo2Max", first)).toMatchObject({ comparison: null });
+    expect(available([...vo2(addDays(first, -20), 44), ...vo2(first, 40, 2), ...vo2(addDays(first, 40), 45, 2)], "vo2Max", first)).toMatchObject({ comparison: {
+      baseline: { from: first, through: addDays(first, 27), days: 2, value: 40 }, current: { days: 2, value: 45 }, sinceFirstGame: true } });
+  });
+});
+
+describe("pair board steps", () => {
+  const first = "2030-03-01";
+  const steps = (source: string, from: string, count: number, value: number) => rows("steps", source, from, count, value, "count");
+  const at = (through: string, records: HostedRuntimeGroupSharedRecord[]) => {
+    const asOf = { from: addDays(through, -89), through };
+    return boardNumber("steps", { state: "available", records: records.filter(record => record.occurredAt.slice(0, 10) <= through) }, asOf, first);
+  };
+  it("drops 0-step days from the baseline, the current week and daily, for steps only", () => {
+    const records = [...steps("garmin", addDays(first, -60), 55, 8000), ...steps("garmin", addDays(first, -5), 5, 0),
+      ...steps("garmin", first, 19, 9000), ...steps("garmin", addDays(first, 19), 1, 0)];
+    const number = at(addDays(first, 19), records);
+    expect(number).toMatchObject({ latest: { date: addDays(first, 18), value: 9000 }, comparison: {
+      baseline: { value: 8000, days: 55 }, current: { through: addDays(first, 18), value: 9000, days: 7 }, improvement: 1000 } });
+    if (number.state !== "available") throw new Error("Expected steps");
+    expect(number.daily.every(point => point.value > 0)).toBe(true);
+    expect(at(addDays(first, 19), steps("garmin", first, 20, 0))).toEqual({ state: "pending", reason: "no_readings" });
+    expect(available(rows("sleep", "oura", window.from, 3, 0, "minutes"), "sleep")).toMatchObject({ latest: { value: 0 } });
+  });
+  it("stays on a worn device whose zeros end mid-game, with no comparison or crown until its week clears", () => {
+    const real = addDays(first, 10);
+    const records = [...steps("whoop", addDays(first, -60), 70, 0), ...steps("whoop", real, 7, 8000), ...steps("whoop", addDays(real, 7), 30, 9000),
+      ...steps("apple-health-kit", addDays(first, -60), 110, 15000)];
+    const rival = available([], "steps");
+    const crown = (number: BoardNumber) => boardCrowns([person("a", number), person("b", rival)]).steps;
+    const onWorn = (number: BoardNumber) => {
+      if (number.state !== "available") throw new Error("Expected steps");
+      expect(number.daily.every(point => point.value < 15000)).toBe(true);
+      expect(number.daily[0]?.date).toBe(real);
+    };
+    for (const age of [3, 6, 12]) {
+      const number = at(addDays(real, age), records);
+      onWorn(number);
+      expect(number).toMatchObject({ comparison: null });
+      expect(crown(number)).toBeNull();
+    }
+    const cleared = at(addDays(real, 13), records);
+    onWorn(cleared);
+    expect(cleared).toMatchObject({ comparison: { baseline: { from: real, through: addDays(real, 6), value: 8000, days: 7 },
+      current: { from: addDays(real, 7), value: 9000, days: 7 }, improvement: 1000, sinceFirstGame: false } });
+    expect(crown(cleared)).toBe("a");
+    expect(at(addDays(real, 2), records)).toMatchObject({ latest: { value: 15000 } }); // under four real days on the device
+  });
+  it.each(["apple-health-kit", "google-health", "health-connect", "samsung-health", "manual"])("prefers a worn device with readings this week over %s", other => {
+    const records = [...steps(other, addDays(first, -60), 80, 15000), ...steps("garmin", addDays(first, 15), 4, 9000)];
+    expect(at(addDays(first, 19), records)).toMatchObject({ latest: { value: 9000 }, comparison: null });
+  });
+  it("keeps the device worn this week over a spare with more old days", () => {
+    const records = [...steps("garmin", addDays(first, -30), 20, 300), ...steps("garmin", addDays(first, 17), 2, 1500),
+      ...steps("whoop", addDays(first, 10), 9, 9000), ...steps("apple-health-kit", addDays(first, -60), 80, 15000)];
+    expect(at(addDays(first, 19), records)).toMatchObject({ latest: { value: 9000 }, comparison: null });
+  });
+  it("leaves a worn device that stopped this week behind, and merged-only and worn-only members alone", () => {
+    const merged = steps("apple-health-kit", addDays(first, -60), 80, 15000);
+    const stopped = [...merged, ...steps("garmin", addDays(first, -60), 72, 8000)];
+    expect(at(addDays(first, 19), stopped)).toMatchObject({ latest: { value: 15000 }, comparison: { baseline: { value: 15000 } } });
+    expect(at(addDays(first, 19), merged)).toMatchObject({ comparison: { baseline: { days: 60 }, current: { days: 7 } } });
+    const two = [...steps("garmin", addDays(first, -60), 80, 8000), ...steps("oura", addDays(first, 15), 5, 9000)];
+    expect(at(addDays(first, 19), two)).toMatchObject({ latest: { value: 8000 }, comparison: { baseline: { value: 8000 } } });
+    const health = [...rows("restingHeartRate", "apple-health-kit", addDays(first, -60), 80, 55), ...rows("restingHeartRate", "garmin", addDays(first, 15), 4, 60)];
+    expect(boardNumber("restingHeartRate", { state: "available", records: health }, { from: addDays(first, -70), through: addDays(first, 19) }, first))
+      .toMatchObject({ latest: { value: 55 } });
+  });
+});
+
 function state(dayOne: string, lengthDays: number, completed: number[], schedule: number[] = [0, 1, 2, 3, 4, 5, 6]): RuleState {
   return { game: { id: dayOne, createdBy: "a", seats: 2, status: "live", lengthDays, startsOn: null, inviteExpiresAt: null,
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: schedule.filter((n): n is 0 | 1 | 2 | 3 | 4 | 5 | 6 => n >= 0 && n <= 6) }, stakes: [] }] } },

@@ -46,6 +46,15 @@ retain the active metric selections, with only the genuine pre-existing sleep
 v0/v1 compatibility mapping. Automatic expansion does not regrant permissions.
 Explicit saves retain the existing pending-generation refresh recovery.
 
+The pair board's four metrics (`resting-heart-rate-days.v0`,
+`sleep-duration-days.v0`, `steps-days.v0`, `vo2-max-days.v0`) retain 180
+member-local dates under the same plain grants, in every group that holds them,
+so the board can read a baseline from before a first game. Only the board reader
+asks for more than 90; chat, weekly and email reads still clip to their own
+windows, and a reader that names no window gets 90. The 720-record ceiling does
+not change. A member whose 180 dates would pass it, or whose older dates have no
+public source, publishes the complete 90 dates instead.
+
 Retention is separate from response selection. Ordinary `read_shared`, weekly
 updates, and group-email reads retain their short reporting windows: the shared
 reader returns at most the recent seven civil dates from a timezone-aware

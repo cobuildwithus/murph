@@ -18,6 +18,7 @@ import {
   requireString,
 } from "./parsers/assertions.ts";
 import {
+  HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
@@ -30,6 +31,7 @@ import {
 } from "./vault-share-limits.ts";
 
 export {
+  HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
@@ -990,9 +992,27 @@ export function hostedVaultShareReadAuthorityScopes(
     : [requested];
 }
 
+/** The pair board's numbers, in its wire order. */
+export const HOSTED_VAULT_SHARE_BOARD_PROJECTION_KINDS = [
+  "resting-heart-rate-days.v0", "sleep-duration-days.v0", "steps-days.v0", "vo2-max-days.v0",
+] as const satisfies readonly HostedVaultShareFixedProjectionKind[];
+
+export type HostedVaultShareHistoryDays = 7 | 90 | typeof HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS;
+
+/**
+ * Dates a published snapshot may retain, not dates a reader receives: every reader
+ * names its own window, and only the pair board asks for more than the default.
+ */
+export function hostedVaultShareRetainedHistoryDays(
+  kind: HostedVaultShareProjectionKind,
+): typeof HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS | typeof HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS {
+  const kinds: readonly HostedVaultShareProjectionKind[] = HOSTED_VAULT_SHARE_BOARD_PROJECTION_KINDS;
+  return kinds.includes(kind) ? HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS : HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
+}
+
 /** Civil-date arithmetic, including DST and both sides of the date line. */
 export function hostedVaultShareHistoryDateWindow(input: {
-  historyDays: 7 | 90;
+  historyDays: HostedVaultShareHistoryDays;
   nowMs?: number;
   timeZone: string;
 }): { from: string; through: string } {
@@ -1014,7 +1034,7 @@ export function filterHostedVaultShareHistoryRecords(input: {
   scope: HostedVaultShareProjectionScope;
   timeZone: string;
   nowMs?: number;
-  requestedHistoryDays?: 7 | 90;
+  requestedHistoryDays?: HostedVaultShareHistoryDays;
 }): HostedVaultShareDeliveryRecord[] {
   if (!isHostedVaultShareRecentDateProjectionKind(input.scope.projectionKind)) {
     return [...input.records];

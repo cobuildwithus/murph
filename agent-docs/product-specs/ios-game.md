@@ -195,15 +195,34 @@ Each metric selects one public source for both windows, preferring sufficient
 coverage, then more distinct dates across the windows, later latest date, and
 source id. Never fill gaps from another source. Unknown-source legacy values
 can display but cannot support comparison. Explicit naps do not count as sleep.
-Daily comparisons need four dates in each seven-day window: baseline starts at
-`max(firstGameOn, window.from)` and current ends at the source's latest date.
-Overlap gives null. VO2 uses its existing median/two-date policy with a 14-day
-current window and an up-to-90-day baseline clipped before that window and to
-retention. `comparison` contains `baseline` and `current`, each
+A 0-step row is not a reading: a worn device can hold 0 for days it reported no
+steps, so zeros leave the baseline, the current week and `daily`. Steps first
+prefer a worn device with four real days in the seven ending on the steps
+cutoff, even when only a merged total has a comparison, so a merged total never
+stands in for the device. Shared records name the public source, not the
+`sourceType` that daily steps selection reads, so the board treats
+`apple-health`, `apple-health-kit`, `google-fit`, `google-health`,
+`health-connect`, `samsung-health`, `manual` and `murph` as not worn. Daily
+steps selection's rule that a device under half of the merged total came off
+does not apply here; the board stays one source at a time.
+
+Comparisons read up to 180 retained dates. Only the baseline reaches past
+`window`: `daily`, `latest` and `window` stay at 90 days, and a source with no
+reading inside `window` has no row. Daily comparisons need four dates in each
+window. The baseline is the 60 days before `firstGameOn`, clipped to retention,
+when they hold four dates; otherwise it is the seven days from the first reading
+on or after `firstGameOn`. The current week is the seven days ending on the
+source's latest date, never starting before `firstGameOn`, so a pre-game baseline
+can compare from the fourth reading. Overlap gives null, so a first-week baseline
+has no comparison until its thirteenth day after the first reading. VO2 uses its
+existing median/two-date policy with the same pre-game window and a 14-day
+current window; its first-week baseline is up to 90 days, clipped before that
+window. `comparison` contains `baseline` and `current`, each
 `{ from, through, value, days }`, plus raw `delta`, direction-adjusted
-`improvement`, and `sinceFirstGame`. The latter is false when Day 1 has aged
-out of retention. `firstGameOn` itself is never clipped or inferred from capped
-history. Crowns name the unique largest positive improvement (or positive
+`improvement`, and `sinceFirstGame`. The latter is true for a pre-game baseline
+or one starting on `firstGameOn`, and false otherwise, when the app names
+`baseline.from` instead. `firstGameOn` itself is never clipped or inferred from
+capped history. Crowns name the unique largest positive improvement (or positive
 streak); ties and all-nonpositive values give null. They are recomputed, not
 stored holders.
 

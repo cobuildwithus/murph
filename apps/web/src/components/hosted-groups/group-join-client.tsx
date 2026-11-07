@@ -363,7 +363,7 @@ export function GroupJoinAcceptForm(props: {
             <>
               {props.alreadyActiveMember
                 ? "Uncheck to stop sharing."
-                : "Your name and what you pick from the last 90 days."}{" "}
+                : "Your name and what you pick, going back up to 180 days."}{" "}
               <Button
                 className="relative font-semibold text-[#FFFCF6] underline underline-offset-2 after:absolute after:-inset-x-2 after:-inset-y-3"
                 onClick={() => setDetailsOpen(true)}
@@ -539,7 +539,7 @@ export function GroupJoinDetailsDrawer({
   return (
     <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
       <GroupJoinDrawer
-        detail="Your name and what you pick from the last 90 days, in the chat and the Murph app. Everything else stays private."
+        detail="Your name and what you pick, going back up to 180 days, in the chat and the Murph app. Everything else stays private."
         title="What they’ll see"
       >
         <dl
