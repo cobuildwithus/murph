@@ -426,6 +426,23 @@ describe("hosted execution email callback routes", () => {
     expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
   });
 
+  it.each([null, VALID_REPLY_ALIAS_KEY])("rejects comment mailbox confusion before any owner lookup (alias=%s)", async (aliasKey) => {
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+    mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_123");
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({ core: { id: "member_123" } });
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ aliasKey, authenticatedSender: AUTHENTICATED_SENDER,
+        envelopeFrom: "owner@example.com", headerFrom: "attacker@evil.test (reply <owner@example.com>)" }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+    await expect(response.json()).resolves.toEqual({ userId: null });
+    expect(mocks.readHostedMemberIdByReplyAliasLookupKey).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+  });
+
   it("accepts authenticated sender proof only for the current verified alias owner", async () => {
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({ core: { id: "member_123" } });

@@ -419,22 +419,18 @@ export function isHostedEmailInboundSenderAuthorized(input: {
   return resolveHostedEmailAuthorizedSenderAddresses(input).includes(sender);
 }
 function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
+  const header = normalizeHostedEmailOptionalText(value, { maxLength: 4_096, overLimit: "drop" });
+  if (!header) return null;
+
+  // Admission supports one bare dot-atom mailbox or one name-addr. Do not
+  // search display names/comments for addresses, or deduplicate a mailbox list.
+  // Unsupported comments, obsolete routes and ambiguous syntax fail closed.
+  const named = /^(?:(?:"(?:[^"\\\r\n]|\\[^\r\n])*"|[^()<>,:;@"\\]+)\s*)?<([^<>]+)>$/u.exec(header);
+  const mailbox = (named?.[1] ?? header).trim();
+  if (!/^[A-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+$/iu.test(mailbox)) {
     return null;
   }
-
-  const angleBracketCandidates = collectHostedEmailHeaderSenderCandidates(
-    [...value.matchAll(/<([^>]+)>/gu)].map((match) => match[1] ?? ""),
-  );
-  if (angleBracketCandidates.size > 0) {
-    return readSingleHostedEmailHeaderSenderCandidate(angleBracketCandidates);
-  }
-
-  return readSingleHostedEmailHeaderSenderCandidate(
-    collectHostedEmailHeaderSenderCandidates(
-      value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu) ?? [],
-    ),
-  );
+  return mailbox.length <= HOSTED_EMAIL_ADDRESS_MAX_LENGTH ? mailbox.toLowerCase() : null;
 }
 
 export function normalizeHostedEmailMessageId(value: string | null | undefined): string | null {
@@ -472,35 +468,6 @@ function normalizeHostedEmailOptionalText(
   }
 
   return normalized;
-}
-
-function collectHostedEmailHeaderSenderCandidates(
-  values: Iterable<string>,
-): Set<string> {
-  const candidates = new Set<string>();
-
-  for (const value of values) {
-    const normalized = normalizeHostedEmailAddress(value);
-    if (normalized) {
-      candidates.add(normalized);
-    }
-  }
-
-  return candidates;
-}
-
-function readSingleHostedEmailHeaderSenderCandidate(
-  candidates: ReadonlySet<string>,
-): string | null {
-  if (candidates.size !== 1) {
-    return null;
-  }
-
-  for (const candidate of candidates) {
-    return candidate;
-  }
-
-  return null;
 }
 
 function encodeHostedEmailTargetPayload(value: string): string {

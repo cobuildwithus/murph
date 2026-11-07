@@ -13,6 +13,7 @@ import {
   createHostedEmailThreadTarget,
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
   redactHostedGroupEmailPromptText,
+  resolveHostedEmailDirectSenderLookupAddress,
   serializeHostedEmailThreadTarget,
   type HostedEmailAuthenticatedSenderVerdict,
 } from "@murphai/runtime-state";
@@ -81,9 +82,13 @@ export function verifyHostedEmailTrustedSender(
   const dmarcResults = fields.slice(1)
     .map((field) => /^\s*dmarc\s*=\s*([a-z]+)(?:\s|$)/iu.exec(field)?.[1]?.toLowerCase())
     .filter((result) => result !== undefined);
-  return dmarcResults.length === 1 && dmarcResults[0] === "pass"
-    ? { dkimAligned: false, dmarcPass: true, spfAligned: false }
-    : null;
+  if (dmarcResults.length !== 1 || dmarcResults[0] !== "pass") return null;
+  const verdict = { dkimAligned: false, dmarcPass: true, spfAligned: false };
+  return resolveHostedEmailDirectSenderLookupAddress({
+    authenticatedSender: verdict,
+    envelopeFrom: input.envelopeFrom,
+    headerFrom: input.headerFrom,
+  }) ? verdict : null;
 }
 
 function readFirstAuthenticationResultFields(value: string | null): string[] | null {

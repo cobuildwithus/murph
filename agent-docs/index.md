@@ -1979,3 +1979,6 @@ The current family policies remain in `docs/contracts/06-hosted-workspace-file-c
 Reply-email sender authentication and public invite-status privacy are owned by
 [Security](SECURITY.md). Local remediation and rollout proof are tracked in
 [the execution plan](exec-plans/completed/2026-11-06-reply-invite-auth.md).
+
+The reply-email parser correction and production rollout are tracked in
+[the shipping plan](exec-plans/completed/2026-11-06-reply-invite-shipping.md).
