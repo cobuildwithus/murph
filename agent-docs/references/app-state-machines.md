@@ -1,6 +1,6 @@
 # Murph and iOS state machines
 
-Last verified: 2026-11-06
+Last verified: 2026-11-07
 
 ## Scope and evidence
 
@@ -56,11 +56,11 @@ or resource-lifecycle defect.
 
 | ID | Priority and impact | Related issue | State and proof |
 | --- | --- | --- | --- |
-| SM-03 | P2: delayed Home successes/errors or offline snapshots undo accepted game actions | [iOS #473](https://github.com/cobuildwithus/murph-ios/issues/473) | Fixed locally; 285 simulator tests pass with latest reminder integration; original independent review complete |
-| SM-06 | P2: reminder operations cross account boundaries or competing saves undo accepted settings | [iOS #477](https://github.com/cobuildwithus/murph-ios/issues/477) | Fixed locally; six new regressions and three existing reminder tests pass |
-| SM-05 | P2: delayed game activation overwrites explicit reminder preferences, including opt-out | [Murph #4732](https://github.com/cobuildwithus/murph/issues/4732) | Fixed locally; 42 PostgreSQL tests pass, including both lock orders and 1,000-game load proof |
-| SM-02 | P2: diagnostic callback claims readiness or completion after its conditional write lost to terminalization | [Murph #4730](https://github.com/cobuildwithus/murph/issues/4730) | Fixed locally; see verification ledger |
-| SM-04 | P3: shutdown during warmup setup still launches a child and misclassifies cancellation | [Murph #4731](https://github.com/cobuildwithus/murph/issues/4731) | Fixed locally; six lifecycle tests and Cloudflare typecheck pass |
+| SM-03 | P2: delayed Home successes/errors or offline snapshots undo accepted game actions | [iOS #473](https://github.com/cobuildwithus/murph-ios/issues/473) | Merged in [iOS PR #478](https://github.com/cobuildwithus/murph-ios/pull/478); 288 simulator tests pass; independent local review complete |
+| SM-06 | P2: reminder operations cross accounts or overwrite saved settings through loading and competing saves | [iOS #477](https://github.com/cobuildwithus/murph-ios/issues/477) | Merged in [iOS PR #478](https://github.com/cobuildwithus/murph-ios/pull/478); nine new and three existing reminder tests pass |
+| SM-05 | P2: delayed game activation overwrites explicit reminder preferences, including opt-out | [Murph #4732](https://github.com/cobuildwithus/murph/issues/4732) | Merged in [Murph #4733](https://github.com/cobuildwithus/murph/pull/4733); 42 PostgreSQL tests pass, including both lock orders and 1,000-game load proof |
+| SM-02 | P2: diagnostic callback claims readiness or completion after its conditional write lost to terminalization | [Murph #4730](https://github.com/cobuildwithus/murph/issues/4730) | Merged in [Murph #4733](https://github.com/cobuildwithus/murph/pull/4733); see verification ledger |
+| SM-04 | P3: shutdown during warmup setup still launches a child and misclassifies cancellation | [Murph #4731](https://github.com/cobuildwithus/murph/issues/4731) | Merged in [Murph #4733](https://github.com/cobuildwithus/murph/pull/4733); six lifecycle tests and Cloudflare typecheck pass |
 | SM-01 | Historical P2: old parser cancellation could reset a replacement attempt | [Murph #4729](https://github.com/cobuildwithus/murph/issues/4729), closed; [upstream fix #4656](https://github.com/cobuildwithus/murph/pull/4656) | Already fixed in latest main; redundant local patch removed |
 
 ### SM-01 — parser cancellation, already fixed upstream
@@ -201,27 +201,27 @@ with iOS main `60e6940`; its states and transition table are in IOS-21.
 
 | Reproduced schedule | Baseline invalid state | Required ownership |
 | --- | --- | --- |
-| Hold member A's GET; switch to B and load B; release A | A's settings replace B's projection | Match token, session generation and edit revision before applying a read |
+| Hold member A's GET; switch to B and load B; release A | A's settings replace B's projection | Match token, session generation and loading attempt before applying a read |
 | Open settings as A; account source changes to B; submit A's edit | Account observation supplies B's credential to A's PUT | Capture owner before observation; reject a changed owner before sending |
-| Hold A's PUT; switch to B, load and begin B's save; fail A | A's prior settings replace B's settings | Only the original token/session/attempt can roll back or release its save |
-| Sign out with nondefault settings | Old member's preferences remain visible | Reset preference projection and pending attempt with account state |
-| Hold first PUT; issue an identical second edit that succeeds; fail first | Both writes run, then the earlier failure undoes the accepted local edit | Admit one PUT at a time; release its slot on settlement so explicit retry can run |
+| Hold A's PUT; switch to B, load and begin B's save; fail A | A's prior settings replace B's settings | Only the original token/session/attempt can roll back or settle its save |
+| Sign out with nondefault settings | Old member's preferences remain visible | Reset preference projection and lifecycle with account state |
+| Hold first PUT; issue an identical second edit that succeeds; fail first | Both writes run, then the earlier failure undoes the accepted local edit | Admit one PUT at a time; settlement permits explicit retry |
+| Hold initial GET; toggle a channel before it returns | Full PUT sends default time/exclusions over the saved values; late GET cannot repair them | Only a successfully loaded projection is editable |
+| Hold save A's account observation; complete save B; resume A | A sends its older full snapshot over B's accepted values | Claim the saving attempt synchronously before the first await |
 
-Four account-boundary regressions failed five assertions on the integrated
-baseline; the overlap regression failed two. Six new transport-based tests also
-cover ordinary success/failure, retry and an old completion arriving during the
-new member's save. The authenticated service now owns optimistic display and
-rollback, using existing session/change revisions and one in-flight UUID.
-Controls derive busy state from that UUID; completion releases only its own
-attempt. There is no new persistent queue, authentication owner or dependency.
+Four account-boundary regressions failed five assertions; the overlapping-PUT
+case failed two. The initial-load and pre-await reservation cases each failed
+four assertions before correction. Nine new tests plus three existing reminder
+tests now pass, including current failure/cancellation, unavailable authentication,
+retry and an old completion arriving during the new member's save.
 
-A shipping follow-up found another supported schedule at this same owner:
-Settings starts its first GET with default values still editable. Toggling a
-channel before that GET settles sends a full default snapshot, overwriting the
-member's saved time and exclusions; the stale-read fence then discards the
-correct read. Native remediation and focused proof for this initial-load case
-are still in progress. The native PR will include its final lifecycle and UI
-evidence before merge; the 285-test result above predates that follow-up.
+The service owns one `ReminderState`: unloaded, loading, ready, saving or failed.
+Loading and saving carry their request UUID; token/session checks retain account
+authority. This replaces the separate save marker and reminder-specific use of
+the global game revision. Only ready settings can be edited. Saves reserve that
+state before account observation and own optimistic display/rollback. Failed
+loads offer retry; duplicate loads share the pending request. Reset invalidates
+old attempts. No persistent queue, authentication owner or dependency was added.
 
 ## Web client machines
 
@@ -1172,7 +1172,7 @@ Invariants: backend owns scoring, day close, winner and tickets; a command's acc
 | Recap ready | Recap finished locally | After recap; record exact-member receipt owed to server |
 | Any presentation | Explicit capture/cover or selection | Preserve until user closes/completes; server projection remains canonical |
 
-SM-03 is fixed locally: shared accepted-command revision ownership, stale-error
+SM-03 is merged in iOS PR #478: shared accepted-command revision ownership, stale-error
 guards, and the existing retained-snapshot writer cover deletion, create/accept,
 and accepted partial-post recovery. See the finding and verification ledger.
 
@@ -1228,10 +1228,12 @@ Invariants: draft remains with composer until durable handoff; member/game/entry
 
 Owner: `Game/Live/LiveGameService.swift::finishRecap/acknowledgeRecapWatches/redeem/acknowledgeRedeems`.
 Ticket states from server: `open`, `redeemed`, `expired`, `void`, `unknown`; local per-member sets track recap watches/ticket acknowledgements owed.
-Invariants: local confirmation never repeats Messages handoff; acknowledgement retries exact ticket, never next ticket; ambiguous failure keeps owed marker across restart; server settlement authority remains canonical.
+Invariants: local confirmation never repeats Messages handoff; acknowledgement retries exact ticket, never next ticket; ambiguous failure keeps owed marker across restart; server settlement authority remains canonical. Concurrent acknowledgements may repeat the same request; the canonical ticket is redeemed once. The later main integration at `fc555ff` adds the recap-writing projection through `GamePrototype+Server.swift` and `GameHomePageModel.swift`; an omitted pending field keeps the existing fallback.
 
 | From | Event and guard | To / effect |
 | --- | --- | --- |
+| Settled, recap writing | Server `recapPending` is true and recap is absent | Show writing/result projection; Watch stays unavailable |
+| Recap writing | Accepted server projection supplies recap | Watch becomes available; watched receipt remains separate |
 | Unwatched recap | Finish | Per-member watched receipt pending; locally after-recap |
 | Receipt pending | Server acknowledgement / definitive refusal | Clear exact receipt; transient failure keeps it |
 | Open ticket | Confirm handoff for exact ticket | Record owed acknowledgement; remove from local spendable wallet |
@@ -1394,25 +1396,32 @@ Owners: `Game/Live/LiveGameService.swift::loadReminders/saveReminders`,
 `Game/GameNotificationsScreen.swift`. The server owns time, push/text preferences,
 text eligibility and per-game exclusions; the client has no durable save queue.
 
-| States / owner | Invariant |
+| State | Invariant |
 | --- | --- |
-| Default/unknown; reading; current member projection | A read belongs to its original token/session and cannot cross a newer edit |
-| One save in flight with optimistic projection | Original account survives admission; service owns display/rollback; overlapping PUTs are rejected |
-| Accepted; failed with prior projection restored | Only the matching attempt settles busy state; failure permits explicit retry |
-| Account reset | Values and attempt are cleared; old completions cannot restore data or release a newer save |
+| `unloaded` | Default values are not an editable server projection |
+| `loading(UUID)` | One current GET; only its matching attempt/token/session can publish |
+| `ready` | Loaded settings can be edited; save admission reserves this state before any await |
+| `saving(UUID)` | One account-owned PUT; service owns optimistic display/rollback; controls are disabled |
+| `failed` | Settings stay read-only until an explicit load/retry establishes a current projection |
 
 | From | Event and guard | To / effect |
 | --- | --- | --- |
-| Default/current | Admitted settings read; no pending save | Capture token, generation and change revision; GET |
-| Reading | Same token, generation and revision | Apply current settings; otherwise discard stale/failed result |
-| Current | Edit; original owner survives account observation; no pending save | Assign UUID, advance revision, show optimistic edit and PUT requested settings |
-| Saving | Further edit or settings load | Controls disabled; service refuses another PUT and skips GET |
-| Saving | Current token/generation/attempt succeeds | Keep edit; clear only its attempt |
-| Saving | Current token/generation/attempt fails | Restore prior settings; report failure; clear attempt for retry |
-| Any | Sign-out/member replacement | Reset projection/attempt; old work loses publication and rollback authority |
+| Unloaded/ready/failed | Admitted settings read; current token; no pending request | Loading with a new UUID; GET current settings |
+| Loading | Another settings load | Keep the existing request; no duplicate GET |
+| Loading | Matching attempt/token/session succeeds | Apply server settings; ready |
+| Loading | Current request fails/cancels or credential changes | Failed; show Try again; no editable defaults |
+| Unloaded | Initial account observation unavailable for the same member | Failed; retry remains available |
+| Ready | Edit | Claim saving UUID before awaiting account observation; original member/attempt must survive before optimistic display and PUT |
+| Saving | Further edit or ordinary settings load | Reject another PUT; skip GET while the same save owns state |
+| Saving | Current token/session/attempt succeeds | Keep edit; ready |
+| Saving | Current token/session/attempt PUT fails | Restore prior projection; ready with save error; explicit edit can retry |
+| Saving | Admission/authority fails while its attempt still owns state | Failed; reload before another edit |
+| Any | Sign-out/member replacement | Reset projection to unloaded; old completions cannot change a newer lifecycle |
+| Any | Completion with an obsolete attempt | Ignore without publishing, rolling back or settling the successor |
 
-SM-06 reproduces account-crossing and overlapping-save failures. Prototype saves
-remain immediate; server preferences remain canonical after any transport error.
+SM-06 proves initial-load, account, admission and overlapping-save failures.
+Prototype state starts ready and saves remain immediate; server preferences
+remain canonical after any transport error.
 
 ## Verification and review ledger
 
@@ -1420,14 +1429,15 @@ remain immediate; server preferences remain canonical after any transport error.
 | --- | --- | --- |
 | SM-01 parser cancellation | Two failing cancellation interleavings on stale discovery revision; already fixed upstream before current audit baseline | Latest upstream parser suites 54 passed; inbox suites 25 passed; real SQLite owner preserves replacement attempt and recovered output; no local parser patch |
 | SM-02 diagnostic transition loss | 6 new lifecycle cases failed; ordinary-success case passed | Lifecycle, feedback sanitizer and runtime route: 16 passed across 3 files |
-| SM-03 iOS stale game projections | Four original tests fail with eight assertions; review adds red stale-denial, offline delete/create, and partial-post assertions | Original 276 tests and independent review passed; all 285 tests across ten simulator suites pass after latest-main integration and narrowed cache writes |
+| SM-03 iOS stale game projections | Four original tests fail with eight assertions; review adds red stale-denial, offline delete/create, and partial-post assertions | 288 tests across ten simulator suites pass after latest-main integration and narrowed cache writes; independent local review has no outstanding findings |
 | SM-04 warmup cancellation | New case failed (1 failed, 5 passed): canceled preparation spawned child and returned timed_out | Six tests pass; direct synthetic proof returns aborted without starting child; Cloudflare typecheck passes |
 | SM-05 reminder choice | Real PostgreSQL: two new recovery cases fail, six existing cases pass | Activation 14 passed; ordinary reminders 28 passed; both lock orders, optional fields, feature-disabled saves, replay, and 1,000-game constant-query proof |
-| SM-06 iOS reminder ownership | Four account-boundary tests fail five assertions; overlap test fails two | Six new tests plus three existing reminder tests pass, included in the 285-test run; new-member pending save, ordinary success/failure and retry covered |
+| SM-06 iOS reminder ownership | Four account-boundary tests fail five assertions; overlap fails two; initial-load and pre-await reservation each fail four | Twelve reminder tests pass within the 288-test run; initial-load gating, duplicate reads, failure/cancellation/auth recovery, account isolation, admission ownership and retry covered |
 | Web types | Not a baseline comparison | `pnpm --dir apps/web typecheck` passed |
 | Complexity | Existing member-message handler hotspot 21 | Guard passed for five authored source files; hotspot unchanged; reminder helper maximum 4 |
 | Changelog | Internal diagnostics/warmup need no public note; duplicate upstream parser note removed | Member-visible reminder correction has `game-reminder-choices-stay-saved`; production archive rendering: four tests pass |
 | Document checks | New single reference | Drift/gardening and source-reference checks pass; retired paths are explicitly marked |
+| Native full-suite proof follow-up | First main CI exposed shared Home-cache residue and an incorrect one-request assumption for idempotent ticket acknowledgements | [iOS #480](https://github.com/cobuildwithus/murph-ios/pull/480) isolates the image fixture and forces concurrent exact-ticket replay; 79 affected tests pass with no production changes |
 
 Commands for SM-01: `pnpm --dir packages/parsers test test/prepared-attachment-jobs.test.ts test/parsers.test.ts`,
 `pnpm --dir packages/inboxd test test/kernel/sqlite/parse-jobs.test.ts test/inboxd.test.ts`.
@@ -1456,15 +1466,14 @@ case. This is real local database contention proof, not a production send.
 SM-03 and SM-06 used local Xcode build-for-testing/test-without-building with the
 MurphCompanion unit suites: GameAPIClient 85, GameAccess 32, GameAttemptOwners 48,
 GameBlockCache 11, GamePendingReplies 16, GamePendingShots 38, GamePostReply 28,
-GameProfilePhoto 12, GameReminderSettings 9 and GameSafety 6. The original SM-03
+GameProfilePhoto 12, GameReminderSettings 12 and GameSafety 6. The original SM-03
 lane has 276 tests, including seven new cases and extended overlap/privacy
-restart assertions. SM-06 adds six new cases to three existing reminder tests,
-bringing the lane to 285. Four initial API failures reproduced
-on unchanged production source; a per-test temporary pending store corrected
-fixture leakage. The integrated 285 tests, build and tracked SwiftFormat pass.
-The original correction passed independent review; final review and visual proof
-for the shipping integration are separate pending checks. No physical-device or
-hosted-backend proof is claimed.
+restart assertions. SM-06 adds nine new cases to three existing reminder tests,
+bringing the lane to 288. Four initial API failures reproduced on unchanged
+production source; a per-test temporary pending store corrected fixture leakage.
+The integrated 288 tests, build and tracked SwiftFormat pass. Independent local
+review has no outstanding findings. The native PR owns current four-state UI
+proof and hosted checks; no physical-device or hosted-backend proof is claimed.
 
 Local JavaScript verification ran on Node 24.14.1 and emitted the repository's
 24.22.1 minimum-version warning. These are local check results, distinct from
@@ -1491,10 +1500,9 @@ required CI, native simulator proof, deployment and live provider verification.
   terminal semantics to these records without their owner contract.
 - Retired interfaces are marked explicitly after current-main revalidation;
   surviving schema or UI compatibility values do not establish reachable work.
-- Current defect issues remain open until their fixes are landed. SM-01 was
-  closed because its fix is already upstream. Local success does not close
-  the issue or establish deployment. Preserve the inspected baseline and add
-  the eventual fix commit/PR evidence when landing changes.
+- All confirmed defect issues are closed by their landed fixes. SM-01 was
+  already fixed upstream. Source merge does not establish deployment; keep
+  the baseline and fix PRs distinct from release receipts below.
 - When a listed lifecycle changes, update its states, guards, terminal/replay
   rules, failure schedule and evidence here alongside its canonical owner doc.
   A new defect requires a concrete supported caller, interleaving and impact;
@@ -1514,14 +1522,38 @@ needed by the demonstrated failures.
 Native cache-write ownership is narrowed to accepted game merges, removals and
 partial posts; generic Home presentation no longer writes the cache. Existing
 fresh-read, profile and receipt writers remain at their owners, and mutation
-writes preserve the absent-cache block tombstone. Latest iOS main `60e6940` also
+writes preserve the absent-cache block tombstone. The iOS shipping baseline `60e6940` also
 introduced the reminder machine, whose confirmed account/attempt failures are
-fixed locally under SM-06.
+landed under SM-06.
 
-At this update, [Murph PR #4733](https://github.com/cobuildwithus/murph/pull/4733)
-is ready for review at `735d5cb` with CI running. Required ReviewGPT is pending;
-an available managed-browser route was recovered after the default lanes failed.
-The iOS PR is pending.
-The original completed audit plan remains historical evidence; the active
-shipping plan and PRs own release progression. No merge, deployment or native
-upload is claimed here.
+Merged source and release evidence are tracked separately:
+
+- [Murph PR #4733](https://github.com/cobuildwithus/murph/pull/4733): merged as
+  `1a78f7429bc8e26b353fc7a0d36c1663cad4983b` after all exact-head CI passed. Final ReviewGPT
+  passed on `8367d979f29a4f0587ce4c6ecf3d8290f477a8d6` with no qualifying findings.
+  The original accepted response was recovered through its exact capture receipt
+  after the waiter was interrupted; no duplicate review was submitted.
+  Managed Web production deployment `7616806236` and exact-source Temporal
+  admission [run 42340015400](https://github.com/cobuildwithus/murph/actions/runs/42340015400)
+  succeeded for that merged commit. Protected runner rollout also completed,
+  including delivery/auth/image gates, endpoint smoke and verified live convergence.
+  Its private release receipt is bound to the same public source; no rollback or
+  admission bypass was used.
+- [iOS PR #478](https://github.com/cobuildwithus/murph-ios/pull/478): merged as
+  `2813742176f595a0fe9e762360df230119808926` after hosted checks passed, with 288 passing simulator tests and a
+  completed independent local review. Eight simulator screenshots cover ready,
+  saving, loading and failed states on SE and Pro Max; focused UI checks passed
+  on both phones. One lifecycle now owns reminder loading,
+  save admission and retry, without reminder-specific global revision checks.
+- [iOS PR #480](https://github.com/cobuildwithus/murph-ios/pull/480) merged as
+  `132a2279d2709e137290b6850fd580c7e4efe867` after both exact-head checks passed.
+  Its 79 affected tests and the latest-main test build pass; full
+  [main CI](https://github.com/cobuildwithus/murph-ios/actions/runs/42342494525) is pending.
+- Native delivery is main-only at the user’s request; no TestFlight upload or
+  App Review submission is included. The test-only follow-up preserves the
+  latest main’s build `1.1.24 (88)`.
+
+The original completed audit plan remains historical evidence; the shipping
+plan and linked PRs own current CI and release progression. Merge, managed Web
+promotion, protected runner rollout and native upload require their own receipts;
+none is inferred from local tests or review.

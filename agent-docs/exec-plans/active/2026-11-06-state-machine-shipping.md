@@ -2,49 +2,66 @@
 
 Status: active
 Created: 2026-11-06
-Updated: 2026-11-06
+Updated: 2026-11-07
 
-## Goal
+## Outcome and scope
 
-Ship the confirmed cross-app state-machine fixes after removing unnecessary operations and keeping canonical ownership simple, maintainable and composable.
+Ship the confirmed Murph and iOS state-machine corrections with one maintained
+inventory, regression proof and the smallest correct ownership boundaries.
+Backend production delivery is complete. Native source and the test-only follow-up are on main; full native CI and
+final documentation delivery remain below.
 
-## Success criteria
+On 2026-11-07 the user explicitly limited native delivery to main and excluded a
+new TestFlight upload. Signing setup, archive, upload and App Review submission
+are outside this task. Preserve unrelated edits; no rollback or secret extraction
+is authorized by this plan.
 
-- Preserve every demonstrated retry, concurrency, auth and offline invariant.
-- Remove only proven redundant complexity; keep necessary explicit-choice evidence.
-- Publish scoped PRs, resolve required reviews and exact-head checks, merge through normal protected paths, and verify the supported backend/native release outcomes.
-- Keep the shared state-machine inventory and linked issues current; distinguish merged source from deployed services and uploaded native builds.
+## Architecture decisions
 
-## Scope and authority
+- Reuse the existing game lock and GameEvent foreign-key lock for reminder
+  carry-over. Remove the redundant player-lock query; retain two immutable
+  per-field choice facts because older clients can omit every-day selection.
+- Retain diagnostic conditional writes and one shared durable-winner reread:
+  losing a transition must not report readiness or completion.
+- Keep iOS retained-cache writes at accepted game merges, removals and partial
+  posts. Generic Home presentation no longer writes the cache; account, safety,
+  redaction and absent-cache tombstone guards remain intact.
+- Use one native reminder lifecycle: unloaded, loading, ready, saving or failed.
+  Loading and saving own their attempt UUID; a save reserves ready state before
+  its first await. This removes reminder-specific global-revision checks and
+  prevents edits of defaults, stale-account publication and overlapping writes.
+- Keep one cross-cutting review per repository: validated Murph ReviewGPT and the
+  selected independent native local review. Native checks ran locally through
+  Xcode under the user's explicit authorization.
 
-The user explicitly requested shipping both repositories and prioritizing architectural simplicity. Reuse the existing task branches and preserve unrelated primary-checkout edits. Normal branch pushes, PR creation, guarded merge and supported release paths are authorized. No App Review submission, rollback, secret extraction, or unrelated cleanup is included.
+## Verified delivery receipts
 
-## Decisions
+| Boundary | Receipt |
+| --- | --- |
+| Murph source | [PR #4733](https://github.com/cobuildwithus/murph/pull/4733) merged as `1a78f7429bc8e26b353fc7a0d36c1663cad4983b`; 37 successful checks and three intentional skips. Final ReviewGPT PASS on `8367d979f29a4f0587ce4c6ecf3d8290f477a8d6`, with no qualifying findings. The accepted response was recovered through its exact capture receipt after interruption; no duplicate review was submitted. |
+| Native source | [PR #478](https://github.com/cobuildwithus/murph-ios/pull/478) merged as `2813742176f595a0fe9e762360df230119808926`; 288 local unit tests, both test builds, formatting and independent review passed. Two focused UI executions covered ready/loading/saving/failed on SE and Pro Max, with eight committed screenshots; exact-head hosted visual and review-tooling checks passed. |
+| Managed Web | Production deployment `7616806236` and [Temporal admission #42340015400](https://github.com/cobuildwithus/murph/actions/runs/42340015400) succeeded for public source `1a78f7429bc8e26b353fc7a0d36c1663cad4983b`. |
+| Protected runner/Worker | [Production rollout #42340618753](https://github.com/cobuildwithus/murph-cloud/actions/runs/42340618753) succeeded for that same public source. Delivery, auth, runner and deployed endpoint smoke passed. Final live verification records gradual rollout, `release_converged=true` and 100% Worker traffic on the new release. |
+| Post-deploy contract migrations | [Run #42340678910](https://github.com/cobuildwithus/murph/actions/runs/42340678910) succeeded. |
 
-- Murph's latest main remains c32c522e20fd; iOS main advanced to 60e6940, reconciled with an ordinary merge.
-- Remove the redundant reminder player lock: the existing game FOR UPDATE lock coordinates with newly inserted preference facts through their foreign-key KEY SHARE lock. Existing immutable facts suppress copying their field. Retain independent off/every-day facts because older clients can omit every-day choice.
-- Keep diagnostic conditional writes and the shared losing-transition reread; removing either would reintroduce false success or duplicate durable-winner mapping.
-- Move iOS retained-cache writes out of generic Home presentation to accepted mutation owners; retain current revision/token/safety and block-cache boundaries.
-- Murph uses the required final ReviewGPT alongside CI. iOS retains its selected independent local review gate without duplicating it with ReviewGPT; extend that review for the simplification/integration delta.
-- The user has authorized local Xcode verification instead of the unavailable HEAVY wrapper. Licensing approval is already recorded in the native owner docs; do not request it again.
+Focused backend proof includes activation 14, ordinary reminders 28, diagnostics
+16 and warmup 6 tests, plus Web/Cloudflare typechecks, lint and complexity checks.
+The activation proof covers both lock orders, optional fields, feature-disabled
+saves and constant query count at 1,000 games. The upstream parser fix needed no
+local patch; its parser/inbox suites passed 54 and 25 tests. The shared
+[state-machine inventory](../../references/app-state-machines.md) owns the
+failure schedules, transition tables and detailed evidence.
 
-## Tasks
+## Remaining completion receipts
 
-1. Inspect current heads, ownership and release contracts; reconcile new base changes.
-2. Simplify at the existing owners and run focused regressions/typechecks.
-3. Update inventory and PR evidence, commit, push and open draft PRs.
-4. Finish candidate review, mark ready, run required final review and CI concurrently, and remediate accepted findings.
-5. Close the plan on the final code candidate, merge exact checked heads, and verify backend/native release paths without secret extraction.
-6. Update issues and report concrete shipped outcomes or remaining release gates.
+- **Native test-only follow-up:** [iOS PR #480](https://github.com/cobuildwithus/murph-ios/pull/480)
+  merged as `132a2279d2709e137290b6850fd580c7e4efe867` after both exact-head
+  checks passed. The 79 affected tests and latest-main test build passed locally.
+  [Main CI #42342494525](https://github.com/cobuildwithus/murph-ios/actions/runs/42342494525)
+  is queued; record its result before closing the plan.
+- **Final documentation:** parent owns the evidence PR from this branch, final
+  documentation checks, exact-head hosted checks and merge receipt. Record that
+  PR and archive this plan through the supported task-finishing helper.
 
-## Verification
-
-- Reminder simplification: activation 14 + diagnostic 16 tests pass, including 4 real PostgreSQL lock-order/optional-field cases and the 1,000-game bounded-query test. Focused lint and diff checks pass.
-- Prior proof remains: ordinary reminders 28, warmup 6, upstream parser/inbox 54+25, and native 276; rerun affected compiled graphs for the new candidate.
-- Final typechecks, native tests/review, exact-head hosted checks, final Murph ReviewGPT and deployment/upload proof remain in progress.
-
-## Shipping progress
-
-- Murph PR #4733 is open and ready; source checks passed and hosted CI is running. The first review startup did not submit a request. A working dedicated browser was located through the canonical managed-browser connection options; retry retains round 1 and the exact pushed source.
-- Native reconciliation exposed reminder account/overlap bugs (#477), grouped at the same settings owner. The integrated candidate passed 285 tests and independent local review identified one remaining initial-load/default overwrite schedule; its minimal correction and UI proof are in progress.
-- Native build 1.1.24 (86) is reserved after current main/documented uploaded build 85. Xcode developer-account setup remains necessary for signed upload; no App Review submission is included.
+Physical-device and live native-backend behavior are not represented by simulator
+proof. No TestFlight upload is planned or required for the user-approved outcome.
