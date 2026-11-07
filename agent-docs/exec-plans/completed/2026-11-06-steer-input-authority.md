@@ -1,6 +1,6 @@
 # Derive hosted tool authority from accepted turn inputs
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -225,6 +225,9 @@ reproduced on a real App Server:
   reversible preference, Web binds no semantics to the input, and refusing it is
   the reported bug.
 
+Final ReviewGPT round 5 returned `ROUND_OUTCOME: PASS` at `db6aa241a0`, after rounds 1
+to 4 each produced one accepted finding.
+
 Follow-ups from the review, each separately landable:
 
 1. Done here: carry `groupTool` by reference. The `typeof request` check also went:
@@ -260,3 +263,4 @@ expiry, turn commit). Do not merge the two context objects wholesale.
   A confirmation with a mid-turn follow-up made no subscription request, and the
   reply said nothing was applied and asked for one more confirmation. Confirming
   in a new message then succeeded. UX verdict: Ready.
+Completed: 2026-11-06
