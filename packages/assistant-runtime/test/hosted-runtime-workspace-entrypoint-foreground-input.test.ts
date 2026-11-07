@@ -921,6 +921,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     });
     const importedInputIds: string[] = [];
     const secondBootstrapObserved = createDeferred<void>();
+    const backgroundRetryObserved = createDeferred<number>();
     const scheduledRetryObserved = createDeferred<number>();
     const originalAutomationPass =
       mocks.runAssistantAutomationPass.getMockImplementation();
@@ -943,6 +944,14 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             throw { code: "INBOX_NOT_INITIALIZED" };
           }
 
+          if (automationPassCount === 3) {
+            const retryAt = new Date(Date.now() + 30_000).toISOString();
+            backgroundRetryObserved.resolve(Date.now());
+            return {
+              currentTurnDeliveryIntentIds: [], nextWakeAt: retryAt, progressed: false,
+              replies: { considered: 1, failed: 1, replied: 0, skipped: 0, nextWakeAt: retryAt },
+            };
+          }
           scheduledRetryObserved.resolve(Date.now());
           assert.ok(input.signal);
           return await new Promise((_, reject) => {
@@ -1034,14 +1043,20 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       assert.equal(events.includes("snapshot:idle_shutdown"), false);
 
       await vi.advanceTimersByTimeAsync(30_000);
+      const firstRetryAt = await withRealTimeout(backgroundRetryObserved.promise, 1_000, () => events.join(","));
+      assert.equal(firstRetryAt, Date.parse(TEST_NOW) + 30_000);
+      await waitForFakeTimerScheduled(() => events.join(","));
+      assert.equal(automationPassCount, 3);
+      assert.equal(events.includes("snapshot:idle_shutdown"), false);
+      await vi.advanceTimersByTimeAsync(30_000);
       const retryStartedAt = await withRealTimeout(
         scheduledRetryObserved.promise,
         1_000,
         () => events.join(","),
       );
 
-      assert.equal(retryStartedAt, Date.parse(TEST_NOW) + 30_000);
-      assert.equal(automationPassCount, 3);
+      assert.equal(retryStartedAt, Date.parse(TEST_NOW) + 60_000);
+      assert.equal(automationPassCount, 4);
       assert.equal(
         checkpointRequests.some((request) => request.reason === "idle_shutdown"),
         false,

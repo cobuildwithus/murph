@@ -6825,7 +6825,10 @@ describe("runHostedAssistantAutomationLane", () => {
     }));
   });
 
-  it("exposes a foreground input retry before aggregate wake ownership is lost", async () => {
+  it.each(["foreground", "background"] as const)("exposes a %s input retry before aggregate wake ownership is lost", async (mode) => {
+    if (mode === "background") mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["ain_existing_retry"], mode, pendingInputIds: ["ain_existing_retry"],
+    });
     const retryWakeAt = "2026-04-08T00:00:30.000Z";
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       cronProcessed: 0,
@@ -6862,7 +6865,7 @@ describe("runHostedAssistantAutomationLane", () => {
           userEnvKeys: [],
         },
       },
-      freshAssistantInputIds: ["ain_foreground_retry"],
+      freshAssistantInputIds: mode === "foreground" ? ["ain_foreground_retry"] : [],
       requestId: "req_foreground_retry",
       runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
