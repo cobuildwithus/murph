@@ -114,6 +114,9 @@ describe('longitudinal sleep guidance', () => {
     const dataFirst = readSection(skill, 'Data First')
 
     expect(dataFirst).toContain('vault-cli wearables sleep pattern --format json')
+    expect(dataFirst).toContain('For a factual multi-night summary, start with one date-bounded')
+    expect(dataFirst).toContain('fetch individual nights or other domains only for explicitly requested details the pattern lacks')
+    expect(dataFirst).toContain('For improvement advice or choosing a lever')
     expect(dataFirst).toContain('`--window-days` (default 28, maximum 366)')
     expect(dataFirst).toContain(
       'Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone',

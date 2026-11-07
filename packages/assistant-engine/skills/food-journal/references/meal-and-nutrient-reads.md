@@ -3,6 +3,29 @@
 Read this for recent-meal recall, a saved-day review, or a connected or
 saved-meal nutrient question. New meal capture does not need it.
 
+Apply known numeric preferences before answering: do not surface calories or
+macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive
+users. Keep symptom or digestion questions focused on that purpose. For a meal
+estimate, correction, capture or nutrition card, load `food-journal/SKILL.md`
+before proceeding; this read guide does not authorize estimates or writes.
+
+## Counts, coverage and stored calorie or macro totals
+
+Use `vault-cli meal totals --from <date> --to <date> --format json` for meal
+counts, days with food logs, daily calorie/macronutrient totals, averages and
+comparisons. Its `days` array includes each logged date, its `mealCount`, and
+per-metric totals and contributing `mealCount`. Reuse this one bounded read;
+do not list individual meals unless the question needs food identities,
+provenance or other details the aggregate lacks.
+
+A missing date means no saved meals, not no food eaten. A null metric with
+zero contributing meals means unknown, not zero. Fewer contributing meals than
+the day's `mealCount` means a partial total. Equal counts cover the stored meals,
+not necessarily everything eaten. For averages, name the denominator (logged
+days or days with the requested field); do not count unknown days as zero or
+present partial-day averages as complete intake. Load `nutrition-strategy` for
+target-setting or advice, rather than inferring targets from these totals.
+
 ## Recent meals and saved days
 
 For private recent-meal recall, read canonical records before asking the member

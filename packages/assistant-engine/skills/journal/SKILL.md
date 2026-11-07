@@ -10,6 +10,20 @@ workouts, symptoms, lab results, measurements, sleep and interventions. A fact
 already saved as one of those typed records is already in Journal; do not add a
 second note for it.
 
+## Reading an overview
+
+For dates and titles across Journal, use one bounded
+`vault-cli timeline --entry-type event --from <date> --to <date> --limit 50 --format json`.
+It includes typed events and notes without loading their full bodies. A full
+page may omit entries: narrow the dates or increase the bounded limit before
+claiming completeness. For the latest entry, omit the date bounds and use
+`--limit 1`; timeline is newest first. Add `--kind note` only when the member
+specifically wants notes rather than all Journal entries.
+
+Read an exact returned event with `vault-cli event show <id> --format json`
+when its content is needed. Titles alone cannot establish that a symptom,
+travel detail or follow-up instruction is absent from the record body.
+
 ## Writing a note
 
 Use this contract directly, without preflight help:

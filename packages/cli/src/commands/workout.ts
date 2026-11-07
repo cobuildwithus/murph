@@ -768,7 +768,7 @@ export function registerWorkoutCommands(
       },
     ],
     options: {
-      duration: z.number().int().positive().max(24 * 60).optional().describe('Replace duration in minutes.'),
+      duration: z.number().int().positive().max(24 * 60).optional().describe('Replace duration in minutes; nested workout timestamps are independent. When correcting a manually logged elapsed duration with a previously calculated end time, also pass --workout-ended-at from its saved start plus the corrected duration. Preserve independently measured or paused-session timing.'),
       type: z.string().min(1).max(120).optional().describe('Replace workout activity type.'),
       distanceKm: z.number().positive().max(1_000).optional().describe('Replace workout distance in kilometers.'),
       workoutSourceApp: z.string().regex(workoutSlugPattern).optional().describe('Replace nested workout-session source app slug.'),

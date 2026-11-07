@@ -213,6 +213,16 @@ imports. Supplement inventories use the opt-in detailed canonical list: complete
 typed fields and narrative body, with no repeated frontmatter or truncated notes.
 Personal reminder inventories exclude registered maintenance routines by default
 and check list coverage; explicit requests can include those routines.
+Saved food coverage and calorie/macro aggregates route directly to the read guide
+and bounded meal totals; capture, estimation and card policy stays with the full
+food skill. Complete capture instructions can be reused across follow-ups, but
+must be reloaded after compaction or an incomplete read. Named lab history uses matched-result summaries, with exact-panel
+fallback for ambiguity. Medication and habit inventories filter regimens by kind
+before limiting. Journal titles/dates and latest-event discovery use timeline;
+content questions still require exact records. Sleep recaps load extra detail
+when the request or an applicable saved format needs it. Knowledge inventories
+can use the index without page bodies; content follow-ups retain known source
+references and read relevant bodies before making absence claims.
 
 Idle checkpoint maintenance retires native resume state for every session whose
 `lastTurnAt` (or `updatedAt` when no turn timestamp exists) is strictly older than

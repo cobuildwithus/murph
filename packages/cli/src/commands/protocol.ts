@@ -222,6 +222,7 @@ export function registerProtocolCommands(
     args: z.object({}),
     description: "List private regimen records.",
     options: withBaseOptions({
+      kind: regimenKindSchema.optional().describe("Optional regimen kind, such as medication or habit."),
       status: regimenStatusSchema.optional().describe("Optional regimen status to filter by."),
       limit: z.number().int().positive().max(200).default(10),
     }),
@@ -230,6 +231,7 @@ export function registerProtocolCommands(
       return services.query.listRegimens({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
+        kind: options.kind,
         status: options.status,
         limit: options.limit,
       });

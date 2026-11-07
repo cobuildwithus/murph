@@ -5952,7 +5952,7 @@
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
                         },
                         "duration": {
-                          "description": "Replace duration in minutes.",
+                          "description": "Replace duration in minutes; nested workout timestamps are independent. When correcting a manually logged elapsed duration with a previously calculated end time, also pass --workout-ended-at from its saved start plus the corrected duration. Preserve independently measured or paused-session timing.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
@@ -15492,6 +15492,16 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "kind": {
+                          "description": "Optional regimen kind, such as medication or habit.",
+                          "type": "string",
+                          "enum": [
+                            "medication",
+                            "supplement",
+                            "therapy",
+                            "habit"
+                          ]
                         },
                         "status": {
                           "description": "Optional regimen status to filter by.",

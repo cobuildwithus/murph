@@ -25,6 +25,9 @@ Supplement lists keep their existing compact summaries by default. The optional
 from the same filtered canonical query. It omits only the duplicate frontmatter
 serialization; records without a separate body retain their full markdown.
 Exact `supplement show` output and all mutation contracts remain unchanged.
+Regimen lists accept an optional `kind` filter. Filtering precedes the result
+limit and composes with status; unfiltered reads retain their existing shape.
+Regimen inventory does not replace separate medication-history or intake records.
 
 Keep this package thin. Add a surface here only when multiple CLI/headless callers need the same vault usecase orchestration and importing the lower-level owner internals would create the wrong dependency direction.
 

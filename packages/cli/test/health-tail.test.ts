@@ -1747,6 +1747,23 @@ test("regimen commands keep noun-specific and generic reads aligned", async () =
     assert.equal(requireData(nounList).items[0]?.data.kind, "medication");
     assert.equal(requireData(genericShow).entity.id, regimenId);
     assert.equal(requireData(genericShow).entity.kind, "regimen");
+    for (const [title, kind, status] of [
+      ["A synthetic supplement", "supplement", "active"],
+      ["A paused medication", "medication", "paused"],
+    ]) {
+      await writeFile(payloadPath, JSON.stringify({ title, kind, status, startedOn: "2026-03-12" }), "utf8");
+      assert.equal((await runCli(["regimen", "import-json", "--input", `@${payloadPath}`, "--vault", vaultRoot])).ok, true);
+    }
+    const filtered = await runCli<{ filters: Record<string, unknown>; count: number; items: Array<{ id: string; data: Record<string, unknown> }> }>([
+      "regimen", "list", "--kind", "medication", "--status", "active", "--limit", "1", "--vault", vaultRoot,
+    ]);
+    assert.equal(filtered.ok, true);
+    assert.equal(requireData(filtered).filters.kind, "medication");
+    assert.equal(requireData(filtered).count, 1);
+    assert.equal(requireData(filtered).items[0]?.id, regimenId);
+    assert.equal(requireData(filtered).items[0]?.data.dose, 500);
+    const unfiltered = await runCli<{ count: number }>(["regimen", "list", "--vault", vaultRoot]);
+    assert.equal(requireData(unfiltered).count, 3);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
