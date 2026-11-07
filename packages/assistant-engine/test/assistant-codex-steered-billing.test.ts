@@ -176,3 +176,101 @@ it('refuses a subscription change after a steered image fails to prepare', async
   expect(outcome.subscriptionRequest).not.toHaveBeenCalled()
   expect(outcome.claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
 })
+
+it('refuses a queued subscription change after the App Server exits before the steer', async () => {
+  const workingDirectory = await createTempDir('murph-steered-billing-exit-')
+  const configurationRelease = createDeferred<void>()
+  const configurationStarted = createDeferred<void>()
+  const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
+  const subscriptionRequest = vi.fn(async () => {
+    throw new Error('A stale subscription change must not reach transport.')
+  })
+  const claimSubscriptionAssistantInputId = vi.fn(() => `ain_${'b'.repeat(32)}`)
+  let steerOutcome: unknown = null
+
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+    queueMicrotask(() => {
+      void (async () => {
+        await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: 1, result: {} }))
+        await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({ id: 2, result: { thread: { id: 'thread-steered-billing' } } }))
+        await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({ id: 3, result: { turn: { id: 'turn-steered-billing' } } }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: { threadId: 'thread-steered-billing', turn: { id: 'turn-steered-billing' } },
+        }))
+        const liveTurn = await liveTurnReady.promise
+        child.stdout.write(jsonLine({
+          id: 72,
+          method: 'item/tool/call',
+          params: { arguments: { action: 'read' }, namespace: 'murph', tool: 'assistant_configuration' },
+        }))
+        await configurationStarted.promise
+        child.stdout.write(jsonLine({
+          id: 73,
+          method: 'item/tool/call',
+          params: {
+            arguments: {
+              action: 'change_plan',
+              quoteId: 'quote_synthetic',
+              targetPlanCode: 'launch_edge_monthly',
+            },
+            namespace: 'murph',
+            tool: 'subscription',
+          },
+        }))
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        child.emit('exit', 1, null)
+        child.emit('close', 1, null)
+        steerOutcome = await liveTurn.steer({ prompt: 'Cancel that change.' }).catch((error: unknown) => error)
+        configurationRelease.resolve()
+      })()
+    })
+    return child
+  })
+
+  await expect(executeCodexAppServerTurn({
+    dynamicTools: resolveMurphDynamicTools({
+      assistantConfigurationAvailable: true,
+      progressUpdatesAvailable: false,
+      subscriptionAvailable: true,
+    }),
+    env: { OPENAI_API_KEY: 'openai-test-key' },
+    hostedToolContext: {
+      ...createHostedToolContext(),
+      assistantConfigurationTool: {
+        request: async () => {
+          configurationStarted.resolve()
+          await configurationRelease.promise
+          return {
+            action: 'read' as const,
+            result: {
+              availableModels: [],
+              availableReasoningEfforts: [],
+              configurationAvailable: true,
+              dormantSolPreference: false,
+              model: 'gpt-6.1-terra' as const,
+              reasoningEffort: 'low' as const,
+              solAvailable: false,
+            },
+          }
+        },
+      },
+      claimSubscriptionAssistantInputId,
+      subscriptionTool: { request: subscriptionRequest },
+    },
+    onLiveTurn: (turn) => {
+      liveTurnReady.resolve(turn)
+      return () => {}
+    },
+    prompt: 'Apply the quoted change.',
+    workingDirectory,
+  })).rejects.toThrow()
+
+  expect(steerOutcome).toBeInstanceOf(Error)
+  expect(subscriptionRequest).not.toHaveBeenCalled()
+  expect(claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
+})

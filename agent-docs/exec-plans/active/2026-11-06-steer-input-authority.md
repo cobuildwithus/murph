@@ -218,6 +218,9 @@ reproduced on a real App Server:
   That also let `steerLiveTurn` return to its original order. Round 3 proposed having
   tool preflight observe the controller's fatal admission error; this is smaller and
   needs no controller change.
+- Round 4 found the flag sat after `requireLiveTurnIds()`, so an App Server exit during
+  the pre-steer hook threw before setting it. Accepted and reproduced. The flag is now
+  the first statement in `steerLiveTurn`, so nothing there can run ahead of it.
 - Scope is deliberate. `assistant_configuration` still runs after a steer: it is a
   reversible preference, Web binds no semantics to the input, and refusing it is
   the reported bug.
@@ -250,8 +253,9 @@ expiry, turn commit). Do not merge the two context objects wholesale.
   after the change. All three steered-subscription sequences fail without the rule
   and pass with it: queued behind a slow tool, issued by an older cell, and issued
   after the steer is acknowledged but before Codex consumes it.
-  `assistant-codex-steered-billing.test.ts` adds a call during a held image write and
-  a call after a failed steer. Both are refused.
+  `assistant-codex-steered-billing.test.ts` adds a call during a held image write, a
+  call after a failed steer, and a queued call after the App Server exits. All are
+  refused.
 - Live model: `pnpm test:assistant:live -- --test "explicit Max upgrade"` passed.
   A confirmation with a mid-turn follow-up made no subscription request, and the
   reply said nothing was applied and asked for one more confirmation. Confirming

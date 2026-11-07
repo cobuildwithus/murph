@@ -5745,8 +5745,8 @@ async function runCodexAppServerTurnOnProcess(
   const steerLiveTurn = async (
     steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
   ): Promise<void> => {
-    const liveTurn = requireLiveTurnIds()
     steerAttempted = true
+    const liveTurn = requireLiveTurnIds()
     const preparedSteerImages = await materializeCodexImages({
       images: normalizeCodexAppServerImageDetails({
         images: steerInput.images,
