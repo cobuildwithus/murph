@@ -95,7 +95,7 @@ import type {
   AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
-  HOSTED_IDLE_COMPACT_TIMEOUT_MS,
+  resolveHostedIdleMaintenanceWork,
   runHostedIdleCheckpointMaintenance,
   type HostedIdleMaintenanceOutcome,
 } from "./hosted-runtime/idle-maintenance.ts";
@@ -7069,14 +7069,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
-        const idleMaintenancePendingWork =
-          runtimeOwnerHandoffRequested
-          || pendingDurableCheckpointEffects.length > 0
-          || durableCheckpointFollowUpPending
-          || invocationStatus === "budget_exhausted"
-          || (pendingWake.nextWakeAt !== null
-            && Date.parse(pendingWake.nextWakeAt) - Date.now()
-              < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
+        const idleMaintenanceWork = resolveHostedIdleMaintenanceWork({
+          foregroundWorkPending: runtimeOwnerHandoffRequested
+            || pendingDurableCheckpointEffects.length > 0
+            || durableCheckpointFollowUpPending
+            || invocationStatus === "budget_exhausted",
+          nextWakeAt: pendingWake.nextWakeAt,
+          nowMs: Date.now(),
+        });
         const idleMaintenanceModel =
           readConfirmedAssistantTarget()?.model
           ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
@@ -7128,7 +7128,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
                   memberId: input.request.userId,
                   model: idleMaintenanceModel,
-                  pendingWork: idleMaintenancePendingWork,
+                  ...idleMaintenanceWork,
                   providerName:
                     runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
                   recordUsage: guardedRuntime.platform.usageRecordPort
@@ -7237,6 +7237,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointWakeLatencySeed,
           idleCheckpointWake: selectHostedIdleCheckpointWake({
             idleMaintenance,
+            pendingWork: idleMaintenanceWork.pendingWork,
             previousInboxMediaRetentionWakeAt:
               committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
             projectedWakeAt: pendingWake.nextWakeAt,
@@ -7901,6 +7902,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  foregroundWorkPending: boolean;
   persistGeneratedImageRetention?: Parameters<
     typeof runHostedIdleCheckpointMaintenance
   >[0]["persistGeneratedImageRetention"];
@@ -7940,6 +7942,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     memberId: input.memberId,
     model: input.model,
     pendingWork: input.pendingWork,
+    foregroundWorkPending: input.foregroundWorkPending,
     persistGeneratedImageRetention: input.persistGeneratedImageRetention ?? null,
     processingMode: input.processingMode,
     protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
@@ -8017,6 +8020,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
           memberId: input.input.request.userId,
           model: null,
           pendingWork: false,
+          foregroundWorkPending: false,
           processingMode: "inbox_media_retention",
           persistGeneratedImageRetention: async (write) => {
             const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
@@ -8085,6 +8089,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     expectedUserId: input.expectedUserId,
     ...selectHostedIdleCheckpointWake({
       idleMaintenance,
+      pendingWork: false,
       previousInboxMediaRetentionWakeAt:
         workspace.inboxMediaRetentionWakeAt ?? null,
       projectedWakeAt: workspace.nextWakeAt ?? null,
@@ -9601,6 +9606,7 @@ async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
 
 function selectHostedIdleCheckpointWake(input: {
   idleMaintenance: HostedIdleMaintenanceOutcome;
+  pendingWork: boolean;
   previousInboxMediaRetentionWakeAt: string | null;
   projectedWakeAt: string | null;
   projectedWakeReason: string | null;
@@ -9610,11 +9616,10 @@ function selectHostedIdleCheckpointWake(input: {
   nextWakeReason: string | null;
 } {
   const preservePreviousRetentionWake =
-    "reason" in input.idleMaintenance
-    && (
-      input.idleMaintenance.reason === "pending_work"
-      || input.idleMaintenance.reason === "shutdown"
-    )
+    (input.pendingWork
+      || ("reason" in input.idleMaintenance
+        && (input.idleMaintenance.reason === "pending_work"
+          || input.idleMaintenance.reason === "shutdown")))
     && !input.idleMaintenance.nextWakeAt;
 
   return {

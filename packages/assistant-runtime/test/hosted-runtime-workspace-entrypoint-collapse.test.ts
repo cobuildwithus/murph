@@ -60,7 +60,7 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -72,6 +72,8 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+
+beforeEach(() => { mocks.runHostedIdleCheckpointMaintenance.mockClear(); });
 
 describe("hosted workspace runtime entrypoint", () => {
   test.each([
@@ -802,6 +804,9 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(assistantPhaseCalls, 1);
+      expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(expect.objectContaining({
+        pendingWork: true, foregroundWorkPending: true,
+      }));
     } finally {
       runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
       await invocationPromise?.catch(() => undefined);
@@ -918,6 +923,9 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(result.status, "budget_exhausted");
       assert.match(result.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(expect.objectContaining({
+        pendingWork: true, foregroundWorkPending: true,
+      }));
     } finally {
       runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
       await invocationPromise?.catch(() => undefined);
@@ -2013,6 +2021,12 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, durableWakeAt);
+      // The first snapshot has a pending durable effect; the second saves
+      // that effect's follow-up. Both independently block compaction.
+      expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledTimes(2);
+      for (const [input] of mocks.runHostedIdleCheckpointMaintenance.mock.calls) {
+        expect(input).toMatchObject({ pendingWork: true, foregroundWorkPending: true });
+      }
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

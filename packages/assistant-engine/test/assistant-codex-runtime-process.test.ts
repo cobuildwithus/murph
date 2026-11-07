@@ -2534,9 +2534,9 @@ describe('assistant codex runtime', () => {
               tokenUsage: {
                 last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 0,
-                  inputTokens: 0,
+                  inputTokens: 96_000,
                   outputTokens: 0,
-                  totalTokens: 43_000,
+                  totalTokens: 96_000,
                 },
                 total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 49_000,
@@ -2599,6 +2599,14 @@ describe('assistant codex runtime', () => {
         cachedInputTokens: null, inputTokens: 50_000, outputTokens: null, source: 'estimated', totalTokens: 50_000,
       },
     })
+    // A compacted context can still exceed both idle thresholds. Completion
+    // invalidates those vitals until a new turn, so another idle decision must
+    // not submit another compaction on this warm process.
+    await expect(compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
+      minThreadTokens: 90_000,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({ kind: 'skipped', reason: 'no_thread_vitals' })
     expect(
       readWrittenRpcMessages(
         requireMockChildProcess(spawnedChildren[0] ?? null),

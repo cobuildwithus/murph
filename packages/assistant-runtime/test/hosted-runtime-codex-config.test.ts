@@ -1905,6 +1905,12 @@ async function runHostedCodexAutocompactionE2e(
       inputTokens: 1700, cachedInputTokens: 700, cacheWriteInputTokens: 50,
       outputTokens: 987, reasoningOutputTokens: 123, totalTokens: 2687,
     }]);
+    // Verify native notification ordering too: without a new foreground turn,
+    // a second idle decision must not compact the same resident again.
+    assert.deepEqual(
+      await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 }),
+      { kind: "skipped", reason: "no_thread_vitals", threadContextTokensBefore: null },
+    );
     const afterIdle = await executeCodexAppServerTurn({
       abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
       codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),

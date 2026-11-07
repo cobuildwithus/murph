@@ -38,6 +38,11 @@ const archiveClosedIntegrationIngestShards = vi.fn();
 const archiveClosedEventLedgerShards = vi.fn();
 const archiveClosedAuditShards = vi.fn();
 const runMealPhotoMaintenance = vi.fn();
+const runHostedMealMediaMaintenance = vi.fn();
+vi.mock("../src/hosted-runtime/meal-media-maintenance.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/hosted-runtime/meal-media-maintenance.ts")>()),
+  runHostedMealMediaMaintenance: (input: unknown) => runHostedMealMediaMaintenance(input),
+}));
 const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
@@ -66,7 +71,8 @@ import {
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
   HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS,
-  runHostedIdleCheckpointMaintenance,
+  runHostedIdleCheckpointMaintenance as runIdleMaintenance,
+  resolveHostedIdleMaintenanceWork,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 
@@ -78,6 +84,12 @@ const emptyBlockedCaptureCounts = {
   GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 0,
   VAULT_FILE_MISSING: 0,
 };
+
+function runHostedIdleCheckpointMaintenance(
+  input: Omit<Parameters<typeof runIdleMaintenance>[0], "foregroundWorkPending"> & { foregroundWorkPending?: boolean },
+) {
+  return runIdleMaintenance({ foregroundWorkPending: false, ...input });
+}
 
 async function waitForAtomicArchiveTempFile(
   directoryPath: string,
@@ -98,6 +110,7 @@ async function waitForAtomicArchiveTempFile(
 }
 
 beforeEach(() => {
+  runHostedMealMediaMaintenance.mockReset();
   runAssistantCodexResumeRetention.mockReset().mockResolvedValue(undefined);
   runMealPhotoMaintenance.mockReset().mockResolvedValue({ thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, hasMore: false, nextEligibleAt: null });
   compactWarmCodexThread.mockReset();
@@ -217,6 +230,49 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await fs.rm(vaultRoot, { recursive: true, force: true });
     }
   });
+
+  it.each(["device-sync.reconcile", "inbox_media_retention", "assistant", "assistant_delivery", "mailbox", null]
+    .flatMap(nextWakeReason => [-60_000, 60_000].map(delta => ({ nextWakeReason, delta }))))(
+    "compacts with $nextWakeReason at $delta while bounding maintenance", async ({ nextWakeReason, delta }) => {
+      const retentionAt = "2026-01-02T00:00:00.000Z";
+      runInboxMediaRetention.mockResolvedValue({ hasMoreEligibleAttachments: false, nextEligibleAt: retentionAt });
+      compactWarmCodexThread.mockResolvedValue({
+        kind: "compacted", durationMs: 10, model: "gpt-6.1-sol", serviceTier: null,
+        threadContextTokensBefore: 100_000, threadId: "thread_routine",
+        usage: { inputTokens: 100_000, outputTokens: null, cachedInputTokens: null, totalTokens: 100_000, source: "estimated" },
+      });
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_routine", model: "gpt-6.1-sol",
+        mealMedia: {
+          budget: { remaining: 10, deadlineMs: null, uploaded: 0, fullPhotosRetired: 0, pending: null },
+          mediaStore: { get: vi.fn(), put: vi.fn() },
+          persistRetry: vi.fn(),
+        },
+        providerName: "hosted-openai",
+        ...resolveHostedIdleMaintenanceWork({
+          foregroundWorkPending: false,
+          ...{ nextWakeAt: new Date(delta).toISOString(), nextWakeReason }, nowMs: 0,
+        }),
+        recordUsage: null, resolveAssistantSessionId: null, shutdownSignal: null,
+        vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome).toMatchObject({
+        kind: "compacted",
+        nextWakeAt: retentionAt, nextWakeReason: "inbox_media_retention",
+      });
+      expect(compactWarmCodexThread).toHaveBeenCalledTimes(1);
+      expect(compactWarmCodexThread).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS }));
+      expect(runHostedMealMediaMaintenance).not.toHaveBeenCalled();
+      expect(runInboxMediaRetention).toHaveBeenCalledWith(expect.objectContaining({ maxAttachments: 1 }));
+      expect(runInboxEnvelopeMigration).toHaveBeenCalledWith(expect.objectContaining({ maxFiles: 1 }));
+      expect(runInboxTextRetention).toHaveBeenCalledWith(expect.objectContaining({ maxCaptures: 1 }));
+      expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith(expect.objectContaining({ maxCaptures: 1 }));
+      expect(runMealPhotoMaintenance).toHaveBeenCalledWith(expect.objectContaining({ maxMeals: 1 }));
+      expect(archiveClosedEventLedgerShards).not.toHaveBeenCalled();
+      expect(archiveClosedAuditShards).not.toHaveBeenCalled();
+      expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps idle-shutdown compaction below the hosted Codex auto-compact ceiling", () => {
     expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(50_000);
@@ -851,7 +907,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         memberId: "member_synthetic_retention_1",
         model: null,
-        pendingWork: true,
+        pendingWork: true, foregroundWorkPending: true,
         providerName: null,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -1089,7 +1145,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       memberId: "member_1",
       model: "gpt-6.1-sol",
       providerName: "hosted-openai",
-      pendingWork: true,
+      pendingWork: true, foregroundWorkPending: true,
       recordUsage: null,
       resolveAssistantSessionId: null,
       shutdownSignal: null,
@@ -1463,7 +1519,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         memberId: "member_1",
         model: "gpt-6.1-sol",
         providerName: "hosted-openai",
-        pendingWork: false,
+        pendingWork: true,
+        foregroundWorkPending: false,
         recordUsage: null,
         resolveAssistantSessionId: null,
         shutdownSignal: null,
@@ -1505,7 +1562,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       memberId: "member_1",
       model: "gpt-6.1-sol",
       providerName: "hosted-openai",
-      pendingWork: false,
+      pendingWork: true,
+      foregroundWorkPending: false,
       recordUsage: null,
       resolveAssistantSessionId: null,
       shutdownSignal: shutdownController.signal,
@@ -1515,14 +1573,14 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(outcome).toMatchObject({ kind: "failed", reason: "aborted" });
   });
 
-  it("skips when member-visible work is pending so replies are never delayed", async () => {
+  it("skips compaction when foreground work is pending", async () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
         model: "gpt-6.1-sol",
         providerName: "hosted-openai",
-        pendingWork: true,
+        pendingWork: true, foregroundWorkPending: true,
         recordUsage: null,
         resolveAssistantSessionId: null,
         shutdownSignal: null,
@@ -1895,7 +1953,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
           credentialSource: "platform",
           memberId: "member_1",
           model: "gpt-6.1-sol",
-          pendingWork: true,
+          pendingWork: true, foregroundWorkPending: true,
           protectedCaptureIds: ["cap_pending"],
           providerName: "hosted-openai",
           recordUsage: null,

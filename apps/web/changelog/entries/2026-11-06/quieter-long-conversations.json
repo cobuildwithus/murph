@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "quieter-long-conversations",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Long conversations can refresh between replies",
+    "summary": "Murph can refresh long conversations during quiet time even when background work is scheduled.",
+    "details": "You can keep messaging normally; a new message interrupts the background refresh.",
+    "relevanceTags": [
+      "chat",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4721
+    ]
+  }
+}

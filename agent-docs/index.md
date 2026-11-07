@@ -1,3 +1,7 @@
+Empty-wake retention recovery is tracked in [the review correction](exec-plans/completed/2026-11-06-idle-compaction-interrupted-retention.md).
+
+Idle compaction admission and retention retry recovery are tracked in [the completion plan](exec-plans/completed/2026-11-06-idle-compaction-completion.md); the live contract remains in [the hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 ReviewGPT runs only for risky changes, at any size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
 Checkpoint step timings, the archive plan/build split, and unconditional residue
 pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
