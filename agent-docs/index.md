@@ -1975,3 +1975,7 @@ because age and canonical lock ownership do not prove abandonment.
 Deferred device cron history deletion and the thin-session safety check
 are recorded in [the retention assessment](exec-plans/completed/2026-11-06-retire-settled-device-cron.md).
 The current family policies remain in `docs/contracts/06-hosted-workspace-file-count.md`.
+
+Pending-reply preservation, selected-retry deadline ownership and deferred delivery
+cancellation are documented in [the runtime owner](../packages/assistant-runtime/README.md); implementation
+and proof are tracked in [the reply ownership plan](exec-plans/active/2026-11-06-deferred-delivery-cancellation.md).

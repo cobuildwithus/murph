@@ -726,6 +726,73 @@ it("resets the exact prepared retry when the durable hook yields before provider
   expect(f.sends()).toBe(1);
 });
 
+it.each([
+  ["telegram", "current"], ["email", "current"], ["telegram", "original"],
+] as const)("honors %s %s cancellation before a deferred retry enters the provider", async (channel, cancellation) => {
+  const f = await fixture(channel);
+  await f.retry();
+  const before = await f.read();
+  const original = new AbortController();
+  f.setSignal(original.signal);
+  const { post } = await f.phase();
+  expect(post.afterDurableCheckpoint?.length).toBeGreaterThan(0);
+  expect(await f.read()).toMatchObject({ status: "sending", preparedDispatchToken: expect.any(String) });
+  await f.publish();
+  const current = new AbortController();
+  (cancellation === "current" ? current : original).abort(new Error("Synthetic foreground interruption"));
+  for (const hook of post.afterDurableCheckpoint ?? []) await hook({ signal: current.signal });
+  expect(original.signal.aborted).toBe(cancellation === "original");
+  expect(f.sends()).toBe(0);
+  expect(await f.read()).toMatchObject({
+    status: before.status, attemptCount: before.attemptCount,
+    lastAttemptAt: before.lastAttemptAt, preparedDispatchToken: null,
+  });
+  f.setSignal(undefined);
+  const later = await f.phase();
+  await f.publish();
+  await runHostedWorkspaceDurableCheckpointEffects(later.post.afterDurableCheckpoint);
+  expect(f.sends()).toBe(1);
+  expect(await f.read()).toMatchObject({ status: "sent" });
+});
+
+it("keeps a published current-turn reply ahead of a later scheduling interruption", async () => {
+  const f = await fixture("linq", { followUpRequest, media: [{
+    kind: "voice_memo", filename: "reply.mp3", transcript: "Requested reply.",
+    transport: { kind: "linq_attachment", attachmentId: "attachment_current_turn" },
+  }] });
+  const { post } = await f.phase("foreground", [f.intent.intentId]);
+  expect(post.afterDurableCheckpoint?.length).toBeGreaterThan(0);
+  await f.publish();
+  const current = new AbortController();
+  current.abort(new Error("Synthetic newer message wake"));
+  for (const hook of post.afterDurableCheckpoint ?? []) await hook({ signal: current.signal });
+  expect(f.consumed.has("mailbox_publication")).toBe(true);
+  expect(await f.read()).toMatchObject({ status: "sent" });
+});
+
+it("does not retry an ambiguous send when current durable-effect cancellation arrives during dispatch", async () => {
+  const f = await fixture("telegram");
+  await f.retry();
+  const { post } = await f.phase();
+  expect(post.afterDurableCheckpoint?.length).toBeGreaterThan(0);
+  await f.publish();
+  const current = new AbortController();
+  f.providerFetch.mockImplementation(async () => {
+    current.abort(new Error("Synthetic interruption after provider entry"));
+    throw current.signal.reason;
+  });
+  for (const hook of post.afterDurableCheckpoint ?? []) {
+    try { await hook({ signal: current.signal }); }
+    catch (error) { expect(error).toBe(current.signal.reason); }
+  }
+  expect(f.sends()).toBe(1);
+  expect(await f.read()).toMatchObject({
+    status: "abandoned", lastError: { code: "ASSISTANT_DELIVERY_AMBIGUOUS" },
+  });
+  await f.phase();
+  expect(f.sends()).toBe(1);
+});
+
 it("claims a blocked successor only in its own published batch", async () => {
   const f = await fixture("telegram");
   await f.retry();

@@ -3496,6 +3496,46 @@ describeRealCodex('real Codex public image URL recovery e2e', () => {
 })
 
 describeRealCodex('real Codex direct route planning e2e', () => {
+  it('answers an unanswered direct question after the fifteen-minute retry cutoff', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-delayed-reply-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const receivedAt = '2026-11-06T15:00:00.000Z'
+      const prompt = buildAssistantAutoReplyPrompt([{
+        actorIsSelf: false, attachmentDescriptors: [],
+        attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: null, status: 'not_attempted', updatedAt: null },
+        conversation: { accountId: null, actorId: 'synthetic-sender', actorIsSelf: false,
+          source: 'linq', threadId: 'synthetic-delayed-chat', threadIsDirect: true },
+        inputId: `ain_${'8'.repeat(32)}`, occurredAt: receivedAt, receivedAt,
+        projection: null, replyContext: null, replyTarget: null, source: 'linq', telegramMetadata: null,
+        sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false,
+          senderHandle: '+15555550100', partCount: 1, reactionEligible: true,
+          replyToMessageId: null, service: 'iMessage' },
+        text: 'I have 18 pencils and want to split them equally between 3 boxes. How many pencils go in each box?',
+      }], { timeZone: 'America/New_York' })
+      if (prompt.kind !== 'ready') throw new Error('Expected an accepted direct question.')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-11-06T16:00:00.000Z'),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env, model: config.model, modelProvider: config.modelProvider,
+        prompt: prompt.prompt, reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[delayed-reply-e2e] ${JSON.stringify({ delayMinutes: 60, actions: actions.length, reply })}\n`)
+      expect(actions).toEqual([])
+      expect(reply).toMatch(/(?:6|six)\s+pencils/iu)
+      expect(reply).toMatch(/each|per|every/iu)
+      expect(reply).not.toMatch(/expired|too old|cutoff|retry|already answered|cannot answer|can't answer|scheduled|reminder/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it(
     'answers once from an early detail retained across sixty committed messages',
     async () => {

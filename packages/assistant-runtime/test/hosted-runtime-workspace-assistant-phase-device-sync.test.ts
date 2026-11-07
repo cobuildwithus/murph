@@ -1034,10 +1034,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     }));
 
     expect(result.nextWakeAt).toBe(reminderWakeAt);
-    expect(result).not.toHaveProperty("invocationLocalAssistantWakeAt");
+    expect(result.invocationLocalAssistantWakeAt).toBeNull();
   });
 
-  it("labels a selected foreground retry as invocation-local work", async () => {
+  it.each(["foreground", "background"] as const)("labels a selected %s retry as invocation-local work", async (mode) => {
     const retryWakeAt = "2026-04-27T00:00:30.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -1048,7 +1048,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
+      importedCount: mode === "foreground" ? 1 : 0,
+      workspace: createDueAssistantWorkspace(),
       now: () => "2026-04-27T00:00:00.000Z",
     }));
 

@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "unanswered-message-retries",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable reply retries",
+    "summary": "Unanswered messages stay eligible for a reply after a delay or a newer reply.",
+    "details": "Repeated retries keep their scheduled timing, and delayed background sends can yield to new messages. The fifteen-minute retry cutoff has been removed.",
+    "relevanceTags": [
+      "messages",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}
