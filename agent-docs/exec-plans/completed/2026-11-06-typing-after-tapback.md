@@ -1,6 +1,6 @@
 # Typing means the answer is coming
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -198,3 +198,4 @@ Read-only Codex deep review:
   coverage to another input.
 - After deploy: a real phone check of a tapback turn, a quick follow-up and a long
   turn, and one trace confirming typing tracks the final answer on the runner.
+Completed: 2026-11-06
