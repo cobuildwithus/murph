@@ -15,14 +15,15 @@ export function readGamePushRoutes(db: { companionPushRoute: Pick<Prisma.Transac
 /** One best-effort attempt; each notification owner supplies its current subject authority. */
 export async function deliverGamePush(notification: { memberId: string; sessionId: string; request: ApplePushRequest; requireGameReminders?: true }, stillValid: () => Promise<boolean>): Promise<string> {
   try {
+    if (notification.request.expiresAt.getTime() <= Date.now() || !await stillValid()) return "superseded";
+    // Last, so a route replaced or signed out during the content recheck gets nothing.
     const current = await getPrisma().companionPushRoute.findFirst({
       where: { userId: notification.memberId, ...notification.request.target, alertsAllowed: true, gameSessionId: notification.sessionId,
         ...(notification.requireGameReminders ? { gameReminders: true } : {}),
         member: { suspendedAt: null, authRecords: { some: { model: "session", id: notification.sessionId, expiresAt: { gt: new Date() } } } } },
       select: { userId: true },
     });
-    if (!current || notification.request.expiresAt.getTime() <= Date.now() || !await stillValid()
-      || notification.request.expiresAt.getTime() <= Date.now()) return "superseded";
+    if (!current || notification.request.expiresAt.getTime() <= Date.now()) return "superseded";
     const outcome = await sendApplePush(notification.request);
     if (outcome === "unregistered") await forgetCompanionPushRoute(notification.memberId, notification.request.target.token);
     return outcome;

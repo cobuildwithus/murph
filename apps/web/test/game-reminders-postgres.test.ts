@@ -21,6 +21,7 @@ vi.mock("@/src/lib/game/http/auth", () => ({
 import { getPrisma } from "@/src/lib/prisma";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { sendDueGameReminders } from "@/src/lib/game/reminder-notification";
+import { deliverGamePush } from "@/src/lib/game/push-delivery";
 import { readGameReminders, readHome, runGameCommand } from "@/src/lib/game/service";
 import { GET, PUT } from "../app/api/game/v1/me/reminders/route";
 import { gameHttpError } from "@/src/lib/game/http/errors";
@@ -206,6 +207,17 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     vi.setSystemTime(new Date("2026-11-06T19:29:59Z"));
     await sendDueGameReminders(new Date());
     expect(m.send).toHaveBeenCalledOnce();
+  });
+  it("sends nothing when the route loses capability during the content recheck", async () => {
+    const owner = await member();
+    const route = await db.companionPushRoute.findUniqueOrThrow({ where: { userId: owner } });
+    const request = { target: { token: route.token, topic: route.topic, environment: route.environment }, collapseId: "reminder",
+      expiresAt: new Date(now.getTime() + 60_000), data: {}, message: { kind: "alert", body: "Still time today." } } as ApplePushRequest;
+    await expect(deliverGamePush({ memberId: owner, sessionId: route.gameSessionId!, request, requireGameReminders: true }, async () => {
+      await db.companionPushRoute.update({ where: { userId: owner }, data: { gameReminders: false } });
+      return true;
+    })).resolves.toBe("superseded");
+    expect(m.send).not.toHaveBeenCalled();
   });
   it("visits another minute's shard within the reminder window", async () => {
     const next = new Date("2026-11-06T19:01:00Z"), owner = await member("UTC", true, next);
