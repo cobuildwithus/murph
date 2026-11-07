@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 110,
+  "item": {
+    "id": "game-reminder-choices-stay-saved",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your game reminder choices stay saved",
+    "summary": "Changes to a game's reminders stay in place while the game finishes getting ready.",
+    "details": "Your on/off and every-day choices take precedence over reminder settings carried over from a previous game.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

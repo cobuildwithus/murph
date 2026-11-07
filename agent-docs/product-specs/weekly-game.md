@@ -783,7 +783,10 @@ covers that game. It uses only the member's own unfinished tasks, a frozen batch
 and direct-conversation watermark, and the room check-in's unanswered-evening
 pause. It remains subject to the 28-day engagement pause. On activation, the
 member's reminder opt-out and count-game cadence carry from a validated previous
-game, then the latest same-people game if there is no lineage. A new person gets
+game, then the latest same-people game if there is no lineage. An explicit choice
+for the new game wins over carry-over, including a delayed activation retry.
+On/off and every-day choices are independent; omitting every-day selection keeps
+that field eligible for ordinary carry-over. A new person gets
 one private help offer; familiar people with a changed schedule or length get
 one check-in preference question; an unchanged rhythm stays quiet. The offer
 waits until 09:00 local if activation is between 21:00 and 09:00 and expires

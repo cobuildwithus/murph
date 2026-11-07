@@ -150,6 +150,24 @@ describe("warmHostedContainerCodexBinary", () => {
     expect(await pathExists(fake.recordPath)).toBe(false);
   });
 
+  it("does not start when shutdown interrupts scratch preparation", async () => {
+    const fake = await writeFakeCodex("stall");
+    const controller = new AbortController();
+
+    const pending = warmHostedContainerCodexBinary({
+      codexCommand: fake.command,
+      executablePath,
+      modelCatalogJsonPath: "/catalog.json",
+      signal: controller.signal,
+      timeoutMs: 400,
+    });
+    // The initial signal check has passed, but asynchronous scratch setup has not.
+    controller.abort();
+
+    expect((await pending).outcome).toBe("aborted");
+    expect(await pathExists(fake.recordPath)).toBe(false);
+  });
+
   it("reports failure without throwing for an early exit or a missing binary", async () => {
     const fake = await writeFakeCodex("exit");
 
