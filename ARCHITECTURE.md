@@ -1031,7 +1031,9 @@ Detached phone-call results and usage-referral celebrations are the only
 notification families admitted through the dirty runtime's pre-checkpoint
 system prefix. Their server-generated event identities and idempotent delivery
 make that latency shortcut replay-safe; generic notifications still wait for
-the idle checkpoint. A referral celebration recomputes its current-model
+the idle checkpoint. A blocked system prefix containing an assistant notification
+requests that existing checkpoint promptly instead of waiting out idle batching;
+its import and dispatch safety barriers are unchanged. A referral celebration recomputes its current-model
 capacity label and receives only a server-resolved tone, Humor, and Unhinged
 band, never transcript history. The existing minute recovery pass
 re-signals the exact oldest unconsumed celebration mailbox pointers after a

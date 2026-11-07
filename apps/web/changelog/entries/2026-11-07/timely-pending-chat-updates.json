@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-07",
+  "order": 100,
+  "item": {
+    "id": "timely-pending-chat-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting for chat updates",
+    "summary": "Murph can prepare pending chat updates sooner after a conversation, without an unnecessary idle delay.",
+    "details": "Updates keep the same destination, privacy checks, and delivery safeguards.",
+    "relevanceTags": ["messages", "reliability"],
+    "sourcePullRequests": []
+  }
+}
