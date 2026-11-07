@@ -888,9 +888,106 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
   ).toBe(false)
 })
 
+test('provider retries and steers share one typing decision and final-answer release', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    let gate!: ReturnType<typeof import('../src/assistant/channel-typing.ts').createAssistantChannelTypingHandle>
+    const adapterStart = vi.fn(async () => gate)
+    const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+      ...createDirectTypingContext(), adapter: { startTypingIndicator: adapterStart },
+    })
+    const { createAssistantChannelTypingHandle } = await import('../src/assistant/channel-typing.ts')
+    const start = vi.fn(async () => ({ stop: vi.fn(async () => {}) }))
+    const readAckCoverage = vi.fn(async () => true)
+    gate = createAssistantChannelTypingHandle({ start, readAckCoverage })
+    const run = mocks.executeCodexTurnWithRecovery.getMockImplementation()!
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async input => {
+      const result = await run(input)
+      await vi.advanceTimersByTimeAsync(500)
+      expect(start).not.toHaveBeenCalled()
+      await input.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 1 })
+      input.activeTurnSteering?.onFinalAnswerStarted?.()
+      input.activeTurnSteering?.onFinalAnswerStarted?.()
+      await vi.advanceTimersByTimeAsync(0)
+      return result
+    })
+    const result = await sendAssistantMessageLocal({ deliverResponse: true, prompt: 'Summarize my inbox', vault: '/vaults/test' })
+    expect(result.status).toBe('completed')
+    expect(adapterStart).toHaveBeenCalledTimes(1)
+    expect(readAckCoverage).toHaveBeenCalledTimes(1)
+    expect(start).toHaveBeenCalledTimes(1)
+  } finally { vi.useRealTimers() }
+})
+
+test.each(['covered', 'pending'] as const)('terminal delivery closes %s typing before stalled finalization', async mode => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    const coverage = createDeferred<boolean>()
+    const finalization = createDeferred<void>()
+    const start = vi.fn(async () => ({ stop: vi.fn(async () => {}) }))
+    let gate!: ReturnType<typeof import('../src/assistant/channel-typing.ts').createAssistantChannelTypingHandle>
+    const startTypingIndicator = vi.fn(async () => gate)
+    const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+      ...createDirectTypingContext(), adapter: { startTypingIndicator },
+    })
+    const { createAssistantChannelTypingHandle } = await import('../src/assistant/channel-typing.ts')
+    const readAckCoverage = vi.fn(() => mode === 'covered' ? Promise.resolve(true) : coverage.promise)
+    gate = createAssistantChannelTypingHandle({ start, readAckCoverage })
+    const run = mocks.executeCodexTurnWithRecovery.getMockImplementation()!
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async input => {
+      const result = await run(input)
+      await vi.advanceTimersByTimeAsync(500)
+      expect(readAckCoverage).toHaveBeenCalledTimes(1)
+      return result
+    })
+    const stopGate = vi.spyOn(gate, 'stop')
+    mocks.finalizeDeliveredAssistantTurn.mockImplementationOnce(async () => { await finalization.promise })
+    const result = sendAssistantMessageLocal({ deliverResponse: true, prompt: 'Summarize my inbox', vault: '/vaults/test' })
+    await vi.waitFor(() => expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledTimes(1))
+    expect(startTypingIndicator).toHaveBeenCalledTimes(1)
+    expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+    expect(stopGate).toHaveBeenCalledTimes(1)
+    coverage.resolve(true)
+    gate.release?.()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(start).not.toHaveBeenCalled()
+    finalization.resolve()
+    expect((await result).status).toBe('completed')
+  } finally { vi.useRealTimers() }
+})
+
+test('a terminal provider failure closes the typing gate before failure persistence', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    const persistence = createDeferred<void>()
+    const start = vi.fn(async () => ({ stop: vi.fn(async () => {}) }))
+    let gate!: ReturnType<typeof import('../src/assistant/channel-typing.ts').createAssistantChannelTypingHandle>
+    const startTypingIndicator = vi.fn(async () => gate)
+    const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+      ...createDirectTypingContext(), adapter: { startTypingIndicator },
+    })
+    const { createAssistantChannelTypingHandle } = await import('../src/assistant/channel-typing.ts')
+    gate = createAssistantChannelTypingHandle({ start, readAckCoverage: async () => false })
+    const run = mocks.executeCodexTurnWithRecovery.getMockImplementation()!
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async input => {
+      await run(input)
+      throw new Error('provider failed')
+    })
+    mocks.persistFailedAssistantPromptAttempt.mockImplementationOnce(async () => { await persistence.promise })
+    const result = sendAssistantMessageLocal({ deliverResponse: true, prompt: 'Summarize my inbox', vault: '/tmp/vault' })
+      .catch(error => error)
+    await vi.waitFor(() => expect(mocks.persistFailedAssistantPromptAttempt).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(start).not.toHaveBeenCalled()
+    persistence.resolve()
+    await result
+  } finally { vi.useRealTimers() }
+})
+
 test('sendAssistantMessageLocal does not wait for a pending typing indicator start', async () => {
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
-  const stopTyping = vi.fn(async () => undefined)
+  let providerTyping = false
+  const stopTyping = vi.fn(async () => { providerTyping = false })
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
     ...createDirectTypingContext(),
     adapter: {
@@ -914,15 +1011,15 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   assert.equal(result.status, 'completed')
   assert.equal(stopTyping.mock.calls.length, 0)
 
+  providerTyping = true
   typingIndicatorDeferred.resolve({
     stop: stopTyping,
   })
   await vi.waitFor(() => {
     expect(stopTyping).toHaveBeenCalledTimes(1)
   })
-  expect(stopTyping).toHaveBeenCalledWith({
-    providerStop: false,
-  })
+  expect(stopTyping).toHaveBeenCalledWith()
+  expect(providerTyping).toBe(false)
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {

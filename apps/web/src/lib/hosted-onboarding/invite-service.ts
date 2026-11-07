@@ -83,34 +83,13 @@ export async function getHostedInviteStatus(input: {
   prisma?: PrismaClient;
 }): Promise<HostedInviteStatusPayload> {
   const prisma = input.prisma ?? getPrisma();
-  const environment = getHostedOnboardingEnvironment();
   const now = input.now ?? new Date();
   const invite = await findHostedInviteByCode(input.inviteCode, prisma);
-  const configuredBillingPlanCodes = resolveConfiguredHostedBillingPlanCodes({
-    stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
-  });
-  const billingReady = resolveHostedBillingReady({
-    stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
-    stripeSecretKey: environment.stripeSecretKey,
-  });
-  const billingPlans = listHostedBillingPlanPresentations({
-    configuredPlanCodes: configuredBillingPlanCodes,
-  });
-  const defaultBillingPlanCode = billingPlans.some(
-    (plan) => plan.code === getHostedDefaultBillingPlanCode(),
-  )
-    ? getHostedDefaultBillingPlanCode()
-    : (billingPlans[0]?.code ?? null);
+  const billingPresentation = resolveHostedInviteBillingPresentation();
 
-  if (!invite) {
+  if (!invite || invite.expiresAt <= now) {
     return {
-      billing: {
-        defaultPlanCode: defaultBillingPlanCode,
-        plans: billingPlans,
-      },
-      capabilities: {
-        billingReady,
-      },
+      ...billingPresentation,
       invite: null,
       messagingSetupRequired: false,
       session: {
@@ -118,7 +97,7 @@ export async function getHostedInviteStatus(input: {
         expiresAt: null,
         matchesInvite: false,
       },
-      stage: "invalid",
+      stage: invite ? "expired" : "invalid",
       telegramStartRequired: false,
     };
   }
@@ -142,18 +121,11 @@ export async function getHostedInviteStatus(input: {
       : false,
     suspendedAt: invite.member.suspendedAt,
   });
-  const messagingInput = {
-    identity: {
-      ...(invite.member.identity ?? {}),
-      emailLinked: Boolean(
-        invite.member.emailAuthorization?.verifiedEmailVerifiedAt,
-      ),
-    },
+  const messagingStatus = resolveHostedInviteMessagingStatus({
+    member: invite.member,
     routing: inviteRouting,
-  };
-  const messagingSetupRequired = isHostedMemberMessagingSetupRequired(messagingInput);
-  const telegramStartRequired =
-    resolveHostedMemberMessagingState(messagingInput).telegramAwaitingInbound;
+    sessionMatchesInvite,
+  });
   const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
     await projectHostedMemberIdentityState(inviteIdentity, prisma),
   );
@@ -164,6 +136,7 @@ export async function getHostedInviteStatus(input: {
   const emailAuthTarget = resolveHostedInviteEmailAuthTarget({
     pendingLinqParticipantContact: inviteRouting?.pendingLinqParticipantContact ?? null,
     verificationMode,
+    sessionMatchesInvite,
   });
   const statusPhoneAuthTarget =
     verificationMode === "invite_email"
@@ -171,13 +144,7 @@ export async function getHostedInviteStatus(input: {
       : toHostedInviteStatusPhoneAuthTarget(phoneAuthTarget);
 
   return {
-    billing: {
-      defaultPlanCode: defaultBillingPlanCode,
-      plans: billingPlans,
-    },
-    capabilities: {
-      billingReady,
-    },
+    ...billingPresentation,
     invite: {
       code: invite.inviteCode,
       ...(emailAuthTarget ? { emailAuthTarget } : {}),
@@ -189,7 +156,7 @@ export async function getHostedInviteStatus(input: {
           : null,
       verificationMode,
     },
-    messagingSetupRequired,
+    ...messagingStatus,
     murphPhoneNumber: resolveHostedInviteMurphPhoneNumber({
       routing: inviteRouting,
       sessionMatchesInvite,
@@ -201,7 +168,54 @@ export async function getHostedInviteStatus(input: {
       matchesInvite: Boolean(sessionMatchesInvite),
     },
     stage,
-    telegramStartRequired,
+  };
+}
+
+function resolveHostedInviteBillingPresentation() {
+  const environment = getHostedOnboardingEnvironment();
+  const configuredBillingPlanCodes = resolveConfiguredHostedBillingPlanCodes({
+    stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
+  });
+  const billingReady = resolveHostedBillingReady({
+    stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
+    stripeSecretKey: environment.stripeSecretKey,
+  });
+  const billingPlans = listHostedBillingPlanPresentations({
+    configuredPlanCodes: configuredBillingPlanCodes,
+  });
+  const defaultBillingPlanCode = billingPlans.some(
+    (plan) => plan.code === getHostedDefaultBillingPlanCode(),
+  )
+    ? getHostedDefaultBillingPlanCode()
+    : (billingPlans[0]?.code ?? null);
+
+  return {
+    billing: { defaultPlanCode: defaultBillingPlanCode, plans: billingPlans },
+    capabilities: { billingReady },
+  };
+}
+
+function resolveHostedInviteMessagingStatus(input: {
+  member: NonNullable<Awaited<ReturnType<typeof findHostedInviteByCode>>>["member"];
+  routing: HostedMemberRoutingStateSnapshot | null;
+  sessionMatchesInvite: boolean;
+}) {
+  if (!input.sessionMatchesInvite) {
+    return { messagingSetupRequired: false, telegramStartRequired: false };
+  }
+  const messagingInput = {
+    identity: {
+      ...(input.member.identity ?? {}),
+      emailLinked: Boolean(
+        input.member.emailAuthorization?.verifiedEmailVerifiedAt,
+      ),
+    },
+    routing: input.routing,
+  };
+
+  return {
+    messagingSetupRequired: isHostedMemberMessagingSetupRequired(messagingInput),
+    telegramStartRequired: resolveHostedMemberMessagingState(messagingInput).telegramAwaitingInbound,
   };
 }
 
@@ -665,11 +679,13 @@ function toHostedInviteStatusPhoneAuthTarget(
 }
 
 function resolveHostedInviteEmailAuthTarget(input: {
+  sessionMatchesInvite: boolean;
   pendingLinqParticipantContact: HostedMemberRoutingStateSnapshot["pendingLinqParticipantContact"];
   verificationMode: NonNullable<HostedInviteStatusPayload["invite"]>["verificationMode"];
 }): HostedInviteEmailAuthTarget | null {
   if (
-    input.verificationMode !== "invite_email"
+    !input.sessionMatchesInvite
+    || input.verificationMode !== "invite_email"
     || input.pendingLinqParticipantContact?.kind !== "email"
   ) {
     return null;

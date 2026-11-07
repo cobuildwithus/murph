@@ -436,7 +436,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   Sending happens after commit, with route/session, active participation, block,
   report, real-day and milestone rechecks. Stale or uncertain sends keep claims
   consumed. A blocked peer suppresses completion wording. No content or names
-  enter pushes. Missed-day chat is separate from these push milestones.
+  enter pushes except the recipient's own task words in a daily reminder.
+  Missed-day chat is separate from these push milestones.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It
@@ -535,6 +536,19 @@ resulting avatar. No private photo is shared with the subject or other players.
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
+- **Evening room check-ins.** At the latest local 8pm among the room's eligible
+  scheduled game/player slots, Murph may ask one short question in the existing
+  room naming each still-open player's own task. The half-hour window and one
+  room/date claim never move earlier when someone posts; a late item is dropped.
+  Pair, group and mixed rooms share this path. Every actual recipient must be a
+  joined member with a known current game-profile time zone, and the widest
+  clock gap must be strictly under three hours. Unjoined or unresolved recipients
+  stop the room check-in. A player switched off for a game is not addressed.
+  Murph stays quiet about someone who already said they will or will not do it.
+  Three consecutive accepted scheduled evening sends without a player message
+  pause future evenings until someone writes. Skips and failures do not count.
+  The 28-day iMessage inactivity pause still applies. The feature is off unless
+  `MURPH_GAME_EVENING_CHECK_IN_ENABLED` is exactly `true`.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with
@@ -731,6 +745,32 @@ resulting avatar. No private photo is shared with the subject or other players.
   and sends still-current waiting notices and its recap after the block lifts.
 - **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
   slurs and explicit sexual words are refused with "This can't be posted."
+
+## Daily reminders
+
+The profile owns one local reminder time (default 19:00), push on, text off;
+each live seat can opt out. `setReminders` is the single write owner. Text is
+unavailable (`canText: false`). Reading settings never creates a profile or
+changes Home. Only a current game push registration with `gameReminders: true`
+can receive reminders; older game registrations clear that capability, while
+same-address wearable refreshes preserve it.
+
+The minute sweep makes at most one best-effort attempt per member and local
+calendar date, within 30 minutes of the profile's reminder time. Game eligibility
+uses each seat's frozen zone: live, remaining, scheduled, admitted, no post or
+excuse, with an attempt left. Count games remind only when outstanding credit
+is positive and remaining opportunities are no greater than that shortfall.
+An earlier miss does not stop reminders; an incomplete artifact earns no credit
+but still suppresses a reminder for its own day.
+
+After claiming a member-wide `reminder_notification` event, a fresh projection
+supplies only the member's open games and current own task words, including
+seat overrides. The title joins those tasks with ", " and stops at 120 characters.
+The body is "They posted. Share yours to see it." only for one open game with
+a visible peer post today; otherwise "Still time today." Symmetric blocks and
+reported posts cannot supply that peer signal. The push opens the first open
+game, uses default sound and expires at the window's end. Claims never retry,
+even after failure or a newly closed day. No new chat or private texts ship here.
 
 ## Replies
 

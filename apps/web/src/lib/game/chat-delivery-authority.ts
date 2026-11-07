@@ -13,8 +13,9 @@ import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeReso
 import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { readGroupGameNoticeAuthority, sameGamePlayers } from "./chat-membership";
-import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
+import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
+import { isEveningBatchCurrentTx } from "./evening-check-in";
 import { isMissedCheckInExpired } from "./missed-check-in";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
@@ -25,6 +26,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   audience?: GameNoticeAudience;
   rematchTermsVersion?: number | null;
   groupMissedPolicy?: HostedGameGroupMissedCheckInPolicy;
+  eveningPolicy?: HostedGameEveningCheckInPolicy;
   tx: Prisma.TransactionClient;
   now?: Date;
 }): Promise<boolean> {
@@ -35,6 +37,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   if (recap) return assertGameRecapDeliveryCurrentTx(input, recap.gameId, recap.regenerationId);
   if (key.startsWith("game-recap:")) return stale();
   if (key.startsWith("game-missed:")) return assertGameMissedEventDeliveryCurrentTx(input, key);
+  if (key.startsWith("game-evening:")) return assertGameEveningDeliveryCurrentTx(input, key);
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
   if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:") || key.startsWith("game-change-resolved:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
   const rematch = /^game-rematch:([^:]+)$/.exec(key);
@@ -44,6 +47,13 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
   return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameEveningDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
+  const policy = input.eveningPolicy;
+  if (!policy || policy.eventId !== key || policy.roomId !== input.containerMemberId
+    || !await isEveningBatchCurrentTx(policy, input.playerMemberIds ?? [], input.audience, input.tx, input.now ?? new Date())) return stale();
+  return true;
 }
 
 async function assertGameMissedEventDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {

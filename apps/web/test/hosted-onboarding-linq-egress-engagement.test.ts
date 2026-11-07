@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedAssistantAskCompletionDeliveryAuthorityTx: vi.fn(),
   getPrisma: vi.fn(),
   readGameProposalDeliveryPlayers: vi.fn(),
+  gameCurrentOverride: null as null | (() => Promise<boolean>),
   decodeHostedMailboxStoredPayload: vi.fn(),
   decryptHostedLinqLinePhoneNumber: vi.fn(),
   encryptHostedLinqLinePhoneNumber: vi.fn(),
@@ -26,6 +27,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/game/chat-delivery", () => ({
   readGameProposalDeliveryPlayers: mocks.readGameProposalDeliveryPlayers,
 }));
+vi.mock("@/src/lib/game/chat-delivery-authority", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/src/lib/game/chat-delivery-authority")>();
+  return { ...actual, assertGameProposalDeliveryCurrentTx: async (input: Parameters<typeof actual.assertGameProposalDeliveryCurrentTx>[0]) =>
+    mocks.gameCurrentOverride ? mocks.gameCurrentOverride() : actual.assertGameProposalDeliveryCurrentTx(input) };
+});
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   assertHostedAssistantAskCompletionDeliveryAuthorityTx:
@@ -108,6 +114,7 @@ import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/host
 describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.gameCurrentOverride = null;
     mocks.readGameProposalDeliveryPlayers.mockReset().mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
     mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx.mockResolvedValue(
@@ -369,6 +376,69 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
     expect(console.warn).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps a stalled typing read outside both delivery locks and first-turn repair", async () => {
+    stubTypingCoverageEnv("on");
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    mockPersistedLinqInbound({ prisma, chatId: "chat-home", dedupeKey: "event-later",
+      mailboxItemId: "mailbox-later", messageId: "message-later",
+      occurredAt: new Date().toISOString(), threadIsDirect: true });
+    const stale = { id: "stale-first-turn", status: "pending", attemptedAt: new Date(0),
+      nextAttemptAt: new Date(0), attemptCount: 0 };
+    prisma.hostedLinqDelivery.findFirst.mockImplementation(async () => stale);
+    let finish!: () => void;
+    const wait = new Promise<void>(resolve => { finish = resolve; });
+    let reading = false;
+    prisma.$queryRaw.mockImplementation(async (strings: TemplateStringsArray | string) => {
+      const sql = typeof strings === "string" ? strings : strings.join("?");
+      if (sql.includes("hosted_linq_ack_reaction")) {
+        reading = true;
+        await wait;
+        return [{ covered: true }];
+      }
+      return [];
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    const coverage = postHostedLinqEgressEngagement(routeAuthorityRequest({ target: "chat-home",
+      authorityCheckOnly: true, deliveryPurpose: "typing", replyToMessageId: "message-later" }));
+    await vi.waitFor(() => expect(reading).toBe(true));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    // Ordinary final dispatch can complete while the advisory query is stalled.
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
+    prisma.hostedLinqDelivery.findFirst.mockResolvedValue(null);
+    const sent = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target: "chat-home" }));
+    expect(sent.status).toBe(200);
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+    finish();
+    const response = await coverage;
+    expect(await response.json()).toEqual({ ok: true, ackCovered: true });
+    expect(stale).toEqual({ id: "stale-first-turn", status: "pending", attemptedAt: new Date(0),
+      nextAttemptAt: new Date(0), attemptCount: 0 });
+  });
+
+  it.each([
+    ["disabled", "chat-home", "thread", false, false, "off"],
+    ["foreign", "chat-foreign", "thread", false, false, "on"],
+    ["group", "chat-group", "thread", true, false, "on"],
+    ["participant", "chat-home", "participant", false, false, "on"],
+    ["inactive", "chat-home", "thread", false, true, "on"],
+  ] as const)("returns no typing coverage for %s", async (_label, target, targetKind, group, inactive, flag) => {
+    stubTypingCoverageEnv(flag);
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const prisma = createPrismaStub({ homeChatId: "chat-home", activeMemberAccess: !inactive,
+      ...(group ? { threadRouteContainerMemberId: "member-1" } : {}) });
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target, targetKind,
+      authorityCheckOnly: true, deliveryPurpose: "typing" }));
+    expect((await response.json()).ackCovered).not.toBe(true);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -2386,6 +2456,27 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it("keeps a current evening game notice subject to the dormant-room pause", async () => {
+    const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1" });
+    prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
+    prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.gameCurrentOverride = async () => true;
+    const eventId = "game-evening:member-1:2030-03-04";
+    mocks.readGameProposalDeliveryPlayers.mockResolvedValue({ memberIds: ["person-a", "person-b"], audience: undefined,
+      policy: { kind: "game_evening_check_in", eventId, roomId: "member-1", date: "2030-03-04",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), conversationLaneSeq: "0",
+        batch: [{ gameId: "game", termsVersion: 1, memberIds: ["person-a"], dayIndex: 0 }] } });
+    const response = await postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorityCheckOnly: false, idempotencyKey: eventId, target: "chat-authorized-group", targetKind: "thread" }),
+    }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ deliveryBlockCode: "automation_engagement_paused" });
+    expect(mocks.gameCurrentOverride).not.toBeNull();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])("preserves an exact accepted reply with direct=%s without an inbound-day projection", async (threadIsDirect) => {
     const prisma = createPrismaStub({ homeChatId: "chat-home", ...(threadIsDirect ? {} : { threadRouteContainerMemberId: "member-1" }) });
     prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
@@ -2973,6 +3064,12 @@ async function expectRouteAuthorityMismatchResponse(
   expect(prisma.$executeRaw).not.toHaveBeenCalled();
 }
 
+function stubTypingCoverageEnv(flag: "on" | "off"): void {
+  vi.stubEnv("HOSTED_LINQ_ACK_REACTIONS", flag);
+  vi.stubEnv("HOSTED_LINQ_ACK_REACTION_OPENAI_API_KEY", "test-key");
+  delete (globalThis as { __murphHostedOnboardingEnv?: unknown }).__murphHostedOnboardingEnv;
+}
+
 function captureRouteAuthorityLogs(): void {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -3107,6 +3204,7 @@ function createPrismaStub(input: {
         linqChatLookupKey: "chat-default",
         phoneNumberLookupKey: defaultLineLookupKey,
         providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+        service: null as string | null,
         providerStatus: "HEALTHY",
         providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
       }),

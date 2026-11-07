@@ -208,6 +208,15 @@ provider acceptance is pending. Typing never blocks admission. Failed staging,
 self-authored input, consumed replay, disabled auto-replies, and unbound routes do
 not start preparation; failed admission cancels an unclaimed handle. Attachment
 evidence and canonical receipt/watermark checkpoints keep their existing gates.
+Direct iMessage typing asks Web once for confirmed burst tapback coverage, after
+500 ms from the first typing request, with a one-second lookup budget.
+Only literal `ackCovered: true` holds the existing engine-owned typing handle;
+errors, timeouts and old Web responses start typing. Final-answer start or the
+30-second deadline releases it. Preparation and the turn share that decision
+and deadline; receipt time is not carried by the typing delivery context.
+Web's typing branch is advisory, read-only, and outside delivery locks. Roll
+out Web before the runner. Disabling `HOSTED_LINQ_ACK_REACTIONS` makes new reads
+uncovered; already-held handles drain on final answer, deadline or stop.
 Runtime status checkpoints resolve independent pending-input, outbox,
 provider-cleanup, system-mailbox and cron wake reads concurrently (at most five).
 Wake selection keeps its existing precedence; every started read settles before

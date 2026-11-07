@@ -8,7 +8,7 @@ vi.mock("@/src/lib/prisma", () => ({
       run({ companionPushRoute: { findUnique: m.read, upsert: m.upsert } }),
   }),
 }));
-import { registerCompanionPushRoute } from "@/src/lib/companion/push-route";
+import { companionPushRouteRegistrationSchema, registerCompanionPushRoute } from "@/src/lib/companion/push-route";
 
 const address = {
   installationId: "00000000-0000-4000-8000-000000000001",
@@ -18,11 +18,14 @@ const address = {
 describe("shared companion address game enrollment", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    m.read.mockResolvedValue({ ...address, userId: "member-one", gameSessionId: "session-a" });
+    m.read.mockResolvedValue({ ...address, userId: "member-one", gameSessionId: "session-a", gameReminders: true });
+  });
+  it("does not accept reminder capability on the wearable wire", () => {
+    expect(companionPushRouteRegistrationSchema.safeParse({ ...address, gameReminders: true }).success).toBe(false);
   });
   it("keeps game enrollment for permission updates to the same address", async () => {
     await registerCompanionPushRoute("member-one", { ...address, alertsAllowed: false });
-    expect(m.upsert.mock.calls[0]?.[0].update).toMatchObject({ gameSessionId: "session-a", alertsAllowed: false });
+    expect(m.upsert.mock.calls[0]?.[0].update).toMatchObject({ gameSessionId: "session-a", gameReminders: true, alertsAllowed: false });
   });
   it.each([
     { installationId: "00000000-0000-4000-8000-000000000002" },
@@ -32,10 +35,12 @@ describe("shared companion address game enrollment", () => {
   ])("does not carry session A's game enrollment to a changed target", async (change) => {
     await registerCompanionPushRoute("member-one", { ...address, ...change });
     expect(m.upsert.mock.calls[0]?.[0].update.gameSessionId).toBeNull();
+    expect(m.upsert.mock.calls[0]?.[0].update.gameReminders).toBe(false);
   });
   it("does not enroll games through a new wearable-only address", async () => {
     m.read.mockResolvedValue(null);
     await registerCompanionPushRoute("member-one", address);
     expect(m.upsert.mock.calls[0]?.[0].create.gameSessionId).toBeNull();
+    expect(m.upsert.mock.calls[0]?.[0].create.gameReminders).toBe(false);
   });
 });

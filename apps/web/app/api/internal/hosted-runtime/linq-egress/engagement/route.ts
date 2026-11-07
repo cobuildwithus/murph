@@ -30,6 +30,7 @@ import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
+import { getHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import {
   isHostedLinqAckReactionCoveringCurrentBurst,
@@ -91,11 +92,22 @@ export const POST = withJsonError(async (request: Request) => {
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
 
+  // Advisory typing coverage is read-only and never enters delivery serialization.
+  if (authorityCheckOnly && body.deliveryPurpose === "typing") {
+    return jsonOk({ ok: true, ackCovered: await readHostedLinqTypingCoverage({
+      answeredMailboxItemIds, authorityCheckOnly, directRecipientPhoneNumber,
+      expectedResolvedRoute, fromPhoneNumber, memberId: userId, prisma,
+      replyToMessageId, target, targetKind, homeRouteFallbackAllowed: false,
+    }) });
+  }
+
   const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
 
   const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
-    ? { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
+    ? "memberIds" in gameChatPlayers
+      ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers.audience, eveningPolicy: gameChatPlayers.policy }
+      : { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
     : gameChatPlayers && "memberIds" in gameChatPlayers
     ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
 
@@ -231,7 +243,8 @@ export const POST = withJsonError(async (request: Request) => {
     });
     // App-requested proposals may start a new room with no inbound history.
     // Only the current proposal and freshly proven exact audience qualify.
-    if (!requestedGameProposal && !requestedAskReply && await isHostedLinqProactivityPaused({
+    const gamePauseExempt = requestedGameProposal && !idempotencyKey?.startsWith("game-evening:");
+    if (!gamePauseExempt && !requestedAskReply && await isHostedLinqProactivityPaused({
       answeredMailboxItemIds,
       replyToMessageId,
       service: health.service,
@@ -299,6 +312,22 @@ export const POST = withJsonError(async (request: Request) => {
     ...readHostedLinqAckEngagementResponseFields(assertion),
   });
 });
+
+async function readHostedLinqTypingCoverage(
+  input: Parameters<typeof assertHostedLinqRecentInboundEngagementForRuntime>[0],
+): Promise<boolean> {
+  if (input.targetKind === "participant") return false;
+  const asserted = await assertHostedLinqRecentInboundEngagementForRuntime(input);
+  assertResolvedLinqDeliveryAuthority({
+    authorityCheckOnly: false, expectedResolvedRoute: input.expectedResolvedRoute ?? null,
+    resolvedRoute: asserted.resolvedRoute, target: input.target,
+  });
+  const route = asserted.resolvedRoute;
+  if (route.targetKind !== "thread" || !route.threadIsDirect
+    || !getHostedOnboardingEnvironment().linqAckReactionOpenAiApiKey) return false;
+  // Tapbacks only exist on direct iMessage, and the runner asks only for those.
+  return isHostedLinqAckReactionCoveringCurrentBurst({ linqChatId: route.target, prisma: input.prisma });
+}
 
 function assertHostedLinqInstantFirstTurnEgress(input: {
   deliveryPurpose: unknown;
@@ -411,6 +440,7 @@ async function claimHostedLinqEngagementProviderDispatchTx(input: {
     && input.resolvedRoute.threadIsDirect
     && await isHostedLinqAckReactionCoveringCurrentBurst({
       linqChatId: input.resolvedRoute.target,
+      maxAgeMs: 30_000,
       prisma: input.tx,
     })
   ) {

@@ -240,3 +240,22 @@ replaced; other permissions survive. Stale membership gives
 `409 MEMBERSHIP_CHANGED`; missing current consent uses the existing
 `403 HOSTED_CONSENT_REQUIRED`; unavailable boards give 404. Saves may return
 pending values until the existing publisher runs. All responses are no-store.
+
+
+## Reminder settings and push capability
+
+`GET /api/game/v1/me/reminders` uses game bearer auth and returns
+`{ok:true, minutes:1140, push:true, text:false, canText:false, offGameIds:[]}`.
+`PUT` at the same path replaces `{minutes, push, text, offGameIds}` and returns
+the same shape. Minutes must be an integer from 0 through 1439; text must be
+false until text reminders ship. Off IDs affect only the caller's live seats;
+unknown or foreign IDs are ignored and omitted live seats turn back on.
+Home's shape is unchanged.
+
+`POST /api/game/v1/push-route` additionally accepts optional boolean
+`gameReminders`. Send true only from a build with reminder settings and
+`game_reminder` navigation support. Omission stores false. Wearable registration
+keeps capability only for the same complete address. A reminder carries
+`{gameId, notification:"game_reminder"}`, default sound, and the member's own
+tasks as its title (at most 120 characters). Request sound permission alongside
+alerts and open the selected game through the existing authenticated refresh.

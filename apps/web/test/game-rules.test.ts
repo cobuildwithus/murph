@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { gameReminderWindow, reminderOpenDay } from "@/src/lib/game/reminders";
 import { gameChatProgress } from "@/src/lib/game/chat-progress";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
 import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
@@ -1002,5 +1003,67 @@ describe("scheduled posting admission", () => {
     expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. Back Sunday.");
     state.game.lengthDays = 6;
     expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. No game days left.");
+  });
+});
+
+
+describe("game reminder eligibility", () => {
+  it("uses the frozen game day, schedule and remaining seat", () => {
+    const state = live();
+    const player = state.players[0]!;
+    expect(reminderOpenDay(state, player, at(state, LEO, 0, 19))).toBe(0);
+    for (const day of [-1, 7]) expect(reminderOpenDay(state, player, at(state, LEO, day, 19))).toBeNull();
+    player.leftAt = at(state, LEO, 0, 18);
+    expect(reminderOpenDay(state, player, at(state, LEO, 0, 19))).toBeNull();
+    player.leftAt = null;
+    state.game.status = "settled";
+    expect(reminderOpenDay(state, player, at(state, LEO, 0, 19))).toBeNull();
+  });
+  it("skips an off day and pre-admission group days", () => {
+    const state = live(invited({ days: [0] }));
+    expect(reminderOpenDay(state, state.players[0]!, at(state, LEO, 1, 19))).toBeNull();
+    state.game.seats = 10;
+    state.players[0]!.joinedAt = at(state, LEO, 2, 12);
+    expect(reminderOpenDay(state, state.players[0]!, at(state, LEO, 0, 19))).toBeNull();
+  });
+  it("skips live posts, excuses and a day with both attempts withdrawn", () => {
+    let state = live();
+    const now = at(state, LEO, 0, 19);
+    state = post(state, LEO, now);
+    expect(reminderOpenDay(state, state.players[0]!, now)).toBeNull();
+    state.entries[0]!.incomplete = true;
+    expect(reminderOpenDay(state, state.players[0]!, now)).toBeNull();
+    state.entries[0]!.withdrawnAt = now;
+    expect(reminderOpenDay(state, state.players[0]!, now)).toBe(0);
+    state = post(state, LEO, now);
+    state.entries[1]!.withdrawnAt = now;
+    expect(reminderOpenDay(state, state.players[0]!, now)).toBeNull();
+    state.entries = [{ ...state.entries[0]!, attempt: 0, kind: "excuse" }];
+    expect(reminderOpenDay(state, state.players[0]!, now)).toBeNull();
+  });
+  it("adds count urgency, continues after a missed must-post day and stops at the goal", () => {
+    let state = live(invited({ count: 3 }));
+    const player = state.players[0]!;
+    expect(reminderOpenDay(state, player, at(state, LEO, 3, 19))).toBeNull();
+    expect(reminderOpenDay(state, player, at(state, LEO, 4, 19))).toBe(4);
+    expect(reminderOpenDay(state, player, at(state, LEO, 5, 19))).toBe(5);
+    for (let day = 0; day < 3; day += 1) state = post(state, LEO, at(state, LEO, day, 19));
+    expect(reminderOpenDay(state, player, at(state, LEO, 6, 19))).toBeNull();
+    state.entries[0]!.incomplete = true;
+    expect(reminderOpenDay(state, player, at(state, LEO, 6, 19))).toBe(6);
+  });
+  it("counts a late joiner's available goal", () => {
+    const state = live(invited({ count: 7 }));
+    state.game.seats = 10;
+    state.players[0]!.joinedAt = at(state, LEO, 4, 12);
+    expect(reminderOpenDay(state, state.players[0]!, at(state, LEO, 4, 19))).toBe(4);
+  });
+  it("uses profile wall time for a half-open window, including midnight and invalid zones", () => {
+    expect(gameReminderWindow(new Date("2026-11-06T23:59:59Z"), NYC, 1140)).toBeNull();
+    expect(gameReminderWindow(new Date("2026-11-07T00:00:00Z"), NYC, 1140)).toEqual({ day: "2026-11-06", expiresAt: new Date("2026-11-07T00:30:00Z") });
+    expect(gameReminderWindow(new Date("2026-11-07T00:29:59Z"), NYC, 1140)?.expiresAt).toEqual(new Date("2026-11-07T00:30:00Z"));
+    expect(gameReminderWindow(new Date("2026-11-07T00:30:00Z"), NYC, 1140)).toBeNull();
+    expect(gameReminderWindow(new Date("2026-11-07T00:05:00Z"), "UTC", 1430)).toEqual({ day: "2026-11-06", expiresAt: new Date("2026-11-07T00:20:00Z") });
+    expect(gameReminderWindow(new Date("2026-11-07T00:05:00Z"), "invalid/zone", 1140)).toBeNull();
   });
 });

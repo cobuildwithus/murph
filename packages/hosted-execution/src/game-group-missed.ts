@@ -30,3 +30,22 @@ export const gameGroupMissedCheckInPolicySchema = z.object({
   && policy.batch.every(game => game.misses.every(miss => miss.missedDates[0] === policy.firstMissedDate)));
 
 export type HostedGameGroupMissedCheckInPolicy = z.infer<typeof gameGroupMissedCheckInPolicySchema>;
+
+export const gameEveningCheckInPolicySchema = z.object({
+  kind: z.literal("game_evening_check_in"),
+  eventId: z.string(),
+  roomId: identity,
+  date,
+  expiresAt: z.string().datetime({ offset: true }),
+  conversationLaneSeq: z.string().regex(/^(0|[1-9]\d{0,18})$/u),
+  batch: z.array(z.object({
+    gameId: identity,
+    termsVersion: z.number().int().positive(),
+    memberIds: z.array(identity).min(1).max(10).refine(unique),
+    dayIndex: z.number().int().min(0).max(364),
+  }).strict()).min(1).max(GAME_MISSED_ROOM_MAX_GAMES),
+}).strict().refine(policy => policy.eventId === `game-evening:${policy.roomId}:${policy.date}`
+  && unique(policy.batch.map(game => `${game.gameId}:${game.dayIndex}`))
+  && policy.batch.some(game => game.memberIds.length > 0));
+
+export type HostedGameEveningCheckInPolicy = z.infer<typeof gameEveningCheckInPolicySchema>;

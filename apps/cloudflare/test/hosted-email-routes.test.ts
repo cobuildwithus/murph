@@ -130,6 +130,7 @@ describe("hosted email route callbacks", () => {
 
     await expect(resolveHostedEmailInboundRoute({
       config,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "member@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Member <member@example.com>",
@@ -148,12 +149,13 @@ describe("hosted email route callbacks", () => {
     expect(JSON.parse(String(resolveCall?.body))).toEqual({
       envelopeFrom: "member@example.com",
       groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      authenticatedSender: AUTHENTICATED_SENDER,
       hasRepeatedHeaderFrom: false,
       headerFrom: "Member <member@example.com>",
     });
   });
 
-  it("routes signed group reply alias misses through web-owned From matching without sender-auth proof", async () => {
+  it("rejects signed group reply aliases without sender-auth proof", async () => {
     const config = createHostedEmailTestConfig();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
       JSON.stringify({
@@ -184,13 +186,7 @@ describe("hosted email route callbacks", () => {
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toBeNull();
 
-    const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0];
-    expect(JSON.parse(String(resolveCall?.body))).toEqual({
-      envelopeFrom: "member@example.com",
-      groupId: "hgrp_AAAAAAAAAAAAAAAA",
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "Member <member@example.com>",
-    });
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
   });
 
   it("rejects tampered signed group reply aliases before the web alias lookup", async () => {
@@ -264,9 +260,15 @@ describe("hosted email route callbacks", () => {
       routeAddress: address,
       userId: "user-123",
     });
+    expect(JSON.parse(webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[1]![0].body)).toMatchObject({
+      aliasKey: expect.any(String),
+      authenticatedSender: AUTHENTICATED_SENDER,
+      envelopeFrom: "owner@example.com",
+      headerFrom: "Owner <owner@example.com>",
+    });
   });
 
-  it("resolves signed reply aliases without requiring an authenticated sender verdict", async () => {
+  it("rejects signed reply aliases without authenticated sender proof", async () => {
     const config = createHostedEmailTestConfig();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(await createReplyAliasRegistrationResponse({
@@ -301,26 +303,9 @@ describe("hosted email route callbacks", () => {
       to: address,
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
-    })).resolves.toEqual({
-      authorization: "signed-reply-alias",
-      groupId: null,
-      identityId: "murph@reply.example.com",
-      routeAddress: address,
-      userId: "user-123",
-    });
-
-    const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[1]?.[0];
-    expect(resolveCall).toEqual(expect.objectContaining({
-      body: expect.any(String),
-    }));
-    const aliasResolveBody = JSON.parse(String(resolveCall?.body));
-    expect(aliasResolveBody).toMatchObject({
-      aliasKey: expect.any(String),
-    });
-    expect(aliasResolveBody).not.toHaveProperty("authenticatedSender");
-    expect(aliasResolveBody).not.toHaveProperty("envelopeFrom");
-    expect(aliasResolveBody).not.toHaveProperty("hasRepeatedHeaderFrom");
-    expect(aliasResolveBody).not.toHaveProperty("headerFrom");
+    })).resolves.toBeNull();
+    // Only outbound alias registration ran; untrusted input never reaches lookup.
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
   });
 
   it("returns null when the web-owned alias lookup misses", async () => {
