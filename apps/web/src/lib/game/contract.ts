@@ -282,7 +282,16 @@ export type GameReplyView = { id: string; createdAt: string; mine: boolean } & (
   | { kind: "voice"; durationMs: number; levels: number[] }
 );
 
+export interface GameReminders {
+  minutes: number;
+  push: boolean;
+  text: boolean;
+  canText: false;
+  offGameIds: string[];
+}
+
 export type GameCommand =
+  | ({ type: "setReminders" } & Omit<GameReminders, "canText">)
   | ({ type: "replyToPost"; gameId: string; entryId: string } & ReplyToPostBody)
   | { type: "deleteReply"; gameId: string; replyId: string }
   /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */

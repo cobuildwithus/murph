@@ -60,6 +60,8 @@ export function parseGameCommand(value: unknown): GameCommand {
       };
     case "setProfile":
       return profile(input);
+    case "setReminders":
+      return reminders(input);
     case "setPlayerPhoto":
       return { type: "setPlayerPhoto", memberId: opaque(input.memberId, "memberId"), photoKey: nullable(input.photoKey, mediaKey) };
     case "createGame":
@@ -85,6 +87,12 @@ export function parseGameCommand(value: unknown): GameCommand {
     default:
       return reject("INVALID_REQUEST", "Unknown command.");
   }
+}
+
+function reminders(input: Record<string, unknown>): Extract<GameCommand, { type: "setReminders" }> {
+  if (typeof input.push !== "boolean" || input.text !== false) reject("INVALID_REQUEST", "Choose push reminders. Text reminders aren't available yet.");
+  return { type: "setReminders", minutes: integer(input.minutes, "minutes", 0, 1439), push: input.push, text: false,
+    offGameIds: [...new Set(list(input.offGameIds, "offGameIds", 1000).map(id => clientId(id, "gameId")))] };
 }
 
 /** Shared acceptance body for public token joins and addressed chat acceptance. */

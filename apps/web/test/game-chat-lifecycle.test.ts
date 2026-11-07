@@ -5,7 +5,7 @@ const m = vi.hoisted(() => ({
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
-  missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
+  reminders: vi.fn(), missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event, createMany: m.witness }, gameEntry: { findMany: m.entries }, gameReport: { findMany: m.reports }, hostedThreadRoute: { findFirst: async () => ({ containerMemberId: "room" }) }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findUniqueOrThrow: m.game, findFirst: m.current, updateMany: m.bind } };
@@ -15,6 +15,7 @@ vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGame
   readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions, readCurrentGameChange: m.currentChange,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
+vi.mock("../src/lib/game/reminder-notification", () => ({ sendDueGameReminders: m.reminders }));
 vi.mock("../src/lib/game/chat-membership", async original => ({ ...await original<typeof import("../src/lib/game/chat-membership")>(), bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGroupGameChatAuthority: m.groupAuthority, readGroupGameNoticeAuthority: m.groupAuthority }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal, readGameProposalDeliveryPlayers: async () => ["person-a", "person-b"] }));
@@ -38,6 +39,15 @@ const pending = { v: 1, id: "proposal", proposedByMemberId: "person-a", expected
 const receipt = { id: "receipt", status: "awaiting_generation", sourceRef: "game", template: "game_started", attemptedAt: now, createdAt: now, payloadOwnerMemberId: "room", idempotencyKey: "hash:game-started:game" };
 
 describe("durable game chat lifecycle", () => {
+  it("shares the real deadline and abort signal with reminders and drains despite their failure", async () => {
+    const controller = new AbortController();
+    m.reminders.mockRejectedValueOnce(new Error("Synthetic reminder failure"));
+    const start = Date.now();
+    await expect(drainGameChatLifecycle({ now, signal: controller.signal })).resolves.toMatchObject({ attempted: 1 });
+    expect(m.reminders).toHaveBeenCalledExactlyOnceWith(now, { signal: controller.signal, deadlineMs: expect.any(Number) });
+    expect(m.reminders.mock.calls[0]![1].deadlineMs).toBeGreaterThanOrEqual(start + 90_000);
+    expect(m.reserveMissed).toHaveBeenCalledExactlyOnceWith(now);
+  });
   it.each([false, true])("publishes compact group facts only at the prepared revision; edited before append: %s", async edited => {
     const group = { ...game, maxPlayers: 10, audienceKey: "original", status: "invited", terms: { v: 1, versions: [{ n: edited ? 2 : 1, fromDay: 0, schedule: { count: 5 }, stakes: [] }] } };
     m.game.mockResolvedValue(group); m.current.mockResolvedValue(group); m.groupAuthority.mockResolvedValue({ memberIds: players });

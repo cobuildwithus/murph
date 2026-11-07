@@ -436,7 +436,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   Sending happens after commit, with route/session, active participation, block,
   report, real-day and milestone rechecks. Stale or uncertain sends keep claims
   consumed. A blocked peer suppresses completion wording. No content or names
-  enter pushes. Missed-day chat is separate from these push milestones.
+  enter pushes except the recipient's own task words in a daily reminder.
+  Missed-day chat is separate from these push milestones.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It
@@ -731,6 +732,32 @@ resulting avatar. No private photo is shared with the subject or other players.
   and sends still-current waiting notices and its recap after the block lifts.
 - **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
   slurs and explicit sexual words are refused with "This can't be posted."
+
+## Daily reminders
+
+The profile owns one local reminder time (default 19:00), push on, text off;
+each live seat can opt out. `setReminders` is the single write owner. Text is
+unavailable (`canText: false`). Reading settings never creates a profile or
+changes Home. Only a current game push registration with `gameReminders: true`
+can receive reminders; older game registrations clear that capability, while
+same-address wearable refreshes preserve it.
+
+The minute sweep makes at most one best-effort attempt per member and local
+calendar date, within 30 minutes of the profile's reminder time. Game eligibility
+uses each seat's frozen zone: live, remaining, scheduled, admitted, no post or
+excuse, with an attempt left. Count games remind only when outstanding credit
+is positive and remaining opportunities are no greater than that shortfall.
+An earlier miss does not stop reminders; an incomplete artifact earns no credit
+but still suppresses a reminder for its own day.
+
+After claiming a member-wide `reminder_notification` event, a fresh projection
+supplies only the member's open games and current own task words, including
+seat overrides. The title joins those tasks with ", " and stops at 120 characters.
+The body is "They posted. Share yours to see it." only for one open game with
+a visible peer post today; otherwise "Still time today." Symmetric blocks and
+reported posts cannot supply that peer signal. The push opens the first open
+game, uses default sound and expires at the window's end. Claims never retry,
+even after failure or a newly closed day. No new chat or private texts ship here.
 
 ## Replies
 
