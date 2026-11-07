@@ -91,16 +91,16 @@ immutable historical evidence, never current operating instructions.
   or paced polling. Reserve detached wake for deliberate handoffs; follow the
   review loop's waiting and finding-disposition policies.
 - ReviewGPT is scarce: running it on every PR capped both accounts for days in
-  November 2026. Run it only when a wrong change could hurt someone or lose
-  something: auth, privacy, health safety, billing, data, concurrency, deploys
-  or another trust boundary. Anything else skips it at any size, including UI,
-  copy, tests, docs and tooling, unless asked. One round is the default: start
-  it once, on a head you mean to merge, after local checks pass. Fix accepted
-  findings, prove each fix, then finish the merge checks. Run another round
-  only when a fix changes the design (adds state, a migration or a new
-  authority path) or reaches a risky surface the last round didn't see, or a
-  later commit adds behavior no round reviewed; never just to confirm a fix.
-  Put related small fixes in one PR so they share a review.
+  November 2026. Run it for changes to risky behavior or core architecture,
+  listed in `agent-docs/operations/completion-workflow.md` § Final ReviewGPT
+  Eligibility. UI, copy, tests, docs and tooling skip it at any size, unless
+  asked or the change also touches something on that list. One round is the
+  default: start it once, on a head you mean to merge, after local checks pass.
+  Fix accepted findings, prove each fix, then finish the merge checks. Run
+  another round only when a fix changes the design (adds state, a migration or a
+  new authority path) or reaches a risky surface the last round didn't see, or a
+  later commit adds behavior no round reviewed; never just to confirm a fix. Put
+  related small fixes in one PR so they share a review.
 - Run checks appropriate to the changed behavior. Once they pass, broaden or
   repeat only for new changes, failures, or a material evidence gap. Required
   exact-head CI remains a completion gate; report blockers honestly.
