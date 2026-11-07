@@ -289,24 +289,24 @@ export async function pruneSupersededClinicalExtractionCaches(input: {
   for await (const entry of directory) {
     input.signal.throwIfAborted();
     if (entry.isDirectory() && entry.name.startsWith("extraction-v") && entry.name !== currentExtractionCacheDirectory) {
-      await removeCacheDirectory(path.posix.join(relativeRoot, entry.name));
+      await removeCacheDirectory(path.join(root.absolutePath, entry.name));
     }
   }
 
-  async function removeCacheDirectory(relativePath: string): Promise<void> {
+  async function removeCacheDirectory(absolutePath: string): Promise<void> {
     input.signal.throwIfAborted();
-    const resolved = await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
-    for await (const entry of await opendir(resolved.absolutePath)) {
+    // Disk entry names are opaque: vault path normalization would reinterpret backslashes.
+    for await (const entry of await opendir(absolutePath)) {
       input.signal.throwIfAborted();
       if (entry.isDirectory()) {
-        await removeCacheDirectory(path.posix.join(relativePath, entry.name));
+        await removeCacheDirectory(path.join(absolutePath, entry.name));
       } else {
         // Unlink symlinks themselves; never traverse them or their targets.
-        await rm(path.join(resolved.absolutePath, entry.name), { force: true });
+        await rm(path.join(absolutePath, entry.name), { force: true });
       }
     }
     input.signal.throwIfAborted();
-    await rmdir(resolved.absolutePath);
+    await rmdir(absolutePath);
   }
 }
 

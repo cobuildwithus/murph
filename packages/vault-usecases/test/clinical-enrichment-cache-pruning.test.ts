@@ -8,6 +8,43 @@ import { pruneSupersededClinicalExtractionCaches } from "../src/clinical-enrichm
 
 const relativeRoot = ".runtime/operations/clinical-records/enrichment";
 
+// Windows cannot represent a literal backslash in a directory entry name.
+test.skipIf(process.platform === "win32").each([
+  { placement: "nested", parent: "extraction-v1/.env", prefix: [], depth: 6 },
+  { placement: "direct", parent: "extraction-v1", prefix: [], depth: 6 },
+  { placement: "cache selection", parent: "", prefix: ["extraction-v1"], depth: 5 },
+])("obsolete cache cleanup treats $placement entry names literally", async ({ parent, prefix, depth }) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cache-literal-"));
+  const root = path.join(vaultRoot, relativeRoot);
+  const payload = [...prefix, ...Array<string>(depth).fill(".."), "bank", "automations"].join("\\");
+  const automation = path.join(vaultRoot, "bank/automations/saved.md");
+  const saved = Buffer.from("# Synthetic automation\nKeep this exact saved definition.\n");
+  const current = path.join(root, "extraction-v4", payload);
+  try {
+    await mkdir(path.dirname(automation), { recursive: true });
+    await writeFile(automation, saved);
+    await mkdir(path.join(root, parent, payload), { recursive: true });
+    await writeFile(path.join(root, parent, payload, "obsolete.json"), "obsolete");
+    await mkdir(current, { recursive: true });
+    await writeFile(path.join(current, "current.json"), "current");
+    await mkdir(path.join(root, "jobs"));
+    await writeFile(path.join(root, "jobs/accepted.json"), "accepted");
+    await writeFile(path.join(root, "pending.json"), "pending");
+
+    try {
+      await pruneSupersededClinicalExtractionCaches({ vaultRoot, signal: new AbortController().signal });
+    } finally {
+      assert.deepEqual(await readFile(automation), saved);
+    }
+    assert.deepEqual((await readdir(root)).sort(), ["extraction-v4", "jobs", "pending.json"]);
+    assert.equal(await readFile(path.join(current, "current.json"), "utf8"), "current");
+    assert.equal(await readFile(path.join(root, "jobs/accepted.json"), "utf8"), "accepted");
+    assert.equal(await readFile(path.join(root, "pending.json"), "utf8"), "pending");
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("obsolete cache cleanup stops between entries and resumes without changing the current cache", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cache-pruning-"));
   const root = path.join(vaultRoot, relativeRoot);
