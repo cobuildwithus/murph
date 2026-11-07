@@ -2456,10 +2456,13 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   progress stall. A separate per-message typing monitor reuses the existing
   operational Resend sender and `HostedLinqAlert` retry ledger. It carries the
   Web route receipt time and optional early ingress typing acceptance on the
-  existing ingress trace, compares first accepted typing against the warm
-  3-second or cold 8-second cutoff, and creates one immutable alert per trace.
+  existing ingress trace, compares the earlier of typing and provider start for
+  direct Linq (typing only for Telegram) against the warm 3-second or cold 8-second cutoff, and creates one immutable alert per trace.
   Direct turns start typing when the model request fires (`turn/start`); direct Linq media
-  may start during preparation. Groups type only while a finished message draft
+  may start during preparation. A confirmed Web tapback holds direct iMessage
+  typing until the final-answer item starts or 30 seconds after the first typing
+  request. Preparation hands the same gate to the turn; the advisory lookup
+  and cleanup never delay execution or delivery. Groups type only while a finished message draft
   is held for sending; no-reply and reaction-only drafts stay silent. Web stamps ingress group
   directness with the deferred webhook receipt so the typing monitor excludes queued groups.
   Runtime typing/restore callbacks and the existing alert cron trigger bounded

@@ -20,6 +20,8 @@ interface TypingAlertRow {
   providerEventCreatedAtEpochMs: bigint | null;
   silenceStartedAtEpochMs: bigint;
   typingAcceptedAtEpochMs: bigint | null;
+  measurementAtEpochMs: bigint | null;
+  measurementKind: "typing" | "provider_start";
   workspaceState: "warm" | "cold" | "unconfirmed";
   elapsedMs: bigint;
   thresholdMs: number;
@@ -53,7 +55,7 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
       kind: row.workspaceState === "warm"
         ? "runtime_warm_typing_slow" : "runtime_cold_typing_slow",
       status: "pending",
-      subject: `Murph ${row.workspaceState === "warm" ? "warm" : "cold"} workspace typing`
+      subject: `Murph ${row.workspaceState === "warm" ? "warm" : "cold"} workspace ${row.measurementKind === "provider_start" ? "provider start" : "typing"}`
         + ` exceeded ${row.thresholdMs / 1_000} seconds`,
       // This frozen body survives retries without leaking member/message identity.
       detailsJson: {
@@ -65,6 +67,9 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
         silenceStartedAt: new Date(Number(row.silenceStartedAtEpochMs)).toISOString(),
         typingAcceptedAt: row.typingAcceptedAtEpochMs === null
           ? null : new Date(Number(row.typingAcceptedAtEpochMs)).toISOString(),
+        measurementKind: row.measurementKind,
+        measurementAt: row.measurementAtEpochMs === null
+          ? null : new Date(Number(row.measurementAtEpochMs)).toISOString(),
         workspaceState: row.workspaceState,
         elapsedMs: Number(row.elapsedMs),
         thresholdMs: row.thresholdMs,
@@ -182,6 +187,12 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           SELECT 1 FROM hosted_linq_alert AS alert
           WHERE alert.id = 'runtime-typing/' || trace.id
         )
+    ), endpoints AS (
+      SELECT *, LEAST(typing_ms, CASE
+        WHEN source = 'linq'
+          THEN (EXTRACT(EPOCH FROM provider_start_at AT TIME ZONE 'UTC') * 1000)::bigint
+      END) AS measurement_ms
+      FROM observations
     ), classified AS (
       SELECT *,
         CASE WHEN workspace_state = 'warm'
@@ -189,26 +200,26 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           ELSE ${HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS}::integer
         END AS threshold_ms,
         silence_ended_ms - origin_ms AS elapsed_ms
-      FROM observations
+      FROM endpoints
       -- A delivered Telegram reply ends the wait. Linq answers suppress the alert
       -- below because Linq reply latency has its own monitor; Telegram has none,
       -- so its reply only caps the measured wait. The stored reply is the latest
       -- delivered one, so the cap can overstate silence but never hide it.
       CROSS JOIN LATERAL (SELECT LEAST(
-        COALESCE(typing_ms, ${input.now.getTime()}::bigint),
+        COALESCE(measurement_ms, ${input.now.getTime()}::bigint),
         CASE WHEN telegram_reply_ms >= received_ms
           AND telegram_reply_ms <= ${input.now.getTime()}::bigint
           THEN telegram_reply_ms
         END
       ) AS silence_ended_ms) AS silence
-      WHERE (typing_ms <= ${input.now.getTime()}::bigint
-        OR (typing_ms IS NULL
+      WHERE (measurement_ms <= ${input.now.getTime()}::bigint
+        OR (measurement_ms IS NULL
           AND received_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint))
         -- Pre-provider terminal silence needs no typing. Provider execution,
         -- actual typing, and invalid/stale evidence retain ordinary thresholds.
         -- Terminal suppression can also record provider failures. Checkpoint
         -- publication remains owned by the independent progress monitors.
-        AND (typing_ms IS NOT NULL OR provider_start_at IS NOT NULL OR terminal_non_reply_ms IS NULL
+        AND (measurement_ms IS NOT NULL OR provider_start_at IS NOT NULL OR terminal_non_reply_ms IS NULL
           OR terminal_non_reply_ms < terminal_not_before_ms
           OR terminal_non_reply_ms > ${input.now.getTime()}::bigint)
     ), measured AS MATERIALIZED (
@@ -223,18 +234,21 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
             AND answer.id = observation.linq_delivery_id
             AND answer.accepted_at >= observation.webhook_received_at
             AND answer.accepted_at <= LEAST(${input.now}::timestamp,
-              TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond')
+              TIMESTAMP 'epoch' + observation.measurement_ms * INTERVAL '1 millisecond')
         )
     )
     SELECT id, source, webhook_received_at AS "webhookReceivedAt",
       provider_event_created_ms::bigint AS "providerEventCreatedAtEpochMs",
       silence_started_ms::bigint AS "silenceStartedAtEpochMs",
       typing_ms AS "typingAcceptedAtEpochMs", workspace_state AS "workspaceState",
+      measurement_ms AS "measurementAtEpochMs",
+      CASE WHEN measurement_ms IS NOT NULL AND (typing_ms IS NULL OR measurement_ms < typing_ms)
+        THEN 'provider_start' ELSE 'typing' END AS "measurementKind",
       (silence_ended_ms - silence_started_ms)::bigint AS "elapsedMs",
       threshold_ms AS "thresholdMs"
     FROM measured
     WHERE silence_ended_ms - silence_started_ms > threshold_ms
-      AND (typing_ms IS NOT NULL
+      AND (measurement_ms IS NOT NULL
         OR silence_started_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint)
     ORDER BY webhook_received_at, id
     LIMIT ${ALERT_READ_LIMIT + 1}
@@ -252,14 +266,14 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
           AND delivery.attempted_at <= ${now}
           AND delivery.accepted_at >= observation.origin_at
           AND delivery.accepted_at <= LEAST(${now}::timestamp,
-            TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond')
+            TIMESTAMP 'epoch' + observation.measurement_ms * INTERVAL '1 millisecond')
       ),
       (
         SELECT MAX(LEAST(
           earlier_delivery.accepted_at,
           TIMESTAMP 'epoch' + (prior_typing.ms + 300000) * INTERVAL '1 millisecond',
           ${now}::timestamp,
-          TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond'
+          TIMESTAMP 'epoch' + observation.measurement_ms * INTERVAL '1 millisecond'
         ))
         FROM hosted_ingress_latency_trace AS earlier_trace
         JOIN hosted_mailbox_item AS earlier_mailbox

@@ -69,6 +69,37 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 describe('assistant codex event shaping', () => {
+  it('notifies final-answer start only for accepted events without exposing trace or reply text', async () => {
+    const workingDirectory = await createTempDir('assistant-final-start-work-')
+    const codexHome = await createTempDir('assistant-final-start-home-')
+    const onFinalAnswerStarted = vi.fn()
+    const onFirstAssistantResponseCompleted = vi.fn()
+    const traces: unknown[] = []
+    mockWarmCodexProcess([], 31_979, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      await writeWarmTurnStarted({ child, requestCount: 1, threadId: 'thread-final', turnId: 'turn-final' })
+      for (const [turnId, phase] of [['turn-stale', 'final_answer'], ['turn-final', 'commentary'], ['turn-final', undefined], ['turn-final', 'final_answer']]) {
+        child.stdout.write(jsonLine({ method: 'item/started', params: {
+          threadId: 'thread-final', turnId, item: { type: 'agentMessage', id: 'signal-only', phase, text: '' },
+        } }))
+      }
+      await vi.waitFor(() => expect(onFinalAnswerStarted).toHaveBeenCalledTimes(1))
+      expect(onFirstAssistantResponseCompleted).not.toHaveBeenCalled()
+      writeCompletedTurn(child, 'thread-final', 'turn-final')
+    })
+    const result = await executeCodexAppServerTurn({ codexHome, workingDirectory, prompt: 'Reply once.',
+      onFinalAnswerStarted, onFirstAssistantResponseCompleted,
+      onTraceEvent: event => { traces.push(event) },
+    })
+    expect(result.finalMessage).toBe('')
+    expect(onFinalAnswerStarted).toHaveBeenCalledTimes(1)
+    expect(traces.some(event => {
+      const raw = asRecord(asRecord(event).rawEvent)
+      return raw.method === 'item/started' && asRecord(asRecord(raw.params).item).phase === 'final_answer'
+    })).toBe(false)
+  })
+
   it.each([
     { resume: true, rollout: 'file', contents: 'Synthetic rollout: ✓\n' },
     { resume: true, rollout: 'file', contents: '' },
@@ -2127,6 +2158,7 @@ describe('assistant codex event shaping', () => {
     it('includes pending reactions in the failure context when a no-reply turn fails', async () => {
       const workingDirectory = await createTempDir('assistant-codex-reaction-fail-work-')
       const codexHome = await createTempDir('assistant-codex-reaction-fail-home-')
+      const onFinalAnswerStarted = vi.fn()
       const onFinishWithoutReplyAccepted = vi.fn()
       const onFinishWithoutReplyRecorded = vi.fn()
       const messageRef = `ain_${'d'.repeat(32)}`
@@ -2185,6 +2217,10 @@ describe('assistant codex event shaping', () => {
                 success: true,
               },
             })
+            child.stdout.write(jsonLine({ method: 'item/started', params: {
+              threadId: 'thread-reaction-fail-parent', turnId: 'turn-reaction-fail-parent',
+              item: { type: 'agentMessage', id: 'suppressed-final', phase: 'final_answer', text: '' },
+            } }))
             writeCompletedTurn(
               child,
               'thread-reaction-fail-parent',
@@ -2209,6 +2245,7 @@ describe('assistant codex event shaping', () => {
         dynamicTools: resolveMurphDynamicTools({
           messageTargetingAvailable: true,
         }),
+        onFinalAnswerStarted,
         onFinishWithoutReplyAccepted,
         onFinishWithoutReplyRecorded,
         prompt: 'react and then finish without reply',
@@ -2234,6 +2271,7 @@ describe('assistant codex event shaping', () => {
           },
         ],
       })
+      expect(onFinalAnswerStarted).not.toHaveBeenCalled()
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,

@@ -716,7 +716,8 @@ test('typing indicator stop does not wait for a pending start', async () => {
   await vi.waitFor(() => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
-  expect(stop).toHaveBeenCalledWith({
+  // A start that lands after delivery needs a real stop: the reply cannot have cleared it.
+  expect(stop).not.toHaveBeenCalledWith({
     providerStop: false,
   })
 })

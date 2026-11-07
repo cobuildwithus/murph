@@ -2,6 +2,7 @@ import type {
   AssistantChannelTypingDependencies,
 } from "@murphai/assistant-engine";
 import {
+  createAssistantChannelTypingHandle,
   getAssistantChannelAdapter,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
@@ -22,6 +23,8 @@ import {
   recordHostedAssistantMilestonesBestEffort,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
+
+import type { HostedRuntimeEffectsPort } from "./platform.ts";
 
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
@@ -108,6 +111,7 @@ export function buildHostedTelegramVoiceMemoChannelEnv(input: {
 }
 
 export function createHostedAssistantChannelTypingDependencies(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement">;
   forwardedEnv: Readonly<Record<string, string>>;
   latencyTraceContext?: HostedAssistantMilestoneTraceContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
@@ -156,7 +160,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         if (handle) return handle;
       }
       const typingTarget = claimHostedLinqTypingTarget(target);
-      return typingTarget ? startHostedLinqTypingForTarget(input, typingTarget) : undefined;
+      return typingTarget ? prepareHostedLinqTyping(input, typingTarget, deliveryContext) : undefined;
     },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({
@@ -210,10 +214,10 @@ export function startHostedLinqInputTyping(input: Omit<
   let teardown: Promise<void> | undefined;
   const detach = () => ownerSignal?.removeEventListener("abort", stop);
   typingTarget.state.cleanup = detach;
-  const ready = startHostedLinqTypingForTarget({
+  const ready = prepareHostedLinqTyping({
     ...input,
     signal: controller.signal,
-  }, typingTarget).catch(() => undefined);
+  }, typingTarget, context).catch(() => undefined);
 
   function cancel(): Promise<void> {
     stopped = true;
@@ -252,16 +256,17 @@ export function startHostedLinqInputTyping(input: Omit<
     },
   };
   bindSignal(input.signal);
-  void ready.then((handle) => {
+  void ready.then(async (handle) => {
     if (!handle) {
       detach();
       return;
     }
+    const acceptedAt = handle.ready ? await handle.ready : handle.acceptedAt;
     // After handoff, only the turn can observe acceptance for its admitted inputs.
-    if (handedOff || stopped || handle.isActive?.() === false || !handle.acceptedAt) return;
+    if (handedOff || stopped || handle.isActive?.() === false || !acceptedAt) return;
     recordHostedAssistantMilestonesBestEffort({
       context: input.latencyTraceContext,
-      milestones: [{ at: handle.acceptedAt, milestone: "linq_typing_accepted" }],
+      milestones: [{ at: acceptedAt, milestone: "linq_typing_accepted" }],
     });
   }).catch(() => {});
   return () => { if (!handedOff) stop(); };
@@ -282,6 +287,43 @@ export async function cancelHostedLinqInputTyping(input: {
     }
   }
   await Promise.all(stops);
+}
+
+async function prepareHostedLinqTyping(
+  input: HostedChannelTypingInput,
+  claim: HostedLinqTypingClaim,
+  context: HostedAssistantLinqDeliveryContext,
+) {
+  const read = input.effectsPort?.assertLinqRecentInboundEngagement;
+  if (!read || context.threadIsDirect !== true || context.service?.toLowerCase() !== "imessage") {
+    return startHostedLinqTypingForTarget(input, claim);
+  }
+  const handle = createAssistantChannelTypingHandle({
+    start: () => startHostedLinqTypingForTarget(input, claim),
+    onStoppedBeforeStart: () => releaseHostedLinqTypingTarget(claim, { completedMaxSession: false }),
+    readAckCoverage: async (signal: AbortSignal) => {
+      const result = await read({
+        authorityCheckOnly: true,
+        deliveryPurpose: "typing",
+        directRecipientPhoneNumber: context.directRecipientPhoneNumber,
+        fromPhoneNumber: context.fromPhoneNumber,
+        replyToMessageId: context.replyToMessageId,
+        target: context.target,
+        targetKind: "thread",
+      }, { signal });
+      return result?.ackCovered === true;
+    },
+  });
+  const stopHandle = handle.stop;
+  const stop = () => { void handle.stop(); };
+  handle.stop = async (options) => {
+    input.signal?.removeEventListener("abort", stop);
+    await stopHandle(options);
+  };
+  if (input.signal?.aborted) stop();
+  else input.signal?.addEventListener("abort", stop, { once: true });
+  void handle.ready.then((at) => { if (!at) input.signal?.removeEventListener("abort", stop); });
+  return handle;
 }
 
 async function startHostedLinqTypingForTarget(
