@@ -29,6 +29,26 @@ The app supports immediate upgrades and explicit renewal-bound changes:
 - `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
 - When scheduled cancellation blocks a period-end plan change, Settings offers `Manage billing` directly in the error dialog. The member can renew through the existing Stripe portal and then retry the plan change; Murph never clears cancellation automatically after a payment or plan-change attempt.
 
+Settings labels renewal-bound changes as “Switch to” and keeps the current
+plan active until the scheduled boundary. Max can switch to Edge or Pulse;
+Edge can switch to Pulse. No cancellation is required. A generic billing
+Portal is never labeled as a plan choice: it manages existing billing, cards,
+and invoices rather than starting a selected subscription.
+
+Terminally canceled direct members can select a new paid plan in Settings.
+Before replacement Checkout, Stripe must confirm the existing subscription
+belongs to the retained customer and is terminal. The existing checkout
+reservation and locked billing identity protect concurrent requests. A new
+subscription replaces the canceled binding only through the matching reserved
+Checkout completion; no browser return grants access. Early events for that exact
+replacement use the existing identity-pending retry path. On replacement, the
+old subscription's event watermark and pending schedule are cleared; repeated
+Checkout completion preserves the replacement's watermark. Pending cancellation,
+delinquency, Family ownership and unresolved billing effects retain their
+existing recovery/authority boundaries. Saved-card redisplay remains governed
+by Stripe's customer identity and card consent; the application does not delete
+or merge saved payment methods.
+
 The transition graph is explicit. Arbitrary plan-code routing, reversal, and
 merging with foreign schedules stay out of scope.
 

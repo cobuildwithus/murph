@@ -24,6 +24,8 @@ const at = new Date("2030-01-01T12:00:00Z");
 const members = ["synthetic_migration_starter", "synthetic_migration_peer"];
 const words: TermWords = { v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], stakes: [{ key: "prize", item: "Lunch" }] }] };
 const terms = { v: 1 as const, versions: [{ n: 1, fromDay: 0, schedule: { count: 3 }, stakes: [{ key: "prize", kind: "prize" as const }] }] };
+// Keep the live migration control unfinished under last-post settlement.
+const liveTerms = { ...terms, versions: terms.versions.map(version => ({ ...version, schedule: { count: 4 } })) };
 const result: StoredResult = { v: 1, termsVersion: 1, scores: members.map((memberId, seat) => ({ memberId, seat, score: seat === 0 ? 3 : 2, misses: seat === 0 ? 0 : 1 })) };
 
 /** Apply the actual history, not db push or a hand-built approximation. */
@@ -47,7 +49,7 @@ async function seed(client: pg.Client) {
     const sealed = await sealGameText({ table: "game", field: "terms_words", rowId: id, memberId: members[0] }, JSON.stringify(words));
     await client.query(`INSERT INTO game(id,created_by,previous_game_id,round,status,terms,terms_words_encrypted,invitee_member_id,pending_label,length_days,started_at,settled_at,result,updated_at,created_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,7,$10,$11,$12,$13,$13)`,
-    [id, members[0], id === "settled" ? null : "settled", id === "settled" ? 1 : 2, id === "waiting" ? "invited" : id, JSON.stringify(terms), sealed, id === "settled" ? null : members[1], JSON.stringify(label), id === "waiting" ? null : at, id === "settled" ? at : null, id === "settled" ? JSON.stringify(result) : null, at]);
+    [id, members[0], id === "settled" ? null : "settled", id === "settled" ? 1 : 2, id === "waiting" ? "invited" : id, JSON.stringify(id === "live" ? liveTerms : terms), sealed, id === "settled" ? null : members[1], JSON.stringify(label), id === "waiting" ? null : at, id === "settled" ? at : null, id === "settled" ? JSON.stringify(result) : null, at]);
     for (const [seat, memberId] of members.entries()) {
       if (id === "waiting" && seat === 1) continue;
       await client.query("INSERT INTO game_player(game_id,member_id,seat,time_zone,day_one,joined_at) VALUES ($1,$2,$3,'UTC',$4,$5)", [id, memberId, seat, id === "waiting" ? null : "2030-01-01", at]);
@@ -60,14 +62,14 @@ async function seed(client: pg.Client) {
 
 function expectedPair(id: string, viewerId: string) {
   const players = members.slice(0, id === "waiting" ? 1 : 2).map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: id === "waiting" ? null : "2030-01-01" }));
-  const state: RuleState = { game: { id, createdBy: members[0], status: id === "waiting" ? "invited" : id === "live" ? "live" : "settled", lengthDays: 7, seats: 2, terms, inviteExpiresAt: null, startsOn: null }, players,
+  const state: RuleState = { game: { id, createdBy: members[0], status: id === "waiting" ? "invited" : id === "live" ? "live" : "settled", lengthDays: 7, seats: 2, terms: id === "live" ? liveTerms : terms, inviteExpiresAt: null, startsOn: null }, players,
     entries: id === "waiting" ? [] : players.flatMap(player => Array.from({ length: 3 }, (_, dayIndex) => ({ id: `${id}-${player.seat}-${dayIndex}`, memberId: player.memberId, dayIndex, attempt: 1, kind: "photo" as const, mediaKeys: [], receivedAt: at, withdrawnAt: null, blurHash: null }))) };
   const input: GameViewInput = { state, viewerId, now: new Date(), round: id === "settled" ? 1 : 2, previousGameId: id === "settled" ? null : "settled", startedAt: id === "waiting" ? null : at,
     words, names: new Map([[members[0], "Alex"], [members[1], viewerId === members[0] ? "Teammate" : "Sam"]]), avatarKeys: new Map(), relationships: new Map(),
     invitee: id === "waiting" ? { memberId: members[1], name: viewerId === members[0] ? "Teammate" : "Sam", photoKey: null, relationship: null } : null,
     inviteToken: null, inviteExpiresAt: null, entryWords: new Map(), result: id === "settled" ? result : null, recap: null,
-    // Both players posted days 0 to 2, so the live game's other-player posts take a reply.
-    entryReplies: new Map(), replyEligibleEntryIds: new Set(id === "live" ? state.entries.filter(entry => entry.memberId !== viewerId).map(entry => entry.id) : []),
+    // Both players posted days 0 to 2; live and early-settled replies stay open until the natural end.
+    entryReplies: new Map(), replyEligibleEntryIds: new Set(id !== "waiting" ? state.entries.filter(entry => entry.memberId !== viewerId).map(entry => entry.id) : []),
     tickets: id === "settled" ? [{ id: "ticket", gameId: id, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], players, status: "open", createdAt: at, redeemedAt: null }] : [] };
   return buildGameView(input);
 }

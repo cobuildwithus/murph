@@ -1,3 +1,9 @@
+The [Murph and iOS state-machine inventory](references/app-state-machines.md)
+records source baselines, states, invariants, transition tables, confirmed
+retry/concurrency defects, grouped issues, current regression evidence and
+shipping simplifications at the existing state owners, with backend production
+receipts and native main delivery evidence.
+
 ReviewGPT runs for risky behavior and core architecture, not for size, and one round is the default: [eligibility](operations/completion-workflow.md#final-reviewgpt-eligibility) and [the loop](operations/pr-reviewgpt-loop.md).
 Checkpoint step timings, the archive plan/build split, and unconditional residue
 pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
@@ -1188,6 +1194,8 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
+| `agent-docs/references/app-state-machines.md` | 88 cross-repository state families, invariants, transitions, confirmed failure schedules, the unified native reminder lifecycle, regression proof and release evidence. | Shared Murph/iOS audit | Medium | 2026-11-07 |
+| `agent-docs/exec-plans/completed/2026-11-06-state-machine-shipping.md` | Completed architecture simplifications, backend production receipts, native main fixes and linked final verification. | Historical shipping evidence | High | 2026-11-07 |
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted-only phone-call guard PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status and closed provider rejection categories with composed sanitizer proof. | Testing and CI truth | High | 2026-11-02 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
@@ -1996,3 +2004,15 @@ Reply-email sender authentication and public invite-status privacy are owned by
 
 The reply-email parser correction and production rollout are tracked in
 [the shipping plan](exec-plans/completed/2026-11-06-reply-invite-shipping.md).
+
+Named group iMessage acknowledgment eligibility and background usage checks are
+tracked in [group acknowledgments](exec-plans/active/2026-11-06-group-name-tapback.md).
+The egress boundary remains owned by `SECURITY.md`.
+
+Foreground primary, returned-tool and streamed-child usage share one turn ordinal
+owner, documented in `../packages/assistant-engine/README.md`. Red/green collision
+proof and local verification are recorded in
+[the execution record](exec-plans/completed/2026-11-07-usage-ordinal-collision.md).
+
+The [chat reliability release plan](exec-plans/completed/2026-11-07-chat-reliability-release.md)
+tracks combined verification and release of prompt checkpointing and unique foreground usage identities.

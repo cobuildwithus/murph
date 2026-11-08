@@ -635,6 +635,7 @@ export interface AssistantHostedExecutionContext {
   pollTool?: ConversationPollTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  myGameRemindersTool?: AssistantHostedGroupTool | null
   groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
@@ -833,6 +834,7 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('pollTool', hosted.pollTool && typeof hosted.pollTool.request === 'function' ? { request: hosted.pollTool.request.bind(hosted.pollTool) } : undefined),
       ...optionalHostedField('imessageContactTool', imessageContactTool),
       ...optionalHostedField('personalizationTool', personalizationTool),
+      ...optionalHostedField('myGameRemindersTool', hosted.myGameRemindersTool),
       ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),
       ...optionalHostedField('groupPermissionOfferTool', groupPermissionOfferTool),
       ...optionalHostedField('groupSharedReader', groupSharedReader),

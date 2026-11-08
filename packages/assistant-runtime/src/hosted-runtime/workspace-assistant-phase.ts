@@ -1629,6 +1629,9 @@ function buildHostedPhaseOptionalTools(
             input.runtime.platform.assistantPersonalizationToolPort,
         }
       : {}),
+    ...(input.runtime.platform.groupToolPort
+      ? { myGameRemindersTool: input.runtime.platform.groupToolPort }
+      : {}),
     ...(input.runtime.platform.usageDiagnosticsPort
       ? { usageDiagnostics: input.runtime.platform.usageDiagnosticsPort }
       : {}),

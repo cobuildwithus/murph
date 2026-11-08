@@ -1,6 +1,6 @@
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, VAULT_MEDIA_EXPORT_GUIDANCE } from './dynamic-tools/materialize-vault-media.js'
 export { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from './dynamic-tools/materialize-vault-media.js'
-import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL } from './dynamic-tools/games.js'
+import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
 import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
@@ -1799,6 +1799,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_POLL_TOOL,
   MURPH_READ_GAME_TOOL,
+  MURPH_MY_GAME_REMINDERS_TOOL,
   MURPH_UPDATE_GAME_TOOL,
   MURPH_GAME_PHOTO_TOOL,
   MURPH_GAME_LORE_TOOL,
@@ -1874,6 +1875,7 @@ export interface MurphDynamicToolAvailability {
   usageDiagnosticsAvailable?: boolean | null
   pollsAvailable?: boolean | null
   gameReadAvailable?: boolean | null
+  myGameRemindersAvailable?: boolean | null
   gamesAvailable?: boolean | null
   gamePhotosAvailable?: boolean | null
   gameLoreAvailable?: boolean | null
@@ -1949,6 +1951,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_USAGE_DIAGNOSTICS_TOOL, defaultOff((a) => a.usageDiagnosticsAvailable)],
     [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
     [MURPH_READ_GAME_TOOL, defaultOff((a) => a.gameReadAvailable)],
+    [MURPH_MY_GAME_REMINDERS_TOOL, defaultOff((a) => a.myGameRemindersAvailable)],
     [MURPH_UPDATE_GAME_TOOL, defaultOff((a) => a.gamesAvailable)],
     [MURPH_GAME_PHOTO_TOOL, defaultOff((a) => a.gamePhotosAvailable)],
     [MURPH_GAME_LORE_TOOL, defaultOff((a) => a.gameLoreAvailable)],

@@ -242,6 +242,7 @@ export function expectAdvertisedMurphDynamicTools(
     gameReadAvailable?: boolean;
     gamesAvailable?: boolean;
     gamePhotosAvailable?: boolean;
+    myGameRemindersAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;

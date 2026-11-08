@@ -32,6 +32,20 @@ async function execute(args: unknown, ctx = context()) {
   return executeMurphDynamicToolRequest({ request, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
 }
 describe('game dynamic tools', () => {
+  it('offers a member-only reminder tool on direct accepted input and rejects group scope', async () => {
+    const requestPort = vi.fn(async () => ({ action: 'my_game_reminders' as const, result: { status: 'ok' as const, reaches: 'none' as const } }))
+    const direct = { ...context(), myGameRemindersTool: { request: requestPort }, currentUserActionScope: () => ({
+      conversationId: 'synthetic-direct', inboundMailboxItemIds: [], recipientKey: 'synthetic-member',
+      acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' as const,
+    }) }
+    const request = parse('my_game_reminders', { operation: 'set', minutes: 1080 })!
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: direct, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.contentItems[0]?.text).toContain('"reaches":"none"')
+    expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'my_game_reminders', operation: 'set', minutes: 1080, origin })
+    const group = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), myGameRemindersTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(group.rpcResult.contentItems[0]?.text).toContain('current direct message')
+    expect(requestPort).toHaveBeenCalledOnce()
+  })
   it.each([
     { label: 'pair only', games: [{ status: 'live' }], group: false, pair: true },
     { label: 'pair history in a larger room', games: [{ status: 'settled' }], group: true, pair: true, roster: 3 },
@@ -57,7 +71,7 @@ describe('game dynamic tools', () => {
     expect(GAME_SHARED_SETUP_GUIDANCE).toContain('private invitation in the app')
     expect(GAME_GROUP_MODE_GUIDANCE).toContain('ignoring supplied replacement terms at create')
     expect(GAME_GROUP_MODE_GUIDANCE).toContain('never create another game as recovery')
-    for (const phrase of ['exact game ID', 'requesting member ID', 'timezone', 'bounded number of days', 'every occurrence call scheduled read_game', 'current display name and task', 'game.status=live', 'requester in game.players', 'ended or departed', 'never substitute', 'another person’s request']) expect(GAME_REMINDER_GUIDANCE).toContain(phrase)
+    for (const phrase of ['set_reminder', 'never a new room automation', 'reaches', 'turn on notifications in the app', 'Never set another player']) expect(GAME_REMINDER_GUIDANCE).toContain(phrase)
   })
   it('uses group-only guidance for two-person group games and accepts starter edit_terms', async () => {
     const response = { action: 'read_game', result: { status: 'ok', state: { games: [
@@ -166,7 +180,7 @@ describe('game dynamic tools', () => {
   })
   it('refuses a missing game selector without forwarding a mutation', async () => {
     port.mockClear()
-    const ambiguous = { operation: approval.operation, proposalId: approval.proposalId }
+    const ambiguous = { messageRef: inputId, operation: approval.operation, proposalId: approval.proposalId }
     const result = await execute(ambiguous)
     expect(result.rpcResult.success).toBe(false)
     expect(port).not.toHaveBeenCalled()

@@ -72,6 +72,8 @@ async function initializeThrowawayCodexAppServer(input: {
   signal: AbortSignal;
   timeoutMs: number;
 }): Promise<HostedContainerCodexBinaryWarmupOutcome> {
+  // Shutdown may have arrived while asynchronous scratch preparation was running.
+  if (input.signal.aborted) return "aborted";
   const child = spawn(input.codexCommand, ["app-server"], {
     cwd: input.scratchRoot,
     // Own process group, so one kill also reaps anything it started.

@@ -7,6 +7,16 @@ const store = vi.hoisted(() => ({
   markHostedLinqAckReactionHeavy: vi.fn(),
   releaseHostedLinqAckReaction: vi.fn(),
 }));
+const groupUsage = vi.hoisted(() => ({ resolveHostedRuntimeAiUsageGate: vi.fn() }));
+const providers = vi.hoisted(() => ({ classify: vi.fn(), addReaction: vi.fn() }));
+vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => groupUsage);
+vi.mock("@/src/lib/hosted-onboarding/linq-ack-reaction-classifier", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-ack-reaction-classifier")>(),
+  classifyHostedLinqAckReaction: providers.classify,
+}));
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  addHostedLinqMessageReaction: providers.addReaction,
+}));
 const runtime = vi.hoisted(() => ({
   getHostedOnboardingEnvironment: vi.fn((): { linqAckReactionOpenAiApiKey: string | null } => ({
     linqAckReactionOpenAiApiKey: "sk-test",
@@ -18,13 +28,16 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => runtime);
 
 import {
   maybeScheduleHostedLinqAckReaction,
+  namesMurphInHostedLinqMessage,
   readHostedLinqAckReactionMessage,
   runHostedLinqAckReactionBestEffort,
 } from "@/src/lib/hosted-onboarding/linq-ack-reaction";
 import type { HostedLinqAckReactionDecision } from "@/src/lib/hosted-onboarding/linq-ack-reaction-classifier";
 import type { HostedLinqMessageReceivedEvent } from "@/src/lib/hosted-onboarding/linq-webhook";
 
-const prisma = { $transaction: vi.fn() } as never;
+const transaction = vi.fn();
+const transactionClient = {};
+const prisma = { $transaction: transaction } as never;
 const receivedAt = new Date("2026-11-05T12:00:00.000Z");
 
 function messageEvent(
@@ -72,7 +85,11 @@ function decision(overrides: Partial<HostedLinqAckReactionDecision>): HostedLinq
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  transaction.mockImplementation((callback) => callback(transactionClient));
+  groupUsage.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+  providers.classify.mockResolvedValue(decision({}));
+  providers.addReaction.mockResolvedValue({ ok: true, status: 204 });
   runtime.getHostedOnboardingEnvironment.mockReturnValue({ linqAckReactionOpenAiApiKey: "sk-test" });
 });
 
@@ -109,6 +126,122 @@ describe("maybeScheduleHostedLinqAckReaction", () => {
     expect(maybeScheduleHostedLinqAckReaction(gateInput().input)).toBe(false);
     runtime.getHostedOnboardingEnvironment.mockImplementationOnce(() => { throw new Error("bad env"); });
     expect(maybeScheduleHostedLinqAckReaction(gateInput().input)).toBe(false);
+  });
+
+  function groupInput(text = "Murph, suggest a warmup", overrides: Partial<Parameters<typeof maybeScheduleHostedLinqAckReaction>[0]> = {}) {
+    return gateInput({
+      event: messageEvent([{ type: "text", value: text }], {
+        chat: { id: "chat-1", is_group: true },
+      }),
+      response: { reason: "wake-appended-thread-route" },
+      wakeHandoff: { conversationIsGroup: true, linqChatId: "chat-1", userId: "group-container" },
+      ...overrides,
+    });
+  }
+
+  it("checks named-group usage only after response, then classifies and reacts without live suppression", async () => {
+    store.claimHostedLinqAckReaction.mockResolvedValueOnce(new Date());
+    const { input, scheduled } = groupInput();
+    expect(maybeScheduleHostedLinqAckReaction(input)).toBe(true);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(providers.classify).not.toHaveBeenCalled();
+    await scheduled[0]!();
+    expect(transaction).toHaveBeenCalledExactlyOnceWith(expect.any(Function), { maxWait: 250, timeout: 1_000 });
+    expect(groupUsage.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledExactlyOnceWith({
+      mode: "read_only", prisma: transactionClient, userId: "group-container",
+    });
+    expect(providers.classify).toHaveBeenCalledTimes(1);
+    expect(store.claimHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({ skipLiveConversation: false }));
+    expect(providers.addReaction).toHaveBeenCalledTimes(1);
+    expect(store.confirmHostedLinqAckReaction).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["allowed", "denied", "health_data_consent_withdrawn", "error"])(
+    "never makes the webhook wait for group usage: %s", async (status) => {
+      let settle!: (value: { status: string }) => void;
+      groupUsage.resolveHostedRuntimeAiUsageGate.mockImplementationOnce(() => new Promise((resolve, reject) => {
+        settle = (value) => status === "error" ? reject(new Error("database unavailable")) : resolve(value);
+      }));
+      const { input, scheduled } = groupInput();
+      expect(maybeScheduleHostedLinqAckReaction(input)).toBe(true);
+      const task = scheduled[0]!();
+      expect(providers.classify).not.toHaveBeenCalled();
+      expect(providers.addReaction).not.toHaveBeenCalled();
+      settle({ status });
+      await task;
+      expect(providers.classify).toHaveBeenCalledTimes(status === "allowed" ? 1 : 0);
+      if (status !== "allowed") {
+        expect(store.claimHostedLinqAckReaction).not.toHaveBeenCalled();
+        expect(store.markHostedLinqAckReactionHeavy).not.toHaveBeenCalled();
+        expect(providers.addReaction).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each(["heavy", "quiet", "answered_or_burst_taken"] as const)("preserves group %s suppression", async (outcome) => {
+    providers.classify.mockResolvedValueOnce(decision({
+      ...(outcome === "heavy" ? { heavy: 0.99, emoji: null } : {}),
+      ...(outcome === "quiet" ? { kind: "none", emoji: null } : {}),
+    }));
+    store.claimHostedLinqAckReaction.mockResolvedValueOnce(null);
+    const { input, scheduled } = groupInput();
+    expect(maybeScheduleHostedLinqAckReaction(input)).toBe(true);
+    await scheduled[0]!();
+    expect(providers.addReaction).not.toHaveBeenCalled();
+    expect(store.markHostedLinqAckReactionHeavy).toHaveBeenCalledTimes(outcome === "heavy" ? 1 : 0);
+  });
+
+  it("skips classification if the group availability read exhausts the task deadline", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    groupUsage.resolveHostedRuntimeAiUsageGate.mockImplementationOnce(async () => {
+      clock.mockReturnValue(6_000);
+      return { status: "allowed" };
+    });
+    try {
+      const { input, scheduled } = groupInput();
+      expect(maybeScheduleHostedLinqAckReaction(input)).toBe(true);
+      await scheduled[0]!();
+      expect(providers.classify).not.toHaveBeenCalled();
+      expect(providers.addReaction).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    ["unnamed chatter", "suggest a warmup", {}],
+    ["a substring", "Murphy can help", {}],
+    ["missing owner", "Murph, suggest a warmup", { wakeHandoff: { conversationIsGroup: true, linqChatId: "chat-1" } }],
+    ["wrong route reason", "Murph, suggest a warmup", { response: { reason: "wake-appended-active-member" } }],
+    ["no wake", "Murph, suggest a warmup", { wakeHandoffResult: { started: false } }],
+    ["converted reaction", "Murph, suggest a warmup", { currentInboundReply: null }],
+    ["provider directness mismatch", "Murph, suggest a warmup", { event: messageEvent() }],
+    ["own message", "Murph, suggest a warmup", { event: messageEvent([{ type: "text", value: "Murph" }], { chat: { id: "chat-1", is_group: true }, is_from_me: true }) }],
+    ["SMS", "Murph, suggest a warmup", { event: messageEvent([{ type: "text", value: "Murph" }], { chat: { id: "chat-1", is_group: true }, service: "SMS" }) }],
+  ] as const)("skips %s before environment, usage, or classifier work", (_label, text, overrides) => {
+    const { input, scheduled } = groupInput(text, overrides);
+    expect(maybeScheduleHostedLinqAckReaction(input)).toBe(false);
+    expect(scheduled).toHaveLength(0);
+    expect(runtime.getHostedOnboardingEnvironment).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+    expect(providers.classify).not.toHaveBeenCalled();
+  });
+
+});
+
+describe("namesMurphInHostedLinqMessage", () => {
+  it.each(["murph", "Murph", "MURPH", "murph's", "@murph", "murph,", "hey murph!"])("matches %s", (text) => {
+    expect(namesMurphInHostedLinqMessage(messageEvent([{ type: "text", value: text }]))).toBe(true);
+  });
+  it.each(["murphy", "murphs", "smurph", "a warmup", ""])("does not match %s", (text) => {
+    expect(namesMurphInHostedLinqMessage(messageEvent([{ type: "text", value: text }]))).toBe(false);
+  });
+  it("ignores attachment URLs and does not join partial words across parts", () => {
+    expect(namesMurphInHostedLinqMessage(messageEvent([
+      { mime_type: "image/png", type: "media", url: "https://example.test/murph.png" },
+      { type: "link", value: "https://murph.example.test" },
+      { type: "text", value: "mur" }, { type: "text", value: "ph" },
+    ]))).toBe(false);
   });
 });
 
@@ -153,6 +286,7 @@ describe("runHostedLinqAckReactionBestEffort", () => {
       reaction: "⏰",
     }));
     expect(addReaction).toHaveBeenCalledWith(expect.objectContaining({ emoji: "⏰", messageId: "msg-1" }));
+    expect(groupUsage.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(store.confirmHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({ claimedAt }));
     expect(store.releaseHostedLinqAckReaction).not.toHaveBeenCalled();
   });

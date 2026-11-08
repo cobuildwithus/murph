@@ -138,6 +138,94 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    { name: "notification", kinds: ["assistant.notification.requested"], immediate: true, checkpointFails: false },
+    { name: "notification behind maintenance", kinds: ["device-sync.wake", "assistant.notification.requested"], immediate: true, checkpointFails: false },
+    { name: "notification with failed checkpoint", kinds: ["assistant.notification.requested"], immediate: true, checkpointFails: true },
+    { name: "maintenance only", kinds: ["device-sync.wake"], immediate: false, checkpointFails: false },
+  ] as const)("releases checkpoint-gated $name without importing before durability", async ({ kinds, immediate, checkpointFails }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-notification-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const items = [createMailboxItem()];
+    const started = createDeferred<void>();
+    const imported = createDeferred<void>();
+    const checkpointStarted = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdown = new AbortController();
+    const snapshots: number[] = [];
+    let passes = 0;
+    let job: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | undefined;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      job = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 600_000 } }), {
+          vaultRoot, runtimeWakeSignal, shutdownSignal: shutdown.signal,
+          async importItem({ item }) {
+            if (item.lane === "system") {
+              expect(events).toContain("workspace.checkpoint");
+              events.push(`system.import:${item.laneSeq}`);
+              if (item.laneSeq === String(kinds.length)) imported.resolve();
+            }
+            return { status: "imported" };
+          },
+          async createCheckpointSnapshot() {
+            snapshots.push(Date.now());
+            checkpointStarted.resolve();
+            if (checkpointFails) throw new Error("Synthetic checkpoint failure");
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items }),
+            workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
+          }),
+          async runAssistantPhase() {
+            if (++passes > 1) return { progressed: false };
+            started.resolve();
+            return { progressed: true, checkpointReason: "assistant_runtime_commit" };
+          },
+        },
+      );
+      void job.catch(() => undefined);
+      await withRealTimeout(started.promise, 5_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (const [index, kind] of kinds.entries()) {
+        items.push(createMailboxItem({
+          dedupeKey: `synthetic_checkpoint_notification_${index}`,
+          id: `synthetic_checkpoint_notification_${index}`,
+          kind, lane: "system", laneSeq: String(index + 1),
+        }));
+      }
+      runtimeWakeSignal.notify();
+      if (!immediate) {
+        await waitForFakeTimerScheduled(() => events.join(","));
+        expect(snapshots).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(599_000);
+      }
+      await withRealTimeout(checkpointStarted.promise, 5_000, () => `System prefix remained checkpoint-gated: ${events.join(",")}`);
+      expect(snapshots[0]).toBe(Date.parse(TEST_NOW) + (immediate ? 1_000 : 600_000));
+      if (checkpointFails) {
+        await expect(withRealTimeout(job, 5_000, () => events.join(","))).rejects.toThrow("Synthetic checkpoint failure");
+        expect(events.filter((event) => event.startsWith("system.import:"))).toEqual([]);
+        return;
+      }
+      if (!immediate) return;
+      await withRealTimeout(imported.promise, 5_000, () => `System prefix was not imported after checkpoint: ${events.join(",")}`);
+      expect(events.filter((event) => event.startsWith("system.import:"))).toEqual(
+        kinds.map((_, index) => `system.import:${index + 1}`),
+      );
+      expect(requireEventIndex(events, "workspace.checkpoint")).toBeLessThan(requireEventIndex(events, "system.import:1"));
+    } finally {
+      shutdown.abort(new Error("Synthetic cleanup"));
+      await job?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test.each([0, 480_000])("keeps a publication deadline of %i ms across later accepted work and releases it after publication", async (startAfterMs) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-publication-rearm-"));
     const events: string[] = [];

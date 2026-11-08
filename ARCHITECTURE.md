@@ -1031,7 +1031,9 @@ Detached phone-call results and usage-referral celebrations are the only
 notification families admitted through the dirty runtime's pre-checkpoint
 system prefix. Their server-generated event identities and idempotent delivery
 make that latency shortcut replay-safe; generic notifications still wait for
-the idle checkpoint. A referral celebration recomputes its current-model
+the idle checkpoint. A blocked system prefix containing an assistant notification
+requests that existing checkpoint promptly instead of waiting out idle batching;
+its import and dispatch safety barriers are unchanged. A referral celebration recomputes its current-model
 capacity label and receives only a server-resolved tone, Humor, and Unhinged
 band, never transcript history. The existing minute recovery pass
 re-signals the exact oldest unconsumed celebration mailbox pointers after a
@@ -6721,6 +6723,28 @@ under game and mailbox locks; an expired or changed witness is stale. Recovery
 signals an existing mailbox item without replacing it. The runner parses this
 policy and allows a skip, with no game host tools or lore. Egress checks the
 28-day inactivity pause separately after validating evening currentness.
+
+Private game reminders reuse the signed group-tool transport for a direct-only
+`my_game_reminders` request. The runtime member and accepted direct input own
+authority; Web returns only that member's live tasks, schedule, status, peer
+first names and reminder settings. Settings and both chat tools write through
+`setReminders`. `canText` additionally requires the private-reminders flag,
+remaining AI access and usage, and an already deliverable direct thread; the
+game never grants a private conversation. A per-seat `reminder_every_day` option
+changes count-game reminder urgency without changing posting eligibility.
+
+The minute drain reserves one `game_private_evening` receipt per member and
+local date, one hour after their saved reminder time, for open games no room
+check-in covers. Its typed policy freezes game/day/terms and conversation
+watermark; publication and egress recheck text consent, access, the witness,
+expiry and unanswered-evening pause. Each player's live-game activation copies
+opt-out and cadence from validated lineage or the latest exact cohort, then
+records an idempotent activation event. A new-person or changed-rhythm offer
+gets one `game_private_kickoff` receipt per game and member. It waits overnight
+until 09:00 local, expires 24 hours after start, and rechecks live seating and
+private text eligibility at publication and dispatch. Both notifications are
+output-only, allow a skip, and remain subject to the 28-day pause; ordinary
+direct replies use behavior-followthrough and the direct tool.
 
 The minute drain handles up to ten lifecycle receipts a pass, four at a time. It
 takes the oldest due receipt of each chat before applying that limit, so a chat

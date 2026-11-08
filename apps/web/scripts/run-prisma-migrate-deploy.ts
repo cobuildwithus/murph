@@ -107,6 +107,10 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261107010000_game_reminder_every_day",
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20261106220000_game_reminders",
     // Constant defaults preserve existing rows and old writers.
     new Set(["ADD COLUMN NOT NULL"]),

@@ -1,4 +1,4 @@
-import { GAME_PHOTO_CHAT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
+import { GAME_PHOTO_CHAT_GUIDANCE, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
@@ -551,6 +551,14 @@ function resolveAssistantSpecializedDynamicTools(input: {
 
 function gamePhotoContextPrompts(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): string[] {
   return input.input.channel === 'linq' && areConversationGamesAvailable(input, acceptedInputIds, scope) ? [GAME_PHOTO_CHAT_GUIDANCE] : []
+}
+
+function privateGameReminderAvailable(input: AssistantRouteTurnPlanInput, scope: string, acceptedInputIds: readonly string[]): boolean {
+  return scope === 'direct' && acceptedInputIds.length > 0 && input.hostedToolContext?.myGameRemindersTool != null
+}
+
+function privateGameReminderPrompts(input: AssistantRouteTurnPlanInput, scope: string, acceptedInputIds: readonly string[]): string[] {
+  return privateGameReminderAvailable(input, scope, acceptedInputIds) ? [GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE] : []
 }
 
 function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null, scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>): boolean {
@@ -1136,6 +1144,7 @@ export async function resolveAssistantRouteTurnPlan(
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
     ...gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope),
+    ...privateGameReminderPrompts(input, conversationScope, userActionAcceptedInputIds),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
@@ -1359,6 +1368,7 @@ export async function resolveAssistantRouteTurnPlan(
   })
   const dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
         gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
+        myGameRemindersAvailable: privateGameReminderAvailable(input, conversationScope, userActionAcceptedInputIds),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
         gameLoreAvailable: gameLoreGuidance !== null,
         gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,

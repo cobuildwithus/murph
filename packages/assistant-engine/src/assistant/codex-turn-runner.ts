@@ -241,6 +241,7 @@ export type AssistantCodexTurnRecoveryOutcome =
     }
 
 export async function executeCodexTurnWithRecovery(input: {
+  allocateUsageRecordOrdinal?: () => number
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
@@ -287,6 +288,7 @@ export async function executeCodexTurnWithRecovery(input: {
   let attemptOutcome: AssistantCodexAttemptOutcome
   try {
     attemptOutcome = await executeAssistantCodexAttempt({
+      allocateUsageRecordOrdinal: input.allocateUsageRecordOrdinal,
       analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       attemptPlan,
       executionPlan,
@@ -532,6 +534,7 @@ function emitCodexPlanTraceEvent(input: {
 }
 
 type AssistantCodexAttemptInput = {
+  allocateUsageRecordOrdinal?: () => number
   analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
@@ -935,7 +938,14 @@ function buildCodexAttemptProviderInput(
         executionPlan.input.scheduledInvocationAuthority == null,
       onAdditionalUsage: executionPlan.executionContext.hosted?.usageRecorder
         ? (additionalUsage) => recordAdditionalAssistantUsageEvents({
-            additionalUsages: [additionalUsage],
+            additionalUsages: [{
+              ...additionalUsage,
+              // Streamed children are absent from the returned usage drafts.
+              // Rebase them at the same owner as primary and returned usage,
+              // including when a child settles after reconsideration starts.
+              providerRequestOrdinal: input.allocateUsageRecordOrdinal?.()
+                ?? additionalUsage.providerRequestOrdinal,
+            }],
             effectiveEnv: attemptEnv,
             executionContext: executionPlan.executionContext,
             providerRequestAcceptedInputIds:

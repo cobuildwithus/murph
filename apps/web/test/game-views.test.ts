@@ -481,3 +481,16 @@ it("hydrates app replies on the target entry and omits the feature from groups",
   expect(JSON.stringify(view(state, AVA, JOIN_AT, { ...inputs, multiplayer: true }))).not.toContain('"reply":');
   expect(JSON.stringify(view(state, AVA, JOIN_AT, { ...inputs, multiplayer: true }))).not.toContain('"canReply":');
 });
+
+
+describe("recap UI wait projection", () => {
+  it("omits the optional wait when the game is live or a recap exists", () => {
+    const state = liveState();
+    const now = new Date("2030-03-05T12:00:00Z");
+    expect(view(state, LEO, now, { recapPending: true }).recapPending).toBeUndefined();
+    state.game.status = "settled";
+    expect(view(state, LEO, now, { recapPending: true }).recapPending).toBe(true);
+    expect(view(state, LEO, now, { recapPending: true, recap: { pages: [], chatLine: "Ready" } }).recapPending).toBeUndefined();
+    expect(view(state, LEO, now).recapPending).toBeUndefined();
+  });
+});

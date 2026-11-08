@@ -109,6 +109,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeCheckoutConfig: mocks.requireHostedStripeCheckoutConfig,
 }));
 
+import {
+  acceptHostedMemberStripeCheckoutCompletionTx,
+  prepareHostedMemberStripeCheckoutCompletion,
+} from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 import {
   createHostedStripeCustomerLookupKey,
@@ -363,6 +367,142 @@ describe("createHostedBillingCheckout", () => {
         step: "hosted-onboarding.billing.create-checkout",
       }),
     );
+  });
+
+  async function canceledCheckoutFixture() {
+    const invite = makeInvite();
+    invite.member.billingStatus = HostedBillingStatus.canceled;
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(invite);
+    const prisma = makePrisma({
+      memberBillingStatus: HostedBillingStatus.canceled,
+      billingRef: {
+        memberId: "member_123",
+        ...(await buildHostedMemberBillingPrivateColumns({
+          memberId: "member_123",
+          stripeCustomerId: "cus_existing",
+          stripeSubscriptionId: "sub_canceled",
+        })),
+        stripeCustomerLookupKey: createHostedStripeCustomerLookupKey("cus_existing"),
+        stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey("sub_canceled"),
+      },
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue({
+      id: "sub_canceled",
+      customer: "cus_existing",
+      status: "canceled",
+    });
+    return prisma;
+  }
+
+  it.each(["canceled", "incomplete_expired"])("restarts %s billing with the same customer and reuses its reserved checkout", async (status) => {
+    const prisma = await canceledCheckoutFixture();
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue({
+      id: "sub_canceled", customer: "cus_existing", status,
+    });
+    const input = {
+      billingPlanCode: "launch_edge_monthly" as const,
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    };
+    await expect(createHostedBillingCheckout(input)).resolves.toMatchObject({ alreadyActive: false });
+    await expect(createHostedBillingCheckout(input)).resolves.toMatchObject({ alreadyActive: false });
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(expect.objectContaining({
+      customer: "cus_existing",
+      metadata: expect.objectContaining({
+        billingPlanCode: "launch_edge_monthly",
+        replacesSubscriptionId: "sub_canceled",
+      }),
+    }), expect.anything());
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(await prisma.hostedMemberBillingRef.findUnique()).toMatchObject({
+      stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey("sub_canceled"),
+    });
+  });
+
+  it.each([
+    { status: "active", customer: "cus_existing", cancel_at_period_end: true },
+    { status: "past_due", customer: "cus_existing" },
+    { status: "unpaid", customer: "cus_existing" },
+    { status: "paused", customer: "cus_existing" },
+    { status: "canceled", customer: "cus_other" },
+  ])("rejects stale canceled projection when Stripe reports $status / $customer", async (subscription) => {
+    const prisma = await canceledCheckoutFixture();
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue({ id: "sub_canceled", ...subscription });
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code", member: makeAuthenticatedMember(), prisma: prisma as never,
+    })).rejects.toMatchObject({ code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS" });
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("does not create checkout when terminal provider verification fails", async () => {
+    const prisma = await canceledCheckoutFixture();
+    mocks.stripe.subscriptions.retrieve.mockRejectedValue(new Error("provider unavailable"));
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code", member: makeAuthenticatedMember(), prisma: prisma as never,
+    })).rejects.toThrow("provider unavailable");
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rechecks changed prior ownership after the unlocked Stripe terminal read", async () => {
+    const prisma = await canceledCheckoutFixture();
+    mocks.stripe.subscriptions.retrieve.mockImplementation(async () => {
+      prisma.setBillingRefState({
+        stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey("sub_changed"),
+      });
+      return { id: "sub_canceled", customer: "cus_existing", status: "canceled" };
+    });
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code", member: makeAuthenticatedMember(), prisma: prisma as never,
+    })).rejects.toMatchObject({ code: "HOSTED_BILLING_CHECKOUT_ATTEMPT_STALE" });
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("only the exact canceled subscription can be replaced at completion (matches=%s)", async (matches) => {
+    const prisma = await canceledCheckoutFixture();
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code", member: makeAuthenticatedMember(), prisma: prisma as never,
+    });
+    const metadata = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0].metadata;
+    const preparedCompletion = await prepareHostedMemberStripeCheckoutCompletion({
+      memberId: "member_123", prisma: prisma as never,
+      stripeCustomerId: "cus_existing", stripeSubscriptionId: "sub_restarted",
+    });
+    const completionInput = {
+      billingIdentityDisposition: "bind" as const,
+      checkoutAttemptId: metadata.checkoutAttemptId,
+      checkoutIntentHash: metadata.checkoutIntentHash,
+      checkoutSessionId: "cs_123",
+      replacesSubscriptionId: matches ? metadata.replacesSubscriptionId : "sub_other",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date(), memberId: "member_123", preparedCompletion,
+    };
+    const outcome = await prisma.$transaction((tx) => acceptHostedMemberStripeCheckoutCompletionTx({
+      ...completionInput, tx: tx as never,
+    }));
+    expect(outcome).toEqual({ kind: matches ? "accepted" : "cleanup_superseded" });
+    expect(await prisma.hostedMemberBillingRef.findUnique()).toMatchObject({
+      stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(matches ? "sub_restarted" : "sub_canceled"),
+      ...(matches ? {
+        lastStripeEventCreatedAt: null,
+        stripeSubscriptionScheduleIdEncrypted: null,
+        stripeSubscriptionScheduleLookupKey: null,
+        scheduledBillingPlanCode: null,
+        scheduledBillingEffectiveAt: null,
+      } : {}),
+    });
+    if (matches) {
+      await expect(prisma.$transaction((tx) => acceptHostedMemberStripeCheckoutCompletionTx({
+        ...completionInput, tx: tx as never,
+      }))).resolves.toEqual({ kind: "already_accepted" });
+      expect(await prisma.hostedMemberBillingRef.findUnique()).toMatchObject({
+        lastStripeEventCreatedAt: null,
+      });
+    }
   });
 
   it("creates a fresh direct Checkout after terminal Family release clears the old handoff", async () => {
@@ -1514,7 +1654,7 @@ function makePrisma(input: {
       checkoutIntentHash?: string;
       memberId?: string;
       stripeCheckoutSessionLookupKey?: null | { in: string[] };
-      stripeSubscriptionLookupKey?: null;
+      stripeSubscriptionLookupKey?: null | { in: string[] };
     };
   }) => {
     if (!state || !matchesBillingRefWhere(state, inputData.where)) {
@@ -1565,9 +1705,18 @@ function makePrisma(input: {
         input.hasConfirmedGroupMembership ? { id: "group_member_123" } : null,
       ),
     },
+    hostedMemberAcceptedSubscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique,
+      update: vi.fn().mockImplementation(async ({ data }) => {
+        if (!state) throw new Error("missing fixture");
+        state = { ...state, ...data };
+        return state;
+      }),
       updateMany,
       upsert,
     },
@@ -1598,6 +1747,10 @@ function makePrisma(input: {
     $queryRaw: lockQuery,
     $transaction: transaction,
     hostedGroupMember: prismaTx.hostedGroupMember,
+    hostedMemberAcceptedSubscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     hostedMemberBillingRef: {
       findUnique,
       updateMany,
@@ -1629,7 +1782,7 @@ function matchesBillingRefWhere(
     checkoutIntentHash?: string;
     memberId?: string;
     stripeCheckoutSessionLookupKey?: null | { in: string[] };
-    stripeSubscriptionLookupKey?: null;
+    stripeSubscriptionLookupKey?: null | { in: string[] };
   },
 ): boolean {
   if (
@@ -1651,6 +1804,9 @@ function matchesBillingRefWhere(
     where.stripeSubscriptionLookupKey === null
     && state.stripeSubscriptionLookupKey !== null
   ) {
+    return false;
+  }
+  if (where.stripeSubscriptionLookupKey && !where.stripeSubscriptionLookupKey.in.includes(state.stripeSubscriptionLookupKey ?? "")) {
     return false;
   }
   if (where.stripeCheckoutSessionLookupKey === null) {

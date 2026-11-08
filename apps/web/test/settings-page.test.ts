@@ -2397,6 +2397,10 @@ test.each([
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
+      ...(billingStatus === HostedBillingStatus.canceled ? {
+        scheduledBillingPlanCode: "launch_group_monthly",
+        scheduledBillingEffectiveAt: new Date("2026-08-01T00:00:00.000Z"),
+      } : {}),
     },
   });
 
@@ -2412,6 +2416,9 @@ test.each([
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
       canManageBilling: suspendedAt === null,
+      scheduledBillingPlanCode: null,
+      scheduledBillingEffectiveAt: null,
+      canStartDirectPlan: billingStatus === HostedBillingStatus.canceled && suspendedAt === null,
       canUpgradeToEdge: false,
       usageTopUpOffers: [],
       usageTopUpPurchaseReturn: {

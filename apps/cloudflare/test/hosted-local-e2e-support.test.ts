@@ -956,6 +956,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.group_room_model"
       && name !== "murph.read_game"
       && name !== "murph.update_game"
+      && name !== "murph.my_game_reminders"
       && name !== "murph.game_lore"
       && name !== "murph.game_photo"
       && name !== "murph.imessage_contact"
@@ -989,6 +990,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       gameReadAvailable: true,
       gamesAvailable: true,
       gamePhotosAvailable: true,
+      myGameRemindersAvailable: true,
       groupRoomModelAvailable: true,
       imessageContactAvailable: true,
       messageTargetingAvailable: true,
@@ -1334,6 +1336,7 @@ function buildResponsesRequest(
         && name !== "murph.poll"
         && name !== "murph.create_calendar_link"
         && name !== "murph.connected_apps_manage"
+        && name !== "murph.my_game_reminders"
         && name !== "murph.attach_response_card"
         && name !== "murph.attach_sleep_card"
         && name !== "murph.attach_exercise_routine_card"

@@ -644,6 +644,7 @@ model HostedMember {
   routing                        HostedMemberRouting?
   billingRef                     HostedMemberBillingRef?
   subscriptionCheckouts          HostedMemberSubscriptionCheckout[]
+  acceptedSubscriptions          HostedMemberAcceptedSubscription[]
   emailAuthorization             HostedMemberEmailAuthorization?
   emailPublicBootstrapAttempts   HostedEmailPublicBootstrapAttempt[]
   hostedMailboxItems             HostedMailboxItem[]
@@ -1070,6 +1071,19 @@ model HostedMemberBillingRef {
   member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_billing_ref")
+}
+
+// Historical acceptance is separate from created Checkout sessions. Ciphertext retains
+// the same member-bound billing subscription field context for future reindexing.
+model HostedMemberAcceptedSubscription {
+  memberId String @map("member_id")
+  stripeSubscriptionLookupKey String @map("stripe_subscription_lookup_key")
+  stripeSubscriptionIdEncrypted String @map("stripe_subscription_id_encrypted")
+  createdAt DateTime @default(now()) @map("created_at")
+  member HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, stripeSubscriptionLookupKey])
+  @@map("hosted_member_accepted_subscription")
 }
 
 model HostedMemberSubscriptionCheckout {
@@ -2824,6 +2838,7 @@ model GameInvitee {
 
 model GamePlayer {
   reminderOff        Boolean     @default(false) @map("reminder_off")
+  reminderEveryDay   Boolean     @default(false) @map("reminder_every_day")
   gameId             String      @map("game_id")
   memberId           String?     @map("member_id")
   seat               Int

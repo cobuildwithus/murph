@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
 import { parseHostedExecutionEvent } from "../src/parsers.ts";
+import { buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions } from "../src/runtime-control.ts";
 
 const origin = { kind: "accepted_input", assistantInputId: "ain_synthetic" };
 
@@ -47,6 +48,25 @@ const game = {
 const response = <T extends object>(value: T) => ({ action: "read_game", result: { status: "ok", state: { games: [value] } } });
 
 describe("additive game reader compatibility", () => {
+  it("builds bounded private game notices from own tasks without peer private words", () => {
+    const offer = buildGamePrivateKickoffInstructions({ messageKind: "new_person", task: "100 pushups", otherFirstNames: ["Sam"] });
+    const rhythm = buildGamePrivateKickoffInstructions({ messageKind: "new_rhythm", task: "3 lifts", otherFirstNames: ["Sam"] });
+    const evening = buildGamePrivateEveningInstructions({ tasks: ["100 pushups"] });
+    expect(offer).toContain("100 pushups"); expect(offer).toContain("Sam"); expect(offer).toContain("one question");
+    expect(rhythm).toContain("every evening, or only when you're running behind");
+    expect(evening).toContain("100 pushups");
+    for (const instructions of [offer, rhythm, evening]) expect(instructions).not.toMatch(/read_game|update_game|player status|another player's task in data/iu);
+  });
+  it("accepts private reminder requests and additive reach results before producers turn on", () => {
+    const direct = { action: "my_game_reminders", operation: "set", origin, minutes: 1080, gameId: game.id, on: true, everyDay: true, text: true };
+    expect(parseHostedRuntimeGroupToolRequest(direct)).toEqual(direct);
+    expect(parseHostedRuntimeGroupToolRequest({ action: "update_game", origin,
+      update: { operation: "set_reminder", gameId: game.id, minutes: 1080, on: true } })).toMatchObject({ action: "update_game" });
+    expect(parseHostedRuntimeGroupToolResponse({ action: "update_game", result: { status: "ok", reaches: "text" } })).toMatchObject({ result: { reaches: "text" } });
+    expect(parseHostedRuntimeGroupToolResponse({ action: "update_game", result: { status: "ok" } })).toMatchObject({ result: { status: "ok" } });
+    expect(parseHostedRuntimeGroupToolResponse({ action: "my_game_reminders", result: { status: "ok", reaches: "none",
+      reminders: { minutes: 1080, push: true, text: false, canText: false, games: [] } } })).toMatchObject({ result: { reaches: "none" } });
+  });
   it("accepts strict scheduled origins only for shared game reads", () => {
     const scheduledOrigin = { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00-04:00" };
     const request = { action: "read_game", origin: scheduledOrigin, includePlayers: true };

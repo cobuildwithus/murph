@@ -56,7 +56,8 @@ const LIFECYCLE_FROZEN_BATCH = 1;
  * process (for example one written by a newer build before a rollback) must
  * never become the oldest due row that every sweep picks and skips.
  */
-const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_evening", "game_challenge"];
+const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_evening", "game_private_evening", "game_private_kickoff", "game_challenge"];
+const PRIVATE_GAME_TEMPLATES = new Set<string | null>(["game_private_evening", "game_private_kickoff"]);
 
 /** The existing minute sweep recovers accepted intent even if the app never returns. */
 export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now?: Date; signal?: AbortSignal } = {}): Promise<{ attempted: number; queued: number; deferred: number }> {
@@ -72,6 +73,10 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
     reserveDueGameMissedDayCheckIns(now),
     import("./evening-check-in").then(({ reserveDueGameEveningCheckIns }) => reserveDueGameEveningCheckIns(now,
       { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch((error: unknown) => logLifecycleItemFailure("game_evening", error)),
+    import("./private-notification").then(({ reserveDuePrivateEveningCheckIns }) => reserveDuePrivateEveningCheckIns(now,
+      { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch((error: unknown) => logLifecycleItemFailure("game_private_evening", error)),
+    import("./private-kickoff").then(({ reconcilePrivateGameActivations }) => reconcilePrivateGameActivations(now,
+      { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch((error: unknown) => logLifecycleItemFailure("game_private_kickoff", error)),
     import("./reminder-notification").then(({ sendDueGameReminders }) => sendDueGameReminders(now,
       { signal: input.signal, deadlineMs: startedAtMs + LIFECYCLE_CLAIM_BUDGET_MS })).catch(() => {}),
   ]);
@@ -151,7 +156,9 @@ export async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date):
     WITH oldest AS (
       SELECT DISTINCT ON (chat) id, attempted_at FROM (
         SELECT due.id, due.attempted_at,
-          CASE WHEN due.template IN ('game_group_missed', 'game_evening') THEN COALESCE(due.payload_owner_member_id, split_part(due.source_ref, ':', 1)) ELSE game.chat_container_member_id END AS chat
+          CASE WHEN due.template IN ('game_group_missed', 'game_evening') THEN COALESCE(due.payload_owner_member_id, split_part(due.source_ref, ':', 1))
+            WHEN due.template IN ('game_private_evening', 'game_private_kickoff') THEN due.payload_owner_member_id
+            ELSE game.chat_container_member_id END AS chat
         FROM hosted_linq_delivery due LEFT JOIN game ON game.id = split_part(due.source_ref, ':', 1)
         WHERE due.source = 'game_lifecycle' AND due.template = ANY(${LIFECYCLE_TEMPLATES}::text[]) AND due.source_ref IS NOT NULL
           AND ((due.status = 'awaiting_generation' AND (due.retry_after_at IS NULL OR due.retry_after_at <= ${now}::timestamp))
@@ -164,6 +171,7 @@ export async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date):
 }
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
+  if (PRIVATE_GAME_TEMPLATES.has(receipt.template)) return processPrivateGameIntent(receipt, now);
   if (receipt.template === "game_evening") return processEveningCheckInIntent(receipt, now);
   if (receipt.template === "game_group_missed") return processGroupMissedDayIntent(receipt, now);
   if (receipt.template === "game_talk") return processGameTalkIntent(receipt, now, prisma);
@@ -187,6 +195,51 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, kind), now, kind)
     : deliverGameChatLifecycle(gameId, kind, undefined, now);
+}
+
+function processPrivateGameIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
+  return receipt.template === "game_private_evening" ? processPrivateEveningIntent(receipt, now) : processPrivateKickoffIntent(receipt, now);
+}
+
+async function processPrivateKickoffIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
+  const parts = /^([^:]+):([^:]+)$/u.exec(receipt.sourceRef ?? "");
+  if (!parts || receipt.payloadOwnerMemberId !== parts[2]) return false;
+  const [, gameId, memberId] = parts;
+  const { privateKickoffEventId, publishPrivateKickoff, readPrivateKickoffDeliveryAuthority, isPrivateKickoffCurrentTx } = await import("./private-kickoff");
+  const eventId = privateKickoffEventId(gameId, memberId);
+  if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
+  if (receipt.status === "generation_queued") {
+    const policy = await readPrivateKickoffDeliveryAuthority(eventId, memberId);
+    if (!policy || !await getPrisma().$transaction(tx => isPrivateKickoffCurrentTx(policy, tx, now))) return false;
+    return recoverGameNotificationPointer(receipt.id, memberId, eventId);
+  }
+  const published = await publishPrivateKickoff(gameId, memberId, now);
+  const startedAt = await getPrisma().game.findUnique({ where: { id: gameId }, select: { startedAt: true } });
+  if (!published && (!startedAt?.startedAt || now.getTime() >= startedAt.startedAt.getTime() + 24 * 60 * 60_000)) {
+    await getPrisma().hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: "awaiting_generation" },
+      data: { status: "skipped", skippedAt: now, skipReason: "game_private_kickoff_expired", retryAfterAt: null } });
+  }
+  return published;
+}
+
+async function processPrivateEveningIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
+  const parts = /^([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(receipt.sourceRef ?? "");
+  if (!parts) return false;
+  const [, memberId, date] = parts;
+  const { privateEveningEventId, publishPrivateEveningCheckIn, readPrivateEveningDeliveryAuthority, isPrivateEveningCurrentTx } = await import("./private-notification");
+  const eventId = privateEveningEventId(memberId, date);
+  if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
+  if (receipt.status === "generation_queued") {
+    const policy = await readPrivateEveningDeliveryAuthority(eventId, memberId);
+    if (!policy || !await getPrisma().$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))) return false;
+    return recoverGameNotificationPointer(receipt.id, memberId, eventId);
+  }
+  const published = await publishPrivateEveningCheckIn(memberId, date, now);
+  if (!published && now.getTime() >= receipt.createdAt.getTime() + 30 * 60_000) {
+    await getPrisma().hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: "awaiting_generation" },
+      data: { status: "skipped", skippedAt: now, skipReason: "game_private_evening_expired", retryAfterAt: null } });
+  }
+  return published;
 }
 
 async function processEveningCheckInIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {

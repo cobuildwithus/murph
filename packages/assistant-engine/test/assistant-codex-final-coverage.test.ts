@@ -136,6 +136,9 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import type { AssistantCodexContinuation } from '../src/assistant/active-turn-input-journal.ts'
 import { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
+import { recordAssistantUsageEvent } from '../src/assistant/service-usage.ts'
+import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
+import type { AssistantProviderTurn, AssistantProviderUsageDraft } from '../src/assistant/providers/types.ts'
 import type {
   AssistantCodexAttemptPlan,
   AssistantCodexTurnExecutionPlan,
@@ -2725,4 +2728,117 @@ describe('attested reaction routing through the admitted provider turn', () => {
       expect(resolveAssistantProviderResumeStateAction({ ...outcome.providerTurn, threadScope: 'session-thread' })).toBe('preserve-existing')
     }
   })
+})
+
+
+describe('streamed child usage identity', () => {
+  it.each(['succeeded', 'failed', 'standalone'] as const)(
+    'shares the turn ordinal owner across a %s reconsideration and late children',
+    async (outcomeKind) => {
+      const route = createRoute()
+      const session = createAssistantSession({ providerOptions: route.providerOptions })
+      const input = { prompt: 'Answer the synthetic group update.', vault: '/vaults/test' }
+      const records: Array<{ record: AssistantUsageRecord; inputIds: readonly string[] }> = []
+      const recordUsage = vi.fn(async (
+        record: AssistantUsageRecord,
+        inputIds?: readonly string[],
+      ) => { records.push({ record, inputIds: inputIds ?? [] }) })
+      const executionContext = {
+        hosted: { memberId: 'synthetic-member', userEnvKeys: [], usageRecorder: { recordUsage } },
+      }
+      const turnId = 'synthetic-shared-usage-turn'
+      const callbacks: Array<NonNullable<AssistantProviderTurn['onAdditionalUsage']>> = []
+      let nextOrdinal = 0
+      const allocateUsageRecordOrdinal = () => nextOrdinal++
+      const draft = (ordinal: number, id: string): AssistantProviderUsageDraft => ({
+        occurredAt: '2026-09-30T12:00:00.000Z',
+        provider: 'codex-cli',
+        providerRequestOrdinal: ordinal,
+        providerRequestOutcome: 'succeeded',
+        usage: {
+          apiKeyEnv: null, baseUrl: null, cacheWriteTokens: 0, cachedInputTokens: 0,
+          inputTokens: 180, outputTokens: 8, providerMetadataJson: null,
+          providerName: null, providerRequestId: id, rawUsageJson: null,
+          reasoningTokens: 0, requestedModel: route.providerOptions.model,
+          servedModel: null, totalTokens: 188,
+        },
+      })
+      providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportedUserMessageContentTypes: ['text'], supportsReasoningEffort: true,
+      })
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+        attemptCount: 1, route, session, routePlan: {
+          assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
+          codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
+          diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },
+          dynamicTools: [], onboardingGuidanceInjected: false,
+          planningDiagnostics: createRoutePlanningDiagnostics(), promptCacheMetadata: null,
+          resume: null, sessionContext: undefined, systemPrompt: null,
+          turnContextPrompt: null, workingDirectory: '/work',
+        },
+      } satisfies AssistantCodexAttemptPlan)
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockImplementation(
+        async (providerInput: AssistantProviderTurn) => {
+          const callback = providerInput.onAdditionalUsage
+          if (!callback) throw new Error('Expected hosted child usage callback.')
+          const requestOrdinal = callbacks.length
+          callbacks.push(callback)
+          await callback(draft(requestOrdinal + 1, `child-${requestOrdinal}`))
+          if (requestOrdinal === 1) {
+            // The previous request's child finishes after the next primary
+            // request has started, reusing the adapter-local ordinal 2.
+            await callbacks[0]!(draft(2, 'late-child-0'))
+          }
+          const result = createProviderAttemptResult()
+          if (!result.ok) throw new Error('Expected synthetic successful result.')
+          const usage = draft(0, `primary-${requestOrdinal}`).usage
+          return requestOrdinal === 1 && outcomeKind === 'failed'
+            ? { ok: false, error: new Error('Synthetic provider failure'),
+                metadata: result.metadata, usage, providerRequestOutcome: 'partial' }
+            : { ...result, result: { ...result.result, usage } }
+        },
+      )
+      for (const providerRequestOrdinal of outcomeKind === 'standalone' ? [0] : [0, 1]) {
+        const primaryOrdinal = allocateUsageRecordOrdinal()
+        const inputIds = [`synthetic-input-${providerRequestOrdinal}`]
+        providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+          acceptedInputItems: inputIds.map((id) => ({ id, source: 'manual' as const })),
+          activeTurnSteering: null, allowFinishWithoutReply: true, executionContext, input,
+          profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'session-thread' },
+          promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' },
+          route, sharedPlan: createSharedPlan(), turnId,
+        } satisfies AssistantCodexTurnExecutionPlan)
+        const outcome = await executeCodexTurnWithRecovery({
+          input, plan: createSharedPlan(), resolvedSession: session, route,
+          turnCreatedAt: '2026-09-30T12:00:00Z', turnId, providerRequestOrdinal,
+          ...(outcomeKind === 'standalone' ? {} : { allocateUsageRecordOrdinal }),
+        })
+        expect(outcome.kind).toBe(providerRequestOrdinal === 1 && outcomeKind === 'failed'
+          ? 'failed_terminal' : 'succeeded')
+        const providerResult = outcome.kind === 'succeeded'
+          ? outcome.providerTurn
+          : { ...outcome, provider: route.provider, providerOptions: route.providerOptions }
+        await recordAssistantUsageEvent({
+          executionContext, providerResult, turnId,
+          occurredAt: '2026-09-30T12:00:00.000Z',
+          providerRequestAcceptedInputIds: inputIds,
+          providerRequestOrdinal: primaryOrdinal,
+          providerRequestOutcome: outcome.kind === 'failed_terminal'
+            ? outcome.providerRequestOutcome : 'succeeded',
+        })
+      }
+      const expectedOrdinals = outcomeKind === 'standalone' ? [1, 0] : [1, 0, 3, 4, 2]
+      expect(records.map(({ record }) => record.providerRequestOrdinal)).toEqual(expectedOrdinals)
+      expect(new Set(records.map(({ record }) => record.usageId)).size).toBe(records.length)
+      expect(records.map(({ record }) => record.turnId)).toEqual(Array(records.length).fill(turnId))
+      expect(records.map(({ inputIds }) => inputIds)).toEqual(
+        outcomeKind === 'standalone'
+          ? [['synthetic-input-0'], ['synthetic-input-0']]
+          : [
+              ['synthetic-input-0'], ['synthetic-input-0'], ['synthetic-input-1'],
+              ['synthetic-input-0'], ['synthetic-input-1'],
+            ],
+      )
+    },
+  )
 })

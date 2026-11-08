@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "named-group-acknowledgments",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A nod when you ask Murph in a group",
+    "summary": "Ask Murph by name in an iMessage group and it can react with an emoji to acknowledge your request.",
+    "details": "Messages that do not name Murph skip these acknowledgments. Reactions stay limited while Murph handles a run of messages, so the chat does not fill with extra activity.",
+    "relevanceTags": [
+      "group-chat",
+      "imessage"
+    ],
+    "sourcePullRequests": [
+      4727
+    ]
+  }
+}

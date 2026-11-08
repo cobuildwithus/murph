@@ -56,6 +56,7 @@ describe("hosted member Checkout completion ownership", () => {
         stripeCheckoutSessionLookupKey: true,
         stripeCustomerLookupKey: true,
         stripeSubscriptionLookupKey: true,
+        stripeSubscriptionIdEncrypted: true,
       },
       where: {
         memberId: "member_123",
@@ -358,6 +359,10 @@ async function createBillingRefHarness(input: {
   const findUnique = vi.fn().mockImplementation(async () => state);
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedMemberAcceptedSubscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue(
         input.conflictingMemberId

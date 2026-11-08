@@ -203,6 +203,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step.",
   },
   {
+    slug: "prisma.hosted_member_accepted_subscription",
+    label: "Historical Stripe subscription acceptance receipts",
+    deletion: "local-reference-delete",
+    note: "Retains encrypted accepted subscription identities to prevent historical payments being treated as losing Checkouts. Account deletion removes receipts and reports the deleted row count; export omits historical subscription identifiers.",
+  },
+  {
     slug: "prisma.hosted_member_subscription_checkout",
     label: "Open Stripe subscription Checkout references",
     deletion: "local-reference-delete",
@@ -2991,6 +2997,11 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE email_authorization.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
+        deleted_accepted_subscriptions AS (
+          DELETE FROM hosted_member_accepted_subscription AS accepted
+          WHERE accepted.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
         deleted_subscription_checkouts AS (
           DELETE FROM hosted_member_subscription_checkout AS checkout
           WHERE checkout.member_id IN (SELECT id FROM target_members)
@@ -3120,6 +3131,8 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_email_public_bootstrap_attempt",
           (SELECT count(*) FROM deleted_member_email_authorizations)
             AS "prisma.hosted_member_email_authorization",
+          (SELECT count(*) FROM deleted_accepted_subscriptions)
+            AS "prisma.hosted_member_accepted_subscription",
           (SELECT count(*) FROM deleted_subscription_checkouts)
             AS "prisma.hosted_member_subscription_checkout",
           (SELECT count(*) FROM deleted_member_billing_refs)
