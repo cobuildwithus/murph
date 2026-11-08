@@ -50,7 +50,8 @@ tests, and four changelog render tests passed. Engine, runtime, and Web
 typechecks passed; complexity debt is unchanged; docs drift/gardening and
 whitespace checks passed. Candidate review found no additional state, protocol,
 provider calls, permission changes, or private artifacts. Exact-head CI, final
-external review, publication and deployment authorization remain pending.
+external review and release remain pending. Shipment is authorized; draft PR
+#4736 contains the combined candidate. No production mutations have occurred.
 Existing implementation proof: 74 runtime tests, 149 engine
 owner tests, 49 focused streamed/subagent tests (partly overlapping), typechecks,
 complexity and documentation checks passed in the implementation worktrees.
