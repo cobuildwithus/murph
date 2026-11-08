@@ -322,6 +322,10 @@ const inspectAutomationModelsArgumentsSchema = z.object({
   ),
 }).strict()
 
+const inspectAutomationReadArgumentsSchema = z.discriminatedUnion('action', [
+  inspectAutomationArgumentsSchema, inspectAutomationModelsArgumentsSchema,
+])
+
 type AutomationOperationRequest = AssistantHostedAutomationToolRequest
   | z.infer<typeof inspectAutomationModelsArgumentsSchema>
 
@@ -508,6 +512,19 @@ export const MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA = z.toJSONSchema(
   { io: 'input' },
 )
 
+export const MURPH_AUTOMATION_INSPECT_TOOL = {
+  namespace: 'murph',
+  name: 'automation_inspect',
+  deferLoading: true,
+  description: [
+    'Read an existing reminder or automation without creating, editing, running, or sending it. For an inventory or names in a private vault route, use vault-cli automation list --compact --format json instead; no tool-contract discovery is needed for that CLI read. Group turns must stay within their authenticated group read boundary; never use private vault CLI reads.',
+    'Use action=inspect with an exact automationId from inventory or a current loaded skill recipe. Full inspection includes timing and delivery details and supplies updatedAt for later patches through murph.automation.',
+    'For model-selection audits, use inspect with view=model_review or inspect_models with up to ten exact lookups. This preserves complete ordinary instructions and configuration while omitting timing and execution history. Host-managed records omit instructions because their models must be preserved. Results retain whole records within 24 KB; individually inspect only requiresIndividualInspection ids. Missing or failed reads are unknown, never evidence of absence.',
+    'Do not repeat a successful save or patch readback merely to verify fields it already returned. An unavailable next occurrence is unknown; do not promise scheduling or recovery.',
+  ].join(' '),
+  inputSchema: z.toJSONSchema(inspectAutomationReadArgumentsSchema, { io: 'input' }),
+} as const
+
 export const MURPH_FOLLOW_UP_ATTACHMENT_DESCRIPTION = 'Attach one optional follow-up to this final private message with action=attach_follow_up, afterMinutes, and self-contained instructions describing the unresolved matter and when to skip. It starts only after delivery. Use sparingly for useful action reminders or important unanswered questions. Never attach to a follow-up, repeat an ignored check-in, or create a chain. The future turn reconsiders current context and can stay silent.'
 
 export const MURPH_AUTOMATION_TOOL = {
@@ -574,8 +591,19 @@ export function readAutomationDynamicToolRequest(input: {
   relativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   tool: string | null
 }): AutomationDynamicToolRequest | null {
-  if (input.tool !== MURPH_AUTOMATION_TOOL.name) {
+  const readOnly = input.tool === MURPH_AUTOMATION_INSPECT_TOOL.name
+  if (input.tool !== MURPH_AUTOMATION_TOOL.name && !readOnly) {
     return null
+  }
+
+  if (readOnly) {
+    const read = parseDynamicToolArguments({
+      schema: inspectAutomationReadArgumentsSchema,
+      schemaRootKeys: ['action', 'lookup', 'lookups', 'view'],
+      toolName: 'murph.automation_inspect',
+      value: input.arguments,
+    })
+    if (!read.ok) return { kind: 'invalid-automation-arguments', validationDigest: read.validationDigest }
   }
 
   const parsed = parseDynamicToolArguments({

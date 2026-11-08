@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "lower-conversation-overhead",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less AI usage for everyday questions",
+    "summary": "Murph reuses unchanged saved context and uses more focused reads for health and reminder questions.",
+    "details": "Corrections still take effect, and checks preserve saved doses, notes and conflicting records.",
+    "relevanceTags": [
+      "messages",
+      "usage"
+    ],
+    "sourcePullRequests": [
+      4737
+    ]
+  }
+}

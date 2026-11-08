@@ -91,6 +91,14 @@ export function toSupplementReadEntity(record: object): ReadEntity {
   return toRegimenFamilyReadEntity(record, "supplement", toSupplementEntityData(record))
 }
 
+// Detailed inventories carry typed fields once plus the complete narrative body.
+// Older runtime records without a separate body retain their full markdown.
+export function toSupplementDetailedListEntity(record: object): ReadEntity {
+  const entity = toSupplementReadEntity(record)
+  const body = readRegistryRecordDocument(record).body
+  return { ...entity, markdown: typeof body === "string" ? body : entity.markdown }
+}
+
 export function toSupplementListEntity(record: object) {
   return toListEntity(toSupplementReadEntity(record))
 }

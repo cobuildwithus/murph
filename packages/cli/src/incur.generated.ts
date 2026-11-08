@@ -221,7 +221,7 @@ declare module 'incur' {
       'recipe scaffold': { args: {}; options: { requestId?: string } }
       'recipe show': { args: { id: string }; options: { requestId?: string } }
       'regimen import-json': { args: {}; options: { requestId?: string; input: string } }
-      'regimen list': { args: {}; options: { requestId?: string; status?: "active" | "paused" | "completed" | "stopped"; limit: number } }
+      'regimen list': { args: {}; options: { requestId?: string; kind?: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; limit: number } }
       'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; note?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
@@ -253,7 +253,7 @@ declare module 'incur' {
       'social-history scaffold': { args: {}; options: { requestId?: string } }
       'supplement compound list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped" } }
       'supplement compound show': { args: { compound: string }; options: { requestId?: string; status?: "active" | "paused" | "completed" | "stopped" } }
-      'supplement list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped" } }
+      'supplement list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped"; includeDetails: boolean } }
       'supplement save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; group?: string; substance?: string; dose?: number; doseUnit?: string; brand?: string; manufacturer?: string; servingSize?: string; ingredient?: string[]; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'supplement search-labels': { args: { query: string }; options: { limit?: number; includeOffMarket?: boolean } }
       'supplement search-labels-batch': { args: {}; options: { query: string[]; limit?: number; includeOffMarket?: boolean } }

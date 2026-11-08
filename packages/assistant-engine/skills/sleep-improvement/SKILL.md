@@ -35,7 +35,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
-- Look at recent sleep duration, sleep opportunity, bedtime/wake-time regularity, sleep latency if available, awakenings, naps, HR/RHR overnight, HRV, illness tags, workouts, alcohol/caffeine logs, and recent schedule changes.
+- For a factual multi-night summary, start with one date-bounded `vault-cli wearables sleep pattern --format json` read. Summarize its duration, timing and coverage; fetch individual nights or other domains only for explicitly requested details the pattern lacks, including an applicable saved summary format. State missing metrics rather than fetching more data merely because they are absent. A broad sleep recap alone does not call for recovery, workout or substance reads, a nightly table, or a coaching plan. Missing nights remain unknown.
+- For improvement advice or choosing a lever, look at recent sleep duration, sleep opportunity, bedtime/wake-time regularity, sleep latency if available, awakenings, naps, HR/RHR overnight, HRV, illness tags, workouts, alcohol/caffeine logs, and recent schedule changes.
 - Build a compact evidence bundle before choosing a lever: the live active sleep plan, 7-14 nights of opportunity/timing when available, the user's latency/awakenings and next-day function, and relevant conditions, substances, or schedule constraints. Compact prompt snapshots are navigation only; read the full canonical records that could change the decision.
 - For provider-neutral multi-night timing, coverage, and source freshness, read `vault-cli wearables sleep pattern --format json`. Narrow it only when useful with `--date`, `--from`/`--to`, repeatable `--provider`, or `--window-days` (default 28, maximum 366). Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone; it does not replace per-night canonical zones. Use the returned `summary.notes` to choose the nights that count: describe the pattern across the nights present, such as "across 11 nights", and never treat a missing date as no sleep; leave out explicitly identified nap-only dates; keep legacy nights of unknown sleep identity unlabeled instead of guessing from titles; check whether mixed providers or time zones explain an apparent shift; and omit clock times when no validated zone exists. Report provider-reported awake minutes as awake time, never as WASO or an awakening count.
 - Treat sleep timing and total sleep as more reliable than consumer deep/REM staging.
@@ -86,6 +87,6 @@ Offer one bounded review at the point when the chosen outcome could reasonably c
 
 ## Answer Shape
 
-- Name the likely sleep problem type first, then one lever and one measurement window.
+- For coaching, name the likely sleep problem type first, then one lever and one measurement window. For factual recaps, answer the requested facts and relevant uncertainty without inventing a problem to solve.
 - Optimize one outcome at a time: latency, awakenings, total sleep, or score anxiety.
 - When recommending a change, name the wearable signal that would show it is working.

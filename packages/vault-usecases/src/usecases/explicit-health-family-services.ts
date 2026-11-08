@@ -58,6 +58,7 @@ import {
   toSavedEntitySnapshot,
   toSupplementListEntity,
   toSupplementReadEntity,
+  toSupplementDetailedListEntity,
 } from "./regimen-read-entities.js";
 import {
   normalizeRepeatableFlagOption,
@@ -1625,17 +1626,21 @@ export function createExplicitHealthQueryServices(
     async listRegimens(input: HealthListInput) {
       const { query } = await loadRuntime();
       const records = await query.listRegimens(input.vault, {
-        limit: input.limit,
+        limit: input.kind ? undefined : input.limit,
         status: input.status,
       });
+      const items = records.map((record) => toRegimenListEntity(record));
 
       return asListEnvelope(
         input.vault,
         {
           limit: input.limit ?? 10,
           status: input.status,
+          ...(input.kind ? { kind: input.kind } : {}),
         },
-        records.map((record) => toRegimenListEntity(record)),
+        input.kind
+          ? items.filter((item) => item.data.kind === input.kind).slice(0, input.limit ?? 10)
+          : items,
       );
     },
     async showPrivateProtocol(input: EntityLookupInput) {
@@ -1765,6 +1770,7 @@ export function createExplicitHealthQueryServices(
     },
     async listSupplements(
       input: CommandContext & {
+        includeDetails?: boolean;
         limit: number;
         status?: string;
       },
@@ -1781,7 +1787,9 @@ export function createExplicitHealthQueryServices(
           limit: input.limit,
           status: input.status,
         },
-        records.map((record: object) => toSupplementListEntity(record)),
+        records.map((record: object) => input.includeDetails
+          ? toSupplementDetailedListEntity(record)
+          : toSupplementListEntity(record)),
       );
     },
     async showSupplementCompound(

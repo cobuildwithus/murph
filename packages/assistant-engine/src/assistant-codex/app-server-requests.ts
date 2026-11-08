@@ -12,6 +12,7 @@ import type {
 import type {
   CodexAppServerPreparedImageInput,
 } from './images.js'
+import { buildCodexCurrentStateContext } from './current-state-context.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 import { readCodexNonEmptyString, readCodexRecord } from './app-server-protocol.js'
 import { supportsCodexTurnDeveloperInstructions } from './config.js'
@@ -137,9 +138,13 @@ export function buildCodexTurnStartParams(input: {
   }
   codexThreadId: string
   threadResult?: unknown
+  currentStateCompactionEpoch?: number
 }): Record<string, unknown> {
   const thread = readCodexRecord(input.threadResult)
   const params = stripUndefinedRpcParams({
+    additionalContext: buildCodexCurrentStateContext(
+      input.input.currentStatePrompt, input.currentStateCompactionEpoch,
+    ),
     collaborationMode: input.input.developerInstructions != null && supportsCodexTurnDeveloperInstructions(input.input)
       ? {
           mode: 'default',

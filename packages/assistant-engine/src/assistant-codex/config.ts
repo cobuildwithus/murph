@@ -74,7 +74,7 @@ const CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES = [
   'features.code_mode_interrupt=true',
 ] as const
 
-export function withCodexAppServerSteeringFeatureOverrides(
+export function withCodexAppServerRuntimeFeatureOverrides(
   configOverrides: readonly string[],
 ): readonly string[] {
   const missing = CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES.filter((feature) =>
@@ -82,7 +82,17 @@ export function withCodexAppServerSteeringFeatureOverrides(
       readCodexConfigOverrideKey(override) === readCodexConfigOverrideKey(feature)
     )
   )
-  return missing.length === 0 ? configOverrides : [...configOverrides, ...missing]
+  // Preserve quoted client context during native compaction. The data remains
+  // explicitly untrusted; generated instructions and ordinary tools are unchanged.
+  const retentionKey = 'features.retain_client_developer_messages'
+  const retentionOverride = `${retentionKey}=true`
+  const overrides = missing.length === 0 ? configOverrides : [...configOverrides, ...missing]
+  const retention = overrides.filter((override) => readCodexConfigOverrideKey(override) === retentionKey)
+  if (retention.length === 1 && retention[0] === retentionOverride) return overrides
+  return [
+    ...overrides.filter((override) => readCodexConfigOverrideKey(override) !== retentionKey),
+    retentionOverride,
+  ]
 }
 
 function readCodexConfigOverrideKey(override: string): string {

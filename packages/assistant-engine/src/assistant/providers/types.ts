@@ -166,6 +166,8 @@ export interface AssistantProviderTurn {
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
+  /** Canonical current-state data, transported separately from user history. */
+  currentStatePrompt?: string | null
   turnContextPrompt?: string | null
   /** Runtime-attested entity context for this turn; never model supplied. */
   trustedContextReferences?: readonly AutomationContextReference[] | null

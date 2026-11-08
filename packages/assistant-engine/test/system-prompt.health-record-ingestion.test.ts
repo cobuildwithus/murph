@@ -26,6 +26,28 @@ function buildPrompt(): string {
 }
 
 describe('assistant system prompt health record ingestion invariant', () => {
+  it('routes private measurement and supplement recall through lossless bounded reads', () => {
+    const prompt = buildPrompt()
+    expect(prompt).toContain('measurement entry list --metric <metric> --from <date> --to <date>')
+    expect(prompt).toContain('supplement list --status active --include-details --limit 50 --format json')
+    expect(prompt).toContain('regimen list --kind medication --limit 50 --format json')
+    expect(prompt).toContain('a regimen list alone cannot prove no historical courses or doses exist')
+    expect(prompt).toContain('A label serving is not proof of a personal dose or adherence.')
+    expect(prompt).toContain('Keep conflicting readings and units distinct')
+    expect(prompt).toContain('For dose advice, safety or changes, still load the owning skill')
+    expect(prompt).toContain('blood-test list --text "<marker>" --limit 50 --format json')
+    expect(prompt).toContain('if the matched result is absent, ambiguous or insufficient, inspect that exact panel')
+    expect(prompt).toContain('retain unit and date uncertainty and never infer a diagnosis from a flag')
+    expect(prompt).toContain('stating missing metrics rather than fetching more families just because they are missing')
+    const group = buildAssistantSystemPrompt({
+      channel: 'linq', conversationScope: 'group', onboardingGuidance: false,
+      assistantCliContract: null, cliAccess: { rawCommand: 'vault-cli' },
+      currentLocalDate: '2026-06-26', currentTimeZone: 'America/New_York',
+    })
+    expect(group).not.toContain('supplement list --status active --include-details')
+    expect(group).not.toContain('measurement entry list --metric <metric>')
+  })
+
   it('separates dish names from notes and excludes non-food photos across loaded guidance', async () => {
     const prompt = buildPrompt()
     expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md')

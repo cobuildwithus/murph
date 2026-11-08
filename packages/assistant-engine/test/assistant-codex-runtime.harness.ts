@@ -47,6 +47,8 @@ export const codexSteeringLaunchArgs = [
   'features.instant_interrupt=true',
   '--config',
   'features.code_mode_interrupt=true',
+  '--config',
+  'features.retain_client_developer_messages=true',
 ]
 
 const codexMocks: {

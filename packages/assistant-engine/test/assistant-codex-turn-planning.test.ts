@@ -495,9 +495,9 @@ describe('assistant Codex turn planning', () => {
       for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
         expect(instructions).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
         expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
-        expect(instructions).toContain('start from exact supplied page references')
+        expect(instructions).toContain('start from supplied or already-known relevant page references')
         expect(instructions).toContain(
-          'let the child do this discovery instead of first loading the index and page bodies in root',
+          'pass already-known relevant page references and facts, then let the child discover remaining evidence instead of preloading it in root',
         )
         expect(instructions).not.toContain(
           'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
@@ -571,11 +571,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "6c3b1413186ac3a49b38ce055d1cbd25bb6d5ed09010ef4cd596147518685a8c",
-        "group": "5e8717c31c8b36b5a25aeb9ff3ec646ac67609f76b296de49b344416649ee480",
+        "direct": "7b7a3a24f753c03db7bb7059a46f67e4cd39ee8763e912c833cf6475a2e50d73",
+        "group": "bf678991c76fa63fc9b60450049b0fbbab5027e26b1220feb9451635cd934033",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "5749052441aa37a3b6288d5a8c5734dd5f0094a98adae3b92e84bbfdb5e3674f",
+        "scheduledEmail": "9656cb88e5884ff013f21cbc464806b67252bb417c41df6fd2455becba214943",
       }
     `)
   })
@@ -629,7 +629,7 @@ describe('assistant Codex turn planning', () => {
       .toHaveBeenCalledTimes(1)
     expect(planningMocks.readAssistantContextSnapshotPrompt)
       .toHaveBeenCalledTimes(1)
-    expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+    expect(directPlan.currentStatePrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
     expect(directPlan.systemPrompt).toContain('Follow relevant saved answer formats; offer at most one optional follow-up.')
     expect(directPlan.systemPrompt).not.toContain('and offer at most one useful next step.')
 
@@ -933,7 +933,8 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('Stay balanced, warm, capable, and adaptable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
-      expect(plan.turnContextPrompt).toContain('current mobility prescription')
+      expect(plan.currentStatePrompt).toContain('current mobility prescription')
+      expect(plan.turnContextPrompt ?? '').not.toContain('current mobility prescription')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -1224,7 +1225,7 @@ describe('assistant Codex turn planning', () => {
     expect(ordinaryToolNames).toContain('generate_image')
     expect(ordinaryToolNames).toContain('attach_response_media')
     expect(ordinaryToolNames).toContain('assistant_style')
-    expect(ordinaryPlan.systemPrompt).toContain('hypertension')
+    expect(ordinaryPlan.currentStatePrompt).toContain('hypertension')
     expect(ordinaryPlan.systemPrompt).toContain('device sync pending')
     expect(ordinaryPlan.systemPrompt).not.toContain('Delivery adapter contract:')
     expect(ordinaryPlan.systemPrompt).not.toContain('Maintenance execution rules:')
@@ -1325,7 +1326,7 @@ describe('assistant Codex turn planning', () => {
     expect(onboardingGoalCheckinPlan.developerInstructions).toContain(
       MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
     )
-    expect(onboardingGoalCheckinPlan.systemPrompt).toContain(
+    expect(onboardingGoalCheckinPlan.currentStatePrompt).toContain(
       'Context snapshot: active condition hypertension.',
     )
     expect(onboardingGoalCheckinPlan.assistantContractFingerprint).not.toBe(
@@ -1639,14 +1640,16 @@ describe('assistant Codex turn planning', () => {
       })
       expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
       if (direct) {
-        expect(plan.systemPrompt).toContain('synthetic race logistics')
-        expect(plan.systemPrompt).toContain('proactively suggest one useful preparation or adjustment')
-        expect(plan.systemPrompt).toContain('without waiting for the member to mention the plan')
-        expect(plan.systemPrompt).toContain('For tentative plans, make advice conditional on the plan going ahead')
-        expect(plan.systemPrompt).toContain('do not force irrelevant mentions or create an extra check-in')
-        expect(plan.systemPrompt).toContain('Context grants no authority to change reminder timing')
+        expect(plan.currentStatePrompt).toContain('synthetic race logistics')
+        expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+        expect(plan.currentStatePrompt).toContain('proactively suggest one useful preparation or adjustment')
+        expect(plan.currentStatePrompt).toContain('without waiting for the member to mention the plan')
+        expect(plan.currentStatePrompt).toContain('For tentative plans, make advice conditional on the plan going ahead')
+        expect(plan.currentStatePrompt).toContain('do not force irrelevant mentions or create an extra check-in')
+        expect(plan.currentStatePrompt).toContain('Context grants no authority to change reminder timing')
         expect(plan.systemPrompt).not.toContain('Use only when it materially improves this answer')
       } else {
+        expect(plan.currentStatePrompt).toBeUndefined()
         expect(plan.systemPrompt).not.toContain('synthetic race logistics')
         expect(plan.systemPrompt).not.toContain('without waiting for the member to mention the plan')
       }
@@ -1702,6 +1705,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.systemPrompt).not.toContain(
       'Rough group tips that must not be reinjected.',
     )
+    expect(plan.currentStatePrompt).toBeUndefined()
     expect(plan.systemPrompt).not.toContain('private health context')
     expect(plan.systemPrompt).not.toContain('Hosted groups:')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
@@ -1748,6 +1752,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.systemPrompt).not.toContain(
       'Hosted context that must not be injected.',
     )
+    expect(plan.currentStatePrompt).toBeUndefined()
     expect(plan.systemPrompt).not.toContain('private health context')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
@@ -4385,7 +4390,7 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'For automation creation, inspection, changes, or reconciliation, discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`',
+      'For creation, changes, or reconciliation, discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`',
     )
     expect(plan.dynamicTools.find((tool) => tool.name === 'automation')?.description).toContain('On patch, inspect the current stored automation first')
     expect(plan.developerInstructions).toContain('The tool owns exact arguments')
@@ -5741,7 +5746,7 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.resume?.codexThreadId).toBe('thread-old-snapshot')
     expect(plan.developerInstructions).toEqual(expect.any(String))
-    expect(plan.turnContextPrompt).toContain(
+    expect(plan.currentStatePrompt).toContain(
       'Updated assistant context snapshot.',
     )
     expect(plan.turnContextPrompt).not.toContain(
@@ -6133,7 +6138,7 @@ describe('assistant Codex turn planning', () => {
 
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-sensitive-resume')
     expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
-    expect(resumedPlan.turnContextPrompt).toContain(
+    expect(resumedPlan.currentStatePrompt).toContain(
       'Current assistant context snapshot.',
     )
     expect(resumedPlan.turnContextPrompt).not.toContain('Cached assistant context snapshot.')

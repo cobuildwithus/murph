@@ -257,6 +257,7 @@ export async function executeCodexAssistantTurnAttempt(
     approvalPolicy: providerConfig.policy.approvalPolicy,
     baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
     developerInstructions,
+    currentStatePrompt: input.currentStatePrompt,
     dynamicTools: input.dynamicTools,
     environments: input.environments ?? undefined,
     ephemeral: input.providerThreadEphemeral ?? undefined,

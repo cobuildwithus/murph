@@ -1034,6 +1034,7 @@ function buildCodexAttemptProviderInput(
         : undefined,
       showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
       systemPrompt: attemptPlan.routePlan.systemPrompt,
+      currentStatePrompt: attemptPlan.routePlan.currentStatePrompt,
       turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
       trustedContextReferences:
         executionPlan.input.trustedContextReferences ?? null,

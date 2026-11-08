@@ -132,17 +132,19 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     // The endpoint belongs to Codex's explicit shell setting, not its process
     // environment. Validate its shape without including the generated key in
     // assertion output or a snapshot; retain the exact environment below.
-    assert.deepEqual(args.slice(0, 4), [
+    assert.deepEqual(args.slice(0, 6), [
       '--config',
       'features.instant_interrupt=true',
       '--config',
       'features.code_mode_interrupt=true',
+      '--config',
+      'features.retain_client_developer_messages=true',
     ])
     assert.ok(
-      args.length === 7 && args[4] === '--config' && args[6] === 'app-server',
-      'Only the steering defaults and timing override may precede app-server.',
+      args.length === 9 && args[6] === '--config' && args[8] === 'app-server',
+      'Only the steering defaults, client-context retention and timing override may precede app-server.',
     )
-    const timingSetting = /^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="(\d{5}):[a-f0-9]{32}"$/u.exec(args[5])
+    const timingSetting = /^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="(\d{5}):[a-f0-9]{32}"$/u.exec(args[7])
     assert.ok(timingSetting, 'Expected the private-safe CLI timing shell setting.')
     const timingPort = Number(timingSetting[1])
     assert.ok(timingPort >= 49_152 && timingPort <= 65_535, 'Expected an ephemeral UDP port.')

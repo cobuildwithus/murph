@@ -154,7 +154,7 @@ import {
 } from './assistant-codex/final-response-completion.js'
 import {
   resolveCodexChildEnv,
-  withCodexAppServerSteeringFeatureOverrides,
+  withCodexAppServerRuntimeFeatureOverrides,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
@@ -539,6 +539,7 @@ export interface CodexAppServerTurnInput {
   fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
   developerInstructions?: string | null
+  currentStatePrompt?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   model?: string | null
   modelProvider?: string | null
@@ -1160,7 +1161,7 @@ async function prepareCodexAppServerProcessInput(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const configOverrides = withCodexAppServerSteeringFeatureOverrides(
+  const configOverrides = withCodexAppServerRuntimeFeatureOverrides(
     withHostedCodexModelCatalogConfigOverride({
       configOverrides: input.configOverrides,
       env: input.env,
@@ -1248,6 +1249,7 @@ class CodexAppServerProcess {
   private cleanupProcessExitListener: () => void
   private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
+  currentStateCompactionEpoch = 0
   private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
@@ -2055,6 +2057,7 @@ class CodexAppServerProcess {
         return
       }
       this.lastThreadTokenUsage = null
+      this.currentStateCompactionEpoch += 1
       return
     }
 
@@ -5973,6 +5976,7 @@ async function runCodexAppServerTurnOnProcess(
         images: input.preparedImages,
         codexThreadId,
         threadResult,
+        currentStateCompactionEpoch: codexProcess.currentStateCompactionEpoch,
       }),
     )
     const providerStartedAtMonotonicMs =

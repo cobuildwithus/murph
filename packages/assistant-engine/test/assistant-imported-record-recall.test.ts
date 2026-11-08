@@ -53,6 +53,33 @@ describe('imported-record natural recall evidence', () => {
     expect(reads).toContain('`meal list --limit 1` does not find the latest meal')
     expect(skill).toContain('Do not list meals as a prerequisite to a new capture.')
   })
+
+  it('routes factual food coverage directly to bounded totals while preserving safety and capture ownership', async () => {
+    const prompt = buildAssistantSystemPrompt({ channel: 'local', assistantCliContract: null, currentLocalDate: '2026-02-04', currentTimeZone: 'UTC', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct', onboardingGuidance: false })
+    const reads = await readFile(new URL('../skills/food-journal/references/meal-and-nutrient-reads.md', import.meta.url), 'utf8')
+    const guidance = reads.replace(/\s+/gu, ' ')
+    expect(prompt).toContain('references/meal-and-nutrient-reads.md` directly')
+    expect(prompt).toContain('Meal capture, corrections, estimates and nutrition cards:')
+    expect(prompt).not.toContain('Meal capture and saved-day reviews:')
+    expect(prompt).toContain('Reuse a complete read across follow-up turns')
+    expect(prompt).toContain('after compaction or an incomplete read, reload it before capture')
+    expect(guidance).toContain('vault-cli meal totals --from <date> --to <date> --format json')
+    expect(guidance).toContain('A missing date means no saved meals, not no food eaten.')
+    expect(guidance).toContain('zero contributing meals means unknown, not zero.')
+    expect(guidance).toContain('do not count unknown days as zero')
+    expect(guidance).toContain('do not surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users')
+    expect(guidance).toContain('this read guide does not authorize estimates or writes')
+    const group = buildAssistantSystemPrompt({ channel: 'linq', assistantCliContract: null, currentLocalDate: '2026-02-04', currentTimeZone: 'UTC', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', onboardingGuidance: false })
+    expect(group).not.toContain('Factual saved-meal recall, food-log coverage')
+  })
+
+  it('keeps Journal overview reads compact without making claims about unread bodies', async () => {
+    const journal = await readFile(new URL('../skills/journal/SKILL.md', import.meta.url), 'utf8')
+    const guidance = journal.replace(/\s+/gu, ' ')
+    expect(guidance).toContain('timeline --entry-type event --from <date> --to <date> --limit 50 --format json')
+    expect(guidance).toContain('timeline is newest first')
+    expect(guidance).toContain('Titles alone cannot establish that a symptom, travel detail or follow-up instruction is absent')
+  })
   it('keeps an out-of-conversation device record readable despite omission from the navigation snapshot', async () => {
     const vault = await mkdtemp(path.join(tmpdir(), 'murph-recall-proof-'))
     try {

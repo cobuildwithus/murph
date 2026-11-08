@@ -12,6 +12,8 @@ import {
 import {
   localDateSchema,
   pathSchema,
+  readEntitySchema,
+  listEntitySchema,
   savedEntitySnapshotSchema,
 } from "@murphai/operator-config/vault-cli-contracts"
 import {
@@ -118,7 +120,7 @@ export function registerSupplementCommands(
 
   supplement.command('list', {
     args: z.object({}),
-    description: 'List supplements through the health read model.',
+    description: 'List supplements; include complete saved records for dosing and schedule questions with --include-details.',
     examples: [
       {
         description: 'List active supplements with a smaller page size.',
@@ -129,15 +131,21 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Use --status active to focus on current supplements or --limit to cap results.',
+    hint: 'Use --status active for current supplements. Add --include-details for complete doses, ingredients, notes, and body text in one read; default summaries may be truncated. A full page may have more matches: raise --limit (maximum 200) before claiming a complete inventory.',
     options: withBaseOptions({
       limit: commonListLimitOptionSchema,
       status: statusOptionSchema,
+      includeDetails: z.boolean().default(false).describe(
+        'Include all typed fields and the complete narrative body without repeating frontmatter or truncating list summaries.',
+      ),
     }),
-    output: healthListResultSchema,
+    output: healthListResultSchema.extend({
+      items: z.array(z.union([readEntitySchema, listEntitySchema])),
+    }),
     async run(context) {
       return services.query.listSupplements({
         limit: context.options.limit ?? 10,
+        includeDetails: context.options.includeDetails,
         requestId: requestIdFromOptions(context.options),
         status: context.options.status,
         vault: context.options.vault,
