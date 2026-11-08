@@ -51,6 +51,13 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 - `HostedMemberRouting.telegramUserLookupKey`
 - `HostedMemberBillingRef.stripeCustomerLookupKey`
 - `HostedMemberBillingRef.stripeSubscriptionLookupKey`
+- `HostedMemberAcceptedSubscription.stripeSubscriptionLookupKey`, re-derived from
+  its encrypted subscription identity using the existing same-member
+  `hosted-member-billing-ref.stripe-subscription-id` field context. Receipts copy
+  only canonical or prepared same-member billing ciphertext, without decrypting
+  inside a transaction. Re-derivation must authenticate that ciphertext. Reindex
+  every retained historical receipt before retiring a prior key: losing a receipt
+  match could incorrectly classify a previously accepted payment as a loser.
 - `HostedGroupDisclosurePermission.permissionDigest`, re-derived from the
   group-owned encrypted permission text and owning group id
 

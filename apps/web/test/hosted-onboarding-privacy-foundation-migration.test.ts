@@ -118,6 +118,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     "subscriptionCheckouts HostedMemberSubscriptionCheckout[]",
+    "acceptedSubscriptions HostedMemberAcceptedSubscription[]",
     'suspendedAt DateTime? @map("suspended_at")',
     'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
     'usageCreditBalanceUsdMicros BigInt? @default(0) @map("usage_credit_balance_usd_micros")',
@@ -219,6 +220,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'checkoutCreatedAt DateTime? @map("checkout_created_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedMemberAcceptedSubscription: [
+    'memberId String @map("member_id")',
+    'stripeSubscriptionLookupKey String @map("stripe_subscription_lookup_key")',
+    'stripeSubscriptionIdEncrypted String @map("stripe_subscription_id_encrypted")',
+    'createdAt DateTime @default(now()) @map("created_at")',
   ],
   HostedMemberSubscriptionCheckout: [
     'stripeCheckoutSessionLookupKey String @id @map("stripe_checkout_session_lookup_key")',
@@ -1258,6 +1265,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261106120100_hosted_group_offer_gesture_receipt",
       "20261106220000_game_reminders",
       "20261107010000_game_reminder_every_day",
+      "20261108010000_hosted_accepted_subscription_receipt",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
@@ -2530,6 +2538,16 @@ describe("hosted Prisma baseline migration", () => {
     expect(sourceConfirmedBackfillMigrationSql).not.toContain(
       '"credential_kind" = \'none\'',
     );
+  });
+
+  it("retains indexed encrypted historical acceptance with member deletion cascade", () => {
+    const sql = readFileSync(new URL(
+      "../prisma/migrations/20261108010000_hosted_accepted_subscription_receipt/migration.sql",
+      import.meta.url,
+    ), "utf8");
+    expect(sql).toContain('PRIMARY KEY ("member_id", "stripe_subscription_lookup_key")');
+    expect(sql).toContain('"stripe_subscription_id_encrypted" TEXT NOT NULL');
+    expect(sql).toContain('REFERENCES "hosted_member"("id") ON DELETE CASCADE');
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

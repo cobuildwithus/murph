@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-11-07
-Updated: 2026-11-07
+Updated: 2026-11-08
 
 ## Goal
 
@@ -10,7 +10,7 @@ Restore a usable selected-plan Checkout for terminally canceled direct members, 
 
 ## Scope and constraints
 
-Website only. Keep Stripe authoritative for billing and renewal timing. Retain the existing customer and checkout attempt owner; verify terminal subscription ownership before admitting replacement Checkout. Never alter live subscriptions, cards, or payments while developing. No new persisted state, dependency, or background job.
+Website only. Keep Stripe authoritative for billing and renewal timing. Retain the existing customer and checkout attempt owner; verify terminal subscription ownership before admitting replacement Checkout. Never alter live subscriptions, cards, or payments while developing. No new dependency or background job. Review identified that replaying an accepted predecessor after replacement could incorrectly enter refundable-loser cleanup. A narrowly scoped encrypted accepted-subscription receipt is therefore required; it preserves canonical predecessors atomically and distinguishes historical acceptance from mere Checkout creation.
 
 ## Product UX
 
@@ -43,9 +43,11 @@ Website only. Keep Stripe authoritative for billing and renewal timing. Retain t
 - PR: https://github.com/cobuildwithus/murph/pull/4735. All 36 code/build checks passed on the initial candidate. Hosted design evidence and final external billing review remain release gates. No live billing changes performed.
 - Preview build succeeded, but an existing Telegram welcome study loaded the full hosted environment merely to format a public bot URL. Reuse the narrow username parser so synthetic rendering requires no privacy secrets; preserve full runtime validation for webhook and authenticated paths.
 
+- Historical-acceptance remediation: 255 focused tests passed across browser success, billing service/store, Checkout completion/loser cleanup and privacy deletion/schema coverage. Composed browser proof covers two replacements, pre-receipt canonical acceptance, current/prior lookup rotation, canceled and stale-active historical replay, and genuine loser refund retry. Provider calls and database state are synthetic; invoice entitlement projection is represented by canonical fixture state. Final web typecheck, scoped lint, complexity guard and diff whitespace checks passed. The plan remains active pending the required second final review.
+
 ## Deployment contract
 
-The Web app owns both checkout admission and Stripe reconciliation. Workflow input is an immutable event ID; old in-flight workflows cannot consume later-created replacement events. A minute cron also processes due receipts. Promote new checkout, webhook and cron admissions together and allow old invocations to drain. Once recovery checkout is enabled, do not roll back the consumer below replacement-aware code. If new-request routing cannot guarantee this, deploy the consumer before the producer. No schema, persistent flag or iOS release is needed.
+The Web app owns both checkout admission and Stripe reconciliation. Workflow input is an immutable event ID; old in-flight workflows cannot consume later-created replacement events. A minute cron also processes due receipts. Promote new checkout, webhook and cron admissions together and allow old invocations to drain. Once recovery checkout is enabled, do not roll back the consumer below replacement-aware code. If new-request routing cannot guarantee this, deploy the consumer before the producer. Deploy the additive accepted-subscription receipt migration before the new Web writer. No live migration is performed during development. Receipt-aware consumers are the rollback floor once replacement checkout is enabled; no persistent flag or iOS release is needed. Prior-key retirement requires re-deriving all retained receipt lookups from their same-member encrypted subscription source, as specified by the contact-privacy rotation owner.
 
 ## Remaining evidence limits
 

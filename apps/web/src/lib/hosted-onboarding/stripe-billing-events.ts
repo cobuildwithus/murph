@@ -414,10 +414,7 @@ export async function applyStripeCheckoutCompleted(
     session,
     tx: prisma,
   });
-  if (
-    acceptance.kind === "cleanup_superseded"
-    || acceptance.kind === "cleanup_terminal"
-  ) {
+  if (isHostedStripeCheckoutCleanup(acceptance)) {
     if (!stripeSubscriptionId) {
       throw new TypeError(
         "Accepted standard Stripe Checkout is missing its subscription.",
@@ -431,7 +428,7 @@ export async function applyStripeCheckoutCompleted(
       },
     };
   }
-  if (billingIdentityDisposition === "terminal") {
+  if (billingIdentityDisposition === "terminal" || acceptance.kind === "historically_accepted") {
     return buildEmptyHostedStripeActivationOutcome();
   }
 
@@ -441,6 +438,10 @@ export async function applyStripeCheckoutCompleted(
     newlyActivatedMemberIds: [],
     welcomeEmailMemberId: memberSnapshot.core.id,
   };
+}
+
+function isHostedStripeCheckoutCleanup(acceptance: HostedMemberStripeCheckoutAcceptance): boolean {
+  return acceptance.kind === "cleanup_superseded" || acceptance.kind === "cleanup_terminal";
 }
 
 export async function cleanupHostedStandardCheckoutAndRetireAttempt(input: {
@@ -597,7 +598,8 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     tx: input.tx,
   });
   if (
-    acceptance.kind === "cleanup_superseded"
+    acceptance.kind === "historically_accepted"
+    || acceptance.kind === "cleanup_superseded"
     || acceptance.kind === "cleanup_terminal"
   ) {
     return acceptance;
@@ -720,10 +722,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     session: input.session,
     tx: input.tx,
   });
-  if (
-    acceptance.kind === "cleanup_superseded"
-    || acceptance.kind === "cleanup_terminal"
-  ) {
+  if (isHostedStripeCheckoutCleanup(acceptance)) {
     throw buildHostedLegacyTrialBillingConflictError();
   }
   return buildEmptyHostedStripeActivationOutcome();

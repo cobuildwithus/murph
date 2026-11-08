@@ -1705,6 +1705,10 @@ function makePrisma(input: {
         input.hasConfirmedGroupMembership ? { id: "group_member_123" } : null,
       ),
     },
+    hostedMemberAcceptedSubscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique,
@@ -1743,6 +1747,10 @@ function makePrisma(input: {
     $queryRaw: lockQuery,
     $transaction: transaction,
     hostedGroupMember: prismaTx.hostedGroupMember,
+    hostedMemberAcceptedSubscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     hostedMemberBillingRef: {
       findUnique,
       updateMany,

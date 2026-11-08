@@ -148,7 +148,7 @@ export interface HostedMemberStripeBillingLookupState {
 
 export type HostedMemberStripeCheckoutAcceptance =
   | {
-      kind: "accepted" | "already_accepted";
+      kind: "accepted" | "already_accepted" | "historically_accepted";
     }
   | {
       kind: "cleanup_superseded" | "cleanup_terminal";
@@ -846,9 +846,18 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
       stripeCheckoutSessionLookupKey: true,
       stripeCustomerLookupKey: true,
       stripeSubscriptionLookupKey: true,
+      stripeSubscriptionIdEncrypted: true,
     },
     where: { memberId: input.memberId },
   });
+  if (await isHistoricalHostedAcceptedSubscriptionTx({
+    currentSubscriptionLookupKey: currentRecord?.stripeSubscriptionLookupKey ?? null,
+    memberId: input.memberId,
+    subscriptionLookupKeys,
+    tx: input.tx,
+  })) {
+    return { kind: "historically_accepted" };
+  }
   if (
     currentRecord?.stripeCustomerLookupKey
     && !customerLookupKeys.includes(currentRecord.stripeCustomerLookupKey)
@@ -910,6 +919,12 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   if (input.billingIdentityDisposition === "terminal") {
     return { kind: "cleanup_terminal" };
   }
+  await retainHostedAcceptedSubscriptionsTx({
+    currentRecord,
+    memberId: input.memberId,
+    preparedCompletion: input.preparedCompletion,
+    tx: input.tx,
+  });
   const data = {
     ...hostedCheckoutReplacementProjection({
       alreadyAccepted,
@@ -948,6 +963,55 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   return {
     kind: alreadyAccepted ? "already_accepted" : "accepted",
   };
+}
+
+async function isHistoricalHostedAcceptedSubscriptionTx(input: {
+  currentSubscriptionLookupKey: string | null;
+  memberId: string;
+  subscriptionLookupKeys: string[];
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.subscriptionLookupKeys.includes(input.currentSubscriptionLookupKey ?? "")) {
+    return false;
+  }
+  return Boolean(await input.tx.hostedMemberAcceptedSubscription.findFirst({
+    select: { memberId: true },
+    where: {
+      memberId: input.memberId,
+      stripeSubscriptionLookupKey: { in: input.subscriptionLookupKeys },
+    },
+  }));
+}
+
+/** Capture the legacy canonical predecessor before replacing it, under the member lock. */
+async function retainHostedAcceptedSubscriptionsTx(input: {
+  currentRecord: Pick<HostedMemberBillingRef,
+    "stripeSubscriptionLookupKey" | "stripeSubscriptionIdEncrypted"> | null;
+  memberId: string;
+  preparedCompletion: PreparedHostedMemberStripeCheckoutCompletion;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  // Both ciphertexts use the existing same-member billing subscription field AAD.
+  // No decryption or external key access occurs inside this transaction.
+  for (const source of [input.currentRecord, input.preparedCompletion]) {
+    if (!source?.stripeSubscriptionLookupKey) continue;
+    if (!source.stripeSubscriptionIdEncrypted) {
+      throw new TypeError("Accepted Stripe subscription is missing its encrypted identity.");
+    }
+    const data = {
+      memberId: input.memberId,
+      stripeSubscriptionLookupKey: source.stripeSubscriptionLookupKey,
+      stripeSubscriptionIdEncrypted: source.stripeSubscriptionIdEncrypted,
+    };
+    await input.tx.hostedMemberAcceptedSubscription.upsert({
+      create: data,
+      update: {},
+      where: { memberId_stripeSubscriptionLookupKey: {
+        memberId: data.memberId,
+        stripeSubscriptionLookupKey: data.stripeSubscriptionLookupKey,
+      } },
+    });
+  }
 }
 
 async function canAcceptHostedCheckoutReplacementTx(input: {
