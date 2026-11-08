@@ -230,14 +230,14 @@ export function HostedBillingSettings(props: {
           mode="schedule"
           targetPlanCode="launch_monthly"
         >
-          Choose Pulse
+          Switch to Pulse
         </HostedPlanChangeButton>
       ) : null;
     }
     if (props.canSwitchToPulse === true) {
       return (
         <SwitchToPulseButton block currentPeriodEnd={currentPeriodEndIso}>
-          Choose Pulse
+          Switch to Pulse
         </SwitchToPulseButton>
       );
     }
@@ -248,9 +248,7 @@ export function HostedBillingSettings(props: {
         </HostedPlanCheckoutButton>
       );
     }
-    return props.canManageBilling === true ? (
-      <BillingPortalButton block label="Choose Pulse" variant="secondary" />
-    ) : null;
+    return null;
   })();
 
   const edgeAction: ReactNode = (() => {
@@ -277,7 +275,7 @@ export function HostedBillingSettings(props: {
           mode="schedule"
           targetPlanCode="launch_edge_monthly"
         >
-          Choose Edge
+          Switch to Edge
         </HostedPlanChangeButton>
       ) : null;
     }
@@ -301,9 +299,7 @@ export function HostedBillingSettings(props: {
         </HostedPlanCheckoutButton>
       );
     }
-    return props.canManageBilling === true ? (
-      <BillingPortalButton block label="Choose Edge" variant="secondary" />
-    ) : null;
+    return null;
   })();
 
   const maxAction: ReactNode = (() => {
@@ -537,7 +533,7 @@ export function HostedBillingSettings(props: {
     : starterAccessActive
       ? null
     : retainedPlan
-      ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
+      ? describeInactivePlan(retainedPlan.displayName, canStartDirectPlan)
     : props.billingStatus === "active"
         ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
         : "Choose a plan below when you want recurring included usage.";
@@ -599,6 +595,14 @@ export function HostedBillingSettings(props: {
         />
       )}
       {props.usageActivityDetail}
+      <RenewalPlanSwitchNotice
+        canSwitchToEdge={props.canSwitchToEdge}
+        canSwitchToGroup={props.canSwitchToGroup}
+        canSwitchToPulse={props.canSwitchToPulse}
+        ownPaidBillingActive={ownPaidBillingActive}
+        planChangePending={props.planChangePending}
+        scheduledPlanCode={scheduledPlanCode}
+      />
       <div
         className={cn(
           "grid items-stretch gap-3",
@@ -748,6 +752,33 @@ function renderDirectUsageRecoveryAction(input: {
     >
       {label}
     </HostedPlanChangeButton>
+  );
+}
+
+function describeInactivePlan(planName: string, canStartDirectPlan: boolean): string {
+  return canStartDirectPlan
+    ? `${planName} is not active. Choose a plan below to restart with Stripe Checkout.`
+    : `${planName} is not active. Use Manage billing to resolve your existing subscription.`;
+}
+
+function RenewalPlanSwitchNotice(props: {
+  canSwitchToEdge?: boolean;
+  canSwitchToGroup?: boolean;
+  canSwitchToPulse?: boolean;
+  ownPaidBillingActive: boolean;
+  planChangePending?: boolean;
+  scheduledPlanCode: HostedBillingPlanCode | null;
+}) {
+  if (!props.ownPaidBillingActive || props.planChangePending || props.scheduledPlanCode !== null) {
+    return null;
+  }
+  if (!props.canSwitchToEdge && !props.canSwitchToPulse && !props.canSwitchToGroup) {
+    return null;
+  }
+  return (
+    <p className="text-sm text-pretty text-muted-foreground">
+      Switch to a lower plan at your next renewal. No cancellation is needed.
+    </p>
   );
 }
 

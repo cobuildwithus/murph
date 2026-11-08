@@ -10,7 +10,7 @@ import type Stripe from "stripe";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { getPrisma } from "../prisma";
-import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
+import { buildStripeCancelUrl, buildStripeSuccessUrl, coerceStripeObjectId } from "./billing";
 import {
   getHostedDefaultBillingPlanCode,
   type HostedBillingPlanCode,
@@ -162,6 +162,7 @@ export async function createHostedBillingCheckout(
 
     if (
       invite.member.billingStatus !== HostedBillingStatus.active
+      && invite.member.billingStatus !== HostedBillingStatus.canceled
       && !requiresHostedBillingCheckout(invite.member.billingStatus)
     ) {
       throw hostedOnboardingError({
@@ -188,6 +189,7 @@ export async function createHostedBillingCheckout(
     }))?.verifiedEmail?.address ?? null;
     const checkout = await createOrReuseHostedBillingCheckoutAttempt({
       billingPlanCode,
+      canReplaceCanceledSubscription: invite.member.billingStatus === HostedBillingStatus.canceled,
       inviteCode: invite.inviteCode,
       memberId: invite.member.id,
       now,
@@ -235,6 +237,7 @@ type HostedBillingCheckoutAttemptOutcome =
 
 async function createOrReuseHostedBillingCheckoutAttempt(input: {
   billingPlanCode: HostedBillingPlanCode;
+  canReplaceCanceledSubscription: boolean;
   inviteCode: string;
   memberId: string;
   now: Date;
@@ -250,12 +253,31 @@ async function createOrReuseHostedBillingCheckoutAttempt(input: {
       memberId: input.memberId,
       prisma: input.prisma,
     });
+    // A canceled subscription cannot be resumed in the Portal. Verify the
+    // exact prior identity before replacing its local binding at completion.
+    // Stripe reads stay outside the transaction; reservation fences this proof.
+    let terminalSubscriptionVerified = false;
+    if (input.canReplaceCanceledSubscription && expectedBillingRef?.stripeSubscriptionId) {
+      const subscription = await input.stripe.subscriptions.retrieve(
+        expectedBillingRef.stripeSubscriptionId,
+        {},
+        HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS,
+      );
+      terminalSubscriptionVerified =
+        subscription.id === expectedBillingRef.stripeSubscriptionId
+        && Boolean(expectedBillingRef.stripeCustomerId)
+        && coerceStripeObjectId(subscription.customer)
+          === expectedBillingRef.stripeCustomerId
+        && (subscription.status === "canceled"
+          || subscription.status === "incomplete_expired");
+    }
     let prepared: HostedBillingCheckoutPreparedAttempt | "already_active";
     try {
       prepared = await input.prisma.$transaction(
         (tx) => prepareHostedBillingCheckoutAttempt({
           ...input,
           expectedBillingRef,
+          terminalSubscriptionVerified,
           tx,
         }),
         HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -300,6 +322,7 @@ async function createOrReuseHostedBillingCheckoutAttempt(input: {
 async function prepareHostedBillingCheckoutAttempt(input: {
   billingPlanCode: HostedBillingPlanCode;
   expectedBillingRef: HostedMemberStripeBillingRefSnapshot | null;
+  terminalSubscriptionVerified: boolean;
   inviteCode: string;
   memberId: string;
   now: Date;
@@ -350,6 +373,7 @@ async function prepareHostedBillingCheckoutAttempt(input: {
   }
   if (
     member.billingStatus !== HostedBillingStatus.active
+    && member.billingStatus !== HostedBillingStatus.canceled
     && !requiresHostedBillingCheckout(member.billingStatus)
   ) {
     throw hostedOnboardingError({
@@ -383,12 +407,15 @@ async function prepareHostedBillingCheckoutAttempt(input: {
     priceId: input.priceId,
     publicBaseUrl: input.publicBaseUrl,
     stripeCustomerId,
+    replacesSubscriptionId: input.expectedBillingRef?.stripeSubscriptionId ?? null,
     verifiedEmailAddress,
   });
   const attempt = await reserveHostedMemberStripeCheckoutAttemptUnderLockTx({
     attemptId: randomUUID(),
     createdAt: input.now,
     expectedBillingRef: input.expectedBillingRef,
+    terminalSubscriptionVerified: input.terminalSubscriptionVerified
+      && member.billingStatus === HostedBillingStatus.canceled,
     intentHash,
     memberId: input.memberId,
     tx: input.tx,
@@ -527,12 +554,15 @@ async function runHostedBillingCheckoutAttempt(input: {
     return { kind: "restart" };
   }
 
-  const checkoutMetadata = buildHostedBillingOfferMetadata({
-    billingPlanCode: input.billingPlanCode,
-    memberId: input.memberId,
-  });
-  checkoutMetadata.checkoutAttemptId = currentAttempt.attemptId;
-  checkoutMetadata.checkoutIntentHash = currentAttempt.intentHash;
+  const checkoutMetadata = {
+    ...buildHostedBillingOfferMetadata({
+      billingPlanCode: input.billingPlanCode,
+      memberId: input.memberId,
+    }),
+    ...hostedCheckoutReplacementMetadata(currentAttempt),
+    checkoutAttemptId: currentAttempt.attemptId,
+    checkoutIntentHash: currentAttempt.intentHash,
+  };
   const subscriptionData: NonNullable<
     Stripe.Checkout.SessionCreateParams["subscription_data"]
   > = {
@@ -614,6 +644,7 @@ async function runHostedBillingCheckoutAttempt(input: {
         attemptId: currentAttempt.attemptId,
         intentHash: currentAttempt.intentHash,
         memberId: input.memberId,
+        expectedStripeSubscriptionId: currentAttempt.expectedStripeSubscriptionId,
         preparedSession: preparedSessionBindings.billingCheckoutSession,
         tx,
       });
@@ -751,6 +782,7 @@ async function revalidateHostedBillingCheckoutAttemptTx(input: {
   }
   if (
     member.billingStatus !== HostedBillingStatus.active
+    && member.billingStatus !== HostedBillingStatus.canceled
     && !requiresHostedBillingCheckout(member.billingStatus)
   ) {
     return {
@@ -794,6 +826,8 @@ function assertHostedBillingCheckoutSessionMatchesAttempt(input: {
     || input.session.metadata?.memberId !== input.memberId
     || input.session.metadata?.checkoutAttemptId !== input.attempt.attemptId
     || input.session.metadata?.checkoutIntentHash !== input.attempt.intentHash
+    || (input.session.metadata?.replacesSubscriptionId ?? null)
+      !== (input.attempt.expectedStripeSubscriptionId ?? null)
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_CHECKOUT_SESSION_MISMATCH",
@@ -804,7 +838,14 @@ function assertHostedBillingCheckoutSessionMatchesAttempt(input: {
   }
 }
 
+function hostedCheckoutReplacementMetadata(attempt: HostedMemberStripeCheckoutAttempt): Record<string, string> {
+  return attempt.expectedStripeSubscriptionId
+    ? { replacesSubscriptionId: attempt.expectedStripeSubscriptionId }
+    : {};
+}
+
 function buildHostedBillingCheckoutIntentHash(input: {
+  replacesSubscriptionId: string | null;
   billingPlanCode: HostedBillingPlanCode;
   inviteCode: string;
   memberId: string;
@@ -817,6 +858,7 @@ function buildHostedBillingCheckoutIntentHash(input: {
     billingPlanCode: input.billingPlanCode,
     cancelUrl: buildStripeCancelUrl(input.publicBaseUrl, input.inviteCode),
     customer: input.stripeCustomerId,
+    ...(input.replacesSubscriptionId ? { replacesSubscriptionId: input.replacesSubscriptionId } : {}),
     email: normalizeNullableString(input.verifiedEmailAddress)?.toLowerCase()
       ?? null,
     lineItems: buildHostedBillingCheckoutLineItems(input.priceId),

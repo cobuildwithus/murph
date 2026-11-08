@@ -243,10 +243,11 @@ describe("HostedBillingSettings", () => {
       showMaxPlan: true,
     }));
 
+    assert.match(markup, /No cancellation is needed/);
     assert.match(markup, /Max/);
     assert.match(markup, /Current plan/);
-    assert.match(markup, /Choose Edge/);
-    assert.match(markup, /Choose Pulse/);
+    assert.match(markup, /Switch to Edge/);
+    assert.match(markup, /Switch to Pulse/);
     assert.doesNotMatch(markup, /Choose Max/);
   });
 
@@ -1543,6 +1544,54 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Manage billing/);
   });
 
+  test("never labels a payment-method Portal as a plan choice", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+    for (const billingStatus of ["canceled", "past_due", "paused", "unpaid"]) {
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        billingStatus,
+        canManageBilling: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_max_monthly",
+        showMaxPlan: true,
+      }));
+      assert.match(markup, /Manage billing/);
+      assert.doesNotMatch(markup, />Choose (?:Pulse|Edge|Max)</);
+      assert.doesNotMatch(markup, /Choose a plan below/);
+    }
+  });
+
+  test("opens the selected Edge checkout for a canceled member", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: "https://stripe.example.test/checkout/restart_edge",
+    });
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+    const rendered = await renderClientComponent(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "canceled",
+      canManageBilling: true,
+      canStartDirectPlan: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_max_monthly",
+      showMaxPlan: true,
+    }));
+    try {
+      await act(async () => {
+        findButtonByText(rendered.window.document, "Choose Edge", rendered.window)
+          .dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      });
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls, [[{
+        method: "POST",
+        payload: { billingPlanCode: "launch_edge_monthly" },
+        url: "/api/settings/billing/checkout",
+      }]]);
+      assert.deepEqual(rendered.assign.mock.calls, [["https://stripe.example.test/checkout/restart_edge"]]);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("renders retained inactive billing as lapsed with a recovery path", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
@@ -2170,7 +2219,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Edge/);
     assert.match(markup, /Current plan/);
-    assert.match(markup, /Choose Pulse/);
+    assert.match(markup, /Switch to Pulse/);
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
@@ -2474,21 +2523,26 @@ describe("HostedBillingSettings", () => {
       scheduledBillingPlanCode: "launch_edge_monthly",
       status: "scheduled",
     });
-    const { HostedPlanChangeButton } = await import(
-      "@/src/components/settings/hosted-plan-change-button"
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
     );
     const rendered = await renderClientComponent(createElement(
-      HostedPlanChangeButton,
+      HostedBillingSettings,
       {
-        currentPeriodEnd: "2026-09-01T00:00:00.000Z",
-        mode: "schedule",
-        targetPlanCode: "launch_edge_monthly",
+        authenticated: true,
+        billingStatus: "active",
+        canManageBilling: true,
+        canSwitchToEdge: true,
+        canSwitchToPulse: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_max_monthly",
+        currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+        showMaxPlan: true,
       },
-      "Choose Edge",
     ));
 
     await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      findButtonByText(rendered.window.document, "Switch to Edge", rendered.window).dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -2511,6 +2565,7 @@ describe("HostedBillingSettings", () => {
       },
       url: "/api/settings/billing/switch-plan",
     });
+    assert.equal(rendered.assign.mock.calls.length, 0);
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",

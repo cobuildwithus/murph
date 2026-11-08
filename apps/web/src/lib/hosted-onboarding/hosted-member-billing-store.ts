@@ -117,6 +117,9 @@ export interface HostedMemberStripeBillingRefWriteInput {
 }
 
 export interface HostedMemberStripeCheckoutAttempt {
+  // Ephemeral ownership fence for replacing a provider-confirmed terminal plan.
+  expectedStripeSubscriptionId?: string | null;
+  expectedStripeCustomerId?: string | null;
   attemptId: string;
   createdAt: Date;
   intentHash: string;
@@ -145,7 +148,7 @@ export interface HostedMemberStripeBillingLookupState {
 
 export type HostedMemberStripeCheckoutAcceptance =
   | {
-      kind: "accepted" | "already_accepted";
+      kind: "accepted" | "already_accepted" | "historically_accepted";
     }
   | {
       kind: "cleanup_superseded" | "cleanup_terminal";
@@ -493,6 +496,7 @@ export async function reserveHostedMemberStripeCheckoutAttemptUnderLockTx(input:
   attemptId: string;
   createdAt: Date;
   expectedBillingRef: HostedMemberStripeBillingRefSnapshot | null;
+  terminalSubscriptionVerified?: boolean;
   intentHash: string;
   memberId: string;
   tx: Prisma.TransactionClient;
@@ -503,22 +507,19 @@ export async function reserveHostedMemberStripeCheckoutAttemptUnderLockTx(input:
       checkoutCreatedAt: true,
       checkoutIntentHash: true,
       pulseTrialRedeemedAt: true,
+      lastStripeEventCreatedAt: true,
       stripeCheckoutSessionLookupKey: true,
       stripeCustomerLookupKey: true,
       stripeSubscriptionLookupKey: true,
     },
     where: { memberId: input.memberId },
   });
-  if (current?.stripeSubscriptionLookupKey) {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
-      httpStatus: 409,
-      message:
-        "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
-    });
-  }
-
   const expected = input.expectedBillingRef;
+  assertHostedCheckoutPriorSubscription({
+    current,
+    expected,
+    terminalSubscriptionVerified: input.terminalSubscriptionVerified === true,
+  });
   const expectedAttempt = readHostedMemberStripeCheckoutAttempt(expected);
   const currentAttemptId = current?.checkoutAttemptId ?? null;
   const currentCreatedAt = current?.checkoutCreatedAt ?? null;
@@ -542,7 +543,10 @@ export async function reserveHostedMemberStripeCheckoutAttemptUnderLockTx(input:
     ) {
       throw buildHostedMemberStripeCheckoutAttemptStaleError();
     }
-    return expectedAttempt;
+    return {
+      ...expectedAttempt,
+      ...hostedCheckoutOwnershipFence(expected),
+    };
   }
   if (
     expectedAttempt
@@ -584,11 +588,54 @@ export async function reserveHostedMemberStripeCheckoutAttemptUnderLockTx(input:
   });
 
   return {
+    ...hostedCheckoutOwnershipFence(expected),
     attemptId: input.attemptId,
     createdAt: input.createdAt,
     intentHash: input.intentHash,
     stripeCheckoutSessionId: null,
   };
+}
+
+function hostedCheckoutOwnershipFence(expected: HostedMemberStripeBillingRefSnapshot | null) {
+  return {
+    expectedStripeSubscriptionId: expected?.stripeSubscriptionId ?? null,
+    expectedStripeCustomerId: expected?.stripeCustomerId ?? null,
+  };
+}
+
+function assertHostedCheckoutPriorSubscription({ current, expected, terminalSubscriptionVerified }: {
+  current: Pick<HostedMemberBillingRef, "stripeSubscriptionLookupKey" | "stripeCustomerLookupKey" | "lastStripeEventCreatedAt"> | null;
+  expected: HostedMemberStripeBillingRefSnapshot | null;
+  terminalSubscriptionVerified: boolean;
+}): void {
+  const replaceTerminalSubscription = Boolean(
+    current?.stripeSubscriptionLookupKey && terminalSubscriptionVerified,
+  );
+  if (current?.stripeSubscriptionLookupKey && !replaceTerminalSubscription) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+      httpStatus: 409,
+      message:
+        "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+    });
+  }
+
+  if (replaceTerminalSubscription && (
+    !hostedStripeLookupKeyMatchesValue(
+      current?.stripeSubscriptionLookupKey ?? null,
+      expected?.stripeSubscriptionId ?? null,
+      createHostedStripeSubscriptionLookupKeyReadCandidates,
+    )
+    || !hostedStripeLookupKeyMatchesValue(
+      current?.stripeCustomerLookupKey ?? null,
+      expected?.stripeCustomerId ?? null,
+      createHostedStripeCustomerLookupKeyReadCandidates,
+    )
+    || (current?.lastStripeEventCreatedAt?.getTime() ?? null)
+      !== (expected?.lastStripeEventCreatedAt?.getTime() ?? null)
+  )) {
+    throw buildHostedMemberStripeCheckoutAttemptStaleError();
+  }
 }
 
 export async function prepareHostedMemberStripeCheckoutSession(input: {
@@ -618,6 +665,7 @@ export async function prepareHostedMemberStripeCheckoutSession(input: {
 
 export async function bindHostedMemberStripeCheckoutSessionTx(input: {
   attemptId: string;
+  expectedStripeSubscriptionId?: string | null;
   intentHash: string;
   memberId: string;
   preparedSession: PreparedHostedMemberStripeCheckoutSession;
@@ -634,7 +682,9 @@ export async function bindHostedMemberStripeCheckoutSessionTx(input: {
       checkoutAttemptId: input.attemptId,
       checkoutIntentHash: input.intentHash,
       memberId: input.memberId,
-      stripeSubscriptionLookupKey: null,
+      stripeSubscriptionLookupKey: input.expectedStripeSubscriptionId
+        ? { in: createHostedStripeSubscriptionLookupKeyReadCandidates(input.expectedStripeSubscriptionId) }
+        : null,
     },
   });
   return updated.count === 1;
@@ -656,6 +706,7 @@ export async function revalidateHostedMemberStripeCheckoutAttemptUnderLockTx(inp
       checkoutIntentHash: true,
       stripeCheckoutSessionLookupKey: true,
       stripeSubscriptionLookupKey: true,
+      stripeCustomerLookupKey: true,
     },
     where: { memberId: input.memberId },
   });
@@ -665,7 +716,16 @@ export async function revalidateHostedMemberStripeCheckoutAttemptUnderLockTx(inp
     || current.checkoutCreatedAt?.getTime() !==
       input.attempt.createdAt.getTime()
     || current.checkoutIntentHash !== input.attempt.intentHash
-    || current.stripeSubscriptionLookupKey
+    || (input.attempt.expectedStripeCustomerId !== undefined && !hostedStripeLookupKeyMatchesValue(
+      current.stripeCustomerLookupKey,
+      input.attempt.expectedStripeCustomerId,
+      createHostedStripeCustomerLookupKeyReadCandidates,
+    ))
+    || !hostedStripeLookupKeyMatchesValue(
+      current.stripeSubscriptionLookupKey,
+      input.attempt.expectedStripeSubscriptionId ?? null,
+      createHostedStripeSubscriptionLookupKeyReadCandidates,
+    )
   ) {
     return "stale";
   }
@@ -740,8 +800,8 @@ export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: 
 }
 
 /**
- * Owns exactly one completed direct Checkout while preserving any existing
- * billing identity. A terminal provider candidate is never bound, but this owner
+ * Owns exactly one completed direct Checkout. An existing identity is replaced
+ * only by its terminal-recovery attempt. A terminal candidate is never bound; this owner
  * distinguishes an already-accepted replay from an unaccepted cleanup target.
  */
 export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
@@ -749,6 +809,7 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   checkoutAttemptId: string | null;
   checkoutIntentHash: string | null;
   checkoutSessionId: string;
+  replacesSubscriptionId?: string | null;
   currentCheckoutOffer: string;
   eventCreatedAt: Date;
   memberId: string;
@@ -785,16 +846,17 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
       stripeCheckoutSessionLookupKey: true,
       stripeCustomerLookupKey: true,
       stripeSubscriptionLookupKey: true,
+      stripeSubscriptionIdEncrypted: true,
     },
     where: { memberId: input.memberId },
   });
-  if (
-    currentRecord?.stripeSubscriptionLookupKey
-    && !subscriptionLookupKeys.includes(
-      currentRecord.stripeSubscriptionLookupKey,
-    )
-  ) {
-    return { kind: "cleanup_superseded" };
+  if (await isHistoricalHostedAcceptedSubscriptionTx({
+    currentSubscriptionLookupKey: currentRecord?.stripeSubscriptionLookupKey ?? null,
+    memberId: input.memberId,
+    subscriptionLookupKeys,
+    tx: input.tx,
+  })) {
+    return { kind: "historically_accepted" };
   }
   if (
     currentRecord?.stripeCustomerLookupKey
@@ -817,6 +879,16 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
       )
     ),
   );
+  if (!await canAcceptHostedCheckoutReplacementTx({
+    completionMatchesAttempt,
+    currentRecord,
+    memberId: input.memberId,
+    replacesSubscriptionId: input.replacesSubscriptionId,
+    subscriptionLookupKeys,
+    tx: input.tx,
+  })) {
+    return { kind: "cleanup_superseded" };
+  }
   const acceptsLegacyCompletion = Boolean(
     !input.checkoutAttemptId
     && !input.checkoutIntentHash
@@ -847,17 +919,22 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   if (input.billingIdentityDisposition === "terminal") {
     return { kind: "cleanup_terminal" };
   }
-  const lastStripeEventCreatedAt =
-    currentRecord?.lastStripeEventCreatedAt
-    && currentRecord.lastStripeEventCreatedAt > input.eventCreatedAt
-      ? currentRecord.lastStripeEventCreatedAt
-      : input.eventCreatedAt;
+  await retainHostedAcceptedSubscriptionsTx({
+    currentRecord,
+    memberId: input.memberId,
+    preparedCompletion: input.preparedCompletion,
+    tx: input.tx,
+  });
   const data = {
+    ...hostedCheckoutReplacementProjection({
+      alreadyAccepted,
+      currentRecord,
+      eventCreatedAt: input.eventCreatedAt,
+    }),
     checkoutAttemptId: null,
     checkoutCreatedAt: null,
     checkoutIntentHash: null,
     currentCheckoutOffer: input.currentCheckoutOffer,
-    lastStripeEventCreatedAt,
     stripeCheckoutSessionIdEncrypted: null,
     stripeCheckoutSessionLookupKey: null,
     stripeCustomerIdEncrypted:
@@ -885,6 +962,109 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
 
   return {
     kind: alreadyAccepted ? "already_accepted" : "accepted",
+  };
+}
+
+async function isHistoricalHostedAcceptedSubscriptionTx(input: {
+  currentSubscriptionLookupKey: string | null;
+  memberId: string;
+  subscriptionLookupKeys: string[];
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.subscriptionLookupKeys.includes(input.currentSubscriptionLookupKey ?? "")) {
+    return false;
+  }
+  return Boolean(await input.tx.hostedMemberAcceptedSubscription.findFirst({
+    select: { memberId: true },
+    where: {
+      memberId: input.memberId,
+      stripeSubscriptionLookupKey: { in: input.subscriptionLookupKeys },
+    },
+  }));
+}
+
+/** Capture the legacy canonical predecessor before replacing it, under the member lock. */
+async function retainHostedAcceptedSubscriptionsTx(input: {
+  currentRecord: Pick<HostedMemberBillingRef,
+    "stripeSubscriptionLookupKey" | "stripeSubscriptionIdEncrypted"> | null;
+  memberId: string;
+  preparedCompletion: PreparedHostedMemberStripeCheckoutCompletion;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  // Both ciphertexts use the existing same-member billing subscription field AAD.
+  // No decryption or external key access occurs inside this transaction.
+  for (const source of [input.currentRecord, input.preparedCompletion]) {
+    if (!source?.stripeSubscriptionLookupKey) continue;
+    if (!source.stripeSubscriptionIdEncrypted) {
+      throw new TypeError("Accepted Stripe subscription is missing its encrypted identity.");
+    }
+    const data = {
+      memberId: input.memberId,
+      stripeSubscriptionLookupKey: source.stripeSubscriptionLookupKey,
+      stripeSubscriptionIdEncrypted: source.stripeSubscriptionIdEncrypted,
+    };
+    await input.tx.hostedMemberAcceptedSubscription.upsert({
+      create: data,
+      update: {},
+      where: { memberId_stripeSubscriptionLookupKey: {
+        memberId: data.memberId,
+        stripeSubscriptionLookupKey: data.stripeSubscriptionLookupKey,
+      } },
+    });
+  }
+}
+
+async function canAcceptHostedCheckoutReplacementTx(input: {
+  completionMatchesAttempt: boolean;
+  currentRecord: Pick<HostedMemberBillingRef, "stripeSubscriptionLookupKey"> | null;
+  memberId: string;
+  replacesSubscriptionId?: string | null;
+  subscriptionLookupKeys: string[];
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const currentSubscription = input.currentRecord?.stripeSubscriptionLookupKey;
+  if (!currentSubscription || input.subscriptionLookupKeys.includes(currentSubscription)) {
+    return true;
+  }
+  // The exact replacement attempt is reserved only after provider terminal proof.
+  if (!input.completionMatchesAttempt || !hostedStripeLookupKeyMatchesValue(
+    currentSubscription,
+    input.replacesSubscriptionId ?? null,
+    createHostedStripeSubscriptionLookupKeyReadCandidates,
+  )) {
+    return false;
+  }
+  const member = await input.tx.hostedMember.findUnique({
+    select: { billingStatus: true },
+    where: { id: input.memberId },
+  });
+  return member?.billingStatus === "canceled";
+}
+
+function hostedCheckoutReplacementProjection(input: {
+  alreadyAccepted: boolean;
+  currentRecord: Pick<HostedMemberBillingRef, "stripeSubscriptionLookupKey" | "lastStripeEventCreatedAt"> | null;
+  eventCreatedAt: Date;
+}) {
+  if (input.alreadyAccepted) {
+    // Completion replays must not outrun an earlier new-subscription invoice.
+    return { lastStripeEventCreatedAt: input.currentRecord?.lastStripeEventCreatedAt ?? null };
+  }
+  if (input.currentRecord?.stripeSubscriptionLookupKey) {
+    // Freshness belongs to a subscription, not its customer. Let delayed first
+    // invoice/subscription events for the replacement establish its watermark.
+    return {
+      lastStripeEventCreatedAt: null,
+      stripeSubscriptionScheduleIdEncrypted: null,
+      stripeSubscriptionScheduleLookupKey: null,
+      scheduledBillingPlanCode: null,
+      scheduledBillingEffectiveAt: null,
+    };
+  }
+  const previous = input.currentRecord?.lastStripeEventCreatedAt;
+  return {
+    lastStripeEventCreatedAt: previous && previous > input.eventCreatedAt
+      ? previous : input.eventCreatedAt,
   };
 }
 

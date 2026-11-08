@@ -18,6 +18,7 @@ import {
 } from "@murphai/messaging-ingress/telegram-webhook-payload";
 
 import { hostedOnboardingError } from "./errors";
+import { readHostedTelegramBotUsername } from "./env";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
 import { normalizeHostedTelegramUsernameForLookup } from "./contact-privacy";
@@ -167,7 +168,7 @@ export function buildHostedTelegramWebhookEventId(update: TelegramUpdateLike): s
 }
 
 export function buildHostedTelegramBotLink(start: string | null = null): string | null {
-  const username = normalizeNullableString(getHostedOnboardingEnvironment().telegramBotUsername);
+  const username = normalizeNullableString(readHostedTelegramBotUsername());
 
   if (!username) {
     return null;

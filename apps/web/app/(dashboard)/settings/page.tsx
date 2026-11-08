@@ -344,8 +344,8 @@ function renderAuthenticatedSettingsPage(input: {
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           payerMemberId={authenticatedMember?.id}
-          scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
-          scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+          scheduledBillingEffectiveAt={hasScheduledPlanChange ? billingRef?.scheduledBillingEffectiveAt : null}
+          scheduledBillingPlanCode={hasScheduledPlanChange ? billingRef?.scheduledBillingPlanCode : null}
           usageAddedContactOption={usageAddedContactOption}
           usageRecoveryInitialOpen={usageRecoveryPresentationOpen}
           usageStatus={usageStatus}
@@ -625,7 +625,8 @@ function resolveSettingsBillingPresentation(input: {
   const scheduledPlanCode = parseHostedBillingPlanCode(
     billingRef?.scheduledBillingPlanCode,
   );
-  const hasScheduledPlanChange = scheduledPlanCode !== null;
+  const hasScheduledPlanChange = scheduledPlanCode !== null
+    && authenticatedMember?.billingStatus !== "canceled";
   const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
   const maxPlanConfigured = settingsData?.maxPlanAvailable === true;
   const visiblePlanCodes = resolveVisibleHostedBillingPlanCodes({
@@ -654,14 +655,10 @@ function resolveSettingsBillingPresentation(input: {
       billingStatus: authenticatedMember.billingStatus,
       hasExistingSubscription: Boolean(billingRef?.stripeSubscriptionId),
     });
-  const canStartDirectPlan =
-    !hasScheduledPlanChange
-    && authenticatedMember !== null
-    && !activeFamilyOwner
-    && !sponsoredMember
-    && !authenticatedMember.suspendedAt
-    && !ownPaidBillingActive
-    && !hasRecoverableBilling;
+  const canStartDirectPlan = canStartSettingsDirectPlan({
+    activeFamilyOwner, authenticatedMember, hasRecoverableBilling,
+    hasScheduledPlanChange, ownPaidBillingActive, sponsoredMember,
+  });
   const canManageBilling =
     activeFamilyOwner
     || (
@@ -685,6 +682,27 @@ function resolveSettingsBillingPresentation(input: {
     showGroupPlan: visiblePlanCodes.includes("launch_group_monthly"),
     showMaxPlan: visiblePlanCodes.includes("launch_max_monthly"),
   };
+}
+
+function canStartSettingsDirectPlan({
+  activeFamilyOwner, authenticatedMember, hasRecoverableBilling,
+  hasScheduledPlanChange, ownPaidBillingActive, sponsoredMember,
+}: {
+  activeFamilyOwner: boolean;
+  authenticatedMember: HostedDashboardPageAuthSnapshot["authenticatedMember"];
+  hasRecoverableBilling: boolean;
+  hasScheduledPlanChange: boolean;
+  ownPaidBillingActive: boolean;
+  sponsoredMember: boolean;
+}): boolean {
+  return !hasScheduledPlanChange
+    && authenticatedMember !== null
+    && !activeFamilyOwner
+    && !sponsoredMember
+    && !authenticatedMember.suspendedAt
+    && !ownPaidBillingActive
+    && (!hasRecoverableBilling
+      || authenticatedMember.billingStatus === "canceled");
 }
 
 function resolveSettingsBillingActions(input: {

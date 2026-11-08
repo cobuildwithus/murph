@@ -181,8 +181,8 @@ export function readHostedOnboardingEnvironment(
 }
 
 
-function readHostedTelegramBotUsername(
-  source: HostedOnboardingEnvSource,
+export function readHostedTelegramBotUsername(
+  source: HostedOnboardingEnvSource = process.env,
 ): string | null {
   return normalizeMurphTelegramUsername(readEnv(source, "MURPH_TELEGRAM_USERNAME_OVERRIDE"))
     ?? normalizeMurphTelegramUsername(readEnv(source, "TELEGRAM_BOT_USERNAME"));
