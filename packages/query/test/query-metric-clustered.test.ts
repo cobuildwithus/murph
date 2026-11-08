@@ -11,6 +11,7 @@ import { afterEach, test } from "vitest";
 import { listMetricPoints } from "../src/index.ts";
 import { insertMetricPoints, listStoredMetricPoints } from "../src/projection/metric-store.ts";
 import {
+  QUERY_PROJECTION_SQLITE_VERSION,
   currentQueryProjectionLocation,
   openQueryProjectionDatabase,
   type DatabaseSync,
@@ -89,7 +90,7 @@ function point(index: number): MetricPoint {
   };
 }
 
-test("a populated v35 file rebuilds to v36 through an ordinary metric read", async () => {
+test("a populated v35 file rebuilds to the current schema through an ordinary metric read", async () => {
   const root = await tempRoot();
   await initializeVault({ vaultRoot: root });
   await importDeviceBatch({
@@ -113,7 +114,7 @@ test("a populated v35 file rebuilds to v36 through an ordinary metric read", asy
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   const rebuilt = openQueryProjectionDatabase(location, { readOnly: true });
   try {
-    assert.equal(rebuilt.prepare("PRAGMA user_version").get()?.user_version, 36);
+    assert.equal(rebuilt.prepare("PRAGMA user_version").get()?.user_version, QUERY_PROJECTION_SQLITE_VERSION);
     assert.equal(rebuilt.prepare("PRAGMA table_info(query_metric_points)").all()
       .some(row => row.name === "sort_rank"), false);
     assert.throws(() => rebuilt.prepare("SELECT rowid FROM query_metric_points"), /no such column: rowid/u);
