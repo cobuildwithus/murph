@@ -16,6 +16,8 @@ import {
   readVaultRawTolerant,
   rebuildQueryProjection,
   summarizeWearableActivityRuntime,
+  summarizeWearableRecoveryRuntime,
+  listMetricPoints,
   summarizeWearableSleepRuntime,
   summarizeWearableSourceHealthRuntime,
 } from "../src/index.ts";
@@ -1065,6 +1067,45 @@ test("stored activity summaries take a worn device's steps while per-source rows
     assert.equal(await stepsFor(), 9_000);
     assert.equal(await stepsFor(["garmin"]), 9_000);
     assert.equal(await stepsFor(["apple-health-kit"]), 12_000);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("stored RHR selects WHOOP over Apple Health while scoped reads retain each source", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-device-rhr-"));
+  const date = "2026-04-03";
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl");
+  const event = (source: string, sourceType: string, value: number, hour: string) => ({
+    schemaVersion: "murph.event.v1", id: `evt_device_rhr_${source.replaceAll("-", "_")}`,
+    kind: "observation", occurredAt: `${date}T06:00:00Z`, recordedAt: `${date}T${hour}:00:00Z`,
+    dayKey: date, source: "device", title: "Resting heart rate", metric: "resting-heart-rate", value, unit: "bpm",
+    dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: source, sourceType },
+    externalRef: { system: "junction", resourceType: `junction-${source}-activity` },
+  });
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(eventLedgerPath, [event("whoop-v2", "watch", 54, "07"),
+      event("apple-health-kit", "multiple_sources", 62, "23")].map(row => JSON.stringify(row)).join("\n") + "\n");
+    await rebuildQueryProjection(vaultRoot);
+    const rhrFor = async (providers?: string[]) =>
+      (await summarizeWearableRecoveryRuntime(vaultRoot, { date, ...(providers ? { providers } : {}) }))[0]
+        ?.restingHeartRate.selection;
+    assert.equal((await rhrFor())?.value, 54);
+    assert.equal((await rhrFor())?.provider, "whoop");
+    assert.equal((await rhrFor(["whoop"]))?.value, 54);
+    assert.equal((await rhrFor(["apple-health-kit"]))?.value, 62);
+    // A carried projection must refresh even when no new canonical event arrived.
+    const old = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), { create: false });
+    try {
+      old.exec("UPDATE query_metric_points SET value = 62, canonical_value = 62 WHERE metric_key = 'resting-heart-rate'");
+      old.exec("PRAGMA user_version = 36");
+    } finally { old.close(); }
+    const points = await listMetricPoints(vaultRoot, { metricKey: "resting-heart-rate" });
+    assert.equal(points.length, 1);
+    assert.equal(points[0]?.value, 54);
+    assert.equal(points[0]?.provenance.sourceLabel, "WHOOP");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

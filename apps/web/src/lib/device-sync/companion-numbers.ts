@@ -2,7 +2,7 @@ import "server-only";
 
 import { isCloudflareHostedControlBrowserVaultReplicaNotFoundError } from "@murphai/cloudflare-hosted-control/client";
 import { addDaysToIsoDate, toLocalDayKey } from "@murphai/contracts";
-import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, selectMetricWindowComparison } from "@murphai/health-metrics";
+import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, resolveWearableProviderDescriptor, selectMetricWindowComparison } from "@murphai/health-metrics";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { getBrowserVaultMetricBucketId, type BrowserVaultMetricSeriesCapableQueryClient } from "@murphai/query/browser-replica-client";
@@ -131,7 +131,17 @@ function presentNumber(
     if (normalized.canonicalValue === null) continue;
     byDate.set(row.date, { date: row.date, value: normalized.canonicalValue, source: row.sourceLabel, observedAt: row.observedAt });
   }
-  const points = [...byDate.values()];
+  let points = [...byDate.values()];
+  if (metric.key === "resting-heart-rate") {
+    // An aggregator-only day must not relabel an active wearable's entire
+    // average. Keep the latest non-stale wearable's own history together.
+    const freshFrom = addDaysToIsoDate(window.through, -(definition.selectionPolicy.staleAfterDays ?? 14));
+    const device = points.slice().reverse().find(point => {
+      const provider = resolveWearableProviderDescriptor(point.source ?? "")?.provider;
+      return point.date >= freshFrom && provider && provider !== "junction" && provider !== "google-health";
+    });
+    if (device) points = points.filter(point => point.source === device.source);
+  }
   const latest = points.at(-1);
   if (!latest) return null;
   const intermittent = definition.selectionPolicy.kind === "latest-device-estimate";

@@ -431,3 +431,25 @@ it.each([
     });
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
+
+
+it("keeps active WHOOP RHR history and source together when Apple Health reports a newer day", async () => {
+  const whoopDates = [from, addDaysToIsoDate(through, -2), addDaysToIsoDate(through, -1)];
+  shards = await splitBrowserVaultReplica(fixture([
+    ...whoopDates.map(date => row("resting-heart-rate", date, 54, "bpm", { sourceLabel: "WHOOP" })),
+    row("resting-heart-rate", addDaysToIsoDate(through, -3), 62, "bpm", { sourceLabel: "apple-health-kit" }),
+    row("resting-heart-rate", through, 63, "bpm", { sourceLabel: "apple-health-kit" }),
+  ]));
+  const body = await (await GET(request())).json();
+  expect(body.numbers.restingHeartRate).toMatchObject({ source: "WHOOP", stale: false,
+    latest: { date: whoopDates[2], value: 54 }, daily: whoopDates.map(date => ({ date, value: 54 })) });
+});
+
+it.each(["apple-health-kit", "Google Health", null])("keeps %s RHR when no recent wearable reports it", async sourceLabel => {
+  shards = await splitBrowserVaultReplica(fixture([
+    row("resting-heart-rate", addDaysToIsoDate(through, -15), 54, "bpm", { sourceLabel: "WHOOP" }),
+    row("resting-heart-rate", through, 63, "bpm", { sourceLabel }),
+  ]));
+  const body = await (await GET(request())).json();
+  expect(body.numbers.restingHeartRate).toMatchObject({ source: sourceLabel, latest: { date: through, value: 63 } });
+});

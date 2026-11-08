@@ -124,6 +124,19 @@ or biomarker alias, so it cannot silently alias or aggregate with provider HRV.
 
 Root wearable summary APIs should use the runtime projection helpers such as `summarizeWearableLatestRuntime()` and `summarizeWearableActivityRuntime()`. The lower-level read-model helpers in `src/wearables.ts` are package-internal and expect a full raw/debug read model or an intentionally full source model, not the default `readVault()` projection.
 
+### Device readings and health-store copies
+
+When a watch, ring or known wearable source supplies the same daily metric,
+its own reading takes precedence over a merged health-store copy, even if
+Apple Health or another store syncs later. Sleep-window selection follows the
+same rule after its existing main-sleep eligibility checks. Steps retain their
+separate worn-coverage rule. Days without a device reading and source-filtered
+reads retain health-store evidence. All candidates remain available for
+provenance and raw-observation suppression.
+
+Query schema 37 rebuilds prior wearable selections and MetricPoints through
+the existing projection owner; canonical records are unchanged.
+
 ### Ordinary wearable reads
 
 Day, latest, metric latest/trend, drift, activity, body and recovery runtime

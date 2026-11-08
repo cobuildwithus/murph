@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-08",
+  "order": 100,
+  "item": {
+    "id": "readings-from-your-wearable",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep your wearable's own readings",
+    "summary": "When your wearable and Apple Health both report a daily reading, Murph now prefers the wearable's own data over the health-store copy.",
+    "details": "Your resting-heart-rate chart stays with a recently reporting wearable, so a later Apple Health sync cannot switch its source. Health-store readings remain available when no recent wearable reports RHR. Steps keep their existing worn-device coverage rule.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": []
+  }
+}

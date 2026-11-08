@@ -8,7 +8,7 @@ import {
   resourceTypeScore,
   sourceFamilyScore,
 } from "./provider-policy.ts";
-import { normalizeWearableOriginSourceSlug } from "./origin.ts";
+import { normalizeWearableOriginSourceSlug, resolveWearablePublicSourceProvider } from "./origin.ts";
 import {
   scoreMetricPolicy,
 } from "./metric-policies.ts";
@@ -27,6 +27,10 @@ import type {
 
 const JUNCTION_UNSUPPORTED_SOURCE_PRIORITY_BOOST = 3;
 const JUNCTION_DIRECT_DUPLICATE_PENALTY = -1_000;
+const HEALTH_STORE_FALLBACK_PENALTY = -1_000;
+const HEALTH_STORES: ReadonlySet<string> = new Set([
+  "apple-health", "apple-health-kit", "google-health", "google-fit", "health-connect", "samsung-health",
+]);
 
 export function resolveMetric(
   metric: WearableMetricKey,
@@ -195,7 +199,8 @@ function rankMetricCandidates(
 
   for (const candidate of candidates) {
     const providerScore =
-      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, candidates);
+      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, candidates)
+      + (metric === "steps" ? 0 : scoreHealthStoreFallback(candidate, candidates));
     const resourceScore = resourceTypeScore(metric, candidate.externalRef?.resourceType);
     const familyScore = sourceFamilyScore(candidate.sourceFamily);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.occurredAt ?? "") ?? 0;
@@ -278,7 +283,8 @@ function rankSleepWindows(
 
   for (const candidate of eligibleCandidates) {
     const providerScore =
-      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, eligibleCandidates);
+      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, eligibleCandidates)
+      + scoreHealthStoreFallback(candidate, eligibleCandidates);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "") ?? 0;
     const durationScore = durationScores.get(candidate.durationMinutes) ?? 0;
     const agreementScore = scoreSleepWindowAgreement(candidate, eligibleCandidates);
@@ -347,6 +353,25 @@ function buildProviderRankScores(
   });
 
   return scores;
+}
+
+/** Health stores can contain a copy of a wearable's own reading. A later sync
+ * or agreement with another copy must not displace the device on the same day.
+ * Steps keep their separate worn-coverage policy, including partial-day fallback. */
+function scoreHealthStoreFallback(
+  candidate: WearableMetricCandidate | WearableSleepWindowCandidate,
+  candidates: readonly (WearableMetricCandidate | WearableSleepWindowCandidate)[],
+): number {
+  const isStore = (item: typeof candidate) => HEALTH_STORES.has(resolveWearablePublicSourceProvider(item))
+    || normalizeWearableOriginSourceSlug(item.dataOrigin?.sourceType) === "multiple-sources";
+  if (!isStore(candidate)) return 0;
+  const hasDevice = candidates.some(other => {
+    if (other.date !== candidate.date || isStore(other)) return false;
+    const type = normalizeWearableOriginSourceSlug(other.dataOrigin?.sourceType);
+    return type === "watch" || type === "ring"
+      || hasDirectWearableProviderForSource(resolveWearablePublicSourceProvider(other));
+  });
+  return hasDevice ? HEALTH_STORE_FALLBACK_PENALTY : 0;
 }
 
 function scoreJunctionSourcePolicy(

@@ -1,3 +1,8 @@
+Device-first wearable selection and coherent private RHR series are owned by
+[Query](../packages/query/README.md#device-readings-and-health-store-copies) and
+[private numbers](product-specs/ios-meals.md#private-numbers). Current delivery
+is tracked in the [source-priority plan](exec-plans/active/2026-11-08-wearable-source-priority.md).
+
 The [Murph and iOS state-machine inventory](references/app-state-machines.md)
 records source baselines, states, invariants, transition tables, confirmed
 retry/concurrency defects, grouped issues, current regression evidence and

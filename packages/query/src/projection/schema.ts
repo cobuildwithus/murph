@@ -34,7 +34,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 34: Share wearable JSON field dictionaries and pin search rowids for rebuild compaction.
 // 35: Index allowlisted clinical-fact fields in private search.
 // 36: Cluster metric points by metric and descending time without a sort index.
-export const QUERY_PROJECTION_SQLITE_VERSION = 36;
+// 37: Rebuild device-first wearable selections and their daily metric provenance.
+export const QUERY_PROJECTION_SQLITE_VERSION = 37;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
