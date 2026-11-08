@@ -453,3 +453,14 @@ it.each(["apple-health-kit", "Google Health", null])("keeps %s RHR when no recen
   const body = await (await GET(request())).json();
   expect(body.numbers.restingHeartRate).toMatchObject({ source: sourceLabel, latest: { date: through, value: 63 } });
 });
+
+
+it("preserves an explicit latest manual RHR reading beside a recent wearable", async () => {
+  shards = await splitBrowserVaultReplica(fixture([
+    row("resting-heart-rate", addDaysToIsoDate(through, -1), 54, "bpm", { sourceLabel: "WHOOP" }),
+    row("resting-heart-rate", through, 63, "bpm", { sourceLabel: "Manual", sourceKind: "measurement" }),
+  ]));
+  const body = await (await GET(request())).json();
+  expect(body.numbers.restingHeartRate).toMatchObject({ source: "Manual", reported: true,
+    latest: { date: through, value: 63 } });
+});

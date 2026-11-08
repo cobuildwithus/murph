@@ -385,7 +385,8 @@ Each is null when no usable daily value exists in the window; otherwise it has:
   RHR keeps the latest known wearable source with a reading inside the catalog's
   14-day freshness window and returns only that source's history. A newer
   health-store-only day cannot relabel the wearable's average. Without a recent
-  known wearable, the ordinary saved daily values remain available. Apple Health
+  known wearable, the ordinary saved daily values remain available. An explicit
+  latest manual reading retains precedence. Apple Health
   provenance alone does not identify an Apple Watch.
 - `reported`: true when the latest value is manual, whether entered in the app
   or saved through chat; false for device readings. The server shares the

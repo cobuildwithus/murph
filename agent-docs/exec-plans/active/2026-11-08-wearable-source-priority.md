@@ -31,7 +31,9 @@ Proof: synthetic competing-source, fallback, provider-filter and projection test
 
 ## Verification
 
-Pending focused query and companion-route tests, typechecks, complexity diff, native build/tests, required PR review and CI.
+Query wearable/projection selection: 154 tests passed. Legacy projection refresh: 13 owner tests passed. Companion route and changelog: 44 tests passed including explicit manual-reading precedence. Query and Web typechecks and complexity diff passed. Native builds passed; native focused tests, PR review and CI remain in progress.
+
+Backend PR: https://github.com/cobuildwithus/murph/pull/4738.
 
 ## Risks
 
