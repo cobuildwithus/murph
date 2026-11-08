@@ -1615,7 +1615,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"49d56bc5c7b49395ad977a2e3eefb4bd38d4bdb1776e8278296963bfa78cebf9"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"3655166dcd734afb7a8d05164b49d7fec09164bfcf4273d05be63f24e8156c29"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )
@@ -2317,7 +2317,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain(
       'Local automation delivery supports Telegram or Linq, not email.',
     )
-    expect(prompt).not.toContain('vault-cli automation')
+    expect(prompt).toContain('vault-cli automation list --compact --status active --exclude-maintenance')
+    expect(prompt).not.toMatch(/vault-cli automation (?:create|update|patch|upsert|set-status|delete)\b/u)
     expect(prompt).not.toContain('inspect saved local self-targets')
   })
 

@@ -495,9 +495,9 @@ describe('assistant Codex turn planning', () => {
       for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
         expect(instructions).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
         expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
-        expect(instructions).toContain('start from exact supplied page references')
+        expect(instructions).toContain('start from supplied or already-known relevant page references')
         expect(instructions).toContain(
-          'let the child do this discovery instead of first loading the index and page bodies in root',
+          'pass already-known relevant page references and facts, then let the child discover remaining evidence instead of preloading it in root',
         )
         expect(instructions).not.toContain(
           'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
@@ -571,11 +571,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "f32a1dbd3f2ac9bc57be3811714b8799b6103058296767ee05fb886df4ff70cf",
-        "group": "ccbfcd293e238cf38485e1a8d356ca81d05bf87d0a8d7abe92d536b553e77ed3",
+        "direct": "7b7a3a24f753c03db7bb7059a46f67e4cd39ee8763e912c833cf6475a2e50d73",
+        "group": "bf678991c76fa63fc9b60450049b0fbbab5027e26b1220feb9451635cd934033",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "38c8d8a7d3a499a378fa77fd73a6cb4112157fede1b8a53d99a0c5ad729f9697",
+        "scheduledEmail": "9656cb88e5884ff013f21cbc464806b67252bb417c41df6fd2455becba214943",
       }
     `)
   })

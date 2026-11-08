@@ -156,7 +156,8 @@ describe('assistant dynamic context prompt blocks', () => {
     }
     expect(prompt).toContain('Also delegate reply-critical, multi-pass CLI workflows')
     expect(prompt).toContain('Decide before loading source bodies')
-    expect(prompt).toContain('start from exact supplied page references')
+    expect(prompt).toContain('start from supplied or already-known relevant page references')
+    expect(prompt).toContain('an index or truncated read cannot establish absence')
     expect(prompt).toContain('vault-cli knowledge show <slug> --format json')
     expect(prompt).toContain('Pass this exact command shape in the assignment')
     expect(prompt).not.toContain('For wiki tasks, read `derived/knowledge/index.md` first')
