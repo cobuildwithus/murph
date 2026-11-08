@@ -1446,9 +1446,10 @@ the existing foreground-causal delivery path, and a member action uses its
 existing provider-free foreground-causal service path. Foreground-safe import does
 not itself advance the normal quiet checkpoint. Any unrelated system wake in
 that prefix keeps the whole system prefix checkpoint-gated. If the blocked page
-contains an Ask, finishing the conversation import requests the existing checkpoint
-immediately, before decoding that page. This preserves Ask validity without
-admitting the unrelated notification early. Decoded consented-member deferrals
+contains an Ask or assistant notification, finishing the conversation import
+requests the existing checkpoint immediately, before decoding that page. This
+preserves Ask validity and timely notification service without admitting the
+unsafe prefix early. Maintenance-only prefixes retain ordinary idle batching. Decoded consented-member deferrals
 also request an early checkpoint after foreground completion. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
@@ -4535,7 +4536,11 @@ Newly accepted foreground-priority work restarts the window; ordinary maintenanc
 and no-progress probes do not. A consented-member Ask observed as deferred by
 its admission gate advances the existing checkpoint deadline after foreground
 work, preserving checkpoint-before-service ordering without spending its entire
-ten-minute validity on idle batching. Ask authority and expiry remain unchanged.
+ten-minute validity on idle batching. A checkpoint-gated assistant notification
+observed in the bounded system prefetch also advances that deadline rather than
+waiting out the idle window. It still waits for successful checkpoint publication
+before import; snapshot failure cannot admit it. Ask authority and expiry remain
+unchanged.
 A no-progress phase that requests only a runtime-projection checkpoint
 preserves any active quiet window. If the preceding checkpoint has completed,
 that metadata correction does not start a second quiet window; it still

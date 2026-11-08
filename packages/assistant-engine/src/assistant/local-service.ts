@@ -1660,17 +1660,16 @@ export async function sendAssistantMessageLocal(
           providerResult: Parameters<typeof recordAssistantUsageEvent>[0]['providerResult']
           additionalUsages: Parameters<typeof recordAdditionalAssistantUsageEvents>[0]['additionalUsages']
           providerRequestOutcome?: Parameters<typeof recordAssistantUsageEvent>[0]['providerRequestOutcome']
+          primaryUsageRecordOrdinal: number
         }): Promise<void> => {
           const usageRecordStartedAt = Date.now()
-          const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
-          nextUsageRecordOrdinal += 1
           await recordAssistantUsageEvent({
             executionContext,
             ...(providerRequestStartedAtMs === null
               ? {}
               : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
-            providerRequestOrdinal: primaryUsageRecordOrdinal,
+            providerRequestOrdinal: usageInput.primaryUsageRecordOrdinal,
             ...(usageInput.providerRequestOutcome === undefined
               ? {}
               : { providerRequestOutcome: usageInput.providerRequestOutcome }),
@@ -1714,6 +1713,9 @@ export async function sendAssistantMessageLocal(
         const runCurrentProviderRequest = async (requestInput: {
           allowFailedNoReplyRecovery: boolean
         }): Promise<CurrentProviderRequestResult> => {
+          // Reserve the primary before streamed children can settle. Every
+          // request and late child in this turn shares this ordinal owner.
+          const primaryUsageRecordOrdinal = nextUsageRecordOrdinal++
           providerRequestJournal = null
           providerRequestContinuation = null
           providerRequestAcceptedInputIds = acceptedInputIdsForProviderRequest
@@ -1739,6 +1741,7 @@ export async function sendAssistantMessageLocal(
             ) => turnInputController.registerLiveProviderTurn(liveTurn),
           }
           const providerOutcome = await executeCodexTurnWithRecovery({
+            allocateUsageRecordOrdinal: () => nextUsageRecordOrdinal++,
             acceptedInputItems: providerRequestAcceptedInputItems,
             activeTurnSteering,
             analyzeVideoTurnState,
@@ -1930,6 +1933,7 @@ export async function sendAssistantMessageLocal(
               })
             }
             await recordCurrentProviderUsage({
+              primaryUsageRecordOrdinal,
               providerResult: failedProviderResult,
               additionalUsages: providerOutcome.additionalUsages,
               providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -2121,6 +2125,7 @@ export async function sendAssistantMessageLocal(
             })
           }
           await recordCurrentProviderUsage({
+            primaryUsageRecordOrdinal,
             providerResult: currentProviderResult,
             additionalUsages: currentProviderResult.additionalUsages,
           })

@@ -3626,7 +3626,11 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       (result) => ({ result, status: 'fulfilled' as const }),
       (error: unknown) => ({ error, status: 'rejected' as const }),
     )
+  const streamedUsageOrdinals: number[] = []
+  let firstRequestUsageAllocator: (() => number) | undefined
   const resetScenario = () => {
+    streamedUsageOrdinals.length = 0
+    firstRequestUsageAllocator = undefined
     resetAcceptedInputJournal()
     mocks.appendAssistantTranscriptEntries.mockClear()
     mocks.appendAssistantTranscriptEntriesWithRefs.mockClear()
@@ -3658,6 +3662,9 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
           providerAttemptId: 'attempt-0',
           codexContinuation: { kind: 'explicit-structured-history' },
         })
+        firstRequestUsageAllocator = providerInput.allocateUsageRecordOrdinal
+        // A child settles while the initial parent is still running.
+        streamedUsageOrdinals.push(firstRequestUsageAllocator?.() ?? 1)
         providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
         ready.resolve()
         return {
@@ -3770,6 +3777,10 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
           providerAttemptId: 'attempt-1',
           codexContinuation: { kind: 'explicit-structured-history' },
         })
+        // Another child from the first request can finish after reconsideration
+        // has reserved its primary usage, alongside a child of the new request.
+        streamedUsageOrdinals.push(firstRequestUsageAllocator?.() ?? 2)
+        streamedUsageOrdinals.push(providerInput.allocateUsageRecordOrdinal?.() ?? 2)
         const releaseLiveTurn = scenario.liveSteer
           ? providerInput.activeTurnSteering?.registerLiveProviderTurn({
               interrupt: async () => undefined,
@@ -3965,7 +3976,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       mocks.recordAssistantUsageEvent.mock.calls.map(
         ([usageInput]) => usageInput.providerRequestOrdinal,
       ),
-    ).toEqual([0, 3])
+    ).toEqual([0, 4])
     expect(
       mocks.recordAdditionalAssistantUsageEvents.mock.calls.map(
         ([usageInput]) =>
@@ -3973,8 +3984,20 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
             (usage) => usage.providerRequestOrdinal,
           ),
       ),
-    ).toEqual([[1, 2], [4]])
-    const canonicalUsageIds = [0, 1, 2, 3, 4].map(
+    ).toEqual([[2, 3], [7]])
+    expect(streamedUsageOrdinals).toEqual([1, 5, 6])
+    const usageOrdinals = [
+      ...mocks.recordAssistantUsageEvent.mock.calls.map(
+        ([usageInput]) => usageInput.providerRequestOrdinal ?? 0,
+      ),
+      ...mocks.recordAdditionalAssistantUsageEvents.mock.calls.flatMap(
+        ([usageInput]) => (usageInput.additionalUsages ?? []).map(
+          (usage) => usage.providerRequestOrdinal,
+        ),
+      ),
+      ...streamedUsageOrdinals,
+    ]
+    const canonicalUsageIds = usageOrdinals.map(
       (providerRequestOrdinal) => createAssistantUsageId({
         attemptCount: 1,
         providerRequestOrdinal,

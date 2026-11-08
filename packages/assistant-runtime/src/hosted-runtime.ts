@@ -693,7 +693,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   canImportForPreCheckpointSystemWork: boolean;
-  hasAssistantAskRequests: boolean;
+  hasAssistantRequests: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -781,7 +781,10 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
-    hasAssistantAskRequests: systemItems.some((item) => item.kind === "assistant.ask.requested"),
+    hasAssistantRequests: systemItems.some((item) =>
+      item.kind === "assistant.ask.requested"
+      || item.kind === "assistant.notification.requested"
+    ),
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -6192,9 +6195,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             typeof inspectHostedPreCheckpointSystemMailboxPrefetch
           >> | null = null,
         ): Promise<void> => {
-          // A mixed page can hold an expiring Ask before it reaches the decoder.
-          // Release that checkpoint gate without admitting the unsafe page.
-          if (checkpointBlockedSystemWork?.hasAssistantAskRequests) {
+          // An Ask or notification may be blocked before it reaches the decoder.
+          // Publish existing state promptly without admitting the unsafe page.
+          if (checkpointBlockedSystemWork?.hasAssistantRequests) {
             setIdleCheckpointStartBy(Date.now());
           }
           await finishHostedMailboxImportPostCheckpointEffects({

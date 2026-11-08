@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-07",
+  "order": 100,
+  "item": {
+    "id": "timely-pending-chat-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable chat updates",
+    "summary": "Pending chat updates can start sooner, and replies are less likely to stall during multi-step work.",
+    "details": "Updates keep the same destination, privacy checks, usage limits, and delivery safeguards.",
+    "relevanceTags": [
+      "messages",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4736
+    ]
+  }
+}
