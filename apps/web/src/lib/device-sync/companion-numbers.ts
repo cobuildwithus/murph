@@ -176,7 +176,8 @@ function preferRecentRhrDevice(points: NumberPoint[], freshFrom: string): Number
   if (isManualMetricSource(points.at(-1)?.source ?? null)) return points;
   const device = points.slice().reverse().find(point => {
     const provider = resolveWearableProviderDescriptor(point.source ?? "")?.provider;
-    return point.date >= freshFrom && provider && provider !== "junction" && provider !== "google-health";
+    return point.date >= freshFrom && (point.source === "Apple Watch"
+      || (provider && provider !== "junction" && provider !== "google-health"));
   });
   return device ? points.filter(point => point.source === device.source) : points;
 }

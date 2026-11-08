@@ -433,15 +433,15 @@ it.each([
 });
 
 
-it("keeps active WHOOP RHR history and source together when Apple Health reports a newer day", async () => {
+it.each(["WHOOP", "Apple Watch"])("keeps active %s RHR history and source together when Apple Health reports a newer day", async source => {
   const whoopDates = [from, addDaysToIsoDate(through, -2), addDaysToIsoDate(through, -1)];
   shards = await splitBrowserVaultReplica(fixture([
-    ...whoopDates.map(date => row("resting-heart-rate", date, 54, "bpm", { sourceLabel: "WHOOP" })),
+    ...whoopDates.map(date => row("resting-heart-rate", date, 54, "bpm", { sourceLabel: source })),
     row("resting-heart-rate", addDaysToIsoDate(through, -3), 62, "bpm", { sourceLabel: "apple-health-kit" }),
     row("resting-heart-rate", through, 63, "bpm", { sourceLabel: "apple-health-kit" }),
   ]));
   const body = await (await GET(request())).json();
-  expect(body.numbers.restingHeartRate).toMatchObject({ source: "WHOOP", stale: false,
+  expect(body.numbers.restingHeartRate).toMatchObject({ source, stale: false,
     latest: { date: whoopDates[2], value: 54 }, daily: whoopDates.map(date => ({ date, value: 54 })) });
 });
 

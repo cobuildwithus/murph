@@ -387,3 +387,13 @@ recovery on the wake date with resting HR from the night's provider when present
 (otherwise the cross-provider selection on that date), and optionally enriches absent RMSSD
 with canonical SDNN samples inside the sleep window. Night timezone precedes
 validated vault reporting timezone. `wearables day` semantics are unchanged.
+
+Apple HealthKit RHR is labeled `Apple Watch` only when the selected reading's
+preserved `source.type` is `watch`. Junction documents that its Apple HealthKit
+watch tag identifies first-party Apple Watch data; third-party apps remain
+`unknown`, and combined data is `multiple_sources`. Those records retain the
+Apple HealthKit label and cannot select a device-specific benchmark. A tagged
+Apple Watch reading also takes precedence over an unidentified store copy.
+See [Junction data attributions](https://docs.junction.com/wearables/providers/data-attributions).
+The Health SDK's daily RHR statistics can lack per-reading device identity;
+knowing that a watch is connected does not establish the source of such a value.

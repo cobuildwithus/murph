@@ -5,6 +5,7 @@ import path from 'node:path'
 import * as coreRuntime from '@murphai/core'
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import {
+  listMetricPoints,
   summarizeWearableLatestRuntime,
   summarizeWearableMetricLatestRuntime,
   summarizeWearableMetricTrendRuntime,
@@ -108,4 +109,34 @@ test('Junction activity summaries retain dedicated heart-rate and intensity quer
   } finally {
     await rm(parentRoot, { recursive: true, force: true })
   }
+})
+
+
+test('Junction Apple Health source tags reach RHR number labels without inferring a watch from merged data', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'junction-rhr-source-'))
+  const types = ['watch', 'unknown', 'multiple_sources', 'phone', 'app']
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, timezone: 'UTC' })
+    await importDeviceProviderSnapshot({
+      provider: 'junction', sourceKind: 'poll', deliveryMode: 'scheduled_reconcile', vaultRoot,
+      snapshot: {
+        importedAt: '2026-08-16T12:00:00Z',
+        summaries: { activity: [
+          ...types.map((type, index) => ({
+            id: `activity-source-${type}`, date: `2026-08-${10 + index}`,
+            heart_rate: { resting_bpm: 54 + index },
+            source: { provider: 'apple_health_kit', type },
+          })),
+          { id: 'activity-newer-merged', date: '2026-08-10', updated_at: '2026-08-16T11:00:00Z',
+            heart_rate: { resting_bpm: 65 }, source: { provider: 'apple_health_kit', type: 'multiple_sources' } },
+        ] },
+      },
+    }, { corePort: coreRuntime })
+    const points = await listMetricPoints(vaultRoot, { metricKey: 'resting-heart-rate', limit: null })
+    expect(points).toHaveLength(5)
+    const watch = points.find(point => point.effectiveDate.startsWith('2026-08-10'))
+    expect(watch?.value).toBe(54)
+    expect(watch?.provenance.sourceLabel).toBe('Apple Watch')
+    expect(points.filter(point => point !== watch).every(point => point.provenance.sourceLabel !== 'Apple Watch')).toBe(true)
+  } finally { await rm(vaultRoot, { recursive: true, force: true }) }
 })

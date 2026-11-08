@@ -8,7 +8,7 @@ import {
   resourceTypeScore,
   sourceFamilyScore,
 } from "./provider-policy.ts";
-import { normalizeWearableOriginSourceSlug, resolveWearablePublicSourceProvider } from "./origin.ts";
+import { isAppleWatchWearableSource, normalizeWearableOriginSourceSlug, resolveWearablePublicSourceProvider } from "./origin.ts";
 import {
   scoreMetricPolicy,
 } from "./metric-policies.ts";
@@ -362,8 +362,9 @@ function scoreHealthStoreFallback(
   candidate: WearableMetricCandidate | WearableSleepWindowCandidate,
   candidates: readonly (WearableMetricCandidate | WearableSleepWindowCandidate)[],
 ): number {
-  const isStore = (item: typeof candidate) => HEALTH_STORES.has(resolveWearablePublicSourceProvider(item))
-    || normalizeWearableOriginSourceSlug(item.dataOrigin?.sourceType) === "multiple-sources";
+  const isStore = (item: typeof candidate) => !isAppleWatchWearableSource(item)
+    && (HEALTH_STORES.has(resolveWearablePublicSourceProvider(item))
+      || normalizeWearableOriginSourceSlug(item.dataOrigin?.sourceType) === "multiple-sources");
   if (!isStore(candidate)) return 0;
   const hasDevice = candidates.some(other => {
     if (other.date !== candidate.date || isStore(other)) return false;

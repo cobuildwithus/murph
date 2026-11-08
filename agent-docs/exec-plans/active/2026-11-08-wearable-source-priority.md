@@ -40,3 +40,14 @@ Backend PR: https://github.com/cobuildwithus/murph/pull/4738.
 - Health-store-only days must remain available when no current wearable source exists.
 - Old projections need normal owner-led rebuilds; canonical history remains unchanged.
 - Existing steps coverage and source-specific queries must not change.
+
+## Junction attribution verification
+
+Reviewed Junction data-attribution, calculated-metric, Apple HealthKit, activity
+summary, heart-rate timeseries and device API documentation, plus the installed
+iOS SDK source. The explicit Apple HealthKit `watch` tag identifies Apple Watch;
+`unknown` and `multiple_sources` do not. The SDK's daily RHR statistics do not
+carry the originating sample identity, so connected-device presence cannot be
+used to relabel those readings. Pass an explicit watch tag into the existing RHR
+source label and keep unattributed data unranked. A composed synthetic import
+checks the documented API shape through canonical import and saved MetricPoints.

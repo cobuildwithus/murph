@@ -18,7 +18,7 @@ import {
   type WearableSummaryBundle,
 } from "../wearables.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
-import { resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
+import { isAppleWatchWearableSource, resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
 import type { WearableDataset, WearableMetricSuppressionEvidence } from "../wearables/types.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
@@ -339,9 +339,7 @@ function heartRateZoneMetricEvidence(summary: WearableActivitySummary): Wearable
         recordIds,
         sourceFamily: "derived",
         sourceKind: "activity-summary",
-        sourceLabel: publicProvider
-          ? formatProviderName(publicProvider)
-          : sourceCandidate?.title ?? "Wearable summary",
+        sourceLabel: wearableMetricSourceLabel(metricKey, publicProvider, sourceCandidate),
         unit: "minutes",
         value: zone.durationMinutes,
       },
@@ -565,9 +563,7 @@ function metricEvidence(
       recordIds,
       sourceFamily: "derived",
       sourceKind,
-      sourceLabel: publicProvider
-        ? formatProviderName(publicProvider)
-        : sourceCandidate?.title ?? "Wearable summary",
+      sourceLabel: wearableMetricSourceLabel(metricKey, publicProvider, sourceCandidate),
       unit: selection.unit ?? sourceCandidate?.unit ?? null,
       value: selection.value,
     },
@@ -577,6 +573,17 @@ function metricEvidence(
       recordIds: suppressionRecordIds,
     },
   };
+}
+
+function wearableMetricSourceLabel(
+  metricKey: string,
+  publicProvider: string | null,
+  candidate: WearableResolvedMetric["candidates"][number] | null,
+): string {
+  if (metricKey === "resting-heart-rate" && candidate && isAppleWatchWearableSource(candidate)) {
+    return "Apple Watch";
+  }
+  return publicProvider ? formatProviderName(publicProvider) : candidate?.title ?? "Wearable summary";
 }
 
 function selectWearableSourceCandidate(resolved: WearableResolvedMetric): WearableResolvedMetric["candidates"][number] | null {
