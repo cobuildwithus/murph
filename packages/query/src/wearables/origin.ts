@@ -21,6 +21,17 @@ export function resolveWearablePublicSourceProvider(input: {
   ) ?? "unknown";
 }
 
+/** Junction tags first-party Apple Watch samples as watch; third-party apps
+ * and combined summaries remain unknown or multiple_sources. */
+export function isAppleWatchWearableSource(input: {
+  dataOrigin?: DeviceDataOrigin | null;
+  externalRef?: WearableExternalRef | null;
+  provider?: string | null;
+}): boolean {
+  return resolveWearablePublicSourceProvider(input) === "apple-health-kit"
+    && normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceType) === "watch";
+}
+
 function resolveRawWearableSourceProvider(input: {
   dataOrigin?: DeviceDataOrigin | null;
   externalRef?: WearableExternalRef | null;

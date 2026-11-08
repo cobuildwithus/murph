@@ -2,7 +2,7 @@ import "server-only";
 
 import { isCloudflareHostedControlBrowserVaultReplicaNotFoundError } from "@murphai/cloudflare-hosted-control/client";
 import { addDaysToIsoDate, toLocalDayKey } from "@murphai/contracts";
-import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, selectMetricWindowComparison } from "@murphai/health-metrics";
+import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, resolveWearableProviderDescriptor, selectMetricWindowComparison } from "@murphai/health-metrics";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { getBrowserVaultMetricBucketId, type BrowserVaultMetricSeriesCapableQueryClient } from "@murphai/query/browser-replica-client";
@@ -113,6 +113,8 @@ async function loadSavedNumbers(memberId: string, signal: AbortSignal) {
   }
 }
 
+type NumberPoint = { date: string; value: number; source: string | null; observedAt: string };
+
 function presentNumber(
   client: BrowserVaultMetricSeriesCapableQueryClient,
   metric: (typeof metrics)[keyof typeof metrics],
@@ -121,7 +123,7 @@ function presentNumber(
 ) {
   const definition = resolveMetricDefinition(metric.key)!;
   const round = (value: number) => Number(value.toFixed(metric.precision));
-  const byDate = new Map<string, { date: string; value: number; source: string | null; observedAt: string }>();
+  const byDate = new Map<string, NumberPoint>();
   const rows = client.metrics.series({ metricKey: metric.key, from: window.from, to: window.through, grain: "day" });
   // Series rows end each date on its highest-priority source, so the last stands;
   // do not average multiple observations or manufacture missing dates.
@@ -131,7 +133,10 @@ function presentNumber(
     if (normalized.canonicalValue === null) continue;
     byDate.set(row.date, { date: row.date, value: normalized.canonicalValue, source: row.sourceLabel, observedAt: row.observedAt });
   }
-  const points = [...byDate.values()];
+  const savedPoints = [...byDate.values()];
+  const points = metric.key === "resting-heart-rate"
+    ? preferRecentRhrDevice(savedPoints, addDaysToIsoDate(window.through, -(definition.selectionPolicy.staleAfterDays ?? 14)))
+    : savedPoints;
   const latest = points.at(-1);
   if (!latest) return null;
   const intermittent = definition.selectionPolicy.kind === "latest-device-estimate";
@@ -163,4 +168,16 @@ function presentNumber(
         delta: round(comparison.delta),
       } : null,
   };
+}
+
+
+/** A health-store-only day must not relabel a wearable's entire average. */
+function preferRecentRhrDevice(points: NumberPoint[], freshFrom: string): NumberPoint[] {
+  if (isManualMetricSource(points.at(-1)?.source ?? null)) return points;
+  const device = points.slice().reverse().find(point => {
+    const provider = resolveWearableProviderDescriptor(point.source ?? "")?.provider;
+    return point.date >= freshFrom && (point.source === "Apple Watch"
+      || (provider && provider !== "junction" && provider !== "google-health"));
+  });
+  return device ? points.filter(point => point.source === device.source) : points;
 }

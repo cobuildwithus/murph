@@ -124,6 +124,19 @@ or biomarker alias, so it cannot silently alias or aggregate with provider HRV.
 
 Root wearable summary APIs should use the runtime projection helpers such as `summarizeWearableLatestRuntime()` and `summarizeWearableActivityRuntime()`. The lower-level read-model helpers in `src/wearables.ts` are package-internal and expect a full raw/debug read model or an intentionally full source model, not the default `readVault()` projection.
 
+### Device readings and health-store copies
+
+When a watch, ring or known wearable source supplies the same daily metric,
+its own reading takes precedence over a merged health-store copy, even if
+Apple Health or another store syncs later. Sleep-window selection follows the
+same rule after its existing main-sleep eligibility checks. Steps retain their
+separate worn-coverage rule. Days without a device reading and source-filtered
+reads retain health-store evidence. All candidates remain available for
+provenance and raw-observation suppression.
+
+Query schema 37 rebuilds prior wearable selections and MetricPoints through
+the existing projection owner; canonical records are unchanged.
+
 ### Ordinary wearable reads
 
 Day, latest, metric latest/trend, drift, activity, body and recovery runtime
@@ -374,3 +387,13 @@ recovery on the wake date with resting HR from the night's provider when present
 (otherwise the cross-provider selection on that date), and optionally enriches absent RMSSD
 with canonical SDNN samples inside the sleep window. Night timezone precedes
 validated vault reporting timezone. `wearables day` semantics are unchanged.
+
+Apple HealthKit RHR is labeled `Apple Watch` only when the selected reading's
+preserved `source.type` is `watch`. Junction documents that its Apple HealthKit
+watch tag identifies first-party Apple Watch data; third-party apps remain
+`unknown`, and combined data is `multiple_sources`. Those records retain the
+Apple HealthKit label and cannot select a device-specific benchmark. A tagged
+Apple Watch reading also takes precedence over an unidentified store copy.
+See [Junction data attributions](https://docs.junction.com/wearables/providers/data-attributions).
+The Health SDK's daily RHR statistics can lack per-reading device identity;
+knowing that a watch is connected does not establish the source of such a value.
