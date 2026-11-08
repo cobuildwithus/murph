@@ -2004,5 +2004,5 @@ owner, documented in `../packages/assistant-engine/README.md`. Red/green collisi
 proof and local verification are recorded in
 [the execution record](exec-plans/completed/2026-11-07-usage-ordinal-collision.md).
 
-The [chat reliability release plan](exec-plans/active/2026-11-07-chat-reliability-release.md)
+The [chat reliability release plan](exec-plans/completed/2026-11-07-chat-reliability-release.md)
 tracks combined verification and release of prompt checkpointing and unique foreground usage identities.
