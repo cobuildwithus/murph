@@ -1325,6 +1325,15 @@ function buildResponsesRequest(
     description: namespacedToolNames
       .filter((name) =>
         name !== "murph.automation"
+        && name !== "murph.automation_inspect"
+        && name !== "murph.assistant_configuration"
+        && name !== "murph.assistant_style"
+        && name !== "murph.personalization"
+        && name !== "murph.device"
+        && name !== "murph.labs"
+        && name !== "murph.poll"
+        && name !== "murph.create_calendar_link"
+        && name !== "murph.connected_apps_manage"
         && name !== "murph.attach_response_card"
         && name !== "murph.attach_sleep_card"
         && name !== "murph.attach_exercise_routine_card"
