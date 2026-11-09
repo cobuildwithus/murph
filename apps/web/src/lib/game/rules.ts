@@ -623,7 +623,7 @@ export function decideLeave(state: RuleState, memberId: string): "left" | "void"
 
 /** An addressed rematch seats only its addressee. */
 function assertAddressee(game: RuleGame, memberId: string): void {
-  if (game.invitees?.some(invitee => invitee.memberId !== null) && !game.invitees.some(invitee => invitee.memberId === memberId)) reject("NOT_A_PLAYER", "This rematch is for someone else.");
+  if (game.invitees?.some(invitee => invitee.memberId !== null) && !game.invitees.some(invitee => invitee.memberId === memberId)) reject("NOT_A_PLAYER", "This invite is for someone else.");
 }
 
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */

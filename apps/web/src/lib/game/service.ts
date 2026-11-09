@@ -26,6 +26,7 @@ import { readGamePushRoutes } from "./push-delivery";
 import { gameReminderReach } from "./reminders";
 import { GAME_REMINDER_OFF_CHOICE_EVENT, recordGameReminderPreferencesTx } from "./reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
+import { createHostedLinqParticipantContact } from "../hosted-onboarding/linq-participant-contact";
 import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
 import type { GameReminders } from "./contract";
@@ -45,6 +46,7 @@ import {
   type GameHomeView,
   type GameProfileView,
   type GameInvitePreview,
+  type GameInviteRecipient,
   type GameStatus,
   type GameView,
   type CreateGameView,
@@ -710,6 +712,7 @@ function parsePendingLabel(value: Prisma.JsonValue | null): PendingLabel {
 }
 
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string | { gameId: string; composer?: { murphPhoneNumber: string } }> {
+  if (command.maxPlayers === 10 && command.inviteeRecipient) reject("INVALID_REQUEST", "Group invites address each person in invitees.");
   if (command.maxPlayers === 10) return createGroupGame(context, command);
   if (command.invitees || command.groupWord || command.terms.defaultTask) reject("INVALID_REQUEST", "Group terms require maxPlayers 10.");
   const { actor } = context;
@@ -722,7 +725,8 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   if (await isGameCreationReplay(prisma, actor, gameId, chatOther ? chatPlayers : undefined)) return gameId;
   const rematch = await readGameCreationRematch(context, command, chatOther);
   if (chatOther) await maintainPair(actor, chatOther);
-  const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone);
+  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command.inviteeRecipient);
+  const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone, addressed);
   try {
     await commandTransaction(context, async (tx) => {
       const now = context.now ?? await databaseNow(tx);
@@ -745,8 +749,27 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   return gameId;
 }
 
+/**
+ * Someone you already play one-on-one, by the number or email you picked for
+ * them: the invite is theirs, on their Home, and only they can accept it. An
+ * address that isn't a member's, a member you've never played, yourself, or a
+ * blocked pair stays an open link, so an address never says whether a stranger
+ * is on Murph.
+ */
+async function knownInvitee(actor: string, recipient: GameInviteRecipient | undefined): Promise<string | null> {
+  const contact = recipient ? createHostedLinqParticipantContact(recipient) : null;
+  if (!contact) return null;
+  const prisma = getPrisma();
+  const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ ambiguityPolicy: "unresolved", handles: [contact.value], prisma });
+  const member = resolved.get(contact.value) ?? null;
+  if (!member || member === actor) return null;
+  const played = await prisma.game.findFirst({ where: gamePairWhere([actor, member]), select: { id: true } });
+  if (!played || await areGamePlayersBlocked(prisma, actor, member)) return null;
+  return member;
+}
+
 /** Prepare encrypted words and immutable row data before taking database locks. */
-async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string) {
+async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null = null) {
   const { actor } = context;
   const { gameId, inviteeLabel } = command;
   const newTerms = decideNewTerms(command.terms, {
@@ -761,7 +784,7 @@ async function prepareGameCreateData(context: CommandContext, command: Extract<G
     chatOther ? null : seal(labelTarget(actor, "name"), command.inviteeFirstName!),
     inviteeLabel?.relationship ? seal(labelTarget(actor, "relationship"), inviteeLabel.relationship) : null,
   ]);
-  const opponentMemberId = chatOther ?? rematch?.opponentMemberId ?? null;
+  const opponentMemberId = chatOther ?? rematch?.opponentMemberId ?? addressed;
   return {
     createdBy: actor, wordsOwnerMemberId: actor, id: gameId,
     chatContainerMemberId: context.chatContainerMemberId ?? (opponentMemberId ? rematch?.chatContainerMemberId ?? null : null),

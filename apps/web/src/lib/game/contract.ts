@@ -142,7 +142,18 @@ export interface CreateGameBody {
   /** The first name the challenger typed for the invitee. */
   inviteeFirstName?: string;
   inviteeLabel?: GameInviteeLabel;
+  /**
+   * One-on-one only: the number or email the challenger picked for the
+   * invitee. When it belongs to someone they already play with, the invite is
+   * addressed to that member; otherwise it's an open link, as without it.
+   */
+  inviteeRecipient?: GameInviteRecipient;
   previousGameId?: string;
+}
+
+export interface GameInviteRecipient {
+  kind: "phone" | "email";
+  value: string;
 }
 
 export interface GameInviteTargetInput {

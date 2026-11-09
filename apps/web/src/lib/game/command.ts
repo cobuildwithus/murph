@@ -9,6 +9,7 @@ import {
   GAME_WEEKDAYS,
   type GameCommand,
   type AcceptInviteBody,
+  type GameInviteRecipient,
   type GameInviteTargetInput,
   type GameChange,
   type GameInviteeLabel,
@@ -147,8 +148,14 @@ function create(input: Record<string, unknown>): Extract<GameCommand, { type: "c
     ...optional(input.groupWord, value => ({ groupWord: words(value, "groupWord") })),
     ...optional(input.invitees, value => ({ invitees: inviteTargets(value) })),
     ...optional(input.inviteeLabel, (label) => ({ inviteeLabel: inviteeLabel(record(label, "inviteeLabel")) })),
+    ...optional(input.inviteeRecipient, value => ({ inviteeRecipient: recipient(value) })),
     ...optional(input.previousGameId, (id) => ({ previousGameId: clientId(id, "previousGameId") })),
   };
+}
+
+function recipient(value: unknown): GameInviteRecipient {
+  const input = record(value, "recipient");
+  return { kind: oneOf(input.kind, "recipient.kind", ["phone", "email"] as const), value: string(input.value, "recipient.value", 320) };
 }
 
 const WORDS_MAX = 200;
@@ -256,10 +263,9 @@ function terms(input: Record<string, unknown>): GameTerms {
 function inviteTargets(value: unknown): GameInviteTarget[] {
   const targets = list(value, "invitees", 9).map(value => {
     const target = record(value, "invitees[]");
-    const recipient = record(target.recipient, "recipient");
     return {
       seat: integer(target.seat, "invitees[].seat", 1, 9),
-      recipient: { kind: oneOf(recipient.kind, "recipient.kind", ["phone", "email"] as const), value: string(recipient.value, "recipient.value", 320) },
+      recipient: recipient(target.recipient),
       firstName: words(target.firstName, "firstName"),
       ...optional(target.label, value => ({ label: inviteeLabel(record(value, "label")) })),
     };

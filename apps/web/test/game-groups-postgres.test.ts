@@ -497,6 +497,13 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await readGame(game.id, b.id, true)).not.toBeNull();
   });
 
+  it("names each group invitee in invitees, never in a one-on-one recipient", async () => {
+    const a = await person(), b = await person();
+    expect(await run(a.id, { type: "createGame", gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms,
+      invitees: [{ seat: 1, firstName: "Player", recipient: { kind: "email", value: b.email } }], inviteeRecipient: { kind: "email", value: b.email } }))
+      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
   it("rejects two different handles resolving to one person and reuses an audience through key rotation", async () => {
     const a = await person(), b = await person(), c = await person();
     const phone = "+12025550123";
