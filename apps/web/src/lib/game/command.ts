@@ -432,6 +432,7 @@ function oneOf<T extends string | number>(value: unknown, field: string, options
 export function parseGameChange(value: unknown, allowSealedWords = false): GameChange {
   const input = record(value, "change");
   if (input.kind === "start_now") return { kind: "start_now" };
+  if (input.kind === "call_off") return { kind: "call_off" };
   if (input.kind !== "edit") return reject("INVALID_REQUEST", "Choose a game change.");
   if (input.schedule === undefined && input.lengthDays === undefined && input.startsOn === undefined && input.tasks === undefined && input.stakes === undefined && !allowSealedWords) {
     return reject("INVALID_REQUEST", "Choose a task, stake, schedule, duration or start date to change.");

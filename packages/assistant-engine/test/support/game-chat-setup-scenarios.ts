@@ -14,6 +14,7 @@ export interface GameSetupScenario {
   history?: string
   speaker?: 'Sam'
   state?: 'waiting' | 'live' | 'settled' | 'invited'
+  pendingCallOff?: true
   otherLiveGame?: boolean
   create?: CreateTerms
   previousGameId?: string
@@ -62,6 +63,12 @@ export const GAME_CHAT_SETUP_SCENARIOS: GameSetupScenario[] = [
   { name: 'Play again invitee suggests changes', state: 'invited', speaker: 'Sam', message: 'Murph, for that Play again, make it 30 days instead of 7 if Ava agrees.', operation: 'propose', change: { kind: 'edit', lengthDays: 30 }, reply: [/30/i, /Ava/i, /\?/u], forbidden: /now live|has started/i },
   { name: 'other player declines whole game', message: 'No thanks, Murph. Call off this challenge.', speaker: 'Sam', state: 'waiting', operation: 'cancel_game', reply: [], quiet: true },
   { name: 'requester cancels before agreement', message: 'Changed my mind, Murph, call off the challenge.', state: 'waiting', operation: 'cancel_game', reply: [], quiet: true },
+  { name: 'live player asks to call off the whole game', state: 'live', message: 'Murph, this game is not working for us anymore. Can we call the whole thing off? Ask Sam.', operation: 'propose', change: { kind: 'call_off' },
+    reply: [/Sam/i, /\?/u], forbidden: /(?:game|it|challenge)(?: is|’s|'s) (?:now )?(?:off|over|called off|cancell?ed|ended)|I(?:’ve|'ve| have) (?:called|cancell?ed|ended)/i },
+  { name: 'other player agrees to call off and Murph stays quiet', state: 'live', pendingCallOff: true, speaker: 'Sam',
+    history: 'Ava: Murph, can we call the whole game off? Murph: Sam, Ava wants to call off the game early, with no winner and no prize. Are you okay with that?',
+    message: 'Yeah, fine by me. Call it off, Murph.', operation: 'approve', reply: [], quiet: true },
+  { name: 'venting about a hard day is not a call-off', state: 'live', message: 'Ugh, today was brutal. I am so done with walking lol.', reply: [], forbidden: /called off|cancell?ed|ended the game/i },
   { name: 'start now uses existing change', state: 'live', message: 'Murph, can we start our scheduled game now? Ask Sam.', operation: 'propose', change: { kind: 'start_now' }, reply: [/Sam/i, /now|today/i, /\?/u], forbidden: /has started|already live/i },
   { name: 'other player counters', message: 'Murph, make it 30 days instead of 7, if Ava agrees.', speaker: 'Sam', state: 'waiting', operation: 'propose', change: { kind: 'edit', lengthDays: 30 }, reply: [/30/i, /Ava/i, /\?/u], forbidden: /(?:now|already) (?:live|started)|is now 30/i },
   { name: 'requester changes duration', message: 'Murph, I want 3 days instead of 7. Ask Sam.', state: 'waiting', operation: 'propose', change: { kind: 'edit', lengthDays: 3 }, reply: [/3|three/i, /Sam/i, /\?/u] },

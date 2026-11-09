@@ -5,7 +5,7 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-o
 import { claimHostedLinqDeliveryProviderDispatchTx, markHostedLinqDeliveryAcceptedTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { getPrisma } from "@/src/lib/prisma";
-import { readGame, readGameChatState, runGameCommand } from "@/src/lib/game/service";
+import { readGame, readGameChatState, readHome, runGameCommand } from "@/src/lib/game/service";
 import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { parseStoredTerms, scorePlayer, settleDueAt, type RuleState } from "@/src/lib/game/rules";
 import type { GameCommand, GameSchedule, Weekday } from "@/src/lib/game/contract";
@@ -380,6 +380,51 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     const {b,room,gameId} = await setup();
     expect(await run(b,{type:"cancelInvite",gameId},{chatContainerMemberId:room,beforeMutationTx:fence}))
       .toMatchObject({ok:false,error:{code:"INVITE_USED",message:"This game has already started."}});
+  });
+  it("calls off a live game only when the other player agrees in chat, keeping its terms and announcing it once", async () => {
+    const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const before = await db.game.findUniqueOrThrow({where:{id:gameId}});
+    const proposalId = randomUUID(); const callOff = {kind:"call_off" as const};
+    const ask = {type:"proposeChange" as const,gameId,proposalId,expectedTermsVersion:1,change:callOff};
+    delivery.mockClear();
+    expect(await run(a,ask)).toMatchObject({ok:false,error:{code:"INVALID_REQUEST",message:"Ask to call off this game in its chat."}});
+    expect(await run(a,ask,chat)).toMatchObject({ok:true});
+    expect((await readGame(gameId,b))?.pendingChange).toMatchObject({id:proposalId,change:callOff,origin:"chat"});
+    expect(delivery).not.toHaveBeenCalled();
+    const approve = {type:"respondChange" as const,gameId,proposalId,decision:"approve" as const};
+    expect(await run(b,approve)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
+    expect(await run(a,approve,chat)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
+    // The deciding yes and its retry apply once.
+    for (let i=0;i<2;i++) expect(await run(b,approve,chat)).toMatchObject({ok:true});
+    const after = await db.game.findUniqueOrThrow({where:{id:gameId}});
+    expect(after).toMatchObject({status:"void",pendingChange:null,result:null,settledAt:null,
+      terms:before.terms,termsWordsEncrypted:before.termsWordsEncrypted,lengthDays:before.lengthDays,startsOn:before.startsOn});
+    expect(await db.gameEvent.findMany({where:{gameId,type:{in:["change_applied","cancelled"]}},orderBy:{id:"asc"},select:{type:true,actor:true,payload:true}})).toEqual([
+      {type:"change_applied",actor:b,payload:{v:1,proposalId,changeKind:"call_off"}},
+      {type:"cancelled",actor:b,payload:{v:1,calledOff:true,proposalId}},
+    ]);
+    expect(await db.gameTicket.count({where:{gameId}})).toBe(0);
+    expect(await db.hostedLinqDelivery.findMany({where:{sourceRef:gameId,template:{in:["game_cancelled","game_recap"]}},select:{template:true,status:true}}))
+      .toEqual([{template:"game_cancelled",status:"awaiting_generation"}]);
+    for (const player of [a,b]) expect((await readHome(player)).games.some((game) => game.id === gameId)).toBe(false);
+    expect(await run(a,{...ask,proposalId:randomUUID()},chat)).toMatchObject({ok:false});
+  });
+  it("asks again for a call-off the other player declined, and refuses one before the game is live", async () => {
+    const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const callOff = {kind:"call_off" as const}; const asked = randomUUID();
+    await run(a,{type:"proposeChange",gameId,proposalId:asked,expectedTermsVersion:1,change:callOff},chat);
+    expect(await run(b,{type:"respondChange",gameId,proposalId:asked,decision:"decline"},chat)).toMatchObject({ok:true});
+    expect((await db.gameEvent.findFirstOrThrow({where:{gameId,type:"change_declined"}})).payload).toEqual({v:1,proposalId:asked});
+    // Coming round later is a new ask: the first asker must say yes again.
+    const again = randomUUID();
+    expect(await run(b,{type:"proposeChange",gameId,proposalId:again,expectedTermsVersion:1,change:callOff},chat)).toMatchObject({ok:true});
+    expect(await readGame(gameId,a)).toMatchObject({status:"live",pendingChange:{id:again,proposedByMemberId:b}});
+    expect(await run(a,{type:"respondChange",gameId,proposalId:again,decision:"approve"},chat)).toMatchObject({ok:true});
+    expect((await readGame(gameId,a))?.status).toBe("void");
+    const negotiating = await setup();
+    await db.game.update({where:{id:negotiating.gameId},data:{status:"negotiating"}});
+    expect(await run(negotiating.a,{type:"proposeChange",gameId:negotiating.gameId,proposalId:randomUUID(),expectedTermsVersion:1,change:callOff},
+      {chatContainerMemberId:negotiating.room,beforeMutationTx:fence})).toMatchObject({ok:false,error:{code:"GAME_NOT_LIVE"}});
   });
   it("clears a proposal on a terms-version move", async () => {
     const {a,gameId} = await setup(); const proposalId = randomUUID(); const db=getPrisma();

@@ -240,9 +240,10 @@ export interface ReportGameBody {
 // fail with PLAYER_UNAVAILABLE. DELETE /blocks/:memberId unblocks; games that
 // ended stay ended. No bodies.
 
-/** Proposed in the app; the other player agrees in the game's shared chat. */
+/** Proposed in the app; the other player agrees in the game's shared chat. Call off is chat-only and needs every remaining player. */
 export type GameChange =
   | { kind: "start_now" }
+  | { kind: "call_off" }
   | { kind: "edit"; schedule?: GameSchedule; lengthDays?: number; startsOn?: string | null;
       tasks?: GameTask[]; defaultTask?: string; stakes?: GameStake[]; stakesApplyToWholeGame?: true };
 

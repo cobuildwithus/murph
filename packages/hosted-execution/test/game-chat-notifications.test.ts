@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, gameZoneSpreadHours, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameKickoffInstructions, gameZoneSpreadHours, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
   it("relays the note as user data without inventing terms or acceptance", () => {
@@ -283,6 +283,10 @@ it("keeps group cancellation truthful for invited or live challenges without cha
   expect(group).toContain("earlier group challenge was called off");
   expect(group).not.toMatch(/both players|from the app|before it started|live game was stopped/u);
   expect(buildGameInviteCancelledInstructions()).toContain("from the app before it started");
+  const calledOff = buildGameCalledOffInstructions();
+  expect(calledOff).toContain("Everyone still playing agreed to call off this game early");
+  expect(calledOff).toContain("no winner and no prize or dare owed");
+  expect(calledOff).not.toMatch(/invite|before it started|both players|challenge/iu);
 });
 
 it.each([null, true, false])("uses compact group rematch facts and individual consent (%s)", sameGame => {

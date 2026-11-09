@@ -85,11 +85,12 @@ function parseChangeVotes(value: unknown): Record<string, "yes" | "no"> {
   }));
 }
 
-/** Only remaining seated players count; a late join adds an undecided voter. */
-export function gameChangeMajority(state: RuleState, votes: Record<string, "yes" | "no">) {
+/** Only remaining seated players count; a late join adds an undecided voter. Calling off needs all of them, so one no closes it. */
+export function gameChangeMajority(state: RuleState, votes: Record<string, "yes" | "no">, change?: GameChange) {
   const players = remainingPlayers(state);
   const yes = players.filter(player => votes[player.memberId] === "yes").length;
   const undecided = players.filter(player => votes[player.memberId] === undefined).length;
+  if (change?.kind === "call_off") return { approved: yes === players.length, declined: yes + undecided < players.length, yesNeeded: players.length - yes };
   return { approved: yes * 2 > players.length, declined: (yes + undecided) * 2 <= players.length,
     yesNeeded: Math.max(0, Math.floor(players.length / 2) + 1 - yes) };
 }
@@ -170,6 +171,7 @@ export function decideGameChange(state: RuleState, actor: string, change: GameCh
 /** `agreedStart` is an approved proposal's stored date, whose bounds the approval check already owns. */
 function decideChange(state: RuleState, actor: string, change: GameChange, now: Date, sealedWords?: SealedWordChanges, agreedStart?: string): GameChangeDecision {
   if (!remainingPlayers(state).some(player => player.memberId === actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
+  if (change.kind === "call_off") return decideCallOff(state, change, now);
   const controls = gameChangeControls(state, now, null);
   if (!controls.canEdit) reject("GAME_NOT_LIVE", "This game is no longer open for changes.");
   const effectiveFromDay = changeFromDay(state, change, now, controls.canEditStartDate);
@@ -189,6 +191,12 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
   assertScheduledDayLeft(state, effectiveFromDay, lengthDays, schedule);
   const startsOn = changedStartDate(state, change, now, controls.canEditStartDate, agreedStart);
   return { change: { ...change, ...(change.schedule ? { schedule } : {}) }, effectiveFromDay, startsOn: startsOn && firstScheduledDate(startsOn, schedule) };
+}
+
+/** A live game can be called off until it is due, even after the last day is too late to edit. */
+function decideCallOff(state: RuleState, change: GameChange, now: Date): GameChangeDecision {
+  if (state.game.status !== "live" || !canRequestGameChange(state) || isGameDue(state, now)) reject("GAME_NOT_LIVE", "Only a live game that hasn't ended can be called off. A game that hasn't started is cancelled instead.");
+  return { change, effectiveFromDay: Math.min(firstUnstartedGameDay(state, now), state.game.lengthDays), startsOn: null };
 }
 
 function decideEarlierStartChange(state: RuleState, change: GameChange, now: Date, controls: GameChangeControls, effectiveFromDay: number): GameChangeDecision {
@@ -213,7 +221,7 @@ export function gameChangeCancellationNeedsNotice(pending: Pick<GamePendingChang
 
 /** Rejudge the proposal under the acceptance clock, retaining its requested date. */
 export function decideApprovedGameChange(state: RuleState, actor: string, pending: StoredGamePendingChange, now: Date): GameChangeDecision {
-  const fixedStart = pending.change.kind === "start_now" || typeof pending.change.startsOn === "string";
+  const fixedStart = pending.change.kind === "start_now" || pending.change.kind === "edit" && typeof pending.change.startsOn === "string";
   if (fixedStart && pending.startsOn !== null && calendarPlayers(state).some((player) => gameLocalDate(now, player.timeZone) > pending.startsOn!)) {
     reject("CHANGE_EXPIRED", "The proposed start date has passed. Propose a new date.");
   }
@@ -253,7 +261,7 @@ export function pendingGameChangeView(state: RuleState, pending: GamePendingChan
   const change = pending.change;
   const seatedChange = change.kind === "edit" && change.tasks ? { ...change,
     tasks: [...players].sort((a, b) => a.seat - b.seat).map(player => ({ seat: player.seat, text: change.tasks!.find(task => task.seat === player.seat)?.text ?? change.defaultTask! })) } : change;
-  return { ...view, change: seatedChange, votes, yesNeeded: gameChangeMajority(state, Object.fromEntries(votes.map(({ memberId, vote }) => [memberId, vote]))).yesNeeded };
+  return { ...view, change: seatedChange, votes, yesNeeded: gameChangeMajority(state, Object.fromEntries(votes.map(({ memberId, vote }) => [memberId, vote])), change).yesNeeded };
 }
 
 /** Before play, Day 1 moves to a scheduled day; once play starts, the rest of the game must keep one. */

@@ -94,7 +94,8 @@ Day 1 for everyone; stale joins must read the new terms before accepting.
 App and chat reads expose remaining seated votes and yeses still needed.
 Unjoined invitees retain invitations and cannot vote; stale acceptance must
 refresh the terms version. Controls are closed for invitees and leavers.
-Cancelling the game stays starter-only until the first check-in, while not due.
+Cancelling the game stays starter-only until the first check-in, while not due;
+after that, only a unanimous call-off (below) ends a live group early.
 Posted history retained after account deletion still locks cancellation. Excuses
 alone keep their existing behavior: they block cancellation while present, and
 removing the last excuser's account permits cancellation when no posted history remains.
@@ -1097,9 +1098,25 @@ and neither does a change cancellation or refused approval made from the bound
 chat, where Murph's reply is the one explanation. In chat, either player can
 cancel a negotiating game; the lifecycle cancellation notice is then the one
 announcement (Murph does not also reply), because that reserved notice is what
-keeps a game-funded room deliverable once the game is void. A live game cannot
-be called off, so Murph
-says it settles on schedule and offers shortening, rescheduling, a new prize or
+keeps a game-funded room deliverable once the game is void.
+
+A live game, pair or group, can be called off until it is due, but only when
+every remaining seated player agrees. It is a chat-only change ask,
+`change: { kind: "call_off" }`, made on an explicit request to end the whole
+game. The asker counts as yes; a pair needs the other player's yes and a group
+needs everyone left, so one no closes the ask. App proposals and app votes for
+it are refused, and a declined call-off is never kept as a standing offer: the
+decliner coming round later makes a new ask. It is judged against the due rule
+only, so it stays available after the last day becomes too late to edit. The
+deciding yes writes no new terms version; it records the applied resolution,
+voids the game (no winner, tickets or recap), records one `cancelled` event with
+`calledOff: true`, and reserves the same single cancellation notice, written as
+an agreed call-off. Murph stays quiet after that yes. Home hides it like any
+cancelled game. A retried deciding pair approval still reaches its recorded
+outcome after the void. While it waits, older apps show it as a generic change.
+Terms reports skip the applied call-off when naming the latest terms author.
+
+Short of that, Murph offers shortening, rescheduling, a new prize or
 dare, or marking days incomplete. A request to change tasks once Day 1 has begun
 gets one answer: they stay for this game, and Murph names what can still change. Chat refusals carry the server's plain rule (for example the 60-day
 start limit) so Murph can give the reason and the nearest valid option.

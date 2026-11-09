@@ -48979,7 +48979,7 @@ describeRealCodex('real Codex game chat setup', () => {
       lengthDays: 7, startsOn: scenario.change?.kind === 'start_now' ? '2030-03-07' : null,
       terms: { schedule: SETUP_TERMS.schedule, stakes: SETUP_TERMS.stakes, n: 1, fromDay: 0, tasks: SETUP_TERMS.tasks.map((task, seat) => ({ seat, text: task.text })) },
       players: SETUP_PLAYERS.slice(0, scenario.state === 'invited' ? 1 : 2).map((player, seat) => ({ ...player, seat, dayOne: ['waiting', 'invited'].includes(scenario.state ?? '') ? null : scenario.change?.kind === 'start_now' ? '2030-03-07' : '2030-03-04' })),
-      pendingChange: null, changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
+      pendingChange: scenario.pendingCallOff ? { id: 'proposal_call_off', proposedByMemberId: 'player_ava', expectedTermsVersion: 1, change: { kind: 'call_off' }, effectiveFromDay: 2, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } : null, changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
     }
     const existingGames: SharedGame[] = scenario.state ? [game] : []
     if (scenario.otherLiveGame) existingGames.push({ ...game, id: 'game_other_existing', terms: { ...game.terms, tasks: [{ seat: 0, text: 'Stretch' }, { seat: 1, text: 'Drink water' }] } })
@@ -49014,7 +49014,7 @@ describeRealCodex('real Codex game chat setup', () => {
                 games = [...games, { ...game, id: update.gameId, status: 'negotiating', lengthDays: update.terms.lengthDays ?? 7, startsOn: update.terms.startsOn ?? null,
                   terms: { schedule: update.terms.schedule, stakes: update.terms.stakes, n: 1, fromDay: 0, tasks: players.map((p, seat) => ({ seat, text: update.terms.tasks.find(t => t.memberId === p.memberId)!.text })) },
                   players: players.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: null }]
-              } else if (update.operation === 'approve') games = [{ ...game, status: 'live', players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: '2030-03-06' })), pendingChange: null }]
+              } else if (update.operation === 'approve') games = [scenario.pendingCallOff ? { ...game, status: 'void', pendingChange: null } : { ...game, status: 'live', players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: '2030-03-06' })), pendingChange: null }]
               else if (update.operation === 'cancel_game') games = [{ ...game, status: 'void', pendingChange: null }]
               else if (update.operation === 'propose') games = [{ ...game, status: game.status === 'invited' ? 'negotiating' : game.status, players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: { id: update.proposalId, proposedByMemberId: scenario.speaker === 'Sam' ? 'player_sam' : 'player_ava', expectedTermsVersion: 1, change: update.change, effectiveFromDay: 0, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } }]
               else throw new Error('Unexpected game operation')
@@ -49077,7 +49077,7 @@ describeRealCodex('real Codex game chat setup', () => {
           })
           expect(normalize(update.terms)).toEqual(normalize(scenario.create))
           expect(update.previousGameId).toBe(scenario.previousGameId)
-        } else if (scenario.operation === 'approve') expect(update).toEqual({ operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
+        } else if (scenario.operation === 'approve') expect(update).toEqual(scenario.pendingCallOff ? { operation: 'approve', gameId: game.id, proposalId: 'proposal_call_off' } : { operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
         else if (scenario.operation === 'cancel_game') expect(update).toEqual({ operation: 'cancel_game', gameId: game.id })
         else expect(update).toEqual({ operation: 'propose', gameId: game.id, proposalId: expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/u), expectedTermsVersion: 1, change: scenario.change })
       }

@@ -6,7 +6,7 @@ import { isPairRoster, isGameMemberSet } from "./roster";
 import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
 import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
-import { parseGameRecapEventId, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { openGameTexts } from "./crypto";
 import { readCurrentGameTalk, readGameTalkReceiptIdentity, prepareGameTalkAudience, type GameNoticeAudience } from "./talk";
@@ -688,7 +688,7 @@ async function deliverCurrentGameChatLifecycle(input: {
 
 /** Read shared context only for notices that actually describe game terms. */
 async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMemberId" | "maxPlayers">, kind: GameChatLifecycleKind, players: readonly string[], proposalId?: string): Promise<string | { instructions: string; termsVersion: number } | null> {
-  if (kind === "cancelled") return buildGameInviteCancelledInstructions(game.maxPlayers === 10);
+  if (kind === "cancelled") return await wasCalledOff(game.id) ? buildGameCalledOffInstructions() : buildGameInviteCancelledInstructions(game.maxPlayers === 10);
   const { readGameNoticeRoom } = await import("./service");
   const noticeRoom = () => game.maxPlayers === 10
     ? readGameNoticeRoom(game.id, players, game.chatContainerMemberId ?? "") : readGameNoticeRoom(game.id, players);
@@ -716,6 +716,11 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
   if (!shared || !lifecycleStatuses(kind).includes(shared.status)) return null;
   const room = await noticeRoom();
   return kind === "started" ? buildGameKickoffInstructions({ kind, game: shared, room }) : buildGameChangeCancelledInstructions(room);
+}
+
+async function wasCalledOff(gameId: string): Promise<boolean> {
+  const event = await getPrisma().gameEvent.findFirst({ where: { gameId, type: "cancelled" }, select: { payload: true } });
+  return isRecord(event?.payload) && event.payload.calledOff === true;
 }
 
 async function resolutionInstructions(game: Pick<Game, "id" | "maxPlayers">, kind: GameChatLifecycleKind, proposalId: string | undefined, room: Awaited<ReturnType<typeof import("./service").readGameNoticeRoom>>): Promise<string | null> {

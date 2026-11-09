@@ -487,8 +487,23 @@ it('cancels a not-yet-started game for the current speaker with no proposal or e
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'cancel_game', gameId: 'game_synthetic' } })
   expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-game-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('cancel_game')
-  expect(GAME_PAIR_CHAT_GUIDANCE).toContain('A live pair game cannot be called off: it settles on schedule')
   expect(GAME_SHARED_SETUP_GUIDANCE).toContain('cancel_game stays quiet: the lifecycle owns its one announcement')
+})
+
+it('calls off a live game only as an ask every remaining player agrees to, then stays quiet', async () => {
+  const callOff = { messageRef: inputId, operation: 'propose', gameId: 'game_synthetic', proposalId: 'proposal_synthetic', expectedTermsVersion: 3, change: { kind: 'call_off' } }
+  port.mockClear()
+  expect((await execute(callOff)).rpcResult.success).toBe(true)
+  expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'propose', gameId: 'game_synthetic', proposalId: 'proposal_synthetic', expectedTermsVersion: 3, change: { kind: 'call_off' } } })
+  expect(parse('update_game', { ...callOff, change: { kind: 'call_off', lengthDays: 5 } })?.kind).toBe('invalid-game-arguments')
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties.kind.enum).toEqual(['start_now', 'edit', 'call_off'])
+  expect(GAME_PAIR_CHAT_GUIDANCE).not.toContain('cannot be called off')
+  for (const guidance of [GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE]) {
+    expect(guidance).toContain('only by call_off: on an explicit request to stop the whole game, never from a joke, a missed day or venting')
+    expect(guidance).toContain('After the yes that ends it, stay quiet: the lifecycle owns its one announcement.')
+  }
+  expect(GAME_PAIR_CHAT_GUIDANCE).toContain('The other player’s yes ends it with no winner and nothing owed')
+  expect(GAME_GROUP_MODE_GUIDANCE).toContain('Every remaining player must say yes, so yesNeeded counts everyone left; one no closes the ask.')
 })
 
 it('teaches one pending change, current-ask-only proposals, plain refusals and open days', () => {
