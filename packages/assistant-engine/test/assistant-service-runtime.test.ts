@@ -4825,7 +4825,7 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.provider).toBe("codex-cli");
   });
 
-  it("keeps automation target overrides out of durable session targets", async () => {
+  it("keeps automation target overrides out of durable session targets and keeps the durable thread", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T16:05:00.000Z"));
     runtimeState.sessions.save.mockImplementation(
@@ -4874,8 +4874,8 @@ describe("assistant turn finalizer seam", () => {
 
     expect(saved.target).toEqual(session.target);
     expect(saved.providerOptions).toEqual(session.providerOptions);
-    expect(saved.resumeState).toBeNull();
-    expect(saved.codexResume).toBeNull();
+    expect(saved.resumeState).toEqual(session.resumeState);
+    expect(saved.codexResume).toEqual(session.codexResume);
   });
 });
 

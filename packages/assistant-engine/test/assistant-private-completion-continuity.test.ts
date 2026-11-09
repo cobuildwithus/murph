@@ -284,8 +284,8 @@ describe('private completion continuity', () => {
       fixture.vaultRoot,
       fixture.ordinarySession.sessionId,
     )).resolves.toMatchObject({
-      codexResume: null,
-      resumeState: null,
+      codexResume: fixture.nativeResume,
+      resumeState: fixture.nativeResume,
       turnCount: 1,
     })
     await expect(listAssistantTranscriptEntries(
@@ -299,7 +299,7 @@ describe('private completion continuity', () => {
     ])
   })
 
-  it('imports a canonically sent completion exactly once and clears native resume', async () => {
+  it('imports a canonically sent completion exactly once and preserves native resume', async () => {
     const fixture = await createContinuityFixture('private-continuity-delivered-')
     const delivered = await createDeliveredPrivateCompletion({
       continuitySessionId: fixture.ordinarySession.sessionId,
@@ -322,8 +322,8 @@ describe('private completion continuity', () => {
       fixture.ordinarySession.sessionId,
     )
     expect(session).toMatchObject({
-      codexResume: null,
-      resumeState: null,
+      codexResume: fixture.nativeResume,
+      resumeState: fixture.nativeResume,
       turnCount: 1,
     })
     await expect(listAssistantTranscriptEntries(
@@ -519,8 +519,8 @@ describe('private completion continuity', () => {
     })
 
     expect(attended.session).toMatchObject({
-      codexResume: null,
-      resumeState: null,
+      codexResume: fixture.nativeResume,
+      resumeState: fixture.nativeResume,
       sessionId: fixture.ordinarySession.sessionId,
       turnCount: 1,
     })
@@ -616,8 +616,8 @@ describe('private completion continuity', () => {
     })
 
     expect(scheduled.session).toMatchObject({
-      codexResume: null,
-      resumeState: null,
+      codexResume: fixture.nativeResume,
+      resumeState: fixture.nativeResume,
       sessionId: fixture.ordinarySession.sessionId,
       turnCount: 1,
     })
@@ -1268,6 +1268,7 @@ async function createBoundContinuityFixture(
     routeFingerprint: 'b'.repeat(64),
     threadCompatibilityFingerprint: 'c'.repeat(64),
     threadId: 'thread_private_continuity',
+    transcriptSeenThrough: 'start',
   }
   const ordinarySession = await saveAssistantSession(vaultRoot, {
     ...ordinary.session,

@@ -1,9 +1,10 @@
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHash } from 'node:crypto'
+import { mkdtempSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
@@ -25,6 +26,10 @@ import {
 } from '@murphai/hosted-execution/assistant-identifiers'
 import { GAME_LIVE_LORE_GUIDANCE } from '@murphai/hosted-execution/runtime-control'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  buildCodexResumeState,
+  type TranscriptSeenThrough,
+} from '@murphai/operator-config/assistant/codex-resume-state'
 import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
@@ -173,6 +178,7 @@ import {
   replaceTranscriptEntries,
 } from '../src/assistant/store/persistence.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
+import { resolveAssistantTranscriptPath } from '../src/assistant/store/persistence.js'
 import {
   applyAssistantSessionCodexResumeStateAction,
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
@@ -220,6 +226,9 @@ const priorFactoredAutomationSchema = {
   ],
 }
 
+const defaultPlanningVault = mkdtempSync(path.join(os.tmpdir(), 'assistant-planning-default-'))
+afterAll(async () => { await rm(defaultPlanningVault, { recursive: true, force: true }) })
+
 afterEach(() => {
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
@@ -250,6 +259,7 @@ describe('assistant Codex turn planning', () => {
       assistantContractFingerprint: baseline.assistantContractFingerprint,
       routeFingerprint: planInput.route.routeFingerprint ?? planInput.route.routeId,
       threadId: 'synthetic-resume-thread',
+      transcriptSeenThrough: baseline.transcriptBoundary,
     }
     for (const reason of [null, 'route_mismatch', 'contract_mismatch', 'profile_isolated', 'native_resume_disabled'] as const) {
       planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: reason !== 'native_resume_disabled' })
@@ -2405,7 +2415,7 @@ describe('assistant Codex turn planning', () => {
     ).toHaveBeenCalledTimes(1)
     expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
     expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledWith({
-      vaultRoot: '/vault',
+      vaultRoot: defaultPlanningVault,
     })
 
   })
@@ -2539,8 +2549,9 @@ describe('assistant Codex turn planning', () => {
         foregroundPlan.dynamicTools.find((tool) => tool.name === 'group_chat'),
       ).toMatchObject({ deferLoading: true })
 
-      const foregroundSession = await applyAssistantSessionCodexResumeStateAction({
+      const foregroundSession = await persistCompletedTurnBinding({
         action: 'persist-from-provider-turn',
+        transcriptBoundary: foregroundPlan.transcriptBoundary,
         assistantContractFingerprint:
           foregroundPlan.assistantContractFingerprint,
         codexRolloutRelativePath: null,
@@ -2635,8 +2646,9 @@ describe('assistant Codex turn planning', () => {
       expect(completionPlan.conversationHistoryMessages).toBeUndefined()
 
       const completionSession =
-        await applyAssistantSessionCodexResumeStateAction({
+        await persistCompletedTurnBinding({
           action: 'persist-from-provider-turn',
+          transcriptBoundary: completionPlan.transcriptBoundary,
           assistantContractFingerprint:
             completionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
@@ -2900,6 +2912,7 @@ describe('assistant Codex turn planning', () => {
             resumeState: {
               assistantContractFingerprint:
                 firstPostDeployPlan.assistantContractFingerprint,
+              transcriptSeenThrough: firstPostDeployPlan.transcriptBoundary,
               routeFingerprint: route.routeFingerprint ?? route.routeId,
               threadId: replacementThreadId,
             },
@@ -5943,8 +5956,9 @@ describe('assistant Codex turn planning', () => {
       }
 
       const transitionedSession =
-        await applyAssistantSessionCodexResumeStateAction({
+        await persistCompletedTurnBinding({
           action: 'persist-from-provider-turn',
+          transcriptBoundary: transitionPlan.transcriptBoundary,
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
@@ -5959,6 +5973,160 @@ describe('assistant Codex turn planning', () => {
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('shows a resumed thread the message an isolated notification sent after it', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-isolated-notification-gap-',
+    ))
+    const route = createRoute()
+    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const offer = 'Hey, you and Sam are on for 100 pushups a day. Want me to help you keep it going?'
+    const buildPlan = async (session: AssistantSession, prompt: string) =>
+      await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), prompt, vault },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      const baseSession = createSession({ turnCount: 1 })
+      await appendAssistantTranscriptEntries(vault, baseSession.sessionId, [
+        {
+          contentReceivedAt: '2026-08-21T14:44:00.000Z',
+          createdAt: '2026-08-21T14:44:00.000Z',
+          kind: 'user',
+          text: 'I take two fish oil capsules a day.',
+        },
+        {
+          createdAt: '2026-08-21T14:44:10.000Z',
+          kind: 'assistant',
+          text: 'Got it, two capsules a day.',
+        },
+      ])
+      const firstPlan = await buildPlan(baseSession, 'I take two fish oil capsules a day.')
+      const boundSession = await persistCompletedTurnBinding({
+        action: 'persist-from-provider-turn',
+        transcriptBoundary: firstPlan.transcriptBoundary,
+        assistantContractFingerprint: firstPlan.assistantContractFingerprint,
+        codexRolloutRelativePath: null,
+        codexThreadId: 'thread-ordinary-replies',
+        routeFingerprint,
+        session: baseSession,
+        vault,
+      })
+      await appendAssistantTranscriptEntries(vault, baseSession.sessionId, [
+        // An isolated notification turn writes this and keeps the binding.
+        {
+          createdAt: '2026-08-21T17:24:40.000Z',
+          kind: 'assistant',
+          standaloneAssistantContext: true,
+          text: offer,
+        },
+        {
+          createdAt: '2026-08-21T17:25:00.000Z',
+          kind: 'user',
+          text: 'I can start tomorrow.',
+        },
+      ])
+
+      const replyPlan = await buildPlan(boundSession, 'Sure')
+
+      expect(replyPlan.resume?.codexThreadId).toBe('thread-ordinary-replies')
+      expect(JSON.stringify(replyPlan)).toContain(offer)
+      expect(replyPlan.conversationHistoryMessages?.[0]).toEqual({
+        role: 'assistant', content: offer,
+      })
+      expect(replyPlan.conversationHistoryMessages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'assistant', content: offer }),
+        expect.objectContaining({ role: 'user', content: 'I can start tomorrow.' }),
+      ]))
+
+      const backdated = 'Imported reply from another channel.'
+      await appendAssistantTranscriptEntries(vault, baseSession.sessionId, [{
+        createdAt: '2026-08-20T09:00:00.000Z',
+        kind: 'assistant',
+        text: backdated,
+      }, {
+        createdAt: '2026-08-21T18:00:00.000Z',
+        kind: 'assistant',
+        sourceOutboxIntentId: `outbox_${'a'.repeat(32)}`,
+        standaloneAssistantContext: true,
+        text: 'Private completion returned.',
+      }, {
+        createdAt: '2026-08-21T18:01:00.000Z',
+        kind: 'assistant',
+        text: 'Override turn replied.',
+      }])
+      const backdatedPlan = await buildPlan(boundSession, 'Continue')
+      expect(JSON.stringify(backdatedPlan.conversationHistoryMessages)).toContain(backdated)
+      expect(JSON.stringify(backdatedPlan.conversationHistoryMessages)).toContain('Private completion returned.')
+      expect(JSON.stringify(backdatedPlan.conversationHistoryMessages)).toContain('Override turn replied.')
+
+      const atTail = await persistCompletedTurnBinding({
+        action: 'persist-from-provider-turn',
+        assistantContractFingerprint: firstPlan.assistantContractFingerprint,
+        codexRolloutRelativePath: null,
+        codexThreadId: 'thread-ordinary-replies',
+        routeFingerprint,
+        transcriptBoundary: backdatedPlan.transcriptBoundary,
+        session: boundSession,
+        vault,
+      })
+      const emptySlice = await buildPlan(atTail, 'Continue')
+      expect(emptySlice.resume?.codexThreadId).toBe('thread-ordinary-replies')
+      expect(emptySlice.conversationHistoryMessages).toBeUndefined()
+
+      const legacy = createSession({ legacyResumeState: true, resumeState: {
+        assistantContractFingerprint: firstPlan.assistantContractFingerprint,
+        routeFingerprint,
+        threadId: 'thread-ordinary-replies',
+      } })
+      expect((await buildPlan(legacy, 'Continue')).planningDiagnostics.threadRotationReason)
+        .toBe('transcript_bookmark_missing')
+      const missing = createSession({ resumeState: {
+        assistantContractFingerprint: firstPlan.assistantContractFingerprint,
+        routeFingerprint,
+        threadId: 'thread-ordinary-replies',
+        transcriptSeenThrough: {
+          createdAt: '2026-08-21T00:00:00.000Z',
+          kind: 'assistant',
+          textSha256: '0'.repeat(64),
+        },
+      } })
+      expect((await buildPlan(missing, 'Continue')).planningDiagnostics.threadRotationReason)
+        .toBe('transcript_bookmark_missing')
+
+      // An unreadable transcript is not an empty one, so it gives no boundary.
+      const transcriptPath = resolveAssistantTranscriptPath(
+        resolveAssistantStatePaths(vault),
+        atTail.sessionId,
+      )
+      await rm(transcriptPath, { force: true })
+      await mkdir(transcriptPath, { recursive: true })
+      expect((await buildPlan(atTail, 'Continue')).transcriptBoundary).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -6063,8 +6231,9 @@ describe('assistant Codex turn planning', () => {
       ])
 
       const transitionedSession =
-        await applyAssistantSessionCodexResumeStateAction({
+        await persistCompletedTurnBinding({
           action: 'persist-from-provider-turn',
+          transcriptBoundary: transitionPlan.transcriptBoundary,
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
@@ -6710,7 +6879,7 @@ describe('assistant Codex turn planning', () => {
           sessionId: session.sessionId,
           vault,
         })
-      expect(reconciledSession.resumeState).toBeNull()
+      expect(reconciledSession.resumeState).toEqual(session.resumeState)
       await expect(listAssistantTranscriptEntries(
         vault,
         session.sessionId,
@@ -6880,7 +7049,7 @@ describe('assistant Codex turn planning', () => {
         turnId: 'turn-custom-reminder-model',
       })
 
-      expect(saved.resumeState).toBeNull()
+      expect(saved.resumeState).toEqual(session.resumeState)
       await expect(listAssistantTranscriptEntries(
         vault,
         session.sessionId,
@@ -7755,7 +7924,10 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'Earlier protocol context.', role: 'user' },
+        { content: 'Got it.', role: 'assistant' },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -7904,7 +8076,10 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'Prior sensitive context.', role: 'user' },
+        { content: 'Prior assistant context.', role: 'assistant' },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -8267,7 +8442,7 @@ function createMessageInput(): AssistantMessageInput {
     sessionId: 'session-test',
     threadId: 'thread-test',
     threadIsDirect: true,
-    vault: '/vault',
+    vault: defaultPlanningVault,
     workingDirectory: '/work',
   }
 }
@@ -8479,6 +8654,7 @@ function createUnreachableInboxServices(): InboxServices {
 }
 
 function createSession(input?: {
+  legacyResumeState?: boolean
   resumeState?: AssistantSession['resumeState']
   turnCount?: number
 }): AssistantSession {
@@ -8487,6 +8663,9 @@ function createSession(input?: {
     throw new Error('Expected a default assistant model target.')
   }
 
+  const resumeState = input?.resumeState && !input.legacyResumeState
+    ? { transcriptSeenThrough: 'start' as const, ...input.resumeState }
+    : input?.resumeState ?? null
   return {
     alias: null,
     binding: {
@@ -8506,10 +8685,10 @@ function createSession(input?: {
         provider: 'codex-cli',
       }),
     ),
-    codexResume: input?.resumeState ?? null,
+    codexResume: resumeState,
     codexTarget: target,
     conversationId: 'session-test',
-    resumeState: input?.resumeState ?? null,
+    resumeState,
     schema: 'murph.assistant-conversation.v2',
     sessionId: 'session-test',
     target,
@@ -8557,4 +8736,28 @@ function createPrivateSharedPlan(
   overrides: Partial<AssistantTurnSharedPlan> = {},
 ): AssistantTurnSharedPlan {
   return createSharedPlan(overrides)
+}
+
+// Models the binding a completed provider turn saves: its thread, bookmarked at
+// that turn's planning boundary. Failed-turn saves never advance a bookmark.
+async function persistCompletedTurnBinding(input: {
+  action: 'persist-from-provider-turn'
+  assistantContractFingerprint: string
+  codexRolloutRelativePath: string | null
+  codexThreadId: string | null
+  routeFingerprint: string
+  session: AssistantSession
+  transcriptBoundary: TranscriptSeenThrough | undefined
+  vault: string
+}): Promise<AssistantSession> {
+  const resumeState = buildCodexResumeState({
+    assistantContractFingerprint: input.assistantContractFingerprint,
+    rolloutRelativePath: input.codexRolloutRelativePath,
+    routeFingerprint: input.routeFingerprint,
+    threadId: input.codexThreadId,
+    transcriptSeenThrough: input.transcriptBoundary,
+  })
+  const session = { ...input.session, codexResume: resumeState, resumeState }
+  await saveAssistantSession(input.vault, session)
+  return session
 }

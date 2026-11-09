@@ -4280,7 +4280,7 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.ephemeral).toBeUndefined()
   })
 
-  it('does not replay committed history after stale native resume fails', async () => {
+  it('sends planned unseen history on resume and does not retry after stale native resume fails', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
@@ -4334,15 +4334,18 @@ describe('Codex assistant registry helpers', () => {
       resumeSessionId: 'stale-thread',
     })
     expect(primaryAppServerInput?.prompt).not.toContain('Active turn so far:')
-    expect(primaryAppServerInput?.prompt).not.toContain(
+    // Planning hands a resumed turn only the transcript entries its thread has
+    // not seen; the provider sends them as given.
+    expect(primaryAppServerInput?.prompt).toContain(
       'Recent conversation history for context only; do not answer these prior messages:',
     )
+    expect(primaryAppServerInput?.prompt).toContain('earlier committed assistant context')
     expect(findProviderPromptSizeTraceRawEvent(
       traceEvents,
       'primary',
     )).toMatchObject({
-      conversationHistoryCount: 0,
-      conversationHistoryPresent: false,
+      conversationHistoryCount: 2,
+      conversationHistoryPresent: true,
       providerPromptDiagnosticKind: 'primary',
       resumeCodexThreadIdPresent: true,
     })

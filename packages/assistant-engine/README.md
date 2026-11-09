@@ -41,7 +41,7 @@ validation preserve the numeric fields and stage values. Skipped refreshes remai
 
 Provider plans also carry `threadRotationReason`: `profile_isolated`,
 `native_resume_disabled`, `binding_absent`, `route_mismatch`, or
-`contract_mismatch` (in that decision order). A resumed plan has no rotation
+`contract_mismatch`, or `transcript_bookmark_missing`. A resumed plan has no rotation
 reason. This metadata follows the existing trace callback to hosted logging;
 the shared engine never writes structured logs to stdout.
 
@@ -194,6 +194,14 @@ applies to every registered dynamic tool, including the private
 `murph.assistant_style` surface; no tool-specific stale-resume fallback is
 needed.
 
+The session transcript remains the conversation record across ordinary and
+isolated turns. A resumable binding bookmarks the last transcript entry its
+native thread has seen. Planning supplies later entries as bounded history on
+resume; a missing bookmark starts a fresh thread with the transcript tail.
+Finalization advances the bookmark across its own appended entries and
+non-conversation entries, stopping before a foreign conversation entry. A failed
+provider turn never advances it, since Codex may not have accepted its history.
+
 Private current-state memory and snapshots travel in `turn/start.additionalContext`
 as named application references, separately from user input and stable developer
 instructions. Native exact-value deduplication avoids appending unchanged state
@@ -274,8 +282,8 @@ returned by the queue-time hosted-default continuity lookup. Compatible model
 or reasoning changes preserve that binding. If no ordinary session existed,
 the intent remains unbound until the first canonical attended direct turn;
 another same-route detached session is never inferred as the owner. That turn
-may bind its exact session before delivery finishes, but transcript import,
-session advancement, and stale native provider-resume clearing remain gated on
+may bind its exact session before delivery finishes, but transcript import and
+session advancement remain gated on
 canonical delivery. The outbox intent journals an interrupted
 import, and nested hosted direct route plus accepted assistant-input authority
 repairs it before provider-resume selection even for text-only payloads.

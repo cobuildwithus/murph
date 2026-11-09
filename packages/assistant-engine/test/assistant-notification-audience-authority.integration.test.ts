@@ -778,8 +778,8 @@ describe('notification audience authority integration', () => {
         input: Parameters<typeof boundaries.executeProvider>[0],
       ): ReturnType<typeof executeCodexTurnWithRecovery> => {
         expect(input.resolvedSession).toMatchObject({
-          codexResume: null,
-          resumeState: null,
+          codexResume: stage === 'after-canonical-sent' ? nativeResume : null,
+          resumeState: stage === 'after-canonical-sent' ? nativeResume : null,
           sessionId: ordinaryWithResume.sessionId,
           turnCount: 1,
         })
@@ -940,6 +940,20 @@ describe('notification audience authority integration', () => {
           turnCount: 2,
         },
       })
+      if (consumer === 'assistant-ask-continuation' && stage === 'after-canonical-sent') {
+        const attended = await resolveAssistantSessionForMessage({
+          boundaryDefaultTarget: modelTarget,
+          defaults: null,
+          message: {
+            ...locator,
+            executionContext,
+            prompt: 'Continue after the direct system turn.',
+            sessionId: ordinaryWithResume.sessionId,
+            vault: vaultRoot,
+          },
+        })
+        expect(attended.session.codexResume).toEqual(nativeResume)
+      }
       await expect(listAssistantTranscriptEntries(
         vaultRoot,
         ordinaryWithResume.sessionId,

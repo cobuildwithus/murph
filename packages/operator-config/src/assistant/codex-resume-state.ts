@@ -5,6 +5,15 @@ import { normalizeNullableString } from './shared.js'
 const codexRolloutRelativePathPattern =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
 const assistantContractFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u)
+const transcriptSeenThroughSchema = z.union([
+  z.literal('start'),
+  z.object({
+    createdAt: z.string(),
+    kind: z.string(),
+    textSha256: assistantContractFingerprintSchema,
+  }).strict(),
+])
+export type TranscriptSeenThrough = z.infer<typeof transcriptSeenThroughSchema>
 
 export const codexResumeStateSchema = z
   .object({
@@ -13,6 +22,7 @@ export const codexResumeStateSchema = z
     routeFingerprint: z.string().min(1),
     threadCompatibilityFingerprint: z.string().min(1).optional(),
     threadId: z.string().min(1),
+    transcriptSeenThrough: transcriptSeenThroughSchema.optional(),
   })
   .strict()
 
@@ -82,6 +92,7 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
   const threadCompatibilityFingerprint = normalizeUnknownString(
     record.threadCompatibilityFingerprint,
   )
+  const transcriptSeenThrough = transcriptSeenThroughSchema.safeParse(record.transcriptSeenThrough)
 
   return codexResumeStateSchema.parse({
     threadId,
@@ -89,6 +100,7 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
     ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
     ...(threadCompatibilityFingerprint ? { threadCompatibilityFingerprint } : {}),
+    ...(transcriptSeenThrough.success ? { transcriptSeenThrough: transcriptSeenThrough.data } : {}),
   })
 }
 
@@ -98,6 +110,7 @@ export function buildCodexResumeState(input: {
   routeFingerprint: string | null | undefined
   threadCompatibilityFingerprint?: string | null
   threadId: string | null | undefined
+  transcriptSeenThrough?: TranscriptSeenThrough
 }): CodexResumeState | null {
   const threadId = normalizeNullableString(input.threadId)
   if (!threadId) {
@@ -124,6 +137,7 @@ export function buildCodexResumeState(input: {
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
     ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
     ...(threadCompatibilityFingerprint ? { threadCompatibilityFingerprint } : {}),
+    ...(input.transcriptSeenThrough !== undefined ? { transcriptSeenThrough: input.transcriptSeenThrough } : {}),
   })
 }
 

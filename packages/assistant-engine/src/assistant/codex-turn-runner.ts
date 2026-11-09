@@ -633,6 +633,7 @@ async function executeAssistantCodexAttempt(
         ...result,
         assistantContractFingerprint:
           attemptPlan.routePlan.assistantContractFingerprint,
+        transcriptBoundary: attemptPlan.routePlan.transcriptBoundary,
         attemptCount: attemptPlan.attemptCount,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
         codexContinuation: attemptPlan.routePlan.codexContinuation,

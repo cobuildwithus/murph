@@ -5,7 +5,6 @@ import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 
 import {
-  clearAssistantSessionCodexResumeState,
   persistAssistantTurnAndSession,
 } from './turn-finalizer.js'
 import {
@@ -394,14 +393,9 @@ export async function sendAssistantAskContinuationLocal(
           turnCreatedAt,
           turnId,
         })
-        const continuityResetSession =
-          await clearAssistantSessionCodexResumeState({
-            session: savedSession,
-            vault: input.vault,
-          })
         committedDeliveryOutcome = {
           ...deliveryOutcome,
-          session: continuityResetSession,
+          session: savedSession,
         }
         await finalizeAssistantTurnFromDeliveryOutcome({
           outcome: committedDeliveryOutcome,

@@ -4342,7 +4342,7 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
       assistantTranscriptText: response,
-      providerResumeStateAction: 'clear',
+      providerResumeStateAction: 'preserve-existing',
     }),
   )
   expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
