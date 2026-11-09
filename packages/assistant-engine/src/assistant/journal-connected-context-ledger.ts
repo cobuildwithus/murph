@@ -32,17 +32,32 @@ function parseLedgerBody(body: string) {
 }
 
 export async function readConnectedContextPolicy(vaultRoot: string): Promise<ConnectedContextPolicy | null> {
+  const result = await readConnectedContextPolicyState(vaultRoot)
+  return result.kind === 'readable' ? result.policy : null
+}
+
+export type ConnectedContextPolicyState =
+  | { kind: 'absent' }
+  | { kind: 'unreadable' }
+  | { kind: 'readable'; policy: ConnectedContextPolicy }
+
+/** Only a missing page is absence; path, read, status and parse failures are unknown. */
+export async function readConnectedContextPolicyState(vaultRoot: string): Promise<ConnectedContextPolicyState> {
   try {
     const filePath = await resolveAssistantVaultPath(vaultRoot, buildKnowledgePageRelativePath(CONNECTED_CONTEXT_LEDGER_SLUG), 'file path')
-    const file = await open(filePath, 'r')
+    const file = await open(filePath, 'r').catch((error: unknown) => {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null
+      throw error
+    })
+    if (file === null) return { kind: 'absent' }
     try {
       const buffer = Buffer.alloc(POLICY_MAX_BYTES)
       const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
       const document = parseFrontmatterDocument(buffer.subarray(0, bytesRead).toString('utf8'))
-      if (document.attributes.slug !== CONNECTED_CONTEXT_LEDGER_SLUG || document.attributes.status !== 'active') return null
-      return parseLedgerBody(normalizeKnowledgeBody(document.body)).policy
+      if (document.attributes.slug !== CONNECTED_CONTEXT_LEDGER_SLUG || document.attributes.status !== 'active') return { kind: 'unreadable' }
+      return { kind: 'readable', policy: parseLedgerBody(normalizeKnowledgeBody(document.body)).policy }
     } finally { await file.close() }
-  } catch { return null }
+  } catch { return { kind: 'unreadable' } }
 }
 
 export async function removeConnectedContextAccount(vaultRoot: string, accountId: string): Promise<void> {
