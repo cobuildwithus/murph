@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,9 +13,11 @@ import {
 } from "@murphai/contracts";
 import {
   ID_PREFIXES,
+  addMeal,
   deterministicContractId,
   findEventByExternalRef,
   initializeVault,
+  readEvent,
   showAutomation,
   upsertEvent,
 } from "@murphai/core";
@@ -384,7 +386,121 @@ describe("hosted meal photo mailbox import", () => {
       vaultRoot,
     })).resolves.not.toBeNull();
   });
+
+  it("links the phone's capture of a texted photo to its meal instead of adding another", async () => {
+    const { vaultRoot, texted, photo } = await createVaultWithTextedMeal();
+    const wake = createMealPhotoWake();
+    Object.assign(wake.mealPhoto, mealPhotoIdentity(photo));
+    let staged: Uint8Array | null = photo;
+    const deleteMealPhoto = vi.fn(async () => { staged = null; });
+    const input = {
+      effectsPort: createEffectsPort({ deleteMealPhoto, readMealPhoto: async () => staged }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake,
+    };
+
+    const first = await importHostedMealPhotoCapturedMailboxItem(input);
+    expect(first).toMatchObject({ reasonCode: "meal_photo.already_logged", status: "imported" });
+    expect(await findEventByExternalRef({
+      resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot,
+    })).toBeNull();
+    const linked = (await readEvent({ vaultRoot, eventId: texted.event.id })).event;
+    expect(linked).toMatchObject({ kind: "meal", uploadId: CAPTURE_ID, title: "Chicken rice bowl" });
+    await expect(showAutomation({ automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID, vaultRoot }))
+      .resolves.not.toBeNull();
+    if (first.status !== "imported") throw new Error("Expected an import");
+    // A replay before the capture is cleared finds the link from the staged photo.
+    expect(await importHostedMealPhotoCapturedMailboxItem(input))
+      .toMatchObject({ reasonCode: "meal_photo.already_logged", status: "imported" });
+    await first.afterCheckpoint?.();
+    expect(deleteMealPhoto).toHaveBeenCalledWith("meal_photo_opaque_key");
+
+    // A replay after a restart, with the capture already cleared, still finds its meal.
+    expect(await importHostedMealPhotoCapturedMailboxItem(input))
+      .toMatchObject({ reasonCode: "meal_photo.already_logged", status: "imported" });
+    expect((await readEvent({ vaultRoot, eventId: texted.event.id })).event.lifecycle).toEqual(linked.lifecycle);
+    const project = await createBrowserVaultReplica({
+      vault: await readVault(vaultRoot), metricPoints: [], generatedAt: CAPTURED_AT, sourceBundleHash: "a".repeat(64),
+    });
+    expect(project.meals?.days.flatMap(day => day.meals)).toEqual([
+      expect.objectContaining({ id: texted.mealId, uploadId: CAPTURE_ID }),
+    ]);
+  });
+
+  it("keeps retrying a capture that is gone before any meal holds it", async () => {
+    const { vaultRoot } = await createVaultWithTextedMeal();
+    expect(await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto: async () => null }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    })).toMatchObject({ reasonCode: "meal_photo.missing", retryable: true, status: "blocked" });
+  });
+
+  it("keeps the member's own send from the app as its own meal", async () => {
+    const { vaultRoot, texted, photo } = await createVaultWithTextedMeal();
+    const wake = createMealPhotoWake();
+    Object.assign(wake.mealPhoto, mealPhotoIdentity(photo));
+    wake.eventId = `meal-photo:manual:${CAPTURE_ID}`;
+    const item = createMealPhotoMailboxItem();
+    item.item.dedupeKey = wake.eventId;
+
+    expect(await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto: async () => photo }), item, vaultRoot, wake,
+    })).toMatchObject({ reasonCode: "meal_photo.imported", status: "imported" });
+    expect(await findEventByExternalRef({
+      resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot,
+    })).not.toBeNull();
+    expect((await readEvent({ vaultRoot, eventId: texted.event.id })).event).not.toHaveProperty("uploadId");
+  });
+
+  it.each([
+    ["retries while the texted photo can't be fetched", "transport", { reasonCode: "meal_photo.already_logged_check_failed", retryable: true, status: "blocked" }],
+    ["imports a meal of its own once the texted photo is gone", "expired", { reasonCode: "meal_photo.imported", status: "imported" }],
+  ] as const)("%s", async (_name, reason, outcome) => {
+    const { vaultRoot, texted, photo } = await createVaultWithTextedMeal();
+    const wake = createMealPhotoWake();
+    Object.assign(wake.mealPhoto, mealPhotoIdentity(photo));
+    const materializeWorkspaceArtifacts = vi.fn(async (paths: readonly string[]) => ({
+      materializedArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Map(paths.map(key => [key, reason] as const)),
+    }));
+
+    expect(await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto: async () => photo }),
+      item: createMealPhotoMailboxItem(),
+      materializeWorkspaceArtifacts,
+      vaultRoot,
+      wake,
+    })).toMatchObject(outcome);
+    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith(
+      [`vault:${texted.photo!.relativePath}`],
+      expect.objectContaining({ maxFileBytes: expect.any(Number), maxTotalDownloadBytes: expect.any(Number) }),
+    );
+    expect((await readEvent({ vaultRoot, eventId: texted.event.id })).event).not.toHaveProperty("uploadId");
+    expect(await findEventByExternalRef({
+      resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot,
+    }) !== null).toBe(reason === "expired");
+  });
 });
+
+/** A meal Murph saved from a texted photo, two minutes after it was taken. */
+async function createVaultWithTextedMeal() {
+  const vaultRoot = await createTestVault();
+  const photo = new Uint8Array(await readFile(new URL("./fixtures/synthetic-meal-photo.jpg", import.meta.url)));
+  const photoPath = path.join(vaultRoot, "texted.jpg");
+  await writeFile(photoPath, photo);
+  const savedAt = "2026-07-12T21:17:00.000Z";
+  const texted = await addMeal({
+    vaultRoot, photoPath, photoCapturedAt: savedAt, occurredAt: savedAt, name: "Chicken rice bowl", source: "manual",
+  });
+  return { vaultRoot, texted, photo };
+}
+
+function mealPhotoIdentity(photo: Uint8Array) {
+  return { byteLength: photo.byteLength, sha256: createHash("sha256").update(photo).digest("hex") };
+}
 
 async function createTestVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-meal-photo-vault-"));

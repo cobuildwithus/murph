@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-09",
+  "order": 100,
+  "item": {
+    "id": "texted-meal-photo-logged-once",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A meal photo you text Murph is logged once",
+    "summary": "When the iPhone app's automatic meal capture finds a photo you already texted Murph, it now joins the meal Murph saved instead of adding a second one.",
+    "details": "Only the same photo is matched, so a second shot of your plate or a different dish is still logged on its own. Photos you send from the app's own meal sheet work as before.",
+    "relevanceTags": ["nutrition", "meals"],
+    "sourcePullRequests": [4744]
+  }
+}
