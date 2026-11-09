@@ -2903,8 +2903,8 @@ test("importDeviceBatch retains novel raw-only evidence once and skips its repla
   );
 });
 
-test("importDeviceBatch fails open beyond the novelty row budget, then dedupes the new tail proof", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-novelty-tail-row-budget");
+test("importDeviceBatch dedupes evidence stored behind more than 64 newer rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-novelty-deep-tail");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const buildInput = (importedAt: string) => ({
     vaultRoot,
@@ -2934,13 +2934,40 @@ test("importDeviceBatch fails open beyond the novelty row budget, then dedupes t
     "utf8",
   );
 
-  const outsideBudget = await importDeviceBatch(buildInput("2026-06-04T21:00:00.000Z"));
-  assert.ok(outsideBudget.applied);
-  assert.equal(outsideBudget.persistedEvidencePartCount, 1);
+  const deepReplay = await importDeviceBatch(buildInput("2026-06-04T21:00:00.000Z"));
+  assert.equal(deepReplay.applied, false);
+  assert.equal(deepReplay.persistedEvidencePartCount, 0);
+});
 
-  const tailReplay = await importDeviceBatch(buildInput("2026-06-05T21:00:00.000Z"));
-  assert.equal(tailReplay.applied, false);
-  assert.equal(tailReplay.persistedEvidencePartCount, 0);
+test("importDeviceBatch replays a reconcile cycle wider than 64 payloads as no-ops", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-novelty-wide-cycle");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const cycle = Array.from({ length: 80 }, (_, day) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "account-a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    evidenceParts: [{
+      role: "junction-summary-activity",
+      fileName: "junction-summary-activity.json",
+      content: { day, steps: 1_000 + day },
+    }],
+  }));
+  let shardPath: string | null = null;
+  for (const input of cycle) {
+    const imported = await importDeviceBatch(input);
+    assert.ok(imported.applied);
+    shardPath = imported.ingestShardPath;
+  }
+  assert.ok(shardPath);
+  const beforeReplay = await fs.readFile(path.join(vaultRoot, shardPath));
+
+  for (const input of cycle) {
+    const replay = await importDeviceBatch(input);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+  }
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, shardPath)), beforeReplay);
 });
 
 test("importDeviceBatch makes an exact retry a no-op beyond the novelty row budget", async () => {
@@ -4593,7 +4620,7 @@ test("concatenated malformed ingest rows cannot hide current or legacy delivery 
   }
 });
 
-test("importDeviceBatch fails open when an incremental marker is beyond the row budget", async () => {
+test("importDeviceBatch finds an incremental delivery stored behind more than 64 newer rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-partial-retention-retry");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const partA = {
@@ -4633,18 +4660,10 @@ test("importDeviceBatch fails open when an incremental marker is beyond the row 
   })}\n`;
   await fs.appendFile(path.join(vaultRoot, filtered.ingestShardPath), unrelatedRow.repeat(65), "utf8");
   const replay = await importDeviceBatch(input);
-  const convergedReplay = await importDeviceBatch(input);
 
-  assert.ok(replay.applied);
-  assert.equal(replay.persistedEvidencePartCount, 2);
-  assert.ok(replay.ingestId);
-  const replayRecord = await readRequiredIntegrationIngest(vaultRoot, replay.ingestId);
-  assert.deepEqual(
-    replayRecord.parts.map((part) => part.role),
-    [partA.role, partB.role],
-  );
-  assert.equal(convergedReplay.applied, false);
-  assert.equal(convergedReplay.ingestId, null);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.persistedEvidencePartCount, 0);
+  assert.equal(replay.ingestId, null);
 });
 
 test.each([

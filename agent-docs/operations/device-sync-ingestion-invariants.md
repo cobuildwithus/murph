@@ -123,7 +123,11 @@ snapshot is already reconciled; it does not need an empty Web callback.
    reconciliation; otherwise the existing novelty owner proves every incoming
    evidence fingerprint, receipt, and output link. When that proof is missing
    or unsafe, ingestion fails open by retaining one complete received evidence
-   set, after which the next replay converges. A repair delivery also
+   set, after which the next replay converges. On a live shard, novelty reads
+   backward up to 8 MiB with no row-count limit and parses only rows that name
+   a requested payload hash (every row while a generic receipt is unproven), so
+   a reconcile cycle that replays hundreds of payloads still finds each one's
+   last copy instead of storing it again. A repair delivery also
    retains the complete received evidence set rather than trusting damaged
    historical proof. A batch whose novel evidence cannot be associated with
    its accepted prepared event, or whose prepared events share one canonical
