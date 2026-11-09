@@ -2537,6 +2537,74 @@ test("importDeviceBatch retains only changed evidence from a repeated multi-part
   ].sort((left, right) => (left.id ?? "").localeCompare(right.id ?? "")));
 });
 
+test("importDeviceBatch converges from coarse Junction activity evidence to per-record parts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-activity-evidence-rollout");
+  try {
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+    const coarseRole = "junction-summary-activity";
+    const records = ["2026-06-01", "2026-06-02", "2026-06-03"].map((date, index) => ({
+      date,
+      source: { provider: "garmin", type: "watch" },
+      steps: 1000 + index,
+    }));
+    const parts = records.map((record) => ({
+      role: `${coarseRole}:activity-${record.date}`,
+      fileName: `activity-${record.date}.json`,
+      content: record,
+    }));
+    const input: Parameters<typeof importDeviceBatch>[0] = {
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-activity-rollout-account",
+      importedAt: "2026-06-04T01:00:00.000Z",
+      events: records.map((record, index) => ({
+        kind: "observation",
+        occurredAt: `${record.date}T00:00:00.000Z`,
+        dayKey: record.date,
+        title: "Junction daily steps",
+        evidenceRoles: [parts[index]!.role],
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-activity",
+          resourceId: `activity-${record.date}`,
+          facet: "daily-steps",
+        },
+        fields: { metric: "daily-steps", value: record.steps, unit: "count" },
+      })),
+      evidenceParts: parts,
+    };
+    const legacy = await importDeviceBatch({
+      ...input,
+      importedAt: "2026-06-04T00:00:00.000Z",
+      events: input.events?.map((event) => ({ ...event, evidenceRoles: [coarseRole] })),
+      evidenceParts: [{ role: coarseRole, fileName: `${coarseRole}.json`, content: records }],
+    });
+    const split = await importDeviceBatch(input);
+    assert.equal(legacy.persistedEvidencePartCount, 1);
+    assert.equal(split.persistedEvidencePartCount, 3);
+    assert.deepEqual(split.events, legacy.events);
+    const splitIngest = await readRequiredIntegrationIngest(vaultRoot, split.ingestId!);
+    assert.equal(splitIngest.parts.length, 3);
+    for (const event of split.events) {
+      const history = await listIntegrationIngestsForEvent(vaultRoot, event.id);
+      assert.equal(history.length, 2);
+      const output = splitIngest.outputs.events.find((candidate) => candidate.id === event.id);
+      assert.deepEqual(output?.roles, [`${coarseRole}:${event.externalRef?.resourceId}`]);
+      assert.ok(splitIngest.parts.some((part) => part.role === output?.roles[0]));
+    }
+    const beforeReplay = await snapshotVaultFiles(vaultRoot);
+    const replay = await importDeviceBatch({ ...input, importedAt: "2026-06-04T02:00:00.000Z" });
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+    assert.ok(split.ingestShardPath);
+    assert.equal((await readJsonlRecords({ vaultRoot, relativePath: split.ingestShardPath })).length, 2);
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("importDeviceBatch retains unchanged evidence for a newly appended event revision", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-revised-event-evidence");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

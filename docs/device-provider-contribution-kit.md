@@ -82,6 +82,10 @@ That split is the main guardrail for provider contributions. Treat shared metada
 - Keep provider credentials outside the canonical vault.
 - Keep stored runtime metadata shallow and sanitized; do not persist large nested profile payloads into account metadata.
 - Preserve useful upstream evidence as bounded `evidenceParts` when it helps replay, audit, or future re-normalization.
+- Junction activity summaries retain one sanitized part per admitted record, keyed
+  by the existing source-aware summary identity. Keep collection wrappers out of
+  those parts, preserve resolved source attribution, and link each event only to
+  its own record so core can omit unchanged evidence on replay.
 - Reuse existing canonical event kinds and metric names before inventing new ones. Treat generic sample streams as explicit CSV/import/debug ledgers, not provider firehose output.
 - If a provider supports webhooks, treat them as routing or freshness hints that enqueue work; normalization still happens through importer snapshots.
 - Reuse the shared descriptor and shared registry helper; do not reintroduce provider metadata drift between `device-syncd` and `importers`.

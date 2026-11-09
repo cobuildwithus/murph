@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   extractIsoDatePrefix,
@@ -1596,15 +1597,17 @@ function normalizeSummaries(
           resourceSlug,
         })
       : new Map<number, string>();
-    pushEvidencePart(
-      context.evidenceParts,
-      createEvidencePart(
-        evidencePartRole,
-        `${evidencePartRole}.json`,
-        preparedMenstrualCycle?.evidence
-          ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
-      ),
-    );
+    if (resource !== "activity") {
+      pushEvidencePart(
+        context.evidenceParts,
+        createEvidencePart(
+          evidencePartRole,
+          `${evidencePartRole}.json`,
+          preparedMenstrualCycle?.evidence
+            ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
+        ),
+      );
+    }
 
     if (preparedMenstrualCycle) {
       preparedMenstrualCycle.cycles.forEach((cycle, index) => {
@@ -1634,6 +1637,9 @@ function normalizeSummaries(
       continue;
     }
 
+    // One part per activity record identity; repeats of one identity share it.
+    const activityRecordsByRole = new Map<string, PlainObject[]>();
+    const unattributedActivityRecords: PlainObject[] = [];
     const resolvedEntries = entries.flatMap(({ entry, originFallback }, index): JunctionResolvedResourceEntry[] => {
       const resourceContext = buildResourceContext({
         entry,
@@ -1648,11 +1654,43 @@ function normalizeSummaries(
       });
 
       if (!resourceContext) {
+        if (resource === "activity") {
+          unattributedActivityRecords.push(withoutCollectionWrappers(entry));
+        }
         return [];
+      }
+
+      if (resource === "activity") {
+        const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+        const role = `${evidencePartRole}:${buildStableSummaryResourceId(resourceContext, entry, timestamp)}`;
+        resourceContext.evidenceRoles = [role];
+        const record = buildRawActivitySummaryRecord(entry, resourceContext);
+        const records = activityRecordsByRole.get(role) ?? [];
+        if (!records.some((existing) => isDeepStrictEqual(existing, record))) {
+          records.push(record);
+        }
+        activityRecordsByRole.set(role, records);
       }
 
       return [{ entry, resourceContext }];
     });
+    for (const [role, records] of activityRecordsByRole) {
+      pushEvidencePart(
+        context.evidenceParts,
+        createEvidencePart(role, `${role}.json`, records.length === 1 ? records[0] : records),
+      );
+    }
+    if (unattributedActivityRecords.length > 0) {
+      // Records without source attribution produce no events; keep their raw evidence.
+      pushEvidencePart(
+        context.evidenceParts,
+        createEvidencePart(
+          evidencePartRole,
+          `${evidencePartRole}.json`,
+          buildRawResourcePayload(resource, unattributedActivityRecords, context.connectionsByKey),
+        ),
+      );
+    }
 
     if (resource === "sleep_cycle") {
       pushSleepCycleEntries(resolvedEntries, context, sleepSummaryMetricOwners);
@@ -6081,6 +6119,24 @@ function buildJunctionBloodPressureReadingIdentityHash(input: {
     input.systolic,
     input.diastolic,
   ]);
+}
+
+// Expanded entries inherit collection wrappers; retaining those would copy the whole window.
+function withoutCollectionWrappers(entry: PlainObject): PlainObject {
+  const record = { ...entry };
+  for (const key of JUNCTION_NESTED_RESOURCE_ENTRY_KEYS) {
+    delete record[key];
+  }
+  return record;
+}
+
+function buildRawActivitySummaryRecord(entry: PlainObject, resourceContext: ResourceContext): PlainObject {
+  return stripUndefined({
+    ...asPlainObject(buildRawResourcePayload("activity", withoutCollectionWrappers(entry))),
+    sourceProviderSlug: resourceContext.sourceProviderSlug,
+    sourceType: resourceContext.origin.sourceType,
+    sourceInstanceId: resourceContext.origin.sourceInstanceId,
+  });
 }
 
 function buildRawResourcePayload(

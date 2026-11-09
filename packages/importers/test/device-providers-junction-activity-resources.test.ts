@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as coreRuntime from "@murphai/core";
 import { resolveMetricInputKey } from "@murphai/health-metrics";
 import { test } from "vitest";
 
 import {
+  importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   type DeviceBatchImportPayload,
@@ -13,6 +18,145 @@ const START = `${DAY}T12:00:00.000Z`;
 const END = `${DAY}T12:05:00.000Z`;
 const TIMESTAMP = `${DAY}T12:02:00.000Z`;
 const WORKOUT_END = `${DAY}T12:48:00.000Z`;
+
+test("Junction activity summary evidence roles follow record identity across ordering and corrections", () => {
+  for (const explicitId of [true, false]) {
+    const records = [
+      { provider: "garmin", type: "watch", device_id: "watch-a" },
+      { provider: "garmin", type: "watch", device_id: "watch-b" },
+      { provider: "garmin", type: "phone", device_id: "watch-a" },
+      { provider: "fitbit", type: "watch", device_id: "watch-a" },
+    ].map((source, index) => ({
+      ...(explicitId ? { id: "shared-record-id" } : {}),
+      date: DAY,
+      source,
+      steps: 1000 + index,
+    }));
+    const normalize = (activity: typeof records) => normalizeJunctionSnapshot({
+      importedAt: "2026-02-02T00:00:00.000Z",
+      summaries: { activity },
+    });
+    const first = normalize(records);
+    const reordered = normalize([...records].reverse().map((record) => ({ ...record, steps: record.steps + 10 })));
+    assert.equal(first.evidenceParts?.length, records.length);
+    assert.equal(new Set(first.evidenceParts?.map((part) => part.role)).size, records.length);
+    assert.deepEqual(
+      first.evidenceParts?.map((part) => part.role).sort(),
+      reordered.evidenceParts?.map((part) => part.role).sort(),
+    );
+    for (const payload of [first, reordered]) {
+      assert.equal(payload.events?.length, records.length);
+      for (const event of payload.events ?? []) {
+        const role = `junction-summary-activity:${event.externalRef?.resourceId}`;
+        assert.deepEqual(event.evidenceRoles, [role]);
+        const content = payload.evidenceParts?.find((part) => part.role === role)?.content as Record<string, unknown>;
+        assert.equal(content.steps, event.fields?.value);
+        assert.equal(content.sourceProviderSlug, event.dataOrigin?.sourceProviderSlug);
+        assert.equal(content.sourceType, event.dataOrigin?.sourceType);
+        assert.equal(content.sourceInstanceId, event.dataOrigin?.sourceInstanceId);
+      }
+    }
+    assert.doesNotMatch(JSON.stringify(first.evidenceParts), /watch-a|watch-b|device_id/u);
+  }
+});
+
+test("Junction activity evidence splits envelopes and preserves resolved connection provenance", () => {
+  for (const collectionKey of ["data", "results", "items", "records"]) {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-02-04T00:00:00.000Z",
+      connections: [{
+        id: "private-connection",
+        source: { provider: "garmin", type: "watch", device_id: "private-device" },
+      }],
+      summaries: {
+        activity: {
+          connectionId: "private-connection",
+          [collectionKey]: [
+            { date: "2026-02-01", steps: 1000 },
+            { date: "2026-02-02", steps: 2000 },
+            { date: "2026-02-03", unrecognizedActivityField: 42 },
+          ],
+        },
+      },
+    });
+    assert.equal(payload.events?.length, 2);
+    assert.equal(payload.evidenceParts?.length, 3);
+    const rawOnly = payload.evidenceParts?.find((part) =>
+      (part.content as Record<string, unknown>).date === "2026-02-03"
+    );
+    assert.equal((rawOnly?.content as Record<string, unknown>).unrecognizedActivityField, 42);
+    for (const part of payload.evidenceParts ?? []) {
+      const content = part.content as Record<string, unknown>;
+      assert.equal(content.sourceProviderSlug, "garmin");
+      assert.equal(content.sourceType, "watch");
+      assert.equal(content.sourceInstanceId, payload.events?.[0]?.dataOrigin?.sourceInstanceId);
+      assert.equal(Object.hasOwn(content, collectionKey), false);
+    }
+    assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /private-connection|private-device|connectionId|device_id/u);
+  }
+});
+
+test("Junction three-day activity replay stores only the changed record and keeps audit evidence resolvable", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-activity-records-"));
+  const importActivity = (importedAt: string, steps: number) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>({
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-activity-record-account",
+        importedAt,
+        windowStart: "2026-02-01T00:00:00.000Z",
+        windowEnd: "2026-02-04T00:00:00.000Z",
+        summaries: {
+          activity: {
+            source: { provider: "garmin", type: "watch", device_id: "watch-a" },
+            data: [
+              { date: "2026-02-01", steps: 1000 },
+              { date: "2026-02-02", steps },
+              { date: "2026-02-03", steps: 3000 },
+            ],
+          },
+        },
+      },
+    }, { corePort: coreRuntime });
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, createdAt: "2026-02-01T00:00:00.000Z" });
+    const first = await importActivity("2026-02-04T00:00:00.000Z", 2000);
+    const changed = await importActivity("2026-02-04T01:00:00.000Z", 2500);
+    assert.equal(first.persistedEvidencePartCount, 3);
+    assert.equal(changed.persistedEvidencePartCount, 1);
+    assert.equal(changed.events.length, 3);
+    assert.ok(changed.ingestId);
+    const ingest = await coreRuntime.readIntegrationIngestById(vaultRoot, changed.ingestId);
+    assert.ok(ingest);
+    assert.equal(ingest.record.parts.length, 1);
+    assert.equal(JSON.parse(ingest.record.parts[0]!.content).date, "2026-02-02");
+    for (const event of changed.events) {
+      const history = await coreRuntime.listIntegrationIngestsForEvent(vaultRoot, event.id);
+      const contents = history.flatMap(({ record }) => {
+        const output = record.outputs.events.find((candidate) => candidate.id === event.id);
+        return (output?.roles ?? []).map((role) => {
+          const part = record.parts.find((candidate) => candidate.role === role);
+          assert.ok(part);
+          return JSON.parse(part.content) as Record<string, unknown>;
+        });
+      });
+      assert.ok(contents.length > 0);
+      assert.ok(contents.every((content) => content.date === event.dayKey));
+    }
+    const replay = await importActivity("2026-02-04T02:00:00.000Z", 2500);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+    assert.ok(first.ingestShardPath);
+    assert.equal((await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: first.ingestShardPath,
+    })).length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 function grouped(
   provider: string,
@@ -300,4 +444,81 @@ test("Junction fall and workout hourly identities are stable across replay and i
     first.events?.find((event) => event.fields?.metric === "workout-distance-km")?.fields?.value,
     2,
   );
+});
+
+test("Junction activity evidence shares one part per identity and keeps distinct same-identity records", () => {
+  const garmin = { provider: "garmin", type: "watch", device_id: "watch-a" };
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-02-04T00:00:00.000Z",
+    summaries: {
+      activity: [
+        { id: "shared", date: "2026-02-01", source: garmin, steps: 1000 },
+        { id: "shared", date: "2026-02-01", source: garmin, steps: 1000 },
+        { id: "shared", date: "2026-02-01", source: garmin, steps: 1000, floors: 3 },
+        { date: "2026-02-02", source: garmin, steps: 2000 },
+        { date: "2026-02-02", source: garmin, steps: 2000 },
+      ],
+    },
+  });
+  const roles = payload.evidenceParts?.map((part) => part.role) ?? [];
+  assert.equal(roles.length, 2);
+  assert.equal(new Set(roles).size, 2);
+  const shared = payload.evidenceParts?.find((part) =>
+    Array.isArray(part.content)
+  )?.content as Array<Record<string, unknown>>;
+  assert.deepEqual(shared.map((record) => record.floors), [undefined, 3]);
+  for (const event of payload.events ?? []) {
+    assert.ok(roles.includes(event.evidenceRoles?.[0] ?? ""));
+  }
+});
+
+test("Junction activity import tolerates repeated records and keeps unattributed raw records", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-activity-repeats-"));
+  const garmin = { provider: "garmin", type: "watch", device_id: "watch-a" };
+  const importActivity = (importedAt: string, legacySteps: number) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>({
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-activity-repeat-account",
+        importedAt,
+        windowStart: "2026-02-01T00:00:00.000Z",
+        windowEnd: "2026-02-04T00:00:00.000Z",
+        summaries: {
+          activity: [
+            { id: "activity-1", date: "2026-02-01", source: garmin, steps: 1000 },
+            { id: "activity-1", date: "2026-02-01", source: garmin, steps: 1000 },
+            { id: "activity-2", date: "2026-02-02", source: garmin, steps: 2000 },
+            { id: "legacy-unattributed-activity-1", date: "2026-02-03", steps: legacySteps },
+          ],
+        },
+      },
+    }, { corePort: coreRuntime });
+  const legacyStepsIn = async (ingestId: string) => {
+    const ingest = await coreRuntime.readIntegrationIngestById(vaultRoot, ingestId);
+    const part = ingest?.record.parts.find((candidate) => candidate.role === "junction-summary-activity");
+    assert.ok(part);
+    return (JSON.parse(part.content) as Array<Record<string, unknown>>).map((record) => record.steps);
+  };
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, createdAt: "2026-02-01T00:00:00.000Z" });
+    const first = await importActivity("2026-02-04T00:00:00.000Z", 3000);
+    assert.equal(first.applied, true);
+    // Repeats resolve to the same event; the unattributed record produces none.
+    assert.equal(new Set(first.events.map((event) => event.id)).size, 2);
+    assert.ok(first.ingestId);
+    const parts = (await coreRuntime.readIntegrationIngestById(vaultRoot, first.ingestId))?.record.parts ?? [];
+    assert.equal(new Set(parts.map((part) => part.role)).size, parts.length);
+    assert.deepEqual(await legacyStepsIn(first.ingestId), [3000]);
+
+    const changed = await importActivity("2026-02-04T01:00:00.000Z", 3100);
+    assert.ok(changed.ingestId);
+    assert.deepEqual(await legacyStepsIn(changed.ingestId), [3100]);
+
+    const replay = await importActivity("2026-02-04T02:00:00.000Z", 3100);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });

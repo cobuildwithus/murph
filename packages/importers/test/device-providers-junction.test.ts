@@ -810,7 +810,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
     "stress_level",
     "glucose",
   ]);
-  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-activity"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("junction-summary-activity:")));
   assert.equal(findJunctionFeatureTimeseriesArtifacts(payload, "heartrate").length, 1);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "glucose").length, 1);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen").length, 1);
@@ -3557,7 +3557,7 @@ test("Junction repeated empty polls persist once and still admit later records",
   }
 });
 
-test("Junction nonempty unnormalized collections retain changed raw evidence", async () => {
+test("Junction admitted activity records without canonical metrics retain changed raw evidence", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-unnormalized-poll-evidence");
   const input = (importedAt: string, revision: number) => ({
     provider: "junction",
@@ -3566,7 +3566,14 @@ test("Junction nonempty unnormalized collections retain changed raw evidence", a
       accountId: "junction-unnormalized-poll-account",
       importedAt,
       windowEnd: importedAt,
-      summaries: { activity: [{ unrecognizedProviderRevision: revision }], workouts: [] },
+      summaries: {
+        activity: [{
+          date: "2026-04-22",
+          source: { provider: "garmin", type: "watch" },
+          unrecognizedProviderRevision: revision,
+        }],
+        workouts: [],
+      },
     },
   });
   const importPoll = (importedAt: string, revision: number) =>
@@ -3581,8 +3588,14 @@ test("Junction nonempty unnormalized collections retain changed raw evidence", a
     assert.equal(payload.events?.length ?? 0, 0);
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.deepEqual(
-      payload.evidenceParts?.find((part) => part.role === "junction-summary-activity")?.content,
-      [{ unrecognizedProviderRevision: 1 }],
+      payload.evidenceParts?.find((part) => part.role.startsWith("junction-summary-activity:"))?.content,
+      {
+        date: "2026-04-22",
+        source: { provider: "garmin", type: "watch" },
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        unrecognizedProviderRevision: 1,
+      },
     );
     const first = await importPoll("2026-04-22T12:00:00.000Z", 1);
     const changed = await importPoll("2026-04-22T13:00:00.000Z", 2);
@@ -9118,10 +9131,8 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   assert.equal(Object.hasOwn(rawReceipt, "payload"), false);
   assert.equal(rawReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")), false);
-  assert.deepEqual(rawReceipt.rawArtifactRoles.slice(0, 2), [
-    "junction-summary-profile",
-    "junction-summary-activity",
-  ]);
+  assert.equal(rawReceipt.rawArtifactRoles[0], "junction-summary-profile");
+  assert.match(rawReceipt.rawArtifactRoles[1]!, /^junction-summary-activity:activity-[a-f0-9]{16}$/u);
   assert.equal(
     rawReceipt.rawArtifactRoles.some((role) => role.startsWith("junction-timeseries-daily-steps:")),
     true,
@@ -9364,7 +9375,7 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   assert.equal(respiratoryRate?.dayKey, "2026-05-20");
   assert.deepEqual(payload.provenance?.summaryResources, ["activity", "sleep"]);
   assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
-  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-activity"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("junction-summary-activity:")));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep"));
   assert.equal(respiratoryArtifact, undefined);
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "respiratory-rate").length, 1);
@@ -15845,7 +15856,7 @@ test("Junction normalizer maps documented activity and body summary scalar field
     && event?.dataOrigin?.aggregatorProvider === "junction"
     && event?.dataOrigin?.sourceProviderSlug === "garmin"
     && event?.evidenceRoles?.length === 1
-    && event?.evidenceRoles?.[0] === "junction-summary-activity"
+    && event?.evidenceRoles?.[0] === `junction-summary-activity:${event?.externalRef?.resourceId}`
   ));
 
   assert.equal(metricValue("weight"), 80);
