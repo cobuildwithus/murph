@@ -411,6 +411,16 @@ describe("game chat tool authority", () => {
     m.run.mockResolvedValue({ ok: false, error: { code: "INVALID_REQUEST", message: "x".repeat(300) }, status: 400 });
     expect((await handleGameChatTool(update)).result.error).toHaveLength(128);
   });
+  it("lets only a pair approval retry reach a void game, so the yes that called it off can replay", async () => {
+    const pairStatuses = () => m.game.mock.calls.at(-1)![0].where.OR[0].status.in;
+    await handleGameChatTool(update);
+    expect(pairStatuses()).toEqual(["negotiating", "live", "settled", "void"]);
+    for (const other of [{ operation: "decline" as const, gameId: "game_synthetic", proposalId: "proposal_synthetic" },
+      { operation: "approve" as const, gameId: "game_synthetic", expectedTermsVersion: 1 }, { operation: "cancel_game" as const, gameId: "game_synthetic" }]) {
+      await handleGameChatTool({ ...update, request: { action: "update_game", origin, update: other } });
+      expect(pairStatuses()).toEqual(["negotiating", "live", "settled"]);
+    }
+  });
   it("cancels a not-yet-started game through the app's cancel command", async () => {
     m.run.mockClear();
     await handleGameChatTool({ ...update, request: { action: "update_game", origin, update: { operation: "cancel_game", gameId: "game_synthetic" } } });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { gameChangeMajority, normalizeGroupGameChange, gameChangeCancellationNeedsNotice, decideApprovedGameChange, decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange, pendingGameChangeView } from "@/src/lib/game/changes";
 import { parseGameCommand } from "@/src/lib/game/command";
-import { decideNewTerms, scorePlayer, type RuleState, type TermWords } from "@/src/lib/game/rules";
+import { decideNewTerms, scorePlayer, settleDueAt, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { dayStartInstant } from "@/src/lib/game/time";
 import type { GamePendingChange, GameTermsInput } from "@/src/lib/game/contract";
 
@@ -246,6 +246,35 @@ describe("weekly game mutually agreed changes", () => {
       expect(isGameChangeExpired(s, extension, firstDone)).toBe(true);
     });
 
+    it("lets a live game be called off until it is due, even after one player's last day is over", () => {
+      const s = twoZones(3, "2026-11-07", ["Pacific/Auckland", "Pacific/Honolulu"]);
+      const ends = s.players.map((player) => dayStartInstant("2026-11-10", player.timeZone).getTime());
+      const lastDay = new Date(Math.min(...ends) - 60_000), firstDone = new Date(Math.min(...ends) + 60_000);
+      const callOff = { kind: "call_off" as const };
+      const asked = { ...BASE, ...decideGameChange(s, "player_a", callOff, lastDay) };
+      expect(asked).toMatchObject({ change: callOff, startsOn: null });
+      // Edits close with the first finished player; calling off waits for the game to be due.
+      expect(gameChangeControls(s, firstDone, null).canEdit).toBe(false);
+      expect(decideGameChange(s, "player_b", callOff, firstDone).change).toEqual(callOff);
+      expect(isGameChangeExpired(s, asked, firstDone)).toBe(false);
+      expect(decideApprovedGameChange(s, "player_b", asked, firstDone).change).toEqual(callOff);
+      const due = settleDueAt(s);
+      expect(() => decideGameChange(s, "player_a", callOff, due)).toThrow("can be called off");
+      expect(isGameChangeExpired(s, asked, due)).toBe(true);
+      expect(parseGameCommand({ type: "proposeChange", gameId: "game_changes", proposalId: "proposal_r1", expectedTermsVersion: 1, change: callOff })).toMatchObject({ change: callOff });
+    });
+
+    it("refuses to call off a game that isn't live or a pair already decided", () => {
+      const callOff = { kind: "call_off" as const };
+      const negotiating = state(); negotiating.game.status = "negotiating"; negotiating.players.forEach((player) => { player.dayOne = null; });
+      expect(() => decideGameChange(negotiating, "player_a", callOff, BEFORE)).toThrow("can be called off");
+      const decided = state(); decided.game.terms.versions[0].schedule = { count: 1 };
+      decided.entries = decided.players.map(player => ({ id: `done-${player.seat}`, memberId: player.memberId,
+        dayIndex: 0, attempt: 1, kind: "words", mediaKeys: [], blurHash: null, receivedAt: DURING, withdrawnAt: null }));
+      expect(() => decideGameChange(decided, "player_a", callOff, DURING)).toThrow("can be called off");
+      expect(() => decideGameChange(state(), "stranger", callOff, DURING)).toThrow("belongs to its players");
+    });
+
     it.each(["player_a", "player_b"])("expires a waiting change the moment it can't apply, so it never blocks editing (proposed by %s)", (proposer) => {
       // Live 10-day game on New York's day 3 (Auckland's day 4); a 6-day length waits until day 6.
       const s = twoZones(10, "2026-11-07", ["America/New_York", "Pacific/Auckland"]);
@@ -283,6 +312,20 @@ describe("group change rules", () => {
           yesNeeded: Math.max(0, Math.floor(count / 2) + 1 - yes) });
       }
     }
+  });
+
+  it.each([2, 3, 10])("calls off only when all %i remaining players say yes; one no closes it", count => {
+    const s = group(count); const callOff = { kind: "call_off" as const };
+    for (let yes = 1; yes <= count; yes++) {
+      const votes: Record<string, "yes" | "no"> = Object.fromEntries(s.players.slice(0, yes).map(p => [p.memberId, "yes"]));
+      expect(gameChangeMajority(s, votes, callOff)).toEqual({ approved: yes === count, declined: false, yesNeeded: count - yes });
+    }
+    expect(gameChangeMajority(s, { member_0: "yes", [`member_${count - 1}`]: "no" }, callOff)).toMatchObject({ approved: false, declined: true });
+    // A departed player no longer has to agree.
+    s.players[count - 1].leftAt = BEFORE;
+    expect(gameChangeMajority(s, Object.fromEntries(s.players.slice(0, count - 1).map(p => [p.memberId, "yes" as const])), callOff)).toMatchObject({ approved: true });
+    const view = pendingGameChangeView(group(count), { ...pending(), change: callOff, votes: [{ memberId: "member_0", vote: "yes" }] }, DURING);
+    expect(view?.yesNeeded).toBe(count - 1);
   });
 
   it("ignores unjoined and departed votes, and parses final votes from pending JSON", () => {

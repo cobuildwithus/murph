@@ -17,6 +17,7 @@ export const hostedGameChangeSchema = z.discriminatedUnion("kind", [
     stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare"]), item: z.string().min(1).max(200) }).strict()).min(1).max(3).optional(),
     stakesApplyToWholeGame: z.literal(true).optional(),
   }).strict(),
+  z.object({ kind: z.literal("call_off") }).strict(),
 ]);
 export const hostedGameCreateTermsSchema = z.object({
   defaultTask: z.string().min(1).max(200).optional(),
@@ -101,9 +102,10 @@ const pending = z.object({
   change: z.discriminatedUnion("kind", [hostedGameChangeSchema.options[0], hostedGameChangeSchema.options[1].extend({
     defaultTask: z.string().min(1).max(200).optional(),
     tasks: z.array(z.object({ seat: z.number().int().min(0).max(9), text: z.string().min(1).max(200) }).strict()).min(1).max(10).optional(),
-  })]), effectiveFromDay: z.number().int().min(0),
+  }), hostedGameChangeSchema.options[2]]), effectiveFromDay: z.number().int().min(0),
   votes: z.array(z.object({ memberId: ref, vote: z.enum(["yes", "no"]) }).strict()).max(10).optional(),
-  yesNeeded: z.number().int().min(0).max(6).optional(),
+  // A call-off needs every remaining player, up to nine more yeses.
+  yesNeeded: z.number().int().min(0).max(9).optional(),
   deliveryStatus: z.enum(["pending", "queued", "sent", "failed", "conversation"]), deliveryRetryable: z.boolean().optional(), startsOn: date.nullable(),
 }).strict();
 const progress = z.object({

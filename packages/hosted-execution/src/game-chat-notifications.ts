@@ -195,6 +195,15 @@ export function buildGameChangeCancelledInstructions(room?: GameNoticeRoom, grou
   ].join("\n");
 }
 
+/** Every remaining player agreed to end a live game early. */
+export function buildGameCalledOffInstructions(): string {
+  return [
+    "Everyone still playing agreed to call off this game early. Tell the room in one brief, plain line that the game is off, with no winner and no prize or dare owed.",
+    "Do not repeat tasks or prizes, ask a question, offer reminders, assign blame or name who asked first. Never mention internal IDs or delivery details.",
+    "This concerns only this game, not any later game. Never use vs., an em dash or a spaced hyphen.",
+  ].join("\n");
+}
+
 /** A notice about the cancelled invite, never a claim about later games. */
 export function buildGameInviteCancelledInstructions(group = false): string {
   if (group) return [

@@ -185,8 +185,10 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
 /** Reads/creation may precede a game; all other effects require its current room. */
 async function canRunGameChatRequestTx(input: Input, players: readonly string[], tx: Prisma.TransactionClient): Promise<boolean> {
   if (input.request.action === "read_game" || (input.request.action === "update_game" && input.request.update.operation === "create")) return true;
+  // The yes that calls off a pair game voids it; a retry of that yes must still reach its recorded outcome.
+  const replayableApproval = input.request.action === "update_game" && input.request.update.operation === "approve" && input.request.update.proposalId !== undefined;
   const game = await tx.game.findFirst({
-    where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } }, addressedGameRematchWhere(players), ...(input.multiplayer ? [{ maxPlayers: 10, chatContainerMemberId: input.memberId }] : [])], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
+    where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled", ...(replayableApproval ? ["void" as const] : [])] } }, addressedGameRematchWhere(players), ...(input.multiplayer ? [{ maxPlayers: 10, chatContainerMemberId: input.memberId }] : [])], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
     include: { invitees: true, players: { take: 11 } },
   });
   if (!game || !isGameOn(game)) return false;

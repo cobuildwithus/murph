@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-09",
+  "order": 200,
+  "item": {
+    "id": "end-a-game-early-together",
+    "kind": "feature",
+    "priority": 2,
+    "title": "End a game early when everyone agrees",
+    "summary": "Ask Murph in your game chat to call off a game that's already going. If everyone still playing says yes, it ends with no winner and nothing owed.",
+    "details": "Works for one-on-one and group games. One no keeps the game going, and Murph only asks when someone clearly wants to stop the whole game. Games that haven't started can still be cancelled as before.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4751]
+  }
+}

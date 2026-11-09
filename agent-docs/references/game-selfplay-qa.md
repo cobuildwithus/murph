@@ -26,7 +26,7 @@ stateDiagram-v2
     negotiating --> void: cancel or expire
     live --> live: post / correct / agree permitted edit
     live --> settled: due or final eligible posts
-    live --> void: pair block or insufficient group roster
+    live --> void: pair block, insufficient group roster or agreed call-off
     settled --> invited: new rematch identity
     settled --> [*]
     void --> [*]
@@ -38,7 +38,7 @@ stateDiagram-v2
 | Native phase | needsName, zero, waiting, negotiating, declined, beforeDayOne, playing, resultsSoon, recapReady, afterRecap, rematchRequested | A useful action or honest waiting state exists; closing a cover preserves the selected game. |
 | Admission | signed out, unverified, allowed, denied, lookup failed | Retry and sign-out remain reachable; one account never sees another's pending work. |
 | Schedule | before Day 1, scheduled day, off day, any-N target open/met, last day, grace window, due | Server calendar and player time zone own eligibility; the 3 AM boundary uses message occurrence time for chat corrections. |
-| Proposal | absent, pending, applied, declined, cancelled, expired; queued/sent/retryable/terminal delivery | Pending terms do not replace accepted terms; exact other-player consent; expired changes cannot strand the game. |
+| Proposal | absent, pending, applied, declined, cancelled, expired; queued/sent/retryable/terminal delivery | Pending terms do not replace accepted terms; exact other-player consent; a call-off needs every remaining player's yes in chat; expired changes cannot strand the game. |
 | Post | empty, captured, unsaved, durable pending, sending, uncertain, Terms waiting, accepted, refused | One stable entry identity across retries; response loss cannot destroy a post; terminal refusal gives an exit. |
 | Daily evidence | first post, retake, withdrawn, removed, incomplete, restored | Corrections preserve evidence; no third attempt; no post is invented by restoration. |
 | Opponent visibility | none, locked, visible, loading, hidden, missed, off | Post-to-unlock remains server-owned; reporting hides content without rescoring. |

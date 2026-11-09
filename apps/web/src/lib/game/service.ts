@@ -446,7 +446,7 @@ async function gameChatCreateCommand(input: Parameters<typeof runGameChatUpdate>
 async function gameChatTermsCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "approve" | "propose" }>): Promise<{ command: unknown } | { result: GameCommandResult }> {
   const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { invitees: true, players: true } });
   if (!row || !await gameChatContextCurrent(row, input) || !isGameOn(row)) reject("NOT_A_PLAYER", "This game belongs to its players.");
-  if (row.maxPlayers === 10 && update.operation === "propose" && update.change.kind !== "start_now") reject("INVALID_REQUEST", "Ask for group changes with edit_terms and a new proposalId.");
+  if (row.maxPlayers === 10 && update.operation === "propose" && update.change.kind === "edit") reject("INVALID_REQUEST", "Ask for group changes with edit_terms and a new proposalId.");
   if (update.operation === "propose" && (row.status !== "invited" || row.maxPlayers === 10)) {
     return { command: { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change } };
   }
@@ -1152,17 +1152,22 @@ async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: nu
 }
 
 async function cancelInvite(context: CommandContext, gameId: string): Promise<string> {
-  await runLocked(gameId, context, async ({ tx, loaded, clock, now }) => {
-    if (decideCancelInvite(loaded.state, context.actor, now) === "already-void") return [];
-    await endGame(tx, gameId, { status: "void" });
-    // Always reserve: the pending notice is also what keeps a game-funded room
-    // able to deliver the one cancellation message after the game is void.
-    if (loaded.row.chatContainerMemberId) {
-      await reserveGameChatLifecycleTx({ gameId, kind: "cancelled", now: clock, tx });
-    }
-    return [{ type: "cancelled", payload: {} }];
+  await runLocked(gameId, context, async locked => {
+    if (decideCancelInvite(locked.loaded.state, context.actor, locked.now) === "already-void") return [];
+    return cancelGameTx(locked, {});
   });
   return gameId;
+}
+
+/** Cancellation and an agreed call-off end the game the same way, with one notice. */
+async function cancelGameTx({ tx, loaded, clock }: LockedStep, payload: Prisma.InputJsonObject): Promise<GameEventDraft[]> {
+  await endGame(tx, loaded.row.id, { status: "void" });
+  // Always reserve: the pending notice is also what keeps a game-funded room
+  // able to deliver the one cancellation message after the game is void.
+  if (loaded.row.chatContainerMemberId) {
+    await reserveGameChatLifecycleTx({ gameId: loaded.row.id, kind: "cancelled", now: clock, tx });
+  }
+  return [{ type: "cancelled", payload }];
 }
 
 /**
@@ -1750,7 +1755,9 @@ async function readReportSubject(actor: string, command: ReportCommand): Promise
 
 async function latestTermsAuthor(game: Pick<Game, "id" | "createdBy">): Promise<string | null> {
   const db = getPrisma();
-  const applied = await db.gameEvent.findFirst({ where: { gameId: game.id, type: "change_applied" }, orderBy: { id: "desc" }, select: { payload: true } });
+  // An applied call-off ends the game, so only the change before it can have written terms.
+  const applied = (await db.gameEvent.findMany({ where: { gameId: game.id, type: "change_applied" }, orderBy: { id: "desc" }, take: 2, select: { payload: true } }))
+    .find(event => !isRecord(event.payload) || event.payload.changeKind !== "call_off");
   const proposalId = isRecord(applied?.payload) ? applied.payload.proposalId : null;
   if (typeof proposalId !== "string") return game.createdBy;
   const proposed = await db.gameEvent.findUnique({ where: { commandKey: `game-change:${game.id}:${proposalId}` }, select: { actor: true } });
@@ -2147,8 +2154,9 @@ async function negotiateGroupNote(context: CommandContext, command: Extract<Game
 async function proposeChange(context: CommandContext, command: Extract<GameCommand, { type: "proposeChange" }>): Promise<string> {
   const owner = await getPrisma().game.findFirst({ where: { id: command.gameId, players: { some: { memberId: context.actor } } } });
   if (!owner) reject("NOT_A_PLAYER", "This game belongs to its players.");
+  if (command.change.kind === "call_off" && !context.chatContainerMemberId) reject("INVALID_REQUEST", "Ask to call off this game in its chat.");
   if (owner.maxPlayers === 10) {
-    if (command.change.kind !== "start_now") reject("INVALID_REQUEST", "Use full terms to request a group edit.");
+    if (command.change.kind === "edit") reject("INVALID_REQUEST", "Use full terms to request a group edit.");
     const [before] = await loadGames(getPrisma(), [command.gameId]);
     return proposeGroupChange(context, command, before);
   }
@@ -2223,6 +2231,8 @@ async function respondToPendingChange(locked: LockedStep, context: CommandContex
     if (await replayChangeResolution(tx, resolutionKey, context, command)) return { events: [] };
     reject("CHANGE_EXPIRED", "That proposal is no longer waiting for agreement.");
   }
+  // Consent to end the game is given in its chat, for groups too.
+  if (proposal.change.kind === "call_off" && command.decision !== "cancel") assertChangeResponseContext(context, command, false);
   const proposer = proposal.proposedByMemberId === context.actor;
   if (group && proposer && command.decision !== "cancel") reject("INVALID_REQUEST", "You already count as a yes.");
   if ((command.decision === "cancel") !== proposer) reject("NOT_A_PLAYER", proposer ? "The other player needs to agree." : "Only the proposer can cancel this change.");
@@ -2255,7 +2265,7 @@ async function voteOnGroupChange(locked: LockedStep, context: CommandContext, co
   const vote = command.decision === "approve" ? "yes" : "no";
   const votes: Record<string, "yes" | "no"> = { ...proposal.votes, [context.actor]: vote };
   const updated: StoredGamePendingChange = { ...proposal, votes };
-  const tally = gameChangeMajority(locked.loaded.state, votes);
+  const tally = gameChangeMajority(locked.loaded.state, votes, proposal.change);
   const event: GameEventDraft = { type: "change_voted", commandKey: groupVoteKey(command, context.actor), payload: { proposalId: proposal.id, vote } };
   if (tally.approved) {
     const response = await approvePendingChange(locked, context, updated, resolutionKey);
@@ -2297,13 +2307,14 @@ async function approvePendingChange(locked: LockedStep, context: CommandContext,
   return { refusal, events: [{ commandKey: resolutionKey, type: "change_expired", payload: { proposalId: proposal.id, ...(outdated ? {} : { reason: refusal }) } }] };
 }
 
-/** A word-free declined proposal is kept so the decliner can still take it (agreeToDeclinedChange). */
+/** A word-free declined proposal is kept so the decliner can still take it (agreeToDeclinedChange); ending a game always asks again. */
 function closedChangePayload(proposal: StoredGamePendingChange, decision: "decline" | "cancel"): Prisma.InputJsonObject {
-  return decision === "decline" && !proposal.termsWordsEncrypted
+  return decision === "decline" && !proposal.termsWordsEncrypted && proposal.change.kind !== "call_off"
     ? { proposalId: proposal.id, declined: toPrismaJsonObject({ v: 1, ...proposal }) } : { proposalId: proposal.id };
 }
 
 async function applyApprovedChange(locked: LockedStep, gameId: string, proposal: StoredGamePendingChange, resolutionKey: string, actor: string, decision: ReturnType<typeof decideGameChange>, answered = false): Promise<GameEventDraft[]> {
+  if (proposal.change.kind === "call_off") return callOffGameTx(locked, proposal, resolutionKey, actor);
   const { tx, loaded, now, clock } = locked;
   const { startsOn, next, terms, lengthDays } = await applyChangeTermsTx(locked, gameId, proposal, decision);
   if (loaded.state.game.seats === 2 && loaded.state.game.status === "negotiating") {
@@ -2329,6 +2340,17 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
     return [];
   }
   return [{ commandKey: resolutionKey, type: "change_applied", payload: { proposalId: proposal.id, termsVersion: next.n, effectiveFromDay: next.fromDay } }];
+}
+
+/** Everyone agreed: no terms change, the game ends void, and the cancellation notice is the one announcement. */
+async function callOffGameTx(locked: LockedStep, proposal: StoredGamePendingChange, resolutionKey: string, actor: string): Promise<GameEventDraft[]> {
+  const { tx, loaded, clock } = locked;
+  const group = loaded.row.maxPlayers === 10;
+  // Resolve before endGame, which would otherwise expire the applied ask.
+  if (group) await resolveGroupGameChangeTx({ tx, game: loaded.row, actor, now: clock, proposal, outcome: "change_applied",
+    reason: "Everyone still playing agreed to call off the game.", tally: groupChangeTally(loaded.state, proposal), answeredInBoundChat: true });
+  const resolution: GameEventDraft[] = group ? [] : [{ commandKey: resolutionKey, type: "change_applied", payload: { proposalId: proposal.id, changeKind: "call_off" } }];
+  return [...resolution, ...await cancelGameTx(locked, { calledOff: true, proposalId: proposal.id })];
 }
 
 /** Persist the approved terms version before applying its calendar or terminal outcome. */

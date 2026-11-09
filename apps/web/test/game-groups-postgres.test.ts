@@ -1412,6 +1412,41 @@ describe.skipIf(!enabled)("group majority changes", () => {
       .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
   });
 
+  it("calls off a live group only when every remaining player says yes in its chat", async () => {
+    const g = await majorityGame(3);
+    const callOff = { operation: "propose" as const, gameId: g.game.id, proposalId: g.proposalId, expectedTermsVersion: 1, change: { kind: "call_off" as const } };
+    expect(await g.send(1, callOff)).toMatchObject({ ok: true });
+    expect((await g.shared()).pendingChange).toMatchObject({ id: g.proposalId, change: { kind: "call_off" }, yesNeeded: 2 });
+    expect(await g.vote(0, "approve")).toMatchObject({ ok: true });
+    // A majority is not enough, and an app vote can't finish it.
+    expect(await gameRow(g.game.id)).toMatchObject({ status: "live" });
+    expect((await g.shared()).pendingChange?.yesNeeded).toBe(1);
+    expect(await run(g.people[2].id, { type: "respondChange", gameId: g.game.id, proposalId: g.proposalId, decision: "approve" }))
+      .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    for (let i = 0; i < 2; i++) expect(await g.vote(2, "approve")).toMatchObject({ ok: true });
+    expect(await gameRow(g.game.id)).toMatchObject({ status: "void", pendingChange: null, result: null, terms: { versions: [{ n: 1 }] } });
+    expect(await db.gameEvent.findUnique({ where: { commandKey: `game-change-resolved:${g.game.id}:${g.proposalId}` } }))
+      .toMatchObject({ type: "change_applied", payload: { changeKind: "call_off", tally: { yes: 3, no: 0, total: 3 } } });
+    expect(await db.gameEvent.findMany({ where: { gameId: g.game.id, type: "cancelled" }, select: { payload: true } }))
+      .toEqual([{ payload: { v: 1, calledOff: true, proposalId: g.proposalId } }]);
+    expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "change_voted" } })).toBe(2);
+    expect(await db.hostedLinqDelivery.findMany({ where: { source: "game_lifecycle", sourceRef: { startsWith: g.game.id },
+      template: { in: ["game_cancelled", "game_change_resolved", "game_change_expired"] } }, select: { template: true } })).toEqual([{ template: "game_cancelled" }]);
+  });
+
+  it("closes a group call-off on the first no and counts every remaining player", async () => {
+    const g = await majorityGame(4);
+    expect(await g.send(0, { operation: "propose", gameId: g.game.id, proposalId: g.proposalId, expectedTermsVersion: 1, change: { kind: "call_off" } })).toMatchObject({ ok: true });
+    expect(await g.vote(1, "approve")).toMatchObject({ ok: true });
+    expect(await g.vote(2, "decline")).toMatchObject({ ok: true });
+    expect(await gameRow(g.game.id)).toMatchObject({ status: "live", pendingChange: null });
+    expect(await db.gameEvent.findUnique({ where: { commandKey: `game-change-resolved:${g.game.id}:${g.proposalId}` } }))
+      .toMatchObject({ type: "change_declined", payload: { tally: { yes: 2, no: 1, total: 4 } } });
+    const ten = await majorityGame(10);
+    expect(await ten.send(3, { operation: "propose", gameId: ten.game.id, proposalId: ten.proposalId, expectedTermsVersion: 1, change: { kind: "call_off" } })).toMatchObject({ ok: true });
+    expect((await ten.shared()).pendingChange?.yesNeeded).toBe(9);
+  });
+
   it("adds late joiners to the tally without resolving the ask on join", async () => {
     const g = await majorityGame(2, 2);
     expect(await g.send(0, g.edit())).toMatchObject({ ok: true });
@@ -1489,6 +1524,14 @@ describe.skipIf(!enabled)("group majority changes", () => {
     const reportId = randomUUID();
     await ok(g.people[0].id, { type: "report", gameId: g.game.id, reportId, about: "terms", reason: "harassment" });
     expect(await db.gameReport.findUnique({ where: { id: reportId } })).toMatchObject({ reportedMemberId: g.people[1].id });
+    // A later call-off writes no terms, so its asker never becomes the terms author.
+    const callOff = randomUUID();
+    expect(await g.send(2, { operation: "propose", gameId: g.game.id, proposalId: callOff, expectedTermsVersion: 2, change: { kind: "call_off" } })).toMatchObject({ ok: true });
+    for (const index of [0, 1]) expect(await g.send(index, { operation: "approve", gameId: g.game.id, proposalId: callOff })).toMatchObject({ ok: true });
+    expect(await gameRow(g.game.id)).toMatchObject({ status: "void" });
+    const afterCallOff = randomUUID();
+    await ok(g.people[0].id, { type: "report", gameId: g.game.id, reportId: afterCallOff, about: "terms", reason: "harassment" });
+    expect(await db.gameReport.findUnique({ where: { id: afterCallOff } })).toMatchObject({ reportedMemberId: g.people[1].id });
   });
 });
 
