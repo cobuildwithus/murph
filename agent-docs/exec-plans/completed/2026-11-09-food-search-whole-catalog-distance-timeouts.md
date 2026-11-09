@@ -1,6 +1,6 @@
 # Stop food label search timeouts from whole-catalog name-distance scans
 
-Status: active
+Status: completed
 Created: 2026-11-09
 Updated: 2026-11-09
 
@@ -105,4 +105,9 @@ Updated: 2026-11-09
   cases.
 - Read-only timing and `EXPLAIN (ANALYZE, BUFFERS)` on the configured labels
   database before and after the change, as recorded above.
-- `pnpm --dir apps/web typecheck` and focused ESLint.
+- Generic-only typo recovery on the configured labels database intersects the
+  name index with the data-origin index, so a term resembling 13,970 names
+  fetched 42 rows and finished in under a second.
+- `pnpm --dir apps/web typecheck`, focused oxlint, `pnpm complexity:diff`, and
+  `git diff --check` passed. The changelog page test passed 4 tests.
+Completed: 2026-11-09
