@@ -131,6 +131,8 @@ function presentNumber(
     if (row.statistic !== "value" || row.comparator != null) continue;
     const normalized = normalizeMetricValue({ metricKey: metric.key, unit: row.unit, value: row.value });
     if (normalized.canonicalValue === null) continue;
+    // As on the board: a worn device can hold 0 for days it counted no steps; 0 is not a reading.
+    if (metric.key === "steps" && normalized.canonicalValue === 0) continue;
     byDate.set(row.date, { date: row.date, value: normalized.canonicalValue, source: row.sourceLabel, observedAt: row.observedAt });
   }
   const savedPoints = [...byDate.values()];
