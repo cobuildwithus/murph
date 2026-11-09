@@ -36,6 +36,7 @@ import {
 } from "@/src/lib/hosted-mailbox/store";
 import {
   createHostedLinqChatLookupKey,
+  createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -44,6 +45,7 @@ import {
   acquireHostedMemberHomeLinqRouteLockTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   readHostedMemberRoutingState,
+  readHostedLinqDirectRoutingTx,
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -76,7 +78,7 @@ import {
   runHostedLinqMessageEditPreparedTransaction,
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
-import { readUnchangedHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
+import { readUnchangedHostedMemberHomeLinqBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
 import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
 import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
 
@@ -282,7 +284,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           log: [{ emit: "event", level: "query" }],
         });
         let preparedMemberLockAttempts = 0;
+        const queries: string[] = [];
         prisma.$on("query", ({ query }) => {
+          queries.push(query);
           if (query.includes('from "hosted_member"') && query.includes("for no key update")) {
             preparedMemberLockAttempts += 1;
           }
@@ -296,6 +300,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         try {
           fixture = await createActivationContactFixture(prisma, 0);
           const { memberId, memberPhone, linePhone } = fixture;
+          await prisma.hostedWorkspace.create({ data: { userId: memberId } });
+          const crypto = await vi.importActual<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(
+            "@/src/lib/hosted-crypto/domain-root-store",
+          );
+          await crypto.provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "ingress", prisma, userId: memberId });
           const participantContact = createHostedLinqParticipantContact({
             kind: "phone",
             value: memberPhone,
@@ -337,6 +346,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             },
           });
           const admit = () => {
+            queries.length = 0;
             const timestamp = String(Math.floor(Date.now() / 1_000));
             return handleHostedOnboardingLinqWebhook({
               prisma,
@@ -393,6 +403,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             reason: "wake-appended-active-member",
           });
           expect(preparedMemberLockAttempts).toBe(1);
+          if (lockHolder === "foreign-key insert") {
+            const lockIndex = queries.findIndex(query => query.includes("hosted-linq-routing:participant-contact"));
+            expect(lockIndex).toBeGreaterThan(0);
+            const commitIndex = queries.findIndex((query, index) => index > lockIndex && /^\s*COMMIT\b/iu.test(query));
+            expect(commitIndex).toBeGreaterThan(lockIndex);
+            const plannerQueries = queries.slice(lockIndex, commitIndex);
+            // The adapter does not emit BEGIN. 22 statements plus BEGIN/COMMIT
+            // is 24 round trips, down from the established baseline's 27.
+            expect(plannerQueries).toHaveLength(22);
+            expect(plannerQueries.filter(query => query.includes('FROM "public"."hosted_member_routing"'))).toHaveLength(1);
+          }
           // A separate connection observes the committed mailbox item while the FK holder is still open.
           expect(await prisma.hostedMailboxItem.findMany({
             where: { userId: memberId },
@@ -515,6 +536,50 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("classifies all rotated home and pending candidates independently of the exact member row", async () => {
+      vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", [1, 2].map(version =>
+        `v${version}:${Buffer.alloc(32, version).toString("base64url")}`).join(","));
+      vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v2");
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberIds = Array.from({ length: 5 }, () => `routing-rotation-${randomUUID()}`);
+      const memberId = memberIds[0]!;
+      const chatId = `rotation-chat-${randomUUID()}`;
+      try {
+        const keys = createHostedLinqChatLookupKeyReadCandidates(chatId);
+        expect(keys).toHaveLength(2);
+        await prisma.hostedMember.createMany({ data: memberIds.map(id => ({ id })) });
+        await prisma.hostedMemberRouting.createMany({ data: [
+          { memberId, linqChatLookupKey: keys[0], pendingLinqChatLookupKey: keys[0] },
+          { memberId: memberIds[1]!, pendingLinqChatLookupKey: keys[1] },
+          { memberId: memberIds[2]! },
+        ] });
+        await prisma.$transaction(async tx => {
+          await acquireHostedLinqChatOwnershipLockTx({ chatId, tx });
+          await lockHostedMemberRow(tx, memberId);
+          expect(await readHostedLinqDirectRoutingTx({ chatId, lockedMember: { memberId }, prisma: tx })).toMatchObject({
+            home: { memberId }, routingRecord: { memberId }, hasForeignPendingOwner: true,
+          });
+        });
+        // Five distinct matching rows exceed a tempting three-row cap.
+        await prisma.hostedMemberRouting.update({ where: { memberId }, data: {
+          linqChatLookupKey: createHostedLinqChatLookupKey(`other-${chatId}`), pendingLinqChatLookupKey: null,
+        } });
+        await prisma.hostedMemberRouting.update({ where: { memberId: memberIds[2]! }, data: {
+          pendingLinqChatLookupKey: keys[0],
+        } });
+        await prisma.hostedMemberRouting.createMany({ data: [
+          { memberId: memberIds[3]!, linqChatLookupKey: keys[0] },
+          { memberId: memberIds[4]!, linqChatLookupKey: keys[1] },
+        ] });
+        await expect(prisma.$transaction(tx => readHostedLinqDirectRoutingTx({ chatId, lockedMember: { memberId }, prisma: tx })))
+          .rejects.toMatchObject({ code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS", details: { matchCount: 2 } });
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+        await prisma.$disconnect();
+        vi.unstubAllEnvs();
+      }
+    });
+
     it.each([false, true])("repairs a conflicting pending route without disturbing its home (has home: %s)", async (hasHome) => {
       const client = createPrismaClient({ databaseUrl, poolMax: 1 });
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -544,12 +609,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           pendingLinqChatIdEncrypted: "synthetic-pending-chat",
         } });
         const admit = () => client.$transaction(async (tx) => {
-          await acquireHostedLinqParticipantPhoneLockTx({ phoneNumber: participantContact.value, tx });
-          await acquireHostedLinqChatOwnershipLockTx({ chatId, tx });
+          await acquireHostedLinqChatOwnershipLockTx({ chatId, participantContact, tx });
           await lockHostedMemberRow(tx, memberId);
-          const routingRecord = await tx.hostedMemberRouting.findUnique({ where: { memberId } });
-          const retained = await readUnchangedHostedMemberHomeLinqBindingTx({
-            chatId, homeLineAssignedAt, memberId, prisma: tx, recipientPhone, routingRecord,
+          const routing = await readHostedLinqDirectRoutingTx({ chatId, lockedMember: { memberId }, prisma: tx });
+          const retained = readUnchangedHostedMemberHomeLinqBinding({
+            chatId, homeLineAssignedAt, recipientPhone, ...routing,
           });
           return retained ?? bind(tx);
         }, transactionOptions);

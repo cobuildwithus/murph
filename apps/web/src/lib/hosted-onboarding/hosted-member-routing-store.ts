@@ -467,7 +467,7 @@ export async function lookupHostedMemberRoutingByHomeLinqChatId(
   }
 
   if (input.projection === "core") {
-    const resolution = resolveHostedMemberCoreLookup(
+    return resolveHostedHomeLinqCoreLookup(
       await input.prisma.hostedMemberRouting.findMany({
         where: {
           linqChatLookupKey: {
@@ -477,21 +477,6 @@ export async function lookupHostedMemberRoutingByHomeLinqChatId(
         select: hostedMemberRoutingCoreLookupSelect,
       }),
     );
-    if (resolution.status === "ambiguous") {
-      throw hostedOnboardingError({
-        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-        details: {
-          matchCount: resolution.memberIds.length,
-          matchedBy: "linqChatLookupKey",
-        },
-        httpStatus: 500,
-        message: "Hosted member routing lookup matched multiple members.",
-        retryable: true,
-      });
-    }
-    return resolution.status === "found"
-      ? { core: resolution.core, matchedBy: "linqChatLookupKey" }
-      : null;
   }
 
   const routingRecords = await input.prisma.hostedMemberRouting.findMany({
@@ -509,6 +494,63 @@ export async function lookupHostedMemberRoutingByHomeLinqChatId(
     prisma: input.prisma,
     routingRecords,
   });
+}
+
+/** One locked snapshot for direct admission. Each stored key is unique, but
+ * rotation can yield multiple owners: fetch every candidate and classify the
+ * member, home and pending matches independently. No private fields are opened.
+ */
+export async function readHostedLinqDirectRoutingTx(input: {
+  chatId: string;
+  lockedMember: { memberId: string } | null;
+  prisma: Prisma.TransactionClient;
+}) {
+  // Unprepared first contact retains its existing home-only discovery. Only a
+  // prepared member locked by admission can reuse the combined row snapshot.
+  if (!input.lockedMember) {
+    const home = await lookupHostedMemberRoutingByHomeLinqChatId({
+      linqChatId: input.chatId, prisma: input.prisma, projection: "core",
+    });
+    return { home: home ? { core: home.core, memberId: home.core.id } : null,
+      routingRecord: null, hasForeignPendingOwner: false };
+  }
+  const { memberId } = input.lockedMember;
+  const chatKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
+  const records = await input.prisma.hostedMemberRouting.findMany({
+    where: { OR: [
+      { memberId },
+      { linqChatLookupKey: { in: chatKeys } },
+      { pendingLinqChatLookupKey: { in: chatKeys } },
+    ] },
+    select: hostedMemberRoutingLookupSelect,
+  });
+  const home = resolveHostedHomeLinqCoreLookup(records.filter(
+    (record) => record.linqChatLookupKey !== null && chatKeys.includes(record.linqChatLookupKey),
+  ));
+  return {
+    home: home ? { core: home.core, memberId: home.core.id } : null,
+    routingRecord: records.find((record) => record.memberId === memberId) ?? null,
+    hasForeignPendingOwner: records.some((record) => record.memberId !== memberId
+      && record.pendingLinqChatLookupKey !== null && chatKeys.includes(record.pendingLinqChatLookupKey)),
+  };
+}
+
+function resolveHostedHomeLinqCoreLookup(
+  records: readonly HostedMemberRoutingCoreLookupRecord[],
+): HostedMemberHomeLinqCoreLookup | null {
+  const resolution = resolveHostedMemberCoreLookup(records);
+  if (resolution.status === "ambiguous") {
+    throw hostedOnboardingError({
+      code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+      details: { matchCount: resolution.memberIds.length, matchedBy: "linqChatLookupKey" },
+      httpStatus: 500,
+      message: "Hosted member routing lookup matched multiple members.",
+      retryable: true,
+    });
+  }
+  return resolution.status === "found"
+    ? { core: resolution.core, matchedBy: "linqChatLookupKey" }
+    : null;
 }
 
 export async function lookupHostedMemberRoutingByTelegramUserId(input: {

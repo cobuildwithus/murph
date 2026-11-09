@@ -3105,27 +3105,23 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   }
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
-  const activeMemberAccess = readActiveHostedMemberAccess({
+  const accessAllowed = await readActiveHostedMemberAccess({
     memberId,
     prisma: input.prisma,
   });
-  const [routingRecord, accessAllowed, preparedFamilyInvite] =
-    await Promise.all([
-      readHostedMemberRoutingRecord({
-        memberId,
+  const routingRecord = await readHostedMemberRoutingRecord({
+    memberId,
+    prisma: input.prisma,
+  });
+  const preparedFamilyInvite = context.participantContact?.kind === "phone"
+    ? await resolveHostedFamilyPhoneInvitePreparation({
+        acceptedMemberId: memberId,
+        now: new Date(context.occurredAt),
+        phoneNumber: context.participantContact.value,
         prisma: input.prisma,
-      }),
-      activeMemberAccess,
-      context.participantContact?.kind === "phone"
-        ? resolveHostedFamilyPhoneInvitePreparation({
-            acceptedMemberId: memberId,
-            now: new Date(context.occurredAt),
-            phoneNumber: context.participantContact.value,
-            prisma: input.prisma,
-            text: context.summary.text,
-          })
-        : null,
-    ]);
+        text: context.summary.text,
+      })
+    : null;
   // Only Family acceptance consumes the private identity snapshot. Ordinary
   // messages use blind identity/home lookups, revalidated under the locks.
   const identityRecord = preparedFamilyInvite

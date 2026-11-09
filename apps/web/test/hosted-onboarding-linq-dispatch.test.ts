@@ -4523,7 +4523,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId).toHaveBeenCalledOnce();
       expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledTimes(2);
       expect(hostedMemberRouting.findMany).toHaveBeenCalledTimes(2);
-      expect(hostedMemberRouting.findUnique).toHaveBeenCalledTimes(2);
+      expect(hostedMemberRouting.findUnique).toHaveBeenCalledOnce();
+      expect(hostedMemberRouting.findFirst).not.toHaveBeenCalled();
       expect(prisma.$transaction).toHaveBeenCalledOnce();
       expect(providerDomainsAfterTransactionStart).toEqual([]);
       if (continuationCandidate) {
@@ -4717,7 +4718,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
-    )).toHaveLength(4);
+    )).toHaveLength(2);
+    expect(hostedMemberRouting.findMany.mock.calls.filter(([query]) =>
+      isFullHostedMemberRoutingRecordQuery(query)
+    )).toHaveLength(2);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -5045,14 +5049,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     };
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock(routingRecord);
     if (scenario === "pending-conflict") {
-      const findFirst = hostedMemberRouting.findFirst.getMockImplementation()!;
+      const findMany = hostedMemberRouting.findMany.getMockImplementation()!;
       let conflictObserved = false;
-      hostedMemberRouting.findFirst.mockImplementation(async (query) => {
-        if (!conflictObserved && query?.where?.NOT && query.where.pendingLinqChatLookupKey) {
+      hostedMemberRouting.findMany.mockImplementation(async (query) => {
+        const records = await findMany(query);
+        if (!conflictObserved && isFullHostedMemberRoutingRecordQuery(query)) {
           conflictObserved = true;
-          return withHostedMemberRoutingMember({ memberId: "synthetic-pending-owner" });
+          return [...records, { memberId: "synthetic-pending-owner", linqChatLookupKey: null,
+            pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123") }];
         }
-        return findFirst(query);
+        return records;
       });
     }
     const prisma = asPrismaTransactionClient({
@@ -5097,6 +5103,31 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
+  it("keeps the canonical duplicate ahead of changed prepared routing", async () => {
+    const { prisma, hostedMemberRouting, restoreRootMock } = await createDirectPreparationTransitionFixture();
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    const findMany = hostedMemberRouting.findMany.getMockImplementation()!;
+    hostedMemberRouting.findMany.mockImplementation(async query => {
+      const records = await findMany(query);
+      return isFullHostedMemberRoutingRecordQuery(query)
+        ? records.map(record => ({ ...record, pendingLinqChatIdEncrypted: "changed-under-lock" }))
+        : records;
+    });
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({ id: "synthetic-committed-mailbox-item" });
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma, rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false, eventId: "evt_duplicate_routing_drift" }),
+        signature: null, timestamp: null,
+      })).resolves.toMatchObject({ duplicate: true, reason: "duplicate-webhook-event" });
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+      expect(hostedMemberRouting.findMany.mock.calls.some(([query]) => isFullHostedMemberRoutingRecordQuery(query))).toBe(true);
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    } finally {
+      restoreRootMock();
+    }
+  });
+
   it("re-prepares once when the direct routing ciphertext changes under its lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
@@ -5130,14 +5161,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       const record = await defaultFindUnique(query);
       if (isFullHostedMemberRoutingRecordQuery(query)) {
         fullRoutingRecordReadCount += 1;
-        if (fullRoutingRecordReadCount === 2 && record) {
-          return {
-            ...record,
-            pendingLinqChatIdEncrypted: "changed-under-lock",
-          };
-        }
       }
       return record;
+    });
+    const defaultFindMany = hostedMemberRouting.findMany.getMockImplementation()!;
+    hostedMemberRouting.findMany.mockImplementation(async query => {
+      const records = await defaultFindMany(query);
+      if (isFullHostedMemberRoutingRecordQuery(query) && ++fullRoutingRecordReadCount === 2) {
+        return records.map(record => ({ ...record, pendingLinqChatIdEncrypted: "changed-under-lock" }));
+      }
+      return records;
     });
     const prisma = asPrismaTransactionClient({
       hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
@@ -5440,7 +5473,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         });
       expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
         isFullHostedMemberRoutingRecordQuery(query)
-      )).toHaveLength(2);
+      )).toHaveLength(1);
       expect(providerDomainsAfterTransactionStart).toEqual([]);
       expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(2);
       expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
@@ -5617,7 +5650,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(providerDomainsAfterTransactionStart).toEqual([]);
       expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
         isFullHostedMemberRoutingRecordQuery(query)
-      )).toHaveLength(2);
+      )).toHaveLength(1);
       expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
         .not.toHaveBeenCalled();
     } finally {
@@ -6252,7 +6285,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(providerDomainsAfterTransactionStart).toEqual([]);
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
         expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
-        expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+        expect(prisma.$executeRaw).toHaveBeenCalledOnce();
         expect(prisma.$executeRaw.mock.calls[0]?.[1]).toBe(
           "phone:+15551234567",
         );
@@ -16425,7 +16458,7 @@ function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unk
       }
       return record;
     }),
-    findMany: vi.fn(async () => {
+    findMany: vi.fn(async (_query?: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => {
       const record = withHostedMemberRoutingMember(hostedMemberRoutingRecord);
       return record ? [record] : [];
     }),

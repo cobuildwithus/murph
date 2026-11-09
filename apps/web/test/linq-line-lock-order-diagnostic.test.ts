@@ -4,6 +4,12 @@ import type { PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPrismaClient } from "@/src/lib/prisma";
+import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import {
+  acquireHostedLinqParticipantContactLockTx,
+  buildHostedLinqParticipantContactLockValue,
+  createHostedLinqParticipantContact,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -64,6 +70,63 @@ afterEach(() => {
 });
 
 describe.skipIf(!runPostgresProof)("Linq line lock-order PostgreSQL regression", () => {
+  it.each([
+    { kind: "phone" as const, value: formattedPhone },
+    { kind: "email" as const, value: " Lock-Order@Example.Test " },
+  ])("waits for the normalized $kind participant before holding the chat lock", async ({ kind, value }) => {
+    const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+    const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+    const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+    const contact = createHostedLinqParticipantContact({ kind, value });
+    if (!contact) throw new Error("Expected a synthetic contact.");
+    const chatId = `synthetic-lock-order-${randomUUID()}`;
+    const participantKey = buildHostedLinqParticipantContactLockValue(contact);
+    const held = deferred();
+    const releaseFirst = deferred();
+    const acquired = deferred();
+    const releaseSecond = deferred();
+    let pid = 0;
+    const firstResult = Promise.allSettled([first.$transaction(async tx => {
+      await acquireHostedLinqParticipantContactLockTx({ contact: { ...contact, value }, tx });
+      held.resolve();
+      await releaseFirst.promise;
+    }, { timeout: 10_000 })]);
+    let secondResult: Promise<PromiseSettledResult<void>[]> | undefined;
+    try {
+      await held.promise;
+      secondResult = Promise.allSettled([second.$transaction(async tx => {
+        const rows = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+        pid = rows[0]!.pid;
+        await acquireHostedLinqChatOwnershipLockTx({ chatId: ` ${chatId} `, participantContact: contact, tx });
+        acquired.resolve();
+        await releaseSecond.promise;
+      }, { timeout: 10_000 })]);
+      const locks = () => observer.$queryRaw<Array<{ participant: boolean; granted: boolean }>>`
+        SELECT classid = hashtext('hosted-linq-routing:participant-contact')::oid AS participant, granted
+        FROM pg_locks WHERE pid = ${pid} AND locktype = 'advisory' AND objsubid = 2
+          AND ((classid = hashtext('hosted-linq-routing:participant-contact')::oid
+                AND objid = hashtext(${participantKey})::oid)
+            OR (classid = hashtext('hosted-linq-routing:chat')::oid AND objid = hashtext(${chatId})::oid))
+        ORDER BY participant DESC
+      `;
+      await expect.poll(locks, { timeout: 3_000 }).toEqual([{ participant: true, granted: false }]);
+      releaseFirst.resolve();
+      await acquired.promise;
+      expect(await locks()).toEqual([
+        { participant: true, granted: true }, { participant: false, granted: true },
+      ]);
+      releaseSecond.resolve();
+      expect(await firstResult).toEqual([{ status: "fulfilled", value: undefined }]);
+      expect(await secondResult).toEqual([{ status: "fulfilled", value: undefined }]);
+    } finally {
+      releaseFirst.resolve();
+      releaseSecond.resolve();
+      await firstResult;
+      await secondResult;
+      await Promise.all([first.$disconnect(), second.$disconnect(), observer.$disconnect()]);
+    }
+  });
+
   it("completes recovery dispatch and ordinary upsert without losing quota or delivery authority", async () => {
     await withSyntheticLine(async ({ prisma, lookupKey, createEffect }) => {
       const rowHeld = deferred();
