@@ -992,7 +992,7 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
 
-A private hosted biweekly usage review is a managed automation pinned to
+A private hosted monthly usage review is a managed automation pinned to
 GPT-6.1 Sol medium. Its verified private hosted occurrence uses the existing
 isolated conversation/provider-turn profile: it neither resumes the member's
 provider thread nor replays committed chat history. Canonical context and the
@@ -2259,12 +2259,12 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `Usage optimization audit:` prefix are excluded from the product-feedback
   query and read separately with the same window, kind allowlist, row cap,
   projection, and recipient list. Nonempty usage windows send a separate
-  `Biweekly usage reports — <day>` email with report totals and overflow counts,
+  `Monthly usage reports — <day>` email with report totals and overflow counts,
   without feature-request labels or member identifiers. The managed usage
-  optimizer runs every 14 days and requests 14 days of usage diagnostics,
+  optimizer runs every 30 days and requests 30 days of usage diagnostics,
   preserving its existing automation identity. Member cycles are staggered,
-  so the daily email sweep sends the usage email only on a fixed 14-day
-  cadence anchored on 2026-11-07, covering the full 14 days since the previous
+  so the daily email sweep sends the usage email only on a fixed 30-day
+  cadence anchored on 2026-11-07, covering the full 30 days since the previous
   cadence day, and skips empty usage windows.
   Usage delivery has its own `hosted-usage-report-digest/<day>` Resend key,
   so retries after a partial send reuse each email's original key.
