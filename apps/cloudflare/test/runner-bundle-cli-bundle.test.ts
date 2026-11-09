@@ -200,11 +200,16 @@ const RUNTIME_IMPORT_MARKER_PREFIX = "synthetic-runtime-module:";
 const VAULT_READ_PROBE_CONDITION =
   "args.join(' ') === 'wearables day 2026-01-01 --format json' && vault.length > 0";
 
+// The synthetic installed package's helper subpath. Assembled from parts
+// because it exists only inside the staged fixture, not as a workspace
+// entrypoint this test file imports.
+const RUNTIME_IMPORT_HELPER_SPECIFIER = ["@murphai", "vault-usecases", "runtime-import"].join("/");
+
 // Reads `@murphai/query` through the owning package's helper, only on the
 // vault-backed read probe.
 const RUNTIME_IMPORT_FAKE_CLI_SOURCE = `${FAKE_CLI_SOURCE}
 if (${VAULT_READ_PROBE_CONDITION}) {
-  const { loadRuntimeModule } = await import('@murphai/vault-usecases/runtime-import');
+  const { loadRuntimeModule } = await import(${JSON.stringify(RUNTIME_IMPORT_HELPER_SPECIFIER)});
   console.log((await loadRuntimeModule('@murphai/query')).marker);
 }
 `;
