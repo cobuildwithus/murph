@@ -294,6 +294,28 @@ it("requires distinct covered dates, ignores summary/comparator rows, and keeps 
   expect(body.numbers.sleep).toBeNull();
 });
 
+it("leaves out zero-step days so they do not drag the average, and keeps a day's other count", async () => {
+  const whoop = { sourceLabel: "WHOOP" };
+  shards = await splitBrowserVaultReplica(fixture([
+    ...[0, 1, 2, 3].flatMap(offset => [
+      row("steps", addDaysToIsoDate(from, offset), 6000, "count"),
+      row("steps", addDaysToIsoDate(stepsThrough, -offset), 12000, "count", whoop),
+    ]),
+    // Days the strap counted nothing, including the latest settled day.
+    row("steps", addDaysToIsoDate(stepsThrough, -4), 0, "count", whoop),
+    row("steps", addDaysToIsoDate(stepsThrough, -5), 0, "count", whoop),
+    // A zero from the day's top source must not erase another source's count.
+    row("steps", addDaysToIsoDate(stepsThrough, -6), 9000, "count", { observedAt: `${addDaysToIsoDate(stepsThrough, -6)}T10:00:00.000Z` }),
+    row("steps", addDaysToIsoDate(stepsThrough, -6), 0, "count", { ...whoop, id: "metric-row:zero", observedAt: `${addDaysToIsoDate(stepsThrough, -6)}T13:00:00.000Z` }),
+  ]));
+  const body = await (await GET(request())).json();
+  const days = body.numbers.steps.daily as { date: string; value: number }[];
+  expect(days.some(day => day.value === 0)).toBe(false);
+  expect(days.find(day => day.date === addDaysToIsoDate(stepsThrough, -6))?.value).toBe(9000);
+  expect(days).toHaveLength(9);
+  expect(body.numbers.steps.comparison.current).toMatchObject({ value: 11400, days: 5 });
+});
+
 it("keeps a day's summary over a later raw reading, and raw readings on days without one", async () => {
   const raw = { sourceFamily: "event", sourceKind: "observation" };
   shards = await splitBrowserVaultReplica(fixture([
