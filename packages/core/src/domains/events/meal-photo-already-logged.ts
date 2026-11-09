@@ -44,9 +44,9 @@ export async function linkUploadToMealWithSamePhoto(
 ): Promise<string | null> {
   const capturedAt = Date.parse(input.capturedAt);
   if (!Number.isFinite(capturedAt)) throw new TypeError("A meal photo capture time is required.");
-  const meals = (await latestMeals(input)).filter(meal => !isDeletedEventSpineRecord(meal));
-  const linked = meals.find(meal => meal.uploadId === input.uploadId);
-  if (linked) return linked.mealId;
+  const meals = await liveMeals(input);
+  const linked = mealHoldingUpload(meals, input.uploadId);
+  if (linked) return linked;
   const candidates = meals
     .filter(meal => holdsMessagePhotoSavedAfter(meal, capturedAt))
     .sort((left, right) => Date.parse(right.photoCapturedAt!) - Date.parse(left.photoCapturedAt!))
@@ -73,6 +73,23 @@ export async function linkUploadToMealWithSamePhoto(
     return meal.mealId;
   }
   return null;
+}
+
+/** The live meal that already holds this upload: replays recognize their meal by it once staging is gone. */
+export async function findMealHoldingUpload(input: {
+  vaultRoot: string;
+  uploadId: string;
+  signal?: AbortSignal | null;
+}): Promise<string | null> {
+  return mealHoldingUpload(await liveMeals(input), input.uploadId);
+}
+
+async function liveMeals(input: { vaultRoot: string; signal?: AbortSignal | null }): Promise<Meal[]> {
+  return (await latestMeals(input)).filter(meal => !isDeletedEventSpineRecord(meal));
+}
+
+function mealHoldingUpload(meals: readonly Meal[], uploadId: string): string | null {
+  return meals.find(meal => meal.uploadId === uploadId)?.mealId ?? null;
 }
 
 function holdsMessagePhotoSavedAfter(meal: Meal, capturedAt: number): boolean {

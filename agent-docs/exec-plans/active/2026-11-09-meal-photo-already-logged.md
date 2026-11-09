@@ -203,6 +203,24 @@ read-only Codex deep review.
    verification lane, which is out of proportion for this edge. Revisit if a
    member asks whether a texted photo also uploaded.
 
+## PR review dispositions (ReviewGPT round 1, PR #4744 @ 99f751bb)
+
+The first attempt was INVALID: ChatGPT's code sandbox was unavailable, so the
+snapshot could not be opened. The retry on the same head reported one finding.
+
+1. High: a linked capture's replay can stall the system mailbox after a restart.
+   **Accepted, reproduced and fixed.** A linked texted meal holds the upload's
+   `uploadId` but not the capture's `externalRef`. The only pre-read
+   idempotency check is by `externalRef`, so once post-checkpoint cleanup had
+   deleted staging, a replay above the durable consumed prefix returned
+   retryable `meal_photo.missing` on every attempt. The fix: when staging is
+   gone, `findMealHoldingUpload` recognizes the meal before reporting missing,
+   then the shared closeout-ensure and cleanup outcome runs. A fresh import
+   still scans meals once. The linked runtime test now clears staging in its
+   cleanup effect and replays against it; restoring the old `missing` return
+   fails that test. A capture gone before any meal holds it still retries as
+   `meal_photo.missing`.
+
 ## Tasks
 
 1. Core: the `linkUploadToMealWithSamePhoto` print, candidate read and link

@@ -391,9 +391,10 @@ describe("hosted meal photo mailbox import", () => {
     const { vaultRoot, texted, photo } = await createVaultWithTextedMeal();
     const wake = createMealPhotoWake();
     Object.assign(wake.mealPhoto, mealPhotoIdentity(photo));
-    const deleteMealPhoto = vi.fn(async () => undefined);
+    let staged: Uint8Array | null = photo;
+    const deleteMealPhoto = vi.fn(async () => { staged = null; });
     const input = {
-      effectsPort: createEffectsPort({ deleteMealPhoto, readMealPhoto: async () => photo }),
+      effectsPort: createEffectsPort({ deleteMealPhoto, readMealPhoto: async () => staged }),
       item: createMealPhotoMailboxItem(),
       vaultRoot,
       wake,
@@ -409,9 +410,13 @@ describe("hosted meal photo mailbox import", () => {
     await expect(showAutomation({ automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID, vaultRoot }))
       .resolves.not.toBeNull();
     if (first.status !== "imported") throw new Error("Expected an import");
+    // A replay before the capture is cleared finds the link from the staged photo.
+    expect(await importHostedMealPhotoCapturedMailboxItem(input))
+      .toMatchObject({ reasonCode: "meal_photo.already_logged", status: "imported" });
     await first.afterCheckpoint?.();
     expect(deleteMealPhoto).toHaveBeenCalledWith("meal_photo_opaque_key");
 
+    // A replay after a restart, with the capture already cleared, still finds its meal.
     expect(await importHostedMealPhotoCapturedMailboxItem(input))
       .toMatchObject({ reasonCode: "meal_photo.already_logged", status: "imported" });
     expect((await readEvent({ vaultRoot, eventId: texted.event.id })).event.lifecycle).toEqual(linked.lifecycle);
@@ -421,6 +426,16 @@ describe("hosted meal photo mailbox import", () => {
     expect(project.meals?.days.flatMap(day => day.meals)).toEqual([
       expect.objectContaining({ id: texted.mealId, uploadId: CAPTURE_ID }),
     ]);
+  });
+
+  it("keeps retrying a capture that is gone before any meal holds it", async () => {
+    const { vaultRoot } = await createVaultWithTextedMeal();
+    expect(await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto: async () => null }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    })).toMatchObject({ reasonCode: "meal_photo.missing", retryable: true, status: "blocked" });
   });
 
   it("keeps the member's own send from the app as its own meal", async () => {
