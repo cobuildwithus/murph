@@ -157,7 +157,10 @@ for (const scenario of scenarios) {
     cpuMs: (used.user + used.system) / 1_000,
     maxRssKiB: process.resourceUsage().maxRSS, timing,
     // Compare semantic results across builds, excluding generated IDs/receipts.
-    semanticSha256: createHash("sha256").update(JSON.stringify(result.events.map((event) => {
+    // Order is not part of the result contract, so sort before hashing.
+    semanticSha256: createHash("sha256").update(JSON.stringify([...result.events].sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt)
+    ).map((event) => {
       assert.ok(event.kind === "observation");
       return {
         kind: event.kind, occurredAt: event.occurredAt, timeZone: event.timeZone,
