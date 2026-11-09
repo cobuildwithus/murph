@@ -1596,15 +1596,17 @@ function normalizeSummaries(
           resourceSlug,
         })
       : new Map<number, string>();
-    pushEvidencePart(
-      context.evidenceParts,
-      createEvidencePart(
-        evidencePartRole,
-        `${evidencePartRole}.json`,
-        preparedMenstrualCycle?.evidence
-          ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
-      ),
-    );
+    if (resource !== "activity") {
+      pushEvidencePart(
+        context.evidenceParts,
+        createEvidencePart(
+          evidencePartRole,
+          `${evidencePartRole}.json`,
+          preparedMenstrualCycle?.evidence
+            ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
+        ),
+      );
+    }
 
     if (preparedMenstrualCycle) {
       preparedMenstrualCycle.cycles.forEach((cycle, index) => {
@@ -1649,6 +1651,16 @@ function normalizeSummaries(
 
       if (!resourceContext) {
         return [];
+      }
+
+      if (resource === "activity") {
+        const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+        const role = `${evidencePartRole}:${buildStableSummaryResourceId(resourceContext, entry, timestamp)}`;
+        resourceContext.evidenceRoles = [role];
+        pushEvidencePart(
+          context.evidenceParts,
+          createEvidencePart(role, `${role}.json`, buildRawActivitySummaryRecord(entry, resourceContext)),
+        );
       }
 
       return [{ entry, resourceContext }];
@@ -6081,6 +6093,20 @@ function buildJunctionBloodPressureReadingIdentityHash(input: {
     input.systolic,
     input.diastolic,
   ]);
+}
+
+function buildRawActivitySummaryRecord(entry: PlainObject, resourceContext: ResourceContext): PlainObject {
+  const record = { ...entry };
+  // Expanded entries inherit collection wrappers; retaining those would copy the whole window.
+  for (const key of JUNCTION_NESTED_RESOURCE_ENTRY_KEYS) {
+    delete record[key];
+  }
+  return stripUndefined({
+    ...asPlainObject(buildRawResourcePayload("activity", record)),
+    sourceProviderSlug: resourceContext.sourceProviderSlug,
+    sourceType: resourceContext.origin.sourceType,
+    sourceInstanceId: resourceContext.origin.sourceInstanceId,
+  });
 }
 
 function buildRawResourcePayload(
