@@ -487,6 +487,7 @@ describe('Codex provider routing', () => {
         attemptCount: 1,
         route,
         routePlan: {
+          transcriptBoundary: 'start',
           assistantContractFingerprint: 'a'.repeat(64),
           assistantCliContract: null,
           cliEnv: {},
@@ -618,6 +619,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint: 'a'.repeat(64),
         assistantCliContract: null,
         cliEnv: {},
@@ -733,6 +735,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -904,6 +907,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint: 'a'.repeat(64),
         assistantCliContract: null,
         cliEnv: {},
@@ -1101,6 +1105,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -1240,6 +1245,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -1383,6 +1389,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: 'Murph CLI Contract: read current vault state.',
@@ -1501,6 +1508,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -1631,6 +1639,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -1846,6 +1855,7 @@ describe('Codex provider routing', () => {
         attemptCount: 1,
         route,
         routePlan: {
+          transcriptBoundary: 'start',
           assistantContractFingerprint:
             'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           assistantCliContract: null,
@@ -1934,6 +1944,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -2043,6 +2054,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -2164,6 +2176,7 @@ describe('Codex provider routing', () => {
       route,
       routePlan: {
         assistantContractFingerprint,
+        transcriptBoundary: 'start',
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
@@ -2326,6 +2339,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -2428,6 +2442,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -2521,6 +2536,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -2617,6 +2633,7 @@ describe('Codex provider routing', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        transcriptBoundary: 'start',
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
@@ -2704,6 +2721,7 @@ describe('attested reaction routing through the admitted provider turn', () => {
       promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' }, route, sharedPlan: createSharedPlan(), turnId: 'synthetic-parent-turn',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ attemptCount: 1, route, session, routePlan: {
+      transcriptBoundary: 'start',
       assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
       codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
       diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },
@@ -2768,6 +2786,7 @@ describe('streamed child usage identity', () => {
       })
       providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
         attemptCount: 1, route, session, routePlan: {
+          transcriptBoundary: 'start',
           assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
           codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
           diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },

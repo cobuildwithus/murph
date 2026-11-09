@@ -19,7 +19,7 @@ import type {
 
 const runtimeState = vi.hoisted(() => ({
   sessionsSave: vi.fn(async (session: AssistantSession) => session),
-  transcriptsAppend: vi.fn(async () => undefined),
+  transcriptsAppend: vi.fn(async (_sessionId: string, entries: readonly unknown[]) => [...entries]),
   transcriptsList: vi.fn(async () => []),
   turnsAppendEvent: vi.fn(async () => undefined),
 }))
@@ -231,7 +231,7 @@ describe('automation model continuity', () => {
     ).toBe(providerThreadId)
   })
 
-  it('clears the old selected-model thread after an isolated lower-tier turn', async () => {
+  it('keeps the selected-model thread after an isolated lower-tier turn', async () => {
     const solTarget = requireTarget('gpt-6.1-sol', 'low')
     const session = createGroupSession(
       solTarget,
@@ -256,9 +256,11 @@ describe('automation model continuity', () => {
       turnInput,
     })
 
+    // The Sol thread stays; its bookmark makes the next Sol turn read the
+    // isolated Luna reminder from the transcript.
     expect(saved.target).toEqual(solTarget)
-    expect(saved.resumeState).toBeNull()
-    expect(saved.codexResume).toBeNull()
+    expect(saved.resumeState).toEqual(session.resumeState)
+    expect(saved.codexResume).toEqual(session.codexResume)
   })
 
 })

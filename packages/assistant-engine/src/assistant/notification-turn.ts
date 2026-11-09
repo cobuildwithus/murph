@@ -564,6 +564,7 @@ export async function sendAssistantNotificationLocal(
               }),
               assistantContractFingerprint:
                 providerOutcome.assistantContractFingerprint,
+              assistantTargetOverride: input.assistantTargetOverride,
               codexRolloutRelativePath:
                 providerOutcome.codexRolloutRelativePath,
               codexThreadId: providerOutcome.codexThreadId,
@@ -623,7 +624,6 @@ export async function sendAssistantNotificationLocal(
         const selectedRoute = providerResult.route
         const providerResumeStateAction =
           resolveAssistantNotificationProviderResumeStateAction({
-            input,
             providerResult,
             threadScope: notificationThreadScope,
           })
@@ -1821,13 +1821,9 @@ async function deliverAssistantNotificationMessage(input: {
 }
 
 function resolveAssistantNotificationProviderResumeStateAction(input: {
-  input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
   threadScope: AssistantCodexTurnThreadScopeProfile['threadScope']
 }): AssistantProviderResumeStateAction {
-  if (input.input.notificationPromptProfile === 'context-handoff') {
-    return 'clear'
-  }
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }

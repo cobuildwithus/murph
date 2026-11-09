@@ -5286,6 +5286,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
         providerRequestOrdinal,
         ...(providerRequestOrdinal === 1
           ? {
+              // The held draft keeps the first request's transcript boundary.
               resume: {
                 codexThreadId:
                   providerInput.resolvedSession.resumeState?.threadId
@@ -5302,11 +5303,15 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
         throw attempt.error
       }
       expect(attempt.result.responseDeliveryContextOrdinal).toBe(1)
+      if (providerRequestOrdinal === 1) {
+        expect(providerInput.resolvedSession.resumeState?.transcriptSeenThrough).toBe('start')
+      }
       return {
         kind: 'succeeded',
         providerTurn: {
           ...attempt.result,
           codexContinuation: { kind: 'explicit-structured-history' },
+          transcriptBoundary: 'start',
           onboardingGuidanceInjected: true,
           route: { routeId: 'route-group-composed' },
           session: providerInput.resolvedSession,

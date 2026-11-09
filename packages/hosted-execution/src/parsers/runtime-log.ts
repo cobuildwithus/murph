@@ -404,6 +404,15 @@ export function parseHostedRuntimeRedactedJson(
   return parsed;
 }
 
+const THREAD_ROTATION_REASONS: ReadonlySet<string> = new Set([
+  "binding_absent",
+  "route_mismatch",
+  "contract_mismatch",
+  "profile_isolated",
+  "native_resume_disabled",
+  "transcript_bookmark_missing",
+]);
+
 function parseHostedRuntimeRedactedValue(
   value: unknown,
   label: string,
@@ -420,8 +429,12 @@ function parseHostedRuntimeRedactedValue(
     return parseHostedRuntimeRedactedRoutePlanningStage(value, label);
   }
   if (key === "threadRotationReason") {
-    return value === null ? null : parseAllowedString(value, label,
-      ["binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled"]);
+    // A reason this reader does not know yet comes from a newer runner. Drop
+    // the label instead of rejecting the whole log batch it arrived in.
+    if (typeof value === "string" && !THREAD_ROTATION_REASONS.has(value)) {
+      return null;
+    }
+    return value === null ? null : parseAllowedString(value, label, [...THREAD_ROTATION_REASONS]);
   }
   if (key === "reasoningEffort") {
     return parseHostedRuntimeRedactedReasoningEffort(value, label);

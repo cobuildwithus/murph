@@ -13,11 +13,13 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime log contracts", () => {
-  it("accepts only fixed thread rotation labels and numeric automation preparation timings", () => {
-    for (const reason of [null, "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled"]) {
+  it("keeps known thread rotation labels, drops unknown ones, and accepts numeric automation preparation timings", () => {
+    for (const reason of [null, "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled", "transcript_bookmark_missing"]) {
       expect(parseHostedRuntimeRedactedJson({ threadRotationReason: reason }, "log")).toEqual({ threadRotationReason: reason });
     }
-    for (const value of ["private-unrecognized-reason", 7, {}, true]) {
+    // A newer runner's label must not reject the batch, and its text is not kept.
+    expect(parseHostedRuntimeRedactedJson({ threadRotationReason: "private-unrecognized-reason" }, "log")).toEqual({ threadRotationReason: null });
+    for (const value of [7, {}, true]) {
       expect(() => parseHostedRuntimeRedactedJson({ threadRotationReason: value }, "log")).toThrow();
     }
     for (const key of ["automationGroupAndOperationScopeMs", "automationTerminalEvidenceMs", "automationSessionPreflightMs", "automationCrossSessionContextMs", "automationPromptPreparationMs"]) {
@@ -65,6 +67,29 @@ describe("hosted runtime log contracts", () => {
         "u",
       ),
     );
+  });
+
+  it("keeps a log batch whose provider plan carries a rotation reason this reader does not know", () => {
+    const plan = {
+      at: "2026-04-26T00:00:03.000Z",
+      component: "runner",
+      eventCode: "runner.processing_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: { threadRotationReason: "reason_from_newer_runner" },
+    };
+    const ordinary = {
+      at: "2026-04-26T00:00:03.100Z",
+      component: "device-sync",
+      eventCode: "device-sync.legacy_platform_env_present",
+      level: "info",
+      phase: "invoke",
+      redactedJson: { junctionPlatformEnvPresent: true, legacyPlatformEnvKeyCount: 4 },
+    };
+
+    expect(parseHostedRuntimeLogRequest({ entries: [plan, ordinary] })).toEqual({
+      entries: [{ ...plan, redactedJson: { threadRotationReason: null } }, ordinary],
+    });
   });
 
   it("accepts retired device-sync environment logs from warm runners", () => {

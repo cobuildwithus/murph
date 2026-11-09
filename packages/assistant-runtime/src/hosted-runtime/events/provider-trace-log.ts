@@ -57,7 +57,7 @@ const HOSTED_ASSISTANT_REASONING_EFFORT_VALUES = new Set([
   "xhigh",
 ]);
 const HOSTED_ASSISTANT_THREAD_ROTATION_REASON_VALUES = new Set([
-  "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled",
+  "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled", "transcript_bookmark_missing",
 ]);
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",

@@ -4,6 +4,7 @@ import {
   type AssistantAskResult,
   type AssistantResponseMedia,
   type AssistantSession,
+  type AssistantTranscriptEntry,
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -233,6 +234,7 @@ function applyAssistantProviderTurnResumeInMemory(input: {
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
     threadCompatibilityFingerprint:
       readCodexThreadCompatibilityFingerprint(input.providerResult.route),
+    transcriptSeenThrough: input.providerResult.transcriptBoundary,
   })
   if (!resumeState) {
     throw new VaultCliError(
@@ -409,6 +411,7 @@ async function appendUserTranscriptEntryForTurn(input: {
   contentReceivedAt?: string | null
   createdAt?: string | null
   detail: string
+  ownTranscriptEntries?: AssistantTranscriptEntry[]
   sessionId: string
   text: string
   turnId: string
@@ -432,6 +435,7 @@ async function appendUserTranscriptEntryForTurn(input: {
       },
     ],
   )
+  input.ownTranscriptEntries?.push(...appended.entries)
   const persistedAt = appended.entries[0]?.createdAt ?? fallbackCreatedAt
   const transcriptRef =
     appended.refs[0] ??
@@ -1172,6 +1176,9 @@ export async function sendAssistantMessageLocal(
           : null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
+        // Transcript entries this turn wrote while its provider thread ran.
+        // The finalizer advances the thread bookmark over them.
+        const turnOwnTranscriptEntries: AssistantTranscriptEntry[] = []
         let providerRequestDeliveryContextBaseOrdinal = 0
         let nextUsageRecordOrdinal = 0
         const heldGroupAcceptedTranscriptInputs: Array<{
@@ -1193,6 +1200,7 @@ export async function sendAssistantMessageLocal(
             contentReceivedAt: currentUserTurn.userContentReceivedAt,
             createdAt: currentUserTurn.turnCreatedAt,
             detail: persistInput.detail,
+            ownTranscriptEntries: turnOwnTranscriptEntries,
             sessionId: resolved.session.sessionId,
             text: persistInput.prompt,
             turnId: currentUserTurn.turnId,
@@ -1229,6 +1237,7 @@ export async function sendAssistantMessageLocal(
             await appendAcceptedActiveTurnInputTranscriptEntries({
               acceptedInput: persistInput.acceptedInput,
               acceptedInputItems: persistInput.acceptedInputItems,
+              ownTranscriptEntries: turnOwnTranscriptEntries,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
               vault: currentInput.vault,
@@ -1964,6 +1973,7 @@ export async function sendAssistantMessageLocal(
               action: failedProviderResumeStateAction,
               assistantContractFingerprint:
                 providerOutcome.assistantContractFingerprint,
+              assistantTargetOverride: currentInput.assistantTargetOverride,
               codexRolloutRelativePath:
                 providerOutcome.codexRolloutRelativePath,
               codexThreadId: providerOutcome.codexThreadId,
@@ -2027,6 +2037,7 @@ export async function sendAssistantMessageLocal(
                 precedingAssistantTranscriptTexts: [],
                 providerResult: failedNoReplyProviderResult,
                 providerResumeStateAction: failedProviderResumeStateAction,
+                ownTranscriptEntries: turnOwnTranscriptEntries,
                 persistUserPromptToTranscript: !userPromptPersistedToTranscript,
                 session: failedNoReplySession,
                 turnCreatedAt: currentUserTurn.turnCreatedAt,
@@ -2362,6 +2373,7 @@ export async function sendAssistantMessageLocal(
           precedingAssistantTranscriptTexts: precedingResponses,
           providerResult,
           providerResumeStateAction,
+          ownTranscriptEntries: turnOwnTranscriptEntries,
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
           session: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
@@ -2924,6 +2936,7 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
     { kind: 'accepted' }
   >
   acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+  ownTranscriptEntries: AssistantTranscriptEntry[]
   sessionId: string
   turnId: string
   vault: string
@@ -2943,6 +2956,7 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
       contentReceivedAt,
       detail:
         'accepted active-turn input persisted for provider request',
+      ownTranscriptEntries: input.ownTranscriptEntries,
       sessionId: input.sessionId,
       text: plan.text,
       turnId: input.turnId,

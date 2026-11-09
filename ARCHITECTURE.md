@@ -998,7 +998,7 @@ isolated conversation/provider-turn profile: it neither resumes the member's
 provider thread nor replays committed chat history. Canonical context and the
 ordinary tool and delivery authorities remain available. Success and terminal
 failure preserve the foreground resume binding; all isolated notification
-profiles preserve it, except the explicit context-handoff reset. Other scheduled
+profiles preserve it. Other scheduled
 automations keep ordinary conversation continuity. The review reads bounded
 current-member diagnostics from
 the canonical hosted AI usage ledger, preserving recorded allowance costs and

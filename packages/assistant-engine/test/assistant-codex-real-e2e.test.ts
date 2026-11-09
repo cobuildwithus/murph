@@ -49672,6 +49672,81 @@ describeRealCodex('plan D ordinary group hosting', () => {
 
 })
 
+describeRealCodex('real Codex isolated notification thread continuity', () => {
+  it('game private kickoff then bare Sure continues the offer on the resumed thread', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-isolated-kickoff-sure-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGamePrivateKickoffInstructions, gamePrivateKickoffPolicySchema,
+      hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    const gameId = 'game_synthetic_plank'
+    const memberId = 'synthetic-plank-member'
+    const eventId = `game-dm:${gameId}:${memberId}`
+    const reminders = { minutes: 1140, push: true, text: true, canText: true,
+      games: [{ id: gameId, task: '2-minute plank', schedule: { count: 7 }, today: 'open' as const,
+        otherFirstNames: ['Sam'], on: false, everyDay: false }] }
+    const modelTarget = createAssistantModelTarget({
+      approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+      codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+      provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+    })
+    if (!modelTarget) throw new Error('Expected a real Codex target.')
+    const route = { actorId: null, bindingDeliveryTarget: 'synthetic-plank-direct-thread',
+      channel: 'linq' as const, deliveryTarget: 'synthetic-plank-direct-thread', identityId: null,
+      threadId: 'synthetic-plank-direct-thread', threadIsDirect: true }
+    const executionContext = { hosted: { defaultTarget: modelTarget, memberId, userEnvKeys: [],
+      myGameRemindersTool: { request: async (request: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest) => {
+        calls.push(request)
+        return hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: {
+          status: 'ok', reminders, reaches: 'text' } })
+      } },
+    } }
+    const turnEnvironment = { currentWorkingDirectory: workingDirectory, env: config.env }
+    const memberTurn = (prompt: string, inputId: string, sessionId?: string, onTraceEvent?: Parameters<typeof sendAssistantMessageLocal>[0]['onTraceEvent']) =>
+      sendAssistantMessageLocal({ ...route, acceptedTurnInput: { initialInputs: [{ id: inputId, source: 'manual',
+        acceptedAt: new Date().toISOString() }] }, deliverResponse: false, executionContext,
+        includeEarlySessionOnboarding: false, onTraceEvent, prompt, sessionId, turnEnvironment,
+        vault: workingDirectory, workingDirectory })
+
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const first = await memberTurn('I take two fish oil capsules a day.', `ain_${'a'.repeat(32)}`)
+      const threadId = first.session.codexResume?.threadId
+      expect(threadId).toBeTruthy()
+
+      const kickoff = await sendAssistantNotificationLocal({ ...route,
+        deliveryDedupeToken: eventId, deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId,
+        executionContext, instructions: buildGamePrivateKickoffInstructions({ messageKind: 'new_person',
+          task: '2-minute plank', otherFirstNames: ['Sam'] }),
+        responsePolicy: gamePrivateKickoffPolicySchema.parse({ kind: 'game_private_kickoff', eventId,
+          memberId, gameId, messageKind: 'new_person', expiresAt: '2030-03-05T18:00:00.000Z' }),
+        sessionId: first.session.sessionId, turnEnvironment, turnTrigger: 'manual-deliver',
+        vault: workingDirectory, workingDirectory })
+      expect(kickoff.decision.kind).toBe('send_message')
+      expect(kickoff.response).toMatch(/plank/iu)
+      expect(kickoff.response).toMatch(/Sam/u)
+      expect(kickoff.session.codexResume?.threadId).toBe(threadId)
+
+      const traceEvents: unknown[] = []
+      const third = await memberTurn('Sure', `ain_${'b'.repeat(32)}`, kickoff.session.sessionId,
+        event => traceEvents.push(event))
+      const reply = third.response.trim()
+      process.stdout.write(`[isolated-kickoff-sure] ${JSON.stringify({ kickoff: kickoff.response,
+        reply, calls: calls.map(call => ({ action: call.action, operation: call.action === 'my_game_reminders' ? call.operation : null })) })}\n`)
+      expect(hasCodexTimingStage(traceEvents, 'thread-resumed')).toBe(true)
+      expect(third.session.codexResume?.threadId).toBe(threadId)
+      expect(calls.some(call => call.action === 'my_game_reminders' && call.operation === 'set')).toBe(false)
+      expect(reply.length).toBeGreaterThan(0)
+      expect(reply).toMatch(/plank|game|remind|check[ -]?in/iu)
+      expect(reply).not.toMatch(/what (?:do|did) you mean|sure (?:to|about) what|what (?:does|is) (?:that|sure) (?:refer to|about)|fish oil|capsules|game_|ain_/iu)
+    } finally {
+      await stopWarmCodexAppServer('isolated-kickoff-sure-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 600_000)
+})
+
 describeRealCodex('private game reminder reply', () => {
   it('private game reply saves an evening reminder through the direct tool', async () => {
     const config = await resolveRealCodexE2eConfig()

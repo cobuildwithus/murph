@@ -2,7 +2,8 @@ import { GAME_PHOTO_CHAT_GUIDANCE, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
-import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantSession, AssistantTranscriptEntry } from '@murphai/operator-config/assistant-cli-contracts'
+import type { TranscriptSeenThrough } from '@murphai/operator-config/assistant/codex-resume-state'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
 import { resolveElevenLabsModelId } from '@murphai/operator-config/elevenlabs-runtime'
 import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
@@ -66,6 +67,7 @@ import {
 import {
   listAssistantTranscriptEntries,
 } from '../store.js'
+import { findEntriesAfterBookmark, readTranscriptBoundary } from '../transcript-bookmark.js'
 import {
   ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
 } from '../store/persistence.js'
@@ -151,6 +153,8 @@ export interface AssistantRouteTurnPlan {
   followUpAttachmentAllowed?: boolean
   followUpInvocation?: boolean
   assistantContractFingerprint: string
+  // Undefined when the transcript could not be read: no bookmark is saved.
+  transcriptBoundary: TranscriptSeenThrough | undefined
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
@@ -175,7 +179,7 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantRoutePlanningDiagnostics {
-  threadRotationReason: 'binding_absent' | 'route_mismatch' | 'contract_mismatch' | 'profile_isolated' | 'native_resume_disabled' | null
+  threadRotationReason: 'binding_absent' | 'route_mismatch' | 'contract_mismatch' | 'profile_isolated' | 'native_resume_disabled' | 'transcript_bookmark_missing' | null
   assistantContextSnapshotElapsedMs: number | null
   assistantContextSnapshotRefreshElapsedMs: number | null
   followUpContextElapsedMs: number | null
@@ -855,6 +859,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint,
   threadStartDeveloperInstructions,
   dynamicTools,
+  transcriptEntries,
 }: {
   input: AssistantRouteTurnPlanInput
   resumeBinding: ReturnType<typeof resolveAssistantRouteResumeBinding>
@@ -862,6 +867,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint: string
   threadStartDeveloperInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
+  transcriptEntries: readonly AssistantTranscriptEntry[] | null
 }): { resumeCodexThreadId: string | null; threadRotationReason: AssistantRoutePlanningDiagnostics['threadRotationReason'] } {
   const storedAssistantContractFingerprint = normalizeNullableString(
     resumeBinding?.assistantContractFingerprint,
@@ -885,6 +891,9 @@ function resolveRouteNativeResumeThreadId({
     nativeResumeEnabled &&
     supportsNativeResume &&
     resumeBinding !== null &&
+    resumeBinding.transcriptSeenThrough !== undefined &&
+    transcriptEntries !== null &&
+    findEntriesAfterBookmark(transcriptEntries, resumeBinding.transcriptSeenThrough) !== null &&
     assistantContractMatches
       ? resolveAssistantEffectiveCodexResumeThreadId({
           resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
@@ -899,6 +908,7 @@ function resolveRouteNativeResumeThreadId({
       : !supportsNativeResume ? 'native_resume_disabled'
       : resumeBinding === null
         ? readAssistantCodexResume(input.session) === null ? 'binding_absent' : 'route_mismatch'
+        : assistantContractMatches ? 'transcript_bookmark_missing'
         : 'contract_mismatch',
   }
 }
@@ -911,6 +921,7 @@ export async function resolveAssistantRouteTurnPlan(
     input.preferenceContext ?? DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT
   const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
+  const routeTranscript = await readRouteTranscript(input.input.vault, input.session.sessionId)
   const resumeBinding = measureRoutePlanningSync(
     routePlanningSpans,
     'routeResumeBindingElapsedMs',
@@ -1033,7 +1044,7 @@ export async function resolveAssistantRouteTurnPlan(
     contextHandoffNotificationTurn ||
     operatorMessageNotificationTurn ||
     followUp.requiresExplicitHistory
-  const resolveCommittedTranscriptHistoryMessages = async () =>
+  const resolveCommittedTranscriptHistoryMessages = async (resumeCodexThreadId: string | null) =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
           markUnavailableHistory: followUpInvocation,
@@ -1041,8 +1052,11 @@ export async function resolveAssistantRouteTurnPlan(
           includeTimestamps:
             privateInteractiveAudience
             && input.input.scheduledOccurrenceAt != null,
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
+          entries: routeTranscript.entries,
+          // A resumed thread needs only what it has not seen yet.
+          bookmark: resumeCodexThreadId === null
+            ? undefined
+            : resumeBinding?.transcriptSeenThrough,
         })
       : []
   const assistantStyleSettingsAvailable =
@@ -1442,13 +1456,13 @@ export async function resolveAssistantRouteTurnPlan(
     input,
     resumeBinding,
     supportsNativeResume: followUp.supportsNativeResume,
+    transcriptEntries: routeTranscript.entries,
     assistantContractFingerprint,
     threadStartDeveloperInstructions,
     dynamicTools,
   })
-  const conversationHistoryMessages = resumeCodexThreadId === null
-    ? await resolveCommittedTranscriptHistoryMessages()
-    : []
+  const conversationHistoryMessages =
+    await resolveCommittedTranscriptHistoryMessages(resumeCodexThreadId)
   const shouldPrepareBootstrapContext = resumeCodexThreadId === null
   const turnContextPrompt = normalizeNullableString(
     [
@@ -1490,6 +1504,7 @@ export async function resolveAssistantRouteTurnPlan(
     followUpInvocation,
     followUpAttachmentAllowed,
     assistantContractFingerprint,
+    transcriptBoundary: routeTranscript.boundary,
     assistantCliContract: shouldPrepareBootstrapContext
       ? bootstrapAssistantCliContract
       : null,
@@ -1560,27 +1575,40 @@ type TranscriptHistoryCandidate = {
   userPromptKey: string | null
 }
 
+// Reads the transcript once per plan. An unread transcript is not an empty
+// one, so it gives no boundary and no bookmark is saved from this turn.
+async function readRouteTranscript(vault: string, sessionId: string): Promise<{
+  boundary: TranscriptSeenThrough | undefined
+  entries: readonly AssistantTranscriptEntry[] | null
+}> {
+  const entries = await listAssistantTranscriptEntries(vault, sessionId).catch(() => null)
+  return {
+    boundary: entries === null ? undefined : readTranscriptBoundary(entries),
+    entries,
+  }
+}
+
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   markUnavailableHistory?: boolean
   currentUserPrompt: string
   includeTimestamps: boolean
-  sessionId: string
-  vault: string
+  entries: readonly AssistantTranscriptEntry[] | null
+  bookmark?: TranscriptSeenThrough
 }): Promise<readonly AssistantProviderConversationMessage[]> {
-  let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
-  try {
-    entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
-  } catch {
+  if (input.entries === null) {
     return input.markUnavailableHistory
       ? [{ role: 'assistant', content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT }]
       : []
   }
-  if (input.markUnavailableHistory && entries.length === 0) {
+  const entries = input.bookmark === undefined
+    ? input.entries
+    : findEntriesAfterBookmark(input.entries, input.bookmark) ?? []
+  if (input.markUnavailableHistory && entries.length === 0 && input.bookmark === undefined) {
     return [{ role: 'assistant', content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT }]
   }
 
   let historyIncomplete =
-    entries.length >= ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT
+    input.bookmark === undefined && entries.length >= ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
     if (
       entry.kind === 'status' &&
@@ -1690,6 +1718,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   return limitAssistantConversationHistoryMessages(
     messages,
     historyIncomplete,
+    input.bookmark !== undefined,
   )
 }
 
@@ -1717,6 +1746,7 @@ function shouldDropTrailingCurrentUserPrompt(input: {
 function limitAssistantConversationHistoryMessages(
   messages: readonly TranscriptHistoryCandidate[],
   historyIncomplete: boolean,
+  sliceMode = false,
 ): AssistantProviderConversationMessage[] {
   let incomplete =
     historyIncomplete ||
@@ -1751,7 +1781,7 @@ function limitAssistantConversationHistoryMessages(
     return retained.map(({ message }) => message)
   }
 
-  retainedBytes -= dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
+  if (!sliceMode) retainedBytes -= dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
   const marker: AssistantProviderConversationMessage = {
     content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
@@ -1771,7 +1801,7 @@ function limitAssistantConversationHistoryMessages(
     }
     retainedBytes -= assistantConversationHistoryMessageBytes(removed.message)
   }
-  dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
+  if (!sliceMode) dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
   return [marker, ...retained.map(({ message }) => message)]
 }

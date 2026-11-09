@@ -206,8 +206,6 @@ async function reconcileAssistantPrivateCompletionIntent(input: {
   )
   const session = {
     ...input.session,
-    codexResume: null,
-    resumeState: null,
     lastTurnAt,
     turnCount: Math.max(
       input.session.turnCount,

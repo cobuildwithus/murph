@@ -104,7 +104,8 @@ describe('synthetic group/private handoff flow', () => {
       .mockImplementationOnce(async (input) => {
         expect(input.resolvedSession.sessionId).toBe(initial.session.sessionId)
         expect(input.resolvedSession.target).toEqual(target)
-        expect(input.resolvedSession.codexResume).toBeNull()
+        // The group thread is kept; its bookmark puts the handoff in history.
+        expect(input.resolvedSession.codexResume).toEqual(nativeResume)
         await expect(listAssistantTranscriptEntries(
           vaultRoot,
           initial.session.sessionId,
@@ -147,8 +148,8 @@ describe('synthetic group/private handoff flow', () => {
     })
 
     expect(handoff.session).toMatchObject({
-      codexResume: null,
-      resumeState: null,
+      codexResume: nativeResume,
+      resumeState: nativeResume,
       sessionId: initial.session.sessionId,
       target,
     })

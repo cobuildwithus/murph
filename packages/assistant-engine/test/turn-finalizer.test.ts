@@ -10,6 +10,7 @@ import {
   resolveAssistantResumeStateFromProviderTurn,
 } from '../src/assistant/turn-finalizer.js'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.js'
+import { advanceBookmarkOverOwnEntries, fingerprintTranscriptEntry, findEntriesAfterBookmark, readTranscriptBoundary } from '../src/assistant/transcript-bookmark.js'
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -89,6 +90,29 @@ describe('resolveAssistantResumeStateFromProviderTurn', () => {
   })
 })
 
+describe('transcript bookmark', () => {
+  const entry = (kind: 'user' | 'assistant' | 'status', text: string, createdAt = '2026-07-14T00:00:00.000Z') => ({
+    schema: 'murph.assistant-transcript-entry.v1' as const,
+    kind,
+    text,
+    createdAt,
+  })
+
+  it('finds a backdated import by file order and stops before foreign conversation entries', () => {
+    const base = entry('user', 'Earlier message')
+    const own = entry('assistant', 'My answer')
+    const audit = entry('status', 'Tool audit')
+    const foreign = entry('assistant', 'Imported reply', '2026-07-13T00:00:00.000Z')
+    const laterOwn = entry('assistant', 'Later answer')
+    const entries = [base, own, audit, foreign, laterOwn]
+    const boundary = readTranscriptBoundary([base])
+    expect(findEntriesAfterBookmark(entries, boundary)).toEqual([own, audit, foreign, laterOwn])
+    expect(advanceBookmarkOverOwnEntries({ boundary, ownEntries: [own, laterOwn], entries }))
+      .toEqual(fingerprintTranscriptEntry(audit))
+    expect(findEntriesAfterBookmark(entries, fingerprintTranscriptEntry(entry('user', 'missing')))).toBeNull()
+  })
+})
+
 describe('applyAssistantSessionCodexResumeStateAction', () => {
   it('persists, preserves, and clears the provider-confirmed resume state', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
@@ -146,6 +170,8 @@ describe('applyAssistantSessionCodexResumeStateAction', () => {
       action: 'persist-from-provider-turn',
       session,
     })
+    // A failed turn's new thread gets no transcript bookmark: Codex may not
+    // have accepted its history, so the next turn rebuilds from the transcript.
     const expectedResumeState = {
       assistantContractFingerprint:
         actionInput.assistantContractFingerprint,

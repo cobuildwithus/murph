@@ -15,7 +15,8 @@ import {
   compactAssistantProviderConfigInput,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
-import { buildCodexResumeState } from '@murphai/operator-config/assistant/codex-resume-state'
+import { buildCodexResumeState, type TranscriptSeenThrough } from '@murphai/operator-config/assistant/codex-resume-state'
+import { advanceBookmarkOverOwnEntries } from './transcript-bookmark.js'
 import {
   doesAssistantResumeBindingMatchRoute,
 } from './codex-resume-binding.js'
@@ -88,12 +89,12 @@ export async function persistAssistantNoReplyTranscriptMarkers(input: {
   turnCreatedAt: string
   turnId: string
   vault: string
-}): Promise<void> {
+}): Promise<AssistantTranscriptEntry[]> {
   const ordinals = normalizeAssistantNoReplyDeliveryContextOrdinals(
     input.deliveryContextOrdinals,
   )
   if (ordinals.length === 0) {
-    return
+    return []
   }
 
   const state = createAssistantRuntimeStateService(input.vault)
@@ -121,8 +122,9 @@ export async function persistAssistantNoReplyTranscriptMarkers(input: {
       }),
     }))
   if (entries.length > 0) {
-    await state.transcripts.append(input.sessionId, entries)
+    return await state.transcripts.append(input.sessionId, entries)
   }
+  return []
 }
 
 function readAssistantNoReplyTranscriptMarker(
@@ -202,6 +204,7 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
   codexThreadId: string | null
   routeFingerprint: string
   threadCompatibilityFingerprint?: string | null
+  transcriptSeenThrough?: TranscriptSeenThrough
 }): AssistantSession['resumeState'] {
   return buildCodexResumeState({
     assistantContractFingerprint: input.assistantContractFingerprint,
@@ -209,6 +212,7 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
     routeFingerprint: input.routeFingerprint,
     threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
     threadId: input.codexThreadId,
+    transcriptSeenThrough: input.transcriptSeenThrough,
   })
 }
 
@@ -226,9 +230,13 @@ export function resolveAssistantProviderResumeStateAction(input: {
     : 'clear'
 }
 
+// Saves the binding for a provider turn that did not complete. It never
+// advances the transcript bookmark: Codex may not have accepted the turn's
+// history, so unseen entries stay unseen and are replayed on the next turn.
 export async function applyAssistantSessionCodexResumeStateAction(input: {
   action: AssistantProviderResumeStateAction
   assistantContractFingerprint: string
+  assistantTargetOverride?: AssistantMessageInput['assistantTargetOverride']
   codexRolloutRelativePath: string | null
   codexThreadId: string | null
   routeFingerprint: string
@@ -236,35 +244,32 @@ export async function applyAssistantSessionCodexResumeStateAction(input: {
   session: AssistantSession
   vault: string
 }): Promise<AssistantSession> {
-  switch (input.action) {
-    case 'preserve-existing':
-      return input.session
-    case 'clear':
-      return await clearAssistantSessionCodexResumeState({
-        session: input.session,
-        vault: input.vault,
-      })
-    case 'persist-from-provider-turn': {
-      const resumeState = resolveAssistantResumeStateFromProviderTurn({
-        assistantContractFingerprint: input.assistantContractFingerprint,
-        codexRolloutRelativePath: input.codexRolloutRelativePath,
-        codexThreadId: input.codexThreadId,
-        routeFingerprint: input.routeFingerprint,
-        threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
-      })
-      if (!resumeState) {
-        return input.session
-      }
-      const state = createAssistantRuntimeStateService(input.vault)
-      const updatedAt = new Date().toISOString()
-      return await state.sessions.save({
-        ...input.session,
-        codexResume: resumeState,
-        resumeState,
-        updatedAt,
-      })
-    }
+  const current = readAssistantCodexResume(input.session)
+  const next = resolveAssistantSessionResumeState({
+    ...input,
+    overrideDurableTarget:
+      compactAutomationAssistantTargetOverride(input.assistantTargetOverride) !== null
+        ? input.session.target
+        : null,
+    sessionResumeState: current,
+    walkedBookmark: undefined,
+  })
+  if (next === current) {
+    return input.session
   }
+  if (next === null) {
+    return await clearAssistantSessionCodexResumeState({
+      session: input.session,
+      vault: input.vault,
+    })
+  }
+  const state = createAssistantRuntimeStateService(input.vault)
+  return await state.sessions.save({
+    ...input.session,
+    codexResume: next,
+    resumeState: next,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 export async function persistAssistantTurnAndSession(input: {
@@ -272,6 +277,8 @@ export async function persistAssistantTurnAndSession(input: {
   assistantTranscriptStandaloneContext?: true
   assistantTranscriptText?: string | null
   input: AssistantMessageInput
+  // Transcript entries the caller wrote for this turn before finalizing.
+  ownTranscriptEntries?: readonly AssistantTranscriptEntry[]
   plan: AssistantTurnSharedPlan
   persistUserPromptToTranscript?: boolean
   // Final answers completed before a steered message in the same turn; each
@@ -291,10 +298,11 @@ export async function persistAssistantTurnAndSession(input: {
     input.assistantTranscriptText === undefined
       ? input.providerResult.response
       : input.assistantTranscriptText
+  const ownEntries: AssistantTranscriptEntry[] = [...(input.ownTranscriptEntries ?? [])]
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     const startedAt = performance.now()
-    await state.transcripts.append(
+    ownEntries.push(...await state.transcripts.append(
       input.session.sessionId,
       [
         {
@@ -306,7 +314,7 @@ export async function persistAssistantTurnAndSession(input: {
           createdAt: input.turnCreatedAt,
         },
       ],
-    )
+    ))
     await state.turns.appendEvent({
       turnId: input.turnId,
       kind: 'user.persisted',
@@ -322,7 +330,7 @@ export async function persistAssistantTurnAndSession(input: {
   })
   if (auditEntries.length > 0) {
     const startedAt = performance.now()
-    await state.transcripts.append(input.session.sessionId, auditEntries)
+    ownEntries.push(...await state.transcripts.append(input.session.sessionId, auditEntries))
     timing.turnTimingAuditTranscriptMs = performance.now() - startedAt
   }
 
@@ -361,10 +369,10 @@ export async function persistAssistantTurnAndSession(input: {
   ]
   if (turnTranscriptEntries.length > 0) {
     const startedAt = performance.now()
-    await state.transcripts.append(
+    ownEntries.push(...await state.transcripts.append(
       input.session.sessionId,
       turnTranscriptEntries,
-    )
+    ))
     timing.turnTimingAssistantTranscriptMs = performance.now() - startedAt
   }
   const acceptedNoReplyDeliveryContextOrdinals =
@@ -381,18 +389,20 @@ export async function persistAssistantTurnAndSession(input: {
             : []
         )
   const noReplyMarkersStartedAt = performance.now()
-  await persistAssistantNoReplyTranscriptMarkers({
+  ownEntries.push(...await persistAssistantNoReplyTranscriptMarkers({
     deliveryContextOrdinals: noReplyMarkerDeliveryContextOrdinals,
     sessionId: input.session.sessionId,
     turnCreatedAt: input.turnCreatedAt,
     turnId: input.turnId,
     vault: input.input.vault,
-  })
+  }))
   timing.turnTimingNoReplyMarkersMs = performance.now() - noReplyMarkersStartedAt
-  const turnCommittedConversationHistory =
-    persistUserPromptToTranscript ||
-    turnTranscriptEntries.length > 0 ||
-    noReplyMarkerDeliveryContextOrdinals.length > 0
+  const walkedBookmark = await walkCompletedTurnBookmark({
+    action: input.providerResumeStateAction,
+    boundary: input.providerResult.transcriptBoundary,
+    listEntries: () => state.transcripts.list(input.session.sessionId),
+    ownEntries,
+  })
 
   const updatedAt = new Date().toISOString()
   const hasTurnScopedTargetOverride =
@@ -413,23 +423,18 @@ export async function persistAssistantTurnAndSession(input: {
         assistantBackendTargetToProviderConfigInput(nextTarget),
       )
     : input.session.providerOptions
-  const resumeStateInput: AssistantNextResumeStateInput = {
+  const nextResumeState = resolveAssistantSessionResumeState({
     action: input.providerResumeStateAction,
     assistantContractFingerprint: input.providerResult.assistantContractFingerprint,
     codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
     codexThreadId: input.providerResult.codexThreadId,
+    overrideDurableTarget: hasTurnScopedTargetOverride ? nextTarget : null,
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
     threadCompatibilityFingerprint:
       readCodexThreadCompatibilityFingerprint(input.providerResult.route),
     sessionResumeState: readAssistantCodexResume(input.session),
-  }
-  const nextResumeState = hasTurnScopedTargetOverride
-    ? resolveAssistantTurnScopedOverrideResumeState({
-        ...resumeStateInput,
-        durableTarget: nextTarget,
-        turnCommittedConversationHistory,
-      })
-    : resolveAssistantNextResumeState(resumeStateInput)
+    walkedBookmark,
+  })
 
   const sessionPersistenceStartedAt = performance.now()
   const savedSession = await state.sessions.save({
@@ -525,61 +530,73 @@ async function resolveAssistantGeneratedImageDeliveryTranscriptEntries(input: {
     }))
 }
 
-type AssistantNextResumeStateInput = {
+// Only a completed provider turn carries a planning boundary. Failed outcomes
+// do not, so their bookmark is never advanced.
+async function walkCompletedTurnBookmark(input: {
+  action: AssistantProviderResumeStateAction
+  boundary: TranscriptSeenThrough | undefined
+  listEntries: () => Promise<readonly AssistantTranscriptEntry[]>
+  ownEntries: readonly AssistantTranscriptEntry[]
+}): Promise<TranscriptSeenThrough | undefined> {
+  if (input.boundary === undefined || input.action !== 'persist-from-provider-turn') {
+    return undefined
+  }
+  return advanceBookmarkOverOwnEntries({
+    boundary: input.boundary,
+    ownEntries: input.ownEntries,
+    entries: await input.listEntries(),
+  })
+}
+
+// The one rule for every saved thread binding.
+// - A completed provider turn adopts its thread with the bookmark walked over
+//   what that turn saw and wrote.
+// - Any other save of the same thread keeps that thread's existing bookmark; a
+//   different thread gets none, so the next turn rebuilds from the transcript.
+//   Unseen entries are replayed, never skipped.
+// - A turn-scoped target override replaces the durable binding only when its
+//   thread matches the durable route; otherwise the durable binding is kept.
+function resolveAssistantSessionResumeState(input: {
   action: AssistantProviderResumeStateAction
   assistantContractFingerprint?: string | null
   codexRolloutRelativePath?: string | null
   codexThreadId: string | null
+  overrideDurableTarget: AssistantSession['target'] | null
   routeFingerprint: string
   threadCompatibilityFingerprint?: string | null
   sessionResumeState: AssistantSession['resumeState']
-}
-
-function resolveAssistantTurnScopedOverrideResumeState(
-  input: AssistantNextResumeStateInput & {
-    durableTarget: AssistantSession['target']
-    turnCommittedConversationHistory: boolean
-  },
-): AssistantSession['resumeState'] {
-  if (!input.turnCommittedConversationHistory) {
-    return input.sessionResumeState
+  walkedBookmark: TranscriptSeenThrough | undefined
+}): AssistantSession['resumeState'] {
+  const existing = input.sessionResumeState
+  if (input.action === 'preserve-existing') {
+    return existing
   }
-  if (input.action !== 'persist-from-provider-turn') {
-    return null
+  if (input.action === 'clear') {
+    return input.overrideDurableTarget ? existing : null
   }
 
-  const candidate = resolveAssistantNextResumeState(input)
-  if (!candidate) {
-    return null
-  }
-
-  const durableRoute = resolveAssistantExecutionPlan({
-    defaults: null,
-    sessionTarget: input.durableTarget,
-  }).codexRoute
-  return doesAssistantResumeBindingMatchRoute({
-    resumeState: candidate,
-    route: durableRoute,
+  const candidate = resolveAssistantResumeStateFromProviderTurn({
+    assistantContractFingerprint: input.assistantContractFingerprint,
+    codexRolloutRelativePath: input.codexRolloutRelativePath,
+    codexThreadId: input.codexThreadId,
+    routeFingerprint: input.routeFingerprint,
+    threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
+    transcriptSeenThrough: input.walkedBookmark
+      ?? (existing?.threadId === input.codexThreadId
+        ? existing?.transcriptSeenThrough
+        : undefined),
   })
-    ? candidate
-    : null
-}
-
-function resolveAssistantNextResumeState(
-  input: AssistantNextResumeStateInput,
-): AssistantSession['resumeState'] {
-  switch (input.action) {
-    case 'clear':
-      return null
-    case 'preserve-existing':
-      return input.sessionResumeState
-    case 'persist-from-provider-turn':
-      return resolveAssistantResumeStateFromProviderTurn({
-        assistantContractFingerprint: input.assistantContractFingerprint,
-        codexRolloutRelativePath: input.codexRolloutRelativePath,
-        codexThreadId: input.codexThreadId,
-        routeFingerprint: input.routeFingerprint,
-        threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
-      })
+  if (!candidate) {
+    return existing
   }
+  if (input.overrideDurableTarget) {
+    const durableRoute = resolveAssistantExecutionPlan({
+      defaults: null,
+      sessionTarget: input.overrideDurableTarget,
+    }).codexRoute
+    if (!doesAssistantResumeBindingMatchRoute({ resumeState: candidate, route: durableRoute })) {
+      return existing
+    }
+  }
+  return candidate
 }

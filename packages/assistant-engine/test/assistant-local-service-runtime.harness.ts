@@ -885,6 +885,7 @@ export async function loadLocalServiceModule(input?: {
       codexRolloutRelativePath?: string | null
       codexThreadId: string | null
       routeFingerprint: string
+      transcriptSeenThrough?: import('@murphai/operator-config/assistant/codex-resume-state').TranscriptSeenThrough
     }) => input.codexThreadId && input.routeFingerprint
       ? {
           ...(input.assistantContractFingerprint
@@ -895,6 +896,7 @@ export async function loadLocalServiceModule(input?: {
             : {}),
           routeFingerprint: input.routeFingerprint,
           threadId: input.codexThreadId,
+          ...(input.transcriptSeenThrough !== undefined ? { transcriptSeenThrough: input.transcriptSeenThrough } : {}),
         }
       : null,
   }))
