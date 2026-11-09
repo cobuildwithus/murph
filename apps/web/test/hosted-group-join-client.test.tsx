@@ -313,7 +313,7 @@ test("keeps every exact description one tap away in Details", async () => {
   const drawer = await openDetails(container, window);
   expect(drawer.textContent).toContain("What they’ll see");
   expect(drawer.textContent).toContain(
-    "Your name and what you pick, going back up to 180 days, in the chat and the Murph app. Everything else stays private.",
+    "Your name and what you pick, going back up to 180 days, in the chat and the Murph app. Heart rate and VO2 max also send your age group and sex, so they can see your rank for your age. Everything else stays private.",
   );
   const groups = groupJoinPermissionsForDisplay(
     comprehensiveGroupJoinPermissions,

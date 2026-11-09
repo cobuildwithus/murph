@@ -8,8 +8,10 @@ import {
   filterHostedVaultShareHistoryRecords,
   isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliveryRecord,
+  parseHostedVaultShareAgeGroup,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareAgeGroup,
   type HostedVaultShareHistoryDays,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
@@ -46,6 +48,7 @@ export interface HostedVaultShareProjectionSnapshotEntry
 
 export function serializeHostedVaultShareProjectionSnapshot(input: {
   memberTimeZone?: string;
+  memberAgeGroup?: HostedVaultShareAgeGroup;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: HostedVaultShareProjectionSnapshotAuthority;
 }): string {
@@ -55,6 +58,7 @@ export function serializeHostedVaultShareProjectionSnapshot(input: {
   );
   const serialized = JSON.stringify({
     ...(input.memberTimeZone ? { memberTimeZone: requireMemberTimeZone(input.memberTimeZone) } : {}),
+    ...(input.memberAgeGroup ? { memberAgeGroup: parseHostedVaultShareAgeGroup(input.memberAgeGroup, input.share.projectionScope.projectionKind) } : {}),
     records,
     schema: HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA,
   });
@@ -72,7 +76,7 @@ export function parseHostedVaultShareProjectionSnapshot(input: {
 function parseSnapshotEnvelope(input: {
   plaintext: string;
   share: HostedVaultShareProjectionSnapshotAuthority;
-}): { memberTimeZone?: string; records: HostedVaultShareDeliveryRecord[] } {
+}): { memberTimeZone?: string; memberAgeGroup?: HostedVaultShareAgeGroup; records: HostedVaultShareDeliveryRecord[] } {
   assertHostedVaultShareProjectionSnapshotSize(input.plaintext);
 
   let value: unknown;
@@ -87,7 +91,8 @@ function parseSnapshotEnvelope(input: {
   );
   assertExactKeys(
     snapshot,
-    snapshot.memberTimeZone === undefined ? ["records", "schema"] : ["memberTimeZone", "records", "schema"],
+    ["records", "schema", ...(snapshot.memberTimeZone === undefined ? [] : ["memberTimeZone"]),
+      ...(snapshot.memberAgeGroup === undefined ? [] : ["memberAgeGroup"])],
     "Hosted vault-share projection snapshot",
   );
   if (snapshot.schema !== HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA) {
@@ -98,12 +103,16 @@ function parseSnapshotEnvelope(input: {
   }
   return {
     ...(snapshot.memberTimeZone === undefined ? {} : { memberTimeZone: requireMemberTimeZone(snapshot.memberTimeZone) }),
+    ...(snapshot.memberAgeGroup === undefined ? {} : {
+      memberAgeGroup: parseHostedVaultShareAgeGroup(snapshot.memberAgeGroup, input.share.projectionScope.projectionKind),
+    }),
     records: parseHostedVaultShareProjectionSnapshotRecords(snapshot.records, input.share),
   };
 }
 
 export async function encryptHostedVaultShareProjectionSnapshot(input: {
   memberTimeZone?: string;
+  memberAgeGroup?: HostedVaultShareAgeGroup;
   prisma?: HostedSecureBoxPrismaClient;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: HostedVaultShareProjectionSnapshotAuthority;
@@ -131,6 +140,16 @@ export async function decryptHostedVaultShareProjectionSnapshots(input: {
   entries: readonly HostedVaultShareProjectionSnapshotEntry[];
   prisma?: HostedSecureBoxPrismaClient;
 }): Promise<Array<HostedVaultShareDeliveryRecord[] | null>> {
+  const snapshots = await decryptHostedVaultShareProjectionSnapshotsWithAgeGroups(input);
+  return snapshots.map(snapshot => snapshot?.records ?? null);
+}
+
+export async function decryptHostedVaultShareProjectionSnapshotsWithAgeGroups(input: {
+  nowMs?: number;
+  requestedHistoryDays?: HostedVaultShareHistoryDays;
+  entries: readonly HostedVaultShareProjectionSnapshotEntry[];
+  prisma?: HostedSecureBoxPrismaClient;
+}): Promise<Array<{ records: HostedVaultShareDeliveryRecord[]; memberAgeGroup?: HostedVaultShareAgeGroup } | null>> {
   if (input.entries.some((entry) =>
     entry.ciphertext !== null
     && entry.ciphertext !== undefined
@@ -161,20 +180,21 @@ export async function decryptHostedVaultShareProjectionSnapshots(input: {
     }
     const snapshot = parseSnapshotEnvelope({ plaintext, share: entry });
     if (!isHostedVaultShareRecentDateProjectionKind(entry.projectionScope.projectionKind)) {
-      return snapshot.records;
+      return { records: snapshot.records, ...(snapshot.memberAgeGroup ? { memberAgeGroup: snapshot.memberAgeGroup } : {}) };
     }
     // Old snapshots remain usable for ordinary reads. Never infer a timezone
     // or promise longer history until a compatible publisher replaces them.
     if (!snapshot.memberTimeZone) {
-      return (input.requestedHistoryDays ?? 7) > 7 ? null : snapshot.records;
+      return (input.requestedHistoryDays ?? 7) > 7 ? null : { records: snapshot.records,
+        ...(snapshot.memberAgeGroup ? { memberAgeGroup: snapshot.memberAgeGroup } : {}) };
     }
-    return filterHostedVaultShareHistoryRecords({
+    return { records: filterHostedVaultShareHistoryRecords({
       nowMs: input.nowMs,
       records: snapshot.records,
       requestedHistoryDays: input.requestedHistoryDays,
       scope: entry.projectionScope,
       timeZone: snapshot.memberTimeZone,
-    });
+    }), ...(snapshot.memberAgeGroup ? { memberAgeGroup: snapshot.memberAgeGroup } : {}) };
   });
 }
 

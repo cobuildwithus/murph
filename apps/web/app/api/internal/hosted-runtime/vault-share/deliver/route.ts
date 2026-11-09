@@ -161,6 +161,7 @@ export const POST = withJsonError(async (request: Request) => {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         deadlineAtEpochMs: effectDeadlineAtEpochMs,
         memberTimeZone: body.memberTimeZone,
+        memberAgeGroup: body.memberAgeGroup,
         onDeferral: (reason) => { replacementDeferralReason ??= reason; },
         ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,

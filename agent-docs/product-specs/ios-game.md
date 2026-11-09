@@ -208,7 +208,11 @@ and four `numbers`, always in this order:
 
 A number is `{ state: "not_shared" | "hidden" }`,
 `{ state: "pending", reason?: "no_readings" }`, or
-`{ state: "available", unit, latest: { date, value }, stale, daily, comparison }`.
+`{ state: "available", unit, source?, latest: { date, value }, stale, daily, comparison }`.
+`source` is the selected series' public key and is omitted for an empty key.
+The other person (never `me`) may also carry `demographics: { biologicalSex,
+ageFrom }`, from a currently readable resting-heart-rate or VO2-max grant, so
+their drawer can rank them for their age; conflicting snapshot groups omit it.
 Daily points are ascending, one per date, with gaps omitted. Daily values round
 to integers except VO2 (one decimal); window means retain their precision.
 `stale` means the latest date precedes `window.through` by more than seven days,

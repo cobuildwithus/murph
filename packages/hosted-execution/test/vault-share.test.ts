@@ -34,7 +34,9 @@ import {
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
   serializeHostedVaultShareProjectionContentDigestInput,
+  memberAgeGroupFromBirthYear,
 } from "../src/vault-share.ts";
 
 const TEST_SOURCE_WORKSPACE_VERSION = "7";
@@ -264,6 +266,38 @@ const VALID_REVOKE = {
 };
 
 describe("vault-share contracts", () => {
+  it("accepts age groups only on ranking scopes and keeps legacy digest bytes", () => {
+    const scope = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
+    const base = { projectionKind: scope.projectionKind, projectionScope: scope, records: [],
+      expectedGenerationToken: GENERATION_TOKEN, sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION };
+    const group = { biologicalSex: "female", ageFrom: 30 };
+    expect(parseHostedVaultShareDeliverRequestContract({ ...base, memberAgeGroup: group }).memberAgeGroup).toEqual(group);
+    expect(parseHostedVaultShareDeliverRequestContract({ ...base, projectionKind: "vo2-max-days.v0",
+      projectionScope: hostedVaultShareProjectionKindToScope("vo2-max-days.v0"), memberAgeGroup: group }).memberAgeGroup).toEqual(group);
+    for (const invalid of [{ biologicalSex: "female", ageFrom: 19 }, { biologicalSex: "other", ageFrom: 30 },
+      { ...group, birthYear: 2000 }, null]) {
+      expect(() => parseHostedVaultShareDeliverRequestContract({ ...base, memberAgeGroup: invalid })).toThrow();
+    }
+    expect(() => parseHostedVaultShareDeliverRequestContract({ ...base, projectionKind: "steps-days.v0",
+      projectionScope: hostedVaultShareProjectionKindToScope("steps-days.v0"), memberAgeGroup: group })).toThrow();
+    const oldDigest = serializeHostedVaultShareProjectionContentDigestInput({ projectionScope: scope, records: [] });
+    expect(oldDigest).toBe(JSON.stringify({ projectionScope: scope, records: [], schema: "murph.hosted-vault-share.projection-content-digest.v1" }));
+    expect(serializeHostedVaultShareProjectionContentDigestInput({ projectionScope: scope, records: [], memberAgeGroup: group as { biologicalSex: "female"; ageFrom: 30 } })).not.toBe(oldDigest);
+  });
+
+  it("derives a bounded birth-year group in the member's calendar year", () => {
+    const group = (birthYear: number, now: string, timeZone = "UTC") =>
+      memberAgeGroupFromBirthYear({ birthYear, biologicalSex: "male", now: new Date(now), timeZone });
+    expect(group(2001, "2030-06-01T00:00:00Z")?.ageFrom).toBe(20);
+    expect(group(2000, "2030-06-01T00:00:00Z")?.ageFrom).toBe(30);
+    expect(group(2012, "2030-06-01T00:00:00Z")?.ageFrom).toBe(18);
+    expect(group(2011, "2030-06-01T00:00:00Z")?.ageFrom).toBe(18);
+    expect(group(2013, "2030-06-01T00:00:00Z")).toBeNull();
+    expect(group(1940, "2030-06-01T00:00:00Z")?.ageFrom).toBe(90);
+    expect(group(1909, "2030-06-01T00:00:00Z")).toBeNull();
+    expect(group(2000, "2029-12-31T23:30:00Z", "Pacific/Auckland")?.ageFrom).toBe(30);
+    expect(group(2000, "2029-12-31T23:30:00Z", "America/New_York")?.ageFrom).toBe(20);
+  });
   it("parses only an exact millisecond effect deadline header", () => {
     expect(parseHostedVaultShareEffectDeadlineAtEpochMs("1786543200000")).toBe(
       1_786_543_200_000,

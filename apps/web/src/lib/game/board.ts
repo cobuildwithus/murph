@@ -95,6 +95,7 @@ export async function readPairBoard(viewerId: string, otherId: string): Promise<
     const number = (index: number) => boardNumber(BOARD_METRICS[index], person.projections[index],
       BOARD_METRICS[index] === "steps" ? stepsWindow : window, facts.firstGameOn);
     return { memberId: person.memberId, me: person.memberId === viewerId, member: person.member,
+      ...(person.memberId !== viewerId && person.demographics ? { demographics: person.demographics } : {}),
       inARow: facts.streaks.get(person.memberId) ?? null,
       numbers: { restingHeartRate: number(0), sleep: number(1), steps: number(2), vo2Max: number(3) } };
   });

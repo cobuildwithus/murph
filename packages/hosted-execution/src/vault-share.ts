@@ -5,6 +5,7 @@ import {
   isStrictIsoDate,
   normalizeIanaTimeZone,
   isStrictIsoDateTime,
+  formatTimeZoneDateTimeParts,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
 import { resolveWearableProviderDescriptor } from "@murphai/health-metrics/wearable-provider-catalog";
@@ -786,6 +787,7 @@ export interface HostedVaultShareDeliveryRecord {
 export interface HostedVaultShareDeliverRequest {
   /** Canonical member timezone, encrypted with the snapshot; not a shared profile field. */
   memberTimeZone?: string;
+  memberAgeGroup?: HostedVaultShareAgeGroup;
   /**
    * Opaque digest of the active share generations resolved immediately before
    * the runtime begins reading this scope. Web accepts delivery only while the
@@ -797,6 +799,37 @@ export interface HostedVaultShareDeliverRequest {
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
   sourceWorkspaceVersion: string;
+}
+
+export type HostedVaultShareAgeGroup = {
+  biologicalSex: "female" | "male";
+  ageFrom: 18 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
+};
+
+export function memberAgeGroupFromBirthYear(input: {
+  birthYear: number;
+  biologicalSex: "female" | "male";
+  now: Date;
+  timeZone: string;
+}): HostedVaultShareAgeGroup | null {
+  if (!Number.isInteger(input.birthYear) || !Number.isFinite(input.now.getTime())) return null;
+  const age = Number(formatTimeZoneDateTimeParts(input.now, input.timeZone).dayKey.slice(0, 4)) - input.birthYear;
+  if (age < 18 || age > 120) return null;
+  const ageFrom = age < 20 ? 18 : Math.min(90, Math.floor(age / 10) * 10) as HostedVaultShareAgeGroup["ageFrom"];
+  return { biologicalSex: input.biologicalSex, ageFrom };
+}
+
+export function parseHostedVaultShareAgeGroup(value: unknown, projectionKind: HostedVaultShareProjectionKind): HostedVaultShareAgeGroup {
+  if (projectionKind !== "resting-heart-rate-days.v0" && projectionKind !== "vo2-max-days.v0") {
+    throw new TypeError("Vault share member age group is invalid for this projection kind.");
+  }
+  const group = requireObject(value, "Vault share member age group");
+  if (Object.keys(group).sort().join(",") !== "ageFrom,biologicalSex"
+    || (group.biologicalSex !== "female" && group.biologicalSex !== "male")
+    || ![18, 20, 30, 40, 50, 60, 70, 80, 90].includes(group.ageFrom as number)) {
+    throw new TypeError("Vault share member age group is invalid.");
+  }
+  return { biologicalSex: group.biologicalSex, ageFrom: group.ageFrom as HostedVaultShareAgeGroup["ageFrom"] };
 }
 
 /**
@@ -2453,6 +2486,8 @@ export function parseHostedVaultShareDeliverRequest(
     "Vault share deliver request",
   );
   const projectionKind = projectionScope.projectionKind;
+  const memberAgeGroup = request.memberAgeGroup === undefined ? undefined
+    : parseHostedVaultShareAgeGroup(request.memberAgeGroup, projectionKind);
   if (projectionKind === HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND) {
     throw new TypeError(
       "Vault share deliver request does not accept device-sync-status.v0 because Web reads it live.",
@@ -2504,6 +2539,7 @@ export function parseHostedVaultShareDeliverRequest(
 
   return {
     ...(memberTimeZone ? { memberTimeZone } : {}),
+    ...(memberAgeGroup ? { memberAgeGroup } : {}),
     expectedGenerationToken,
     ...(projectionMode ? { projectionMode } : {}),
     projectionKind,
@@ -2515,11 +2551,13 @@ export function parseHostedVaultShareDeliverRequest(
 
 export function serializeHostedVaultShareProjectionContentDigestInput(input: {
   memberTimeZone?: string;
+  memberAgeGroup?: HostedVaultShareAgeGroup;
   projectionScope: HostedVaultShareProjectionScope;
   records: readonly HostedVaultShareDeliveryRecord[];
 }): string {
   const parsed = parseHostedVaultShareDeliverRequest({
     ...(input.memberTimeZone ? { memberTimeZone: input.memberTimeZone } : {}),
+    ...(input.memberAgeGroup ? { memberAgeGroup: input.memberAgeGroup } : {}),
     expectedGenerationToken: HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER,
     projectionKind: input.projectionScope.projectionKind,
     projectionScope: input.projectionScope,
@@ -2538,6 +2576,7 @@ export function serializeHostedVaultShareProjectionContentDigestInput(input: {
     : parsed.records;
   return JSON.stringify({
     ...(parsed.memberTimeZone ? { memberTimeZone: parsed.memberTimeZone } : {}),
+    ...(parsed.memberAgeGroup ? { memberAgeGroup: parsed.memberAgeGroup } : {}),
     projectionScope: parsed.projectionScope,
     records,
     schema: HOSTED_VAULT_SHARE_PROJECTION_CONTENT_DIGEST_SCHEMA,

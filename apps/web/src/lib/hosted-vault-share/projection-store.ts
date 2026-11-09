@@ -12,6 +12,7 @@ import {
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   isHostedVaultShareRuntimeProjectedKind,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareAgeGroup,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionMode,
   type HostedVaultShareProjectionScope,
@@ -359,6 +360,7 @@ export type HostedVaultShareReplacementDeferralReason =
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
   memberTimeZone?: string;
+  memberAgeGroup?: HostedVaultShareAgeGroup;
   deadlineAtEpochMs?: number;
   onDeferral?: (reason: HostedVaultShareReplacementDeferralReason) => void;
   prisma?: PrismaClient;
@@ -372,6 +374,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   const projectionSnapshotCiphertext =
     await encryptHostedVaultShareProjectionSnapshot({
       memberTimeZone: input.memberTimeZone,
+      ...(input.memberAgeGroup ? { memberAgeGroup: input.memberAgeGroup } : {}),
       prisma,
       records: input.records,
       share: input.share,

@@ -212,6 +212,7 @@ function buildRawRequest(body: unknown, signal?: AbortSignal): Request {
 function deliveryEffectControls() {
   return {
     deadlineAtEpochMs: expect.any(Number),
+    memberAgeGroup: undefined,
     onDeferral: expect.any(Function),
     signal: expect.any(AbortSignal),
   };
@@ -391,6 +392,17 @@ function heartRateZonesDeliveryBody(): HostedVaultShareDeliverRequest {
 }
 
 describe("vault-share deliver route", () => {
+  it("forwards an age group only on a ranking delivery", async () => {
+    const scope = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
+    const share = { ...ACTIVE_SHARE, projectionKind: scope.projectionKind, projectionScope: scope,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(scope) };
+    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+    const memberAgeGroup = { biologicalSex: "female", ageFrom: 30 } as const;
+    const response = await deliverRoute.POST(buildRequest({ ...VALID_BODY,
+      projectionKind: scope.projectionKind, projectionScope: scope, records: [], memberTimeZone: "UTC", memberAgeGroup }));
+    expect(response.status).toBe(200);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith(expect.objectContaining({ memberAgeGroup, share }));
+  });
   beforeAll(async () => {
     deliverRoute = await import(
       "../app/api/internal/hosted-runtime/vault-share/deliver/route"

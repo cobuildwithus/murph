@@ -220,6 +220,11 @@ never grants a health scope.
 Join disclosure names the audience and surface: the people in the group can
 see the selected numbers, going back up to 180 days, and compare their changes, in
 the chat and in the Murph app. Unchecking a number and saving stops sharing it.
+Resting heart rate and VO2 max snapshots also carry the member's sex and age
+group (18–19, then a decade, with 90 and over) in the encrypted envelope so
+the other board person's app can rank those numbers for their age. The chat
+reader never receives the age group. Revoking one of those scopes leaves the
+group available through the other; revoking both or leaving removes it.
 The app read captures and revalidates both viewer membership and exact grants
 around decryption. It reads only two people and four scopes, at most eight
 snapshots in batches of four, using the existing 4 MiB decoded-record ceiling.

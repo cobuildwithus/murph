@@ -18,6 +18,11 @@ vi.mock("@/src/lib/hosted-vault-share/projection-snapshot", async original => {
     const result = await actual.decryptHostedVaultShareProjectionSnapshots(input);
     await mocks.afterDecrypt();
     return result;
+  }, decryptHostedVaultShareProjectionSnapshotsWithAgeGroups: async (input: Parameters<typeof actual.decryptHostedVaultShareProjectionSnapshotsWithAgeGroups>[0]) => {
+    mocks.decrypt(input.entries.length, input.requestedHistoryDays);
+    const result = await actual.decryptHostedVaultShareProjectionSnapshotsWithAgeGroups(input);
+    await mocks.afterDecrypt();
+    return result;
   } };
 });
 
@@ -79,7 +84,8 @@ async function fixture(joined = false) {
   mocks.route.mockResolvedValue({ containerMemberId: room });
   const read = () => readPairBoard(a, b);
   const raw = () => readHostedGroupBoardData({ groupId, runtimeMemberId: room, viewerId: a, otherId: b, now: new Date() });
-  const share = async (memberId: string, kind: HostedVaultShareFixedProjectionKind, published = false, legacy = false, sources = 1, days = 90) => {
+  const share = async (memberId: string, kind: HostedVaultShareFixedProjectionKind, published = false, legacy = false, sources = 1, days = 90,
+    memberAgeGroup?: { biologicalSex: "female" | "male"; ageFrom: 18 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 }) => {
     const projectionScope = hostedVaultShareProjectionKindToScope(kind);
     const grant = await db.$transaction(tx => grantHostedVaultShareTx({ tx, grantorMemberId: memberId, destinationMemberId: room, projectionScope, now: new Date() }));
     if (published) {
@@ -87,7 +93,8 @@ async function fixture(joined = false) {
       const values = { "resting-heart-rate-days.v0": ["resting-heart-rate", "bpm", 65], "sleep-duration-days.v0": ["total-sleep-minutes", "minutes", 430], "steps-days.v0": ["steps", "steps", 8000], "vo2-max-days.v0": ["estimated-vo2-max", "mL/kg/min", 42] } as const;
       if (!(kind in values)) throw new Error("Fixture snapshot kind not supported");
       const metric = values[kind as keyof typeof values];
-      const ciphertext = await encryptHostedVaultShareProjectionSnapshot({ share: authority, ...(legacy ? {} : { memberTimeZone: "UTC" }), records: Array.from({ length: days }, (_, i) => Array.from({ length: sources }, (_, sourceIndex) => {
+      const ciphertext = await encryptHostedVaultShareProjectionSnapshot({ share: authority, ...(legacy ? {} : { memberTimeZone: "UTC" }),
+        ...(memberAgeGroup ? { memberAgeGroup } : {}), records: Array.from({ length: days }, (_, i) => Array.from({ length: sources }, (_, sourceIndex) => {
         const date = addDays(today(), i - days + 1);
         return { data: { date, metricKey: metric[0], unit: metric[1], value: metric[2] }, source: resolveHostedVaultShareDataSource(`source-${sourceIndex}`)!, recordKey: `${date}.source-${sourceIndex}`, occurredAt: `${date}T00:00:00.000Z` };
       })).flat() });
@@ -116,6 +123,31 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
+  it("shows age group only for the other person on an exact granted ranking scope", async () => {
+    const f = await fixture(true);
+    const group = { biologicalSex: "female", ageFrom: 30 } as const;
+    const rhr = await f.share(f.b, "resting-heart-rate-days.v0", true, false, 1, 90, group);
+    await f.share(f.a, "resting-heart-rate-days.v0", true, false, 1, 90, group);
+    expect((await f.read())?.people.map(person => person.demographics)).toEqual([undefined, group]);
+    const response = await GET(f.request(), { params: Promise.resolve({ memberId: f.b }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).board.people[1].demographics).toEqual(group);
+    expect((await f.raw())?.people[1].demographics).toEqual(group);
+    expect((await f.read())?.people[1].numbers.restingHeartRate).toMatchObject({ source: "source-0" });
+    const vo2 = await f.share(f.b, "vo2-max-days.v0", true, false, 1, 90, group);
+    await db.hostedVaultShare.update({ where: { id: rhr }, data: { status: "revoked", projectionSnapshotCiphertext: null } });
+    expect((await f.read())?.people[1].demographics).toEqual(group);
+    await db.hostedVaultShare.update({ where: { id: vo2 }, data: { status: "revoked", projectionSnapshotCiphertext: null } });
+    expect((await f.read())?.people[1]).not.toHaveProperty("demographics");
+  });
+  it("omits disagreeing age groups and a group from a revoked exact grant", async () => {
+    const f = await fixture(true);
+    const rhr = await f.share(f.b, "resting-heart-rate-days.v0", true, false, 1, 90, { biologicalSex: "female", ageFrom: 30 });
+    await f.share(f.b, "vo2-max-days.v0", true, false, 1, 90, { biologicalSex: "female", ageFrom: 40 });
+    expect((await f.read())?.people[1]).not.toHaveProperty("demographics");
+    await db.hostedVaultShare.update({ where: { id: rhr }, data: { status: "revoked", projectionSnapshotCiphertext: null } });
+    expect((await f.read())?.people[1].demographics).toEqual({ biologicalSex: "female", ageFrom: 40 });
+  });
   async function sharingSnapshot(f: Awaited<ReturnType<typeof fixture>>) {
     return {
       members: await db.hostedGroupMember.findMany({ where: { groupId: f.groupId }, orderBy: { id: "asc" } }),
