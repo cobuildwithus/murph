@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-08",
+  "order": 110,
+  "item": {
+    "id": "zero-step-days-left-out",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Days without a step count no longer pull your average down",
+    "summary": "When your wearable counts no steps for a day, Murph now leaves that day out of your steps chart and average instead of counting it as zero.",
+    "details": "The game board already worked this way. Now your own steps page does too, so the month average and the arrow show the days that were actually counted.",
+    "relevanceTags": [
+      "wearables"
+    ],
+    "sourcePullRequests": [
+      4740
+    ]
+  }
+}
