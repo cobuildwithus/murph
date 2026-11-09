@@ -230,6 +230,20 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
       mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,
     readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+    // Direct admission reads the member row with its home and pending chat keys;
+    // serve the member row from the same mock as the pre-transaction read.
+    readHostedLinqDirectRoutingTx: async (input: Parameters<typeof actual.readHostedLinqDirectRoutingTx>[0]) => {
+      const home = await actual.lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: input.chatId, prisma: input.prisma, projection: "core",
+      });
+      return {
+        home: home ? { core: home.core, memberId: home.core.id } : null,
+        routingRecord: input.lockedMember
+          ? await mocks.readHostedMemberRoutingRecord({ memberId: input.lockedMember.memberId, prisma: input.prisma })
+          : null,
+        hasForeignPendingOwner: false,
+      };
+    },
     readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
     readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
     upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
