@@ -2534,7 +2534,7 @@ test("Junction reconcile refreshes a revision-1 profile marker once", async () =
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 2,
   });
-  assert.equal(firstResult.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+  assert.equal(firstResult.scheduledJobs, undefined);
   const firstSnapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
   };
@@ -2697,7 +2697,7 @@ test("Junction revision-2 reconcile preserves a no-id profile spine", async () =
       job,
     );
     assert.equal(firstResult.metadataPatch?.junctionProfileSummaryNormalizationRevision, 2);
-    assert.equal(firstResult.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+    assert.equal(firstResult.scheduledJobs, undefined);
 
     const afterRefresh = await readEventRecords();
     assert.equal(afterRefresh.length, beforeRefresh.length);

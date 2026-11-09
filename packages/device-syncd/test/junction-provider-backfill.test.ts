@@ -1389,7 +1389,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
   assert.equal(due?.nextReconcileAt, "2026-04-04T06:16:00.000Z");
 });
 
-test("Junction yieldable reconcile checkpoints one bounded normalization-safe summary unit per continuation", async () => {
+test.each([false, true])("Junction summary reconcile keeps complete units in one job and yields the exact suffix (yield: %s)", async (yieldAfterActivity) => {
   const requestsByPass: string[][] = [];
   const importedSnapshots: unknown[] = [];
   let activePass = 0;
@@ -1434,7 +1434,7 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
       importedSnapshots.push(snapshot);
       return { imported: true };
     },
-    shouldYield: () => false,
+    shouldYield: () => yieldAfterActivity && importedSnapshots.length >= 1 && activePass === 0,
   });
   let job = createJob("reconcile", {
     windowEnd: "2026-04-03T00:00:00.000Z",
@@ -1442,7 +1442,7 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
   });
   const continuationPayloads: Array<Record<string, unknown>> = [];
 
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < (yieldAfterActivity ? 2 : 1); pass += 1) {
     activePass = pass;
     const result = await executeJunctionJob(provider, context, job);
     const continuation = result.scheduledJobs?.find((candidate) =>
@@ -1452,10 +1452,7 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
         || candidate.payload?.summaryPhaseComplete === true
       )
     );
-    if (!continuation) {
-      assert.equal(pass, 3);
-      break;
-    }
+    if (!continuation) continue;
     continuationPayloads.push(continuation.payload ?? {});
     job = createJobFromInput(continuation, pass);
   }
@@ -1464,18 +1461,18 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
     requestsByPass.map((requests) => requests
       .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
       .filter((resource): resource is string => Boolean(resource))),
-    [["activity"], ["sleep", "sleep_cycle"], ["body"], []],
+    yieldAfterActivity
+      ? [["activity"], ["sleep", "sleep_cycle", "body"]]
+      : [["activity", "sleep", "sleep_cycle", "body"]],
   );
   assert.deepEqual(
     continuationPayloads.map((payload) => ({
       summaryPhaseComplete: payload.summaryPhaseComplete,
       summaryResourceCursor: payload.summaryResourceCursor,
     })),
-    [
-      { summaryPhaseComplete: undefined, summaryResourceCursor: "sleep" },
-      { summaryPhaseComplete: undefined, summaryResourceCursor: "body" },
-      { summaryPhaseComplete: true, summaryResourceCursor: undefined },
-    ],
+    yieldAfterActivity
+      ? [{ summaryPhaseComplete: undefined, summaryResourceCursor: "sleep" }]
+      : [],
   );
   assert.equal(importedSnapshots.length, 3);
   assert.ok(importedSnapshots.every((snapshot) =>
@@ -1528,12 +1525,7 @@ test.each([false, true])("Junction skips fetched empty summary imports with boun
     windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
   }));
   assert.equal(importedSnapshots.length, 0);
-  if (bounded) {
-    const continuation = result.scheduledJobs?.find((job) => job.payload?.summaryPhaseComplete === true);
-    assert.ok(continuation);
-    await executeJunctionJob(provider, context, createJobFromInput(continuation));
-    assert.equal(importedSnapshots.length, 0);
-  }
+  assert.equal(result.scheduledJobs?.some((job) => job.payload?.summaryPhaseComplete === true) ?? false, false);
 });
 
 test("Junction yieldable summary continuation fails within its inner provider-attempt bound", async () => {
@@ -1703,10 +1695,10 @@ test("Junction yieldable reconcile bounds maximum provider projection to fixed s
     }),
   );
 
-  // One read projects inventory; empty summaries need no import admission.
-  assert.equal(sourceReads, 1);
+  // No admitted source exists to fence; projection and completion read authority.
+  assert.equal(sourceReads, 2);
   assert.equal(sourceUpserts, JUNCTION_MAX_USER_PROVIDERS);
-  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+  assert.equal(result.scheduledJobs, undefined);
 });
 
 test("Junction rejects provider inventory above the projection bound before local source work", async () => {
