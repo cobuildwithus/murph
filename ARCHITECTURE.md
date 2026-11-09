@@ -5104,6 +5104,12 @@ Prepared direct Linq admission takes the same lock before revalidating its
 prepared control root, matching activation's member-then-root order, so it
 waits for short runtime callbacks instead of returning a retryable 503. Identity,
 root, and route checks remain inside the admission transaction.
+Direct admission acquires participant then chat locks in one lock-only statement;
+the chat lock consumes the participant lock result. The thread route is read in
+a following statement so a waiter sees the preceding holder's committed route.
+Prepared direct admission reads its member routing row and all rotated home and
+pending chat keys together, without a row cap. Home ambiguity, duplicate replay,
+prepared-row comparison and pending-claim repair keep their existing policy order.
 This avoids a second lock namespace and avoids a routing-row/member-row
 cross-channel deadlock. The effective proactive limit is the lower of the hard
 50-conversation ceiling and the line's configured

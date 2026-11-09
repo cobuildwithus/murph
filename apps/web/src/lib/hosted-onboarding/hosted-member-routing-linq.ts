@@ -787,14 +787,13 @@ export function readUnchangedHostedLinqHomeRoute(input: {
  * Retains an exact binding after the caller's live member/home/thread resolution
  * under participant, chat, and member locks. Pending conflicts still use repair.
  */
-export async function readUnchangedHostedMemberHomeLinqBindingTx(input: {
+export function readUnchangedHostedMemberHomeLinqBinding(input: {
   chatId: string;
   homeLineAssignedAt: Date | null;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
+  hasForeignPendingOwner: boolean;
   recipientPhone: string | null;
   routingRecord: Pick<HostedMemberRouting, keyof typeof hostedMemberLinqBindingSelect> | null;
-}): Promise<HostedLinqParticipantIdentity | null> {
+}): HostedLinqParticipantIdentity | null {
   const participant = readHostedMemberHomeLinqParticipantIdentity(input.routingRecord);
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
@@ -809,14 +808,7 @@ export async function readUnchangedHostedMemberHomeLinqBindingTx(input: {
   })) {
     return null;
   }
-  const pendingConflict = await input.prisma.hostedMemberRouting.findFirst({
-    select: { memberId: true },
-    where: {
-      pendingLinqChatLookupKey: { in: createHostedLinqChatLookupKeyReadCandidates(input.chatId) },
-      NOT: { memberId: input.memberId },
-    },
-  });
-  return pendingConflict ? null : participant;
+  return input.hasForeignPendingOwner ? null : participant;
 }
 
 async function writeHostedMemberLinqBindingTx(input: {

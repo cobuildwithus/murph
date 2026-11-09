@@ -6,7 +6,7 @@ import {
 } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
   reconcileHostedMemberLinqPhoneBindingsTx,
-  readUnchangedHostedMemberHomeLinqBindingTx,
+  readUnchangedHostedMemberHomeLinqBinding,
   readUnchangedHostedLinqHomeRoute,
   upsertHostedMemberHomeLinqBindingTx,
 } from "../src/lib/hosted-onboarding/hosted-member-routing-linq";
@@ -60,11 +60,10 @@ function createFixture() {
       recipientPhone: "+15550000000",
       ...overrides,
     });
-  const retain = () => readUnchangedHostedMemberHomeLinqBindingTx({
+  const retain = (hasForeignPendingOwner = false) => readUnchangedHostedMemberHomeLinqBinding({
     chatId: "synthetic-chat",
     homeLineAssignedAt: new Date(assignedAt),
-    memberId: "synthetic-member",
-    prisma: prisma as never,
+    hasForeignPendingOwner,
     recipientPhone: "+15550000000",
     routingRecord: routing,
   });
@@ -141,20 +140,19 @@ describe("established Linq home binding", () => {
     expect(mocks.encrypt).not.toHaveBeenCalled();
   });
 
-  it("retains a validated clean binding with only the pending-conflict read", async () => {
+  it("retains a validated clean binding without another routing read", () => {
     const { prisma, retain } = createFixture();
-    await expect(retain()).resolves.toEqual(participant);
-    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledOnce();
+    expect(retain()).toEqual(participant);
+    expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.encrypt).not.toHaveBeenCalled();
   });
 
-  it("defers a competing pending route to the repair writer", async () => {
+  it("defers a competing pending route to the repair writer", () => {
     const { prisma, retain } = createFixture();
-    prisma.hostedMemberRouting.findFirst.mockResolvedValue({ memberId: "other-owner" });
-    await expect(retain()).resolves.toBeNull();
+    expect(retain(true)).toBeNull();
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
   });
 
@@ -185,7 +183,7 @@ describe("established Linq home binding", () => {
   ])("still writes for %s", async (_name, change) => {
     const { bind, prisma, retain, routing } = createFixture();
     Object.assign(routing, change);
-    await expect(retain()).resolves.toBeNull();
+    expect(retain()).toBeNull();
     await bind();
     expect(mocks.encrypt).toHaveBeenCalledOnce();
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledOnce();

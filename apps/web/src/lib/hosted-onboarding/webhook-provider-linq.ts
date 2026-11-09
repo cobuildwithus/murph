@@ -61,7 +61,7 @@ import {
   readHostedMemberHomeLinqRouteAuthorityTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   hostedMemberRoutingRecordsEqual,
-  readHostedMemberRoutingRecord,
+  readHostedLinqDirectRoutingTx,
   readHostedMemberRoutingControlRootKeyIds,
   readHostedMemberRoutingState,
   type HostedMemberRoutingRecord,
@@ -141,7 +141,7 @@ import {
 } from "./linq-line-store";
 import {
   readUnchangedHostedLinqHomeRoute,
-  readUnchangedHostedMemberHomeLinqBindingTx,
+  readUnchangedHostedMemberHomeLinqBinding,
 } from "./hosted-member-routing-linq";
 import {
   resolveHostedLinqSignupWelcomeDailyLimit,
@@ -203,7 +203,6 @@ import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import {
-  acquireHostedLinqParticipantContactLockTx,
   createHostedLinqParticipantContact,
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContact,
@@ -331,17 +330,15 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
     return null;
   }
 
-  const [identityCandidate, homeChatCandidate] = await Promise.all([
-    lookupHostedLinqIdentityCoreCandidate({
-      audience: "direct",
-      contact: participantContact,
-      prisma: input.prisma,
-    }),
-    lookupHostedLinqHomeChatCoreCandidate({
-      chatId: summary.chatId,
-      prisma: input.prisma,
-    }),
-  ]);
+  const identityCandidate = await lookupHostedLinqIdentityCoreCandidate({
+    audience: "direct",
+    contact: participantContact,
+    prisma: input.prisma,
+  });
+  const homeChatCandidate = await lookupHostedLinqHomeChatCoreCandidate({
+    chatId: summary.chatId,
+    prisma: input.prisma,
+  });
   const identityMemberId = identityCandidate?.memberId ?? null;
   const homeChatMemberId = homeChatCandidate?.memberId ?? null;
   const pendingContactCore = identityMemberId || homeChatMemberId
@@ -757,16 +754,13 @@ async function lockPreparedHostedLinqDirectMemberTx(input: {
 async function revalidatePreparedHostedLinqDirectRoutingTx(input: {
   memberId: string;
   prepared: PreparedHostedLinqDirectMailboxPayloadRoot | null;
-  prisma: Prisma.TransactionClient;
+  liveRouting: Awaited<ReturnType<typeof readHostedLinqDirectRoutingTx>>;
 }): Promise<PreparedHostedLinqDirectMailboxPayloadRoot> {
   if (!input.prepared || input.prepared.memberId !== input.memberId) {
     throw hostedLinqDirectMailboxPreparationRequired("member");
   }
 
-  const routingRecord = await readHostedMemberRoutingRecord({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
+  const routingRecord = input.liveRouting.routingRecord;
   if (!hostedMemberRoutingRecordsEqual(
     routingRecord,
     input.prepared.routingRecord,
@@ -1362,26 +1356,19 @@ export async function planHostedOnboardingLinqWebhook(
     summary,
   } = context;
 
-  if (
+  const lockParticipant =
     !isHostedLinqGroupChat(messageEvent)
     && messageEvent.data.message.parts.length > 0
     && participantContact
     && !shouldIgnoreHostedLinqForLocalInboundGuard({
       isFromMe: summary.isFromMe,
       participantContact,
-    })
-  ) {
-    // Identity and outreach owners take the participant lock before entering
-    // chat work. Preserve participant -> chat -> member everywhere so an
-    // uncommitted signup cannot deadlock an admitted inbound on the same chat.
-    await acquireHostedLinqParticipantContactLockTx({
-      contact: participantContact,
-      tx: input.prisma,
     });
-  }
-
+  // Preserve participant -> chat -> member, including while signup holds the
+  // participant lock. The route read below gets its own post-lock snapshot.
   await acquireHostedLinqChatOwnershipLockTx({
     chatId: summary.chatId,
+    ...(lockParticipant ? { participantContact } : {}),
     tx: input.prisma,
   });
 
@@ -1481,10 +1468,12 @@ export async function planHostedOnboardingLinqWebhook(
     contact: participantContact,
     prisma: input.prisma,
   });
-  const incomingHomeLinqChatOwnerLookup = await lookupHostedLinqHomeChatCoreCandidate({
+  const liveDirectRouting = await readHostedLinqDirectRoutingTx({
     chatId: summary.chatId,
+    lockedMember: preparedDirectMailboxControlAuthority,
     prisma: input.prisma,
   });
+  const incomingHomeLinqChatOwnerLookup = liveDirectRouting.home;
   const existingHomeLinqChatLookup = existingMemberLookup
     ? null
     : incomingHomeLinqChatOwnerLookup;
@@ -1587,6 +1576,7 @@ export async function planHostedOnboardingLinqWebhook(
       existingMemberMatch,
       input,
       preparedDirectMailboxControlAuthority,
+      liveDirectRouting,
     });
     if ("response" in admission) {
       return admission;
@@ -1757,6 +1747,7 @@ export async function planHostedOnboardingLinqWebhook(
       memberRouteBindingAuthority,
       participantContact,
       preparedDirectRoutingAuthority,
+      hasForeignPendingOwner: liveDirectRouting.hasForeignPendingOwner,
     });
   }
 
@@ -1857,6 +1848,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
   existingMemberMatch: HostedLinqExistingMemberMatch;
   input: HostedOnboardingLinqWebhookPlannerInput;
   preparedDirectMailboxControlAuthority: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+  liveDirectRouting: Awaited<ReturnType<typeof readHostedLinqDirectRoutingTx>>;
 }): Promise<
   | HostedOnboardingLinqDirectPlan
   | {
@@ -2012,7 +2004,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
       await revalidatePreparedHostedLinqDirectRoutingTx({
         memberId: existingMember.id,
         prepared: preparedDirectMailboxControlAuthority,
-        prisma: input.prisma,
+        liveRouting: admission.liveDirectRouting,
       });
   }
 
@@ -2493,6 +2485,7 @@ async function planHostedLinqActiveMemberDirectWebhook(input: {
   memberRouteBindingAuthority: HostedLinqHomeLineRouteBindingAuthority | null;
   participantContact: HostedLinqParticipantContact;
   preparedDirectRoutingAuthority: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+  hasForeignPendingOwner: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
     context,
@@ -2601,8 +2594,9 @@ async function planHostedLinqActiveMemberDirectWebhook(input: {
     recipientPhone: bindingResult.recipientPhone,
   };
   const retainedParticipant = preparedDirectMailbox
-    ? await readUnchangedHostedMemberHomeLinqBindingTx({
+    ? readUnchangedHostedMemberHomeLinqBinding({
         ...homeBinding,
+        hasForeignPendingOwner: input.hasForeignPendingOwner,
         routingRecord: preparedDirectMailbox.routingRecord,
       })
     : null;
