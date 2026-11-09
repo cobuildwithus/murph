@@ -553,6 +553,69 @@ function addHistoryCoverage(
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
+    it("acknowledges an empty signed Junction webhook and its batch redelivery without runtime work", async () => {
+      const fixture = await createFixture({
+        setupPhase: "pending_link",
+        sourceLastErrorCode: null,
+        sourceProviderSlug: "google_health",
+      });
+      const providerFetch = vi.fn(async () => {
+        throw new Error("An empty webhook must not read provider state.");
+      });
+      const registry = createJunctionRegistry(providerFetch);
+      try {
+        const connectionBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { nextReconcileAt: true, updatedAt: true },
+          where: { id: fixture.connectionId },
+        });
+        const expectedSource = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: {
+            lastDataAt: true,
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            lastSeenAt: true,
+            status: true,
+            updatedAt: true,
+          },
+          where: { id: fixture.sourceId },
+        });
+        const signed = signJunctionWebhook({
+          body: {
+            event_type: "provider.device.updated",
+            user_id: fixture.externalAccountId,
+            data: { provider: "google_health", type: "activity" },
+          },
+          messageId: `msg_no_work_${randomUUID()}`,
+          receivedAt: fixture.receivedAt,
+        });
+        const service = createIngressService({ headers: signed.headers, registry, store: fixture.store });
+        const prepared = await service.prepareWebhookForDurableEnqueue(
+          "junction", signed.rawBody, fixture.receivedAt,
+        );
+        fixture.traceIds.push(prepared.traceId);
+        expect(prepared.jobs).toEqual([]);
+
+        const result = await admitHostedDeviceWebhookBatch({
+          entries: [queuePreparedWebhook(prepared), queuePreparedWebhook(prepared)],
+          handle: (entry) => service.handlePreparedWebhook(entry.preparedWebhook),
+        });
+        expect(result.entries.map((entry) => entry.disposition)).toEqual(["accepted", "duplicate"]);
+        await expectNoWebhookEffects(fixture, {
+          connectionUpdatedAt: connectionBefore.updatedAt,
+          expectedSource,
+          traceId: prepared.traceId,
+        });
+        await expect(fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { nextReconcileAt: true },
+          where: { id: fixture.connectionId },
+        })).resolves.toEqual({ nextReconcileAt: connectionBefore.nextReconcileAt });
+        expect(providerFetch).not.toHaveBeenCalled();
+        expect(runtimeMocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("keeps a reconstructed Junction source retryable until live provider proof succeeds", async () => {
       const sourceProviderSlug = "apple_health_kit";
       const fixture = await createFixture({ sourceLastErrorCode: null });

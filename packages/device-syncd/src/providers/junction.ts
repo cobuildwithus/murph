@@ -12502,7 +12502,7 @@ function buildJunctionWebhookJobs(input: {
     ];
   }
 
-  if (input.resource) {
+  if (isJunctionDataEvent(input.eventType) && input.resource) {
     const directPayloads = input.webhookDataJsons.length > 0 ? input.webhookDataJsons : [null];
     return directPayloads.map((webhookDataJson, index) => ({
       kind: "resource",
@@ -12542,22 +12542,7 @@ function buildJunctionWebhookJobs(input: {
     }));
   }
 
-  return [
-    {
-      kind: "reconcile",
-      payload: {
-        windowStart: input.window.windowStart,
-        windowEnd: input.window.windowEnd,
-      },
-      priority: 50,
-      dedupeKey: sha256Text(JSON.stringify([
-        "junction-webhook",
-        "reconcile",
-        input.window.windowStart,
-        input.window.windowEnd,
-      ])),
-    },
-  ];
+  return [];
 }
 
 function isJunctionProviderConnectionEvent(eventType: string): boolean {
