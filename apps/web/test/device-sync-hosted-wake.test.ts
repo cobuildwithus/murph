@@ -2145,7 +2145,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -2206,7 +2206,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -2298,7 +2298,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -2366,7 +2366,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -2413,7 +2413,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -2464,7 +2464,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -2535,7 +2535,7 @@ describe("hosted device-sync wakes", () => {
         acceptanceMode: "level_dirty_hint",
         dataSourceProviderSlug: "garmin",
         eventType: "daily.data.heartrate.created",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
         sourceProviderSlug: "garmin",
       },
     });
@@ -2637,7 +2637,7 @@ describe("hosted device-sync wakes", () => {
       webhook: {
         acceptanceMode: "level_dirty_hint",
         eventType: "daily.data.heartrate.created",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
         sourceProviderSlug: "garmin",
       },
     });
@@ -2698,7 +2698,7 @@ describe("hosted device-sync wakes", () => {
         webhook: {
           acceptanceMode: "level_dirty_hint",
           eventType,
-          jobs: [],
+          jobs: [{ kind: "reconcile" }],
           sourceProviderSlug: "garmin",
         },
       });
@@ -3018,7 +3018,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -3109,7 +3109,7 @@ describe("hosted device-sync wakes", () => {
       dataSourceProviderSlug: "apple_health_kit",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -3236,7 +3236,7 @@ describe("hosted device-sync wakes", () => {
       acceptanceMode: "level_dirty_hint",
       eventType: "provider.connection.updated",
       externalAccountId: "acct_sensitive",
-      jobs: [],
+      jobs: [{ kind: "reconcile" }],
       provider: "junction",
       receivedAt: "2026-03-26T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",
@@ -7874,6 +7874,51 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
+  it("completes an empty webhook under the admission lock without source, dirty, migration or wake work", async () => {
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-no-work",
+      now: "2026-03-26T12:00:00.000Z",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      sourceAdmissionDeferred: true,
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_no_work",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "provider.device.updated",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        sourceProviderSlug: "google_health",
+        jobs: [],
+      },
+    });
+
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledExactlyOnceWith(
+      "user-123", "dsc_123", expect.any(Function), expect.any(Object),
+    );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledExactlyOnceWith(
+      "junction", "trace_no_work", "claim-no-work", mocks.prismaTx,
+    );
+    expect(mocks.getConnectionRecordForUser).not.toHaveBeenCalled();
+    expect(mocks.resolveConnectionSourceAdmissionCandidate).not.toHaveBeenCalled();
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.readPendingDirtyConnectionSnapshot).not.toHaveBeenCalled();
+    expect(mocks.prepareDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).not.toHaveBeenCalled();
+    expect(mocks.markWebhookReceived).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("keeps compact-only webhook admission on the canonical final transaction owner", async () => {
     const finalMutationProviderCallFences: boolean[] = [];
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
@@ -7903,7 +7948,7 @@ describe("hosted device-sync wakes", () => {
       webhook: {
         acceptanceMode: "durable_webhook_work",
         eventType: "provider.connection.updated",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
       },
     });
 
@@ -7951,7 +7996,7 @@ describe("hosted device-sync wakes", () => {
         webhook: {
           acceptanceMode: "level_dirty_hint",
           eventType: "sleep.updated",
-          jobs: [],
+          jobs: [{ kind: "reconcile" }],
           resourceCategory: "sleep",
         },
       });
@@ -8003,7 +8048,7 @@ describe("hosted device-sync wakes", () => {
         webhook: {
           acceptanceMode: "level_dirty_hint",
           eventType: "sleep.updated",
-          jobs: [],
+          jobs: [{ kind: "reconcile" }],
           resourceCategory: "sleep",
         },
       });
@@ -8052,7 +8097,7 @@ describe("hosted device-sync wakes", () => {
       webhook: {
         acceptanceMode: "level_dirty_hint",
         eventType: "sleep.updated",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
         resourceCategory: "sleep",
       },
     });
@@ -8093,7 +8138,7 @@ describe("hosted device-sync wakes", () => {
       webhook: {
         acceptanceMode: "durable_webhook_work",
         eventType: "provider.connection.updated",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
       },
     });
 
@@ -9278,7 +9323,7 @@ describe("hosted device-sync wakes", () => {
           webhook: {
             acceptanceMode: "level_dirty_hint",
             eventType: "sleep.updated",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           },
         });
         return { accepted: true };

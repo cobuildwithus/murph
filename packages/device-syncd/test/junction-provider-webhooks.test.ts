@@ -61,7 +61,71 @@ import type {
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
-test("Junction verifies Svix webhooks and maps data events to scalar resource jobs", async () => {
+test.each([
+  ["provider.device.updated", {}],
+  ["provider.device.updated", { resource: "activity" }],
+  ["provider.synthetic.updated", { type: "sleep" }],
+  ["daily.data.", {}],
+  ["historical.data.", {}],
+])("Junction verifies %s without inventing work for %j", async (eventType, data) => {
+  const provider = createJunctionProvider(async () => {
+    throw new Error("No provider request expected.");
+  }, { webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==" });
+  const webhook = createJunctionSvixWebhook({
+    body: { event_type: eventType, user_id: "junction-user-1", data },
+    messageId: "msg_no_work",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    ...webhook,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.eventType, eventType);
+  assert.equal(parsed.traceId, "msg_no_work");
+  assert.equal(parsed.externalAccountId, "junction-user-1");
+  assert.deepEqual(parsed.jobs, []);
+});
+
+test("Junction connection updates preserve their backfill and reconcile jobs", async () => {
+  const provider = createJunctionProvider(async () => {
+    throw new Error("No provider request expected.");
+  }, { summaryBackfillDays: 7, webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==" });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "provider.connection.updated",
+      user_id: "junction-user-1",
+      data: { provider: "google_health", updated_at: "2026-04-03T00:00:00.000Z" },
+    },
+    messageId: "msg_connection_update",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    ...webhook,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  assert.deepEqual(parsed.jobs, [
+    {
+      kind: "backfill",
+      payload: { windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+      priority: 35,
+      dedupeKey: sha256ForTest(JSON.stringify([
+        "junction", "backfill", "2026-03-27T00:00:00.000Z", "2026-04-03T00:00:00.000Z",
+      ])),
+    },
+    {
+      kind: "reconcile",
+      payload: { windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+      priority: 45,
+      dedupeKey: sha256ForTest(JSON.stringify([
+        "junction-webhook", "connection-reconcile", "2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z",
+      ])),
+    },
+  ]);
+});
+
+test.each(["created", "updated"])("Junction verifies Svix activity %s events and preserves scalar resource jobs", async (action) => {
+  const eventType = `daily.data.activity.${action}`;
   const provider = createJunctionProvider(
     async (input) => {
       throw new Error(`Unexpected request: ${readUrl(input)}`);
@@ -72,7 +136,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   );
   const webhook = createJunctionSvixWebhook({
     body: {
-      event_type: "daily.data.activity.created",
+      event_type: eventType,
       user_id: "junction-user-1",
       client_user_id: "murph_blinded",
       data: {
@@ -115,7 +179,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   });
   assert.equal(JSON.stringify(parsed.externalAccountDiagnostic).includes("junction-user-1"), false);
   assert.equal(JSON.stringify(parsed.externalAccountDiagnostic).includes("murph_blinded"), false);
-  assert.equal(parsed.eventType, "daily.data.activity.created");
+  assert.equal(parsed.eventType, eventType);
   assert.equal(parsed.acceptanceMode, "durable_webhook_work");
   assert.equal(parsed.traceId, "msg_activity_1");
   assert.equal(parsed.resourceCategory, "summary");
@@ -131,7 +195,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
     {
       kind: "resource",
       payload: {
-        eventType: "daily.data.activity.created",
+        eventType,
         objectId: "activity-1",
         occurredAt: "2026-04-02T00:00:00.000Z",
         resource: "activity",

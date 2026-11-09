@@ -1852,6 +1852,20 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     });
   }
 
+  if (input.webhook.jobs.length === 0) {
+    await input.store.withHealthDataAdmissionLock(
+      ownerId,
+      input.account.id,
+      (tx) => completeHostedWebhookTraceTx({
+        ...input,
+        provider: input.account.provider,
+        traceId,
+      }, tx),
+      { memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS },
+    );
+    return;
+  }
+
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
   const dirtyResources = buildHostedWebhookDirtyResources({
     eventOccurredAt: input.webhook.occurredAt ?? null,
@@ -4254,20 +4268,6 @@ function buildHostedWebhookDirtyResources(input: {
         ?? providerSlug,
       windowEnd: readHostedDirtyResourceString(payload.windowEnd),
       windowStart: readHostedDirtyResourceString(payload.windowStart),
-    });
-  }
-
-  if (resources.length === 0) {
-    resources.push({
-      count: 1,
-      ...buildHostedWebhookDirtyResourceTiming(input),
-      jobKind: "reconcile",
-      resource: null,
-      resourceCategory: null,
-      sourceProviderSlug: null,
-      timingSourceProviderSlug: webhookSourceProviderSlug ?? providerSlug,
-      windowEnd: null,
-      windowStart: null,
     });
   }
 

@@ -59,12 +59,19 @@ snapshot is already reconciled; it does not need an empty Web callback.
    provider reads and execution. Webhook execution never consults a polling
    fingerprint to decide whether to import.
 
-3. **Unknown input degrades to fetch, never to silence.** Any webhook branch
+3. **Data with a resource degrades to fetch, never to silence.** Junction
+   accepts only `daily.data.*`, `historical.data.*`, and
+   `provider.connection.created|updated` as work-bearing events. Other events,
+   including device metadata, and data events with no inferred resource return
+   no jobs. Ingress completes their claimed trace before account/source
+   admission and creates no dirty state, freshness observation, or runtime wake.
+   Redelivery is a duplicate; the scheduled six-hour reconcile remains the
+   recovery floor. For data events with an inferred resource, a branch
    that has "nothing to import right now" — empty payload, unknown
    discriminator, oversized payload, unconfigured resource with no event-type
    fallback — marks the connection dirty for the floor (a coalescible reconcile
-   over the event window). No silent-complete terminal branch exists: every
-   webhook branch ends in import, fetch, or a scheduled floor reconcile.
+   over the event window). Every admitted resource job ends in import, fetch,
+   or a scheduled floor reconcile.
    The degrade reconcile coalesces on a day-floored window dedupe key, so a
    burst of such webhooks collapses to one floor wake. (Expected edge: a burst
    straddling 00:00 UTC can floor to two days and produce two reconciles —

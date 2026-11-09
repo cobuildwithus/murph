@@ -1520,11 +1520,11 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    // Queue delay can outlive a provider registration. The prepared meaning is
-    // already authenticated, so a removed provider is a terminal authority
-    // loss rather than a reason to retain encrypted work forever.
+    // Empty authenticated deliveries need only a terminal trace, regardless of
+    // account or source readiness. Queue delay can also outlive a provider
+    // registration; neither case should retain encrypted work for retry.
     const provider = this.registry.get(prepared.provider);
-    if (!provider) {
+    if (!provider || webhook.jobs.length === 0) {
       await completeClaimedWebhookTrace(this.store, prepared.provider, traceId, claimToken);
       return {
         accepted: true,
@@ -1549,6 +1549,7 @@ export class DeviceSyncPublicIngress {
     if (!webhookConnection) {
       const unknownWebhookLogContext: Record<string, unknown> = {
         provider: provider.provider,
+        externalAccountDiagnostic: prepared.externalAccountDiagnostic,
         externalAccountIdHash: hashExternalAccountIdForLogs(prepared.externalAccountId),
         eventType: webhook.eventType,
         traceId,
@@ -1556,10 +1557,6 @@ export class DeviceSyncPublicIngress {
         unknownAccountAction: prepared.unknownAccountAction ?? "retry",
         unknownWebhookHookConfigured: Boolean(this.hooks.onUnknownWebhook),
       };
-      if (prepared.externalAccountDiagnostic) {
-        unknownWebhookLogContext.externalAccountDiagnostic = prepared.externalAccountDiagnostic;
-      }
-
       const shouldAcceptUnknownWebhook =
         prepared.unknownAccountAction === "accept"
         && webhook.acceptanceMode === "level_dirty_hint";

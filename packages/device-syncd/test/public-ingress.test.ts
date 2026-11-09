@@ -2024,7 +2024,7 @@ test("public ingress keeps pending external-link accounts inert unless runtime o
         eventType: "daily.data.sleep.created",
         traceId: "pending-link-trace",
         sourceProviderSlug: "garmin",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
       };
     },
   });
@@ -2152,7 +2152,7 @@ test("public ingress terminally consumes a pre-expiry webhook delivered after se
         acceptanceMode: "level_dirty_hint",
         eventType: "provider.connection.updated",
         externalAccountId: "demo-expired-setup",
-        jobs: [],
+        jobs: [{ kind: "reconcile" }],
         sourceProviderSlug: "fitbit",
         traceId: "expired-setup-trace",
       };
@@ -3567,6 +3567,48 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
   );
 });
 
+test.each(["accept", "retry"] as const)("public ingress completes empty deliveries before account lookup even with unknown-account action %s", async (unknownAccountAction) => {
+  const store = new InMemoryPublicIngressStore();
+  const accountLookup = vi.spyOn(store, "getWebhookConnectionByExternalAccount");
+  const sourceLookup = vi.spyOn(store, "resolveConnectionSourceAdmissionCandidate");
+  const receipt = vi.spyOn(store, "markWebhookReceived");
+  const hooks = {
+    onWebhookAccepted: vi.fn(),
+    onUnknownWebhook: vi.fn(),
+    onConnectionSourceObserved: vi.fn(),
+    onLevelDirtyWebhookAlreadySatisfied: vi.fn(),
+  };
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider({
+      async verifyAndParseWebhook() {
+        return {
+          externalAccountId: "no-work-account",
+          eventType: "provider.device.updated",
+          sourceProviderSlug: "google_health",
+          jobs: [],
+          traceId: "no-work-trace",
+          unknownAccountAction,
+        };
+      },
+    })]),
+    store,
+    hooks,
+  });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo", new Headers(), Buffer.from("{}"), new Date(),
+  );
+  assert.deepEqual(prepared.jobs, []);
+  assert.equal(prepared.acceptanceMode, "durable_webhook_work");
+  assert.equal((await ingress.handlePreparedWebhook(prepared)).duplicate, false);
+  assert.equal((await ingress.handlePreparedWebhook(prepared)).duplicate, true);
+  assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(accountLookup.mock.calls.length, 0);
+  assert.equal(sourceLookup.mock.calls.length, 0);
+  assert.equal(receipt.mock.calls.length, 0);
+  for (const hook of Object.values(hooks)) assert.equal(hook.mock.calls.length, 0);
+});
+
 test("public ingress freezes a versioned prepared webhook at its verified receipt instant without touching the store", async () => {
   const store = new InMemoryPublicIngressStore();
   const receivedAt = new Date("2026-04-10T12:00:00.000Z");
@@ -3621,7 +3663,7 @@ test("public ingress admits a prepared webhook after verifier rotation without i
           return {
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
             traceId: "secret-one-trace",
           };
         },
@@ -3721,7 +3763,7 @@ test("public ingress leases a delayed queued trace from dequeue time while prese
             return {
               externalAccountId: "demo-abc",
               eventType: "demo.updated",
-              jobs: [],
+              jobs: [{ kind: "reconcile" }],
               traceId: "queued-trace",
             };
           },
@@ -3787,7 +3829,7 @@ test("public ingress leaves retryable unknown-account webhook traces retryable w
             },
             eventType: "demo.updated",
             traceId: "trace-late",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4170,7 +4212,7 @@ test("public ingress scopes durable webhook traces by external account while pre
             externalAccountId: parsed.externalAccountId,
             eventType: parsed.eventType,
             traceId: parsed.traceId,
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4272,7 +4314,7 @@ test("public ingress defers exact-source admission when the source row is missin
             eventType: "provider.connection.updated",
             sourceProviderSlug: "apple_health_kit",
             traceId: "trace-missing-source",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4550,7 +4592,7 @@ test("public ingress records no source arrival when durable acceptance fails", a
             externalAccountId: "demo-abc",
             eventType: "daily.data.sleep.created",
             traceId: "trace-acceptance-failure",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4649,7 +4691,7 @@ test("public ingress marks disconnected-account webhook traces processed so dela
             externalAccountId: "demo-abc",
             eventType: "demo.deleted",
             traceId: "trace-inactive",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4705,7 +4747,7 @@ test("public ingress leaves reauthorization-required webhook traces retryable un
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-reauthorization",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4762,7 +4804,7 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-retryable",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4820,7 +4862,7 @@ test("public ingress does not stamp lastWebhookAt when durable acceptance fails"
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-no-stamp",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4861,7 +4903,7 @@ test("public ingress keeps accepted webhook traces when only receipt timestamp p
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-mark-failure",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -4908,7 +4950,7 @@ test("public ingress records source data arrival only for payloads that carried 
           async verifyAndParseWebhook() {
             return {
               externalAccountId: "demo-abc",
-              jobs: [],
+              jobs: [{ kind: "reconcile" }],
               ...parsed,
             };
           },
@@ -4968,7 +5010,7 @@ test("public ingress keeps accepted webhooks when only source arrival persistenc
             externalAccountId: "demo-abc",
             eventType: "daily.data.sleep.created",
             traceId: "trace-arrival-failure",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -5035,7 +5077,7 @@ test("public ingress hashes unknown external account ids before logging them", a
             externalAccountId: "demo-unknown",
             eventType: "demo.updated",
             traceId: "trace-unknown-account",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -5055,6 +5097,7 @@ test("public ingress hashes unknown external account ids before logging them", a
   assert.equal(warn.mock.calls.length, 1);
   assert.deepEqual(warn.mock.calls[0]?.[1], {
     provider: "demo",
+    externalAccountDiagnostic: undefined,
     externalAccountIdHash: sha256Text("demo-unknown"),
     eventType: "demo.updated",
     traceId: scopeWebhookTraceId("demo", "demo-unknown", "trace-unknown-account"),
@@ -5085,7 +5128,7 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-overlap",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -5150,7 +5193,7 @@ test("public ingress releases claimed traces when the accepted hook returns with
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-missing-receipt",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
@@ -5927,7 +5970,7 @@ test("public ingress stores webhook receipt timestamps using ingestion time, not
             eventType: "demo.updated",
             traceId: "trace-received-at",
             occurredAt: "2026-03-01T00:00:00.000Z",
-            jobs: [],
+            jobs: [{ kind: "reconcile" }],
           };
         },
       }),
