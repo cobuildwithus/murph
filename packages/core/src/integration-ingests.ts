@@ -78,7 +78,6 @@ export interface BuildIntegrationIngestRecordInput {
   sampleIdsComplete: boolean;
   eventCount: number;
   sampleCount: number;
-  publication?: IntegrationIngestRecord["publication"];
   provenance?: Record<string, unknown>;
 }
 
@@ -364,7 +363,6 @@ export function buildIntegrationIngestRecord(
       eventCount: input.eventCount,
       sampleCount: input.sampleCount,
     },
-    ...(input.publication ? { publication: input.publication } : {}),
     ...(input.provenance && Object.keys(input.provenance).length > 0
       ? { provenance: input.provenance }
       : {}),

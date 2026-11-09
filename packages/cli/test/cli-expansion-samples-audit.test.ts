@@ -1365,12 +1365,12 @@ test('audit receipt inspects archived automatic publications without an audit ro
     assert.ok(result.applied)
     assert.equal(result.auditPath, null)
     await archiveClosedIntegrationIngestShards({ vaultRoot, now: new Date('2026-02-17T00:00:00.000Z') })
-    const envelope = await runSliceCli<{ receipt: { record: { id: string; publication: { retractedCount: number }; parts: unknown[] } } }>([
+    const envelope = await runSliceCli<{ receipt: { record: { id: string; publication?: unknown; parts: unknown[] } } }>([
       'audit', 'receipt', result.ingestId, '--vault', vaultRoot,
     ])
     const data = requireData(envelope)
     assert.equal(data.receipt.record.id, result.ingestId)
-    assert.equal(data.receipt.record.publication.retractedCount, 0)
+    assert.equal(data.receipt.record.publication, undefined)
     assert.equal(data.receipt.record.parts.length, 1)
   } finally { await rm(vaultRoot, { recursive: true, force: true }) }
 })
