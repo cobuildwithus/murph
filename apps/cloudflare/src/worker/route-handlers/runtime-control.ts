@@ -57,6 +57,7 @@ import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
 import { ensurePostgresRuntimeProcessing } from "../../runtime-processing.ts";
+import { buildHostedRuntimeOrchestrationLatencyHeaders } from "../../orchestration-latency-diagnostics.ts";
 
 const runtimeEnsureProcessingRoute = {
   authorizeBeforeMethod: true,
@@ -211,7 +212,7 @@ export async function handleRuntimeEnsureProcessingRoute(
     );
     if (authorizationKind === "vercel-oidc") {
       try {
-        const result = await runRuntimeEnsureProcessingForUser({
+        const { result, stepLatency } = await runRuntimeEnsureProcessingForUser({
           commandStartedAtEpochMs,
           commandTimeoutMs,
           context,
@@ -246,6 +247,10 @@ export async function handleRuntimeEnsureProcessingRoute(
           userId,
         });
         const response = json(result);
+        // Diagnostics only: Web records them with this direct ensure's timing.
+        for (const [name, value] of Object.entries(buildHostedRuntimeOrchestrationLatencyHeaders(stepLatency))) {
+          response.headers.set(name, value);
+        }
         const authTiming = context.runtimeControlAuthTiming;
         if (authTiming) {
           response.headers.set(
@@ -305,14 +310,14 @@ export async function handleRuntimeEnsureProcessingRoute(
     }, classified.status);
   }
 
-  return json(await runRuntimeEnsureProcessingForUser({
+  return json((await runRuntimeEnsureProcessingForUser({
     commandStartedAtEpochMs,
     commandTimeoutMs,
     context,
     ensureRequest,
     orchestration,
     userId,
-  }));
+  })).result);
 }
 
 export async function handleRuntimeHealthDataConsentRoute(
@@ -339,7 +344,10 @@ async function runRuntimeEnsureProcessingForUser(input: {
   ensureRequest: HostedRuntimeEnsureProcessingRequest;
   orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]>;
   userId: string;
-}): Promise<HostedRuntimeEnsureProcessingResponse> {
+}): Promise<{
+  result: HostedRuntimeEnsureProcessingResponse;
+  stepLatency: RuntimeProcessingDiagnostics["orchestration"];
+}> {
   const command = {
     ...input.ensureRequest,
     commandStartedAtEpochMs: input.commandStartedAtEpochMs,
@@ -372,7 +380,7 @@ async function runRuntimeEnsureProcessingForUser(input: {
       try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
     }
   }
-  return postgres;
+  return { result: postgres, stepLatency: diagnostics.orchestration };
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

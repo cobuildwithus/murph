@@ -47,8 +47,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
-  HOSTED_STANDBY_ALLOCATION_OUTCOMES,
-  HOSTED_STANDBY_ALLOCATION_REASONS,
+  HOSTED_RUNTIME_TARGET_PATH_KINDS,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
@@ -56,7 +55,6 @@ import {
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
   inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
-  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_IDLE_CHECKPOINT_TRIGGERS,
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
@@ -97,8 +95,6 @@ import {
   type HostedRuntimeLatencyTraceBatchResponse,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
-  type HostedStandbyAllocationOutcome,
-  type HostedStandbyAllocationReason,
   HOSTED_HEALTH_DATA_CONSENT_STATES,
   type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeWebStatusResponse,
@@ -6419,54 +6415,16 @@ function requireOptionalBoolean(
   return { [key]: requireBoolean(record[key], `${label}.${key}`) };
 }
 
-function requireOptionalShellPrewarmOutcome(
+function requireOptionalAllowedString<Key extends string, T extends string>(
   record: Record<string, unknown>,
+  key: Key,
   label: string,
-): {
-  shellPrewarmOutcome?:
-    | "cold_start_observed"
-    | "failed"
-    | "start_issued_warm"
-    | "superseded";
-} {
-  const value = record.shellPrewarmOutcome;
-  if (value === undefined) {
+  allowed: readonly T[],
+): Partial<Record<Key, T>> {
+  if (record[key] === undefined) {
     return {};
   }
-  if (
-    value !== "cold_start_observed" &&
-    value !== "failed" &&
-    value !== "start_issued_warm" &&
-    value !== "superseded"
-  ) {
-    throw new TypeError(`${label}.shellPrewarmOutcome is invalid.`);
-  }
-  return { shellPrewarmOutcome: value };
-}
-
-function requireOptionalShellPrewarmSource(
-  record: Record<string, unknown>,
-  label: string,
-): {
-  shellPrewarmSource?:
-    | "linq-instant-start"
-    | "linq-message-routing"
-    | "linq-typing-started"
-    | "unknown";
-} {
-  const value = record.shellPrewarmSource;
-  if (value === undefined) {
-    return {};
-  }
-  if (
-    value !== "linq-instant-start" &&
-    value !== "linq-message-routing" &&
-    value !== "linq-typing-started" &&
-    value !== "unknown"
-  ) {
-    throw new TypeError(`${label}.shellPrewarmSource is invalid.`);
-  }
-  return { shellPrewarmSource: value };
+  return { [key]: parseAllowedString(record[key], `${label}.${key}`, allowed) } as Record<Key, T>;
 }
 
 // phaseBreakdown is best-effort diagnostic telemetry, not a core milestone. Parse
@@ -6589,66 +6547,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         orchestrationLabel,
       ),
       ...requireOptionalDirectEnsureOutcome(orchestration, orchestrationLabel),
-      ...requireOptionalShellPrewarmOrchestrationAttemptId(
-        orchestration,
-        "shellPrewarmExpectedOrchestrationAttemptId",
-        orchestrationLabel,
-      ),
-      ...requireOptionalShellPrewarmOrchestrationAttemptId(
-        orchestration,
-        "shellPrewarmOrchestrationAttemptId",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmRequestStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmCloudflareRouteReceivedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmUserRunnerRpcStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmConsentLockAcquiredAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmAdmissionReadStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmAdmissionReadFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "runtimeControlAuthStartedAtEpochMs",
@@ -6676,26 +6574,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ),
       ...requireOptionalNonNegativeInteger(
         orchestration,
-        "userRunnerConstructorStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "userRunnerConstructorFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "userRunnerFirstEnsureRuntimeProcessingAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "userRunnerRpcStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
         "runtimeConsentLockAcquiredAtEpochMs",
         orchestrationLabel,
       ),
@@ -6707,31 +6585,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "healthDataAdmissionReadFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "userRunnerEnsureStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "runnerStateBindStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "runnerStateBindFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "runnerStateReadStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "runnerStateReadFinishedAtEpochMs",
         orchestrationLabel,
       ),
       ...requireOptionalNonNegativeInteger(
@@ -6794,76 +6647,18 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "freshStartRequestedAtEpochMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(orchestration, "runtimeOwnerClaimElapsedMs", orchestrationLabel),
+      ...requireOptionalAllowedString(orchestration, "runnerTargetPathKind", orchestrationLabel, HOSTED_RUNTIME_TARGET_PATH_KINDS),
       ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetReconcileElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetRetireElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "standbyClaimElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetSelectElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetBindElapsedMs", orchestrationLabel),
-      ...requireOptionalStandbyAllocationDiagnostics(
-        orchestration,
-        orchestrationLabel,
-      ),
+      ...requireOptionalNonNegativeInteger(orchestration, "containerReadinessElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "invocationStartElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "freshStartFenceBoundAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerReadinessRequestedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerLifecycleLockAcquiredAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerStateReadFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerStartIssuedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerOnStartAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerPortsReadyAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerHealthStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerHealthFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerProcessStartedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerListeningAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerReadyObservedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "freshStartContainerReadyAtEpochMs",
         orchestrationLabel,
       ),
       ...requireOptionalNonNegativeInteger(
@@ -6876,28 +6671,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "freshStartInvocationAcceptedAtEpochMs",
         orchestrationLabel,
       ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmFirstHintAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmFinishedAtEpochMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmOperationElapsedMs",
-        orchestrationLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        orchestration,
-        "shellPrewarmHintCount",
-        orchestrationLabel,
-      ),
-      ...requireOptionalShellPrewarmOutcome(orchestration, orchestrationLabel),
-      ...requireOptionalShellPrewarmSource(orchestration, orchestrationLabel),
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "workspaceReadElapsedMs",
@@ -7328,11 +7101,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ),
       ...requireOptionalNonNegativeInteger(
         assistant,
-        "foregroundInputSelectedAtEpochMs",
-        assistantLabel,
-      ),
-      ...requireOptionalNonNegativeInteger(
-        assistant,
         "assistantInputAcceptedForExecutionAtEpochMs",
         assistantLabel,
       ),
@@ -7493,27 +7261,6 @@ function requireOptionalDirectEnsureOrchestrationAttemptId<
   return { [key]: value } as Record<Key, string>;
 }
 
-function requireOptionalShellPrewarmOrchestrationAttemptId<
-  Key extends
-    | "shellPrewarmExpectedOrchestrationAttemptId"
-    | "shellPrewarmOrchestrationAttemptId",
->(
-  record: Record<string, unknown>,
-  key: Key,
-  label: string,
-): Partial<Record<Key, string>> {
-  const value = record[key];
-  if (value === undefined) {
-    return {};
-  }
-  if (!isHostedRuntimeShellPrewarmOrchestrationAttemptId(value)) {
-    throw new TypeError(
-      `${label}.${key} must be a shell-prewarm orchestration attempt id.`,
-    );
-  }
-  return { [key]: value } as Record<Key, string>;
-}
-
 function requireOptionalDirectEnsureOutcome(
   record: Record<string, unknown>,
   label: string,
@@ -7576,71 +7323,6 @@ function requireOptionalDirectEnsureOutcome(
     directEnsureResultKind,
     directEnsureRuntimeAttemptId,
   };
-}
-
-function requireOptionalStandbyAllocationDiagnostics(
-  record: Record<string, unknown>,
-  label: string,
-): {
-  standbyAllocationElapsedMs?: number;
-  standbyAllocationOutcome?: HostedStandbyAllocationOutcome;
-  standbyAllocationReason?: HostedStandbyAllocationReason;
-} {
-  const standbyAllocationElapsedMs = requireOptionalNonNegativeInteger(
-    record,
-    "standbyAllocationElapsedMs",
-    label,
-  );
-  const outcome = record.standbyAllocationOutcome;
-  const reason = record.standbyAllocationReason;
-  const elapsedMs = record.standbyAllocationElapsedMs;
-  if (elapsedMs === undefined && outcome === undefined && reason === undefined) {
-    return {};
-  }
-  if (elapsedMs === undefined || outcome === undefined || reason === undefined) {
-    throw new TypeError(
-      `${label} standby allocation elapsed time, outcome, and reason must be recorded together.`,
-    );
-  }
-  const parsedOutcome = parseAllowedString(
-    outcome,
-    `${label}.standbyAllocationOutcome`,
-    HOSTED_STANDBY_ALLOCATION_OUTCOMES,
-  );
-  const parsedReason = parseAllowedString(
-    reason,
-    `${label}.standbyAllocationReason`,
-    HOSTED_STANDBY_ALLOCATION_REASONS,
-  );
-  if (!standbyAllocationReasonMatchesOutcome(parsedOutcome, parsedReason)) {
-    throw new TypeError(`${label} standby allocation outcome and reason are inconsistent.`);
-  }
-  return {
-    ...standbyAllocationElapsedMs,
-    standbyAllocationOutcome: parsedOutcome,
-    standbyAllocationReason: parsedReason,
-  };
-}
-
-function standbyAllocationReasonMatchesOutcome(
-  outcome: HostedStandbyAllocationOutcome,
-  reason: HostedStandbyAllocationReason,
-): boolean {
-  switch (outcome) {
-    case "claimed":
-      return reason === "bind_completed" || reason === "bind_recovered";
-    case "disabled":
-      return reason === "exact_user_pending"
-        || reason === "mode_not_allocate"
-        || reason === "not_trusted_web_direct"
-        || reason === "processing_mode_not_default";
-    case "fallback":
-      return reason === "bind_rejected"
-        || reason === "bindings_unavailable"
-        || reason.startsWith("claim_");
-    case "retained":
-      return reason === "retained";
-  }
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(

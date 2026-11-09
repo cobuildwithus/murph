@@ -2166,29 +2166,6 @@ describe("RunnerContainer", () => {
       kind: "ready",
       preparesSupervisedLaunch: true,
     });
-    if (result.kind !== "ready" || !result.coldStartTiming) {
-      throw new Error("Expected cold readiness timing.");
-    }
-    const timing = result.coldStartTiming;
-    expect(timing.processStartedAtEpochMs).toEqual(expect.any(Number));
-    expect(timing.serverListeningAtEpochMs).toEqual(expect.any(Number));
-    expect(timing.onStartAtEpochMs).toEqual(expect.any(Number));
-    expect(timing.readinessRequestedAtEpochMs)
-      .toBeLessThanOrEqual(timing.lifecycleLockAcquiredAtEpochMs);
-    expect(timing.lifecycleLockAcquiredAtEpochMs)
-      .toBeLessThanOrEqual(timing.stateReadFinishedAtEpochMs);
-    expect(timing.stateReadFinishedAtEpochMs)
-      .toBeLessThanOrEqual(timing.startIssuedAtEpochMs);
-    expect(timing.startIssuedAtEpochMs)
-      .toBeLessThanOrEqual(timing.onStartAtEpochMs ?? Number.POSITIVE_INFINITY);
-    expect(timing.onStartAtEpochMs ?? Number.NEGATIVE_INFINITY)
-      .toBeLessThanOrEqual(timing.portsReadyAtEpochMs);
-    expect(timing.portsReadyAtEpochMs)
-      .toBeLessThanOrEqual(timing.healthCheckStartedAtEpochMs);
-    expect(timing.healthCheckStartedAtEpochMs)
-      .toBeLessThanOrEqual(timing.healthCheckFinishedAtEpochMs);
-    expect(timing.healthCheckFinishedAtEpochMs)
-      .toBeLessThanOrEqual(timing.readyObservedAtEpochMs);
 
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
     expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
@@ -2532,41 +2509,6 @@ describe("RunnerContainer", () => {
     expect(healthChecks).toBe(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(Reflect.get(container, "currentContainerStart")).not.toBeNull();
-  });
-
-  it("keeps cold readiness compatible with health responses that omit startup timestamps", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (!url.endsWith("/health")) {
-          throw new Error(`Unexpected runner request URL: ${url}`);
-        }
-        return new Response(JSON.stringify({
-          activeJobCount: 0,
-          hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
-          ok: true,
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }),
-    });
-
-    const result = await container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    });
-
-    expect(result).toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-    if (result.kind !== "ready" || !result.coldStartTiming) {
-      throw new Error("Expected cold readiness timing.");
-    }
-    expect(result.coldStartTiming).not.toHaveProperty("processStartedAtEpochMs");
-    expect(result.coldStartTiming).not.toHaveProperty("serverListeningAtEpochMs");
   });
 
   it("classifies lifecycle and state-read failures with bounded privacy-safe details", async () => {

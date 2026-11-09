@@ -2248,12 +2248,24 @@ liveness or destroy request. Warm reuse and uncertain stops retain their existin
 ownership and recovery behavior. This uses existing slot states and bindings and
 requires no Web, Temporal, or container-image wire change.
 
-Fresh allocation records `runnerTargetReconcileElapsedMs`, `standbyClaimElapsedMs`,
-and `runnerTargetBindElapsedMs` separately within the existing orchestration
-phase. Steps that were not needed record zero. `standbyAllocationElapsedMs` remains
-the complete allocation duration, including pending-target reconciliation and
-cold binding; it is not the coordinator RPC duration. Container readiness is
-recorded separately by the existing fresh-start timestamps.
+A Web direct ensure itemises the Worker's own cold path in the orchestration
+phase. The Worker's step wrapper sums each step's elapsed time within that one
+ensure, including rejected attempts: `runtimeOwnerClaimElapsedMs` (owner
+`claim`), `runnerTargetReconcileElapsedMs` (`resolveRetainedStandbySlot`),
+`runnerTargetRetireElapsedMs` (owner `retire`/`release` plus any slot stop and
+readback), `standbyClaimElapsedMs` (coordinator claim), `runnerTargetSelectElapsedMs`
+(owner `select_target`), `runnerTargetBindElapsedMs` (`bindStandbySlot`),
+`containerReadinessElapsedMs` and `invocationStartElapsedMs` (which includes the
+slot's own `prepare_launch`). A step that did not run is absent.
+`runnerTargetPathKind` names the first target decision: `retained_warm`,
+`retained_retired` (its successor shows in the select and bind timings),
+`standby` or `fallback`. The direct handler returns these on the existing
+orchestration latency response header; Web's control client sanitizes them
+against its own contract and records them with the direct ensure's timing.
+Neither side waits on them, and no request or log line is added. Old Web ignores
+the header and an old Worker sends none, so Web and Cloudflare may deploy in
+either order. Temporal-only cold starts are not itemised. Retry reasons stay in
+the `runner.processing_finished` runtime log, not the trace.
 
 Worker logs also report coordinator handler duration and remaining deadline,
 and caller RPC settlement duration, outcome and late completion. The existing
@@ -2306,28 +2318,8 @@ targets, so the first exchange is available to later normal turns without
   outcome starts no runtime wake and retains the exact encrypted reply for
   same-event recovery.
 
-Historical shell-prewarm diagnostics remain readable after transport retirement.
-Their bounded sources remain `linq-instant-start`, `linq-message-routing`,
-`linq-typing-started`, or `unknown`; unknown never implies typing.
-Stored observations describe historical shell-prewarm operations and retain
-their triggering source, bounded orchestration attempt and phase timestamps,
-first causal hint timestamp,
-completion time and duration, coalesced hint count, and one terminal
-outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
-The historical producer allowed later hints only to increment that operation's
-bounded hint count until readiness consumed it; they could not launch a second
-operation or replace the causal timestamp. These observations do not imply port
-or health readiness. Current runtime preparation no longer forwards readiness
-hint observations. The latency schema, merge sanitizers, and aggregate report
-retain the stored historical fields without adding runtime work. Historical
-stops, explicit destruction, or Durable Object eviction could erase an optional
-observation, so absent evidence means `no observed prewarm`, not proof that no
-hint occurred. The aggregate cold-start report includes chronology-safe typing
-hints and exact-id-matched message-routing
-hints on uniquely matched Web-direct traces whose reply belongs to the same
-runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
-and attempt-handoff rows rather than guessing, and returns no member, mailbox,
-trace, delivery, or runtime-attempt identifiers.
+The latency contract no longer lists the retired shell-prewarm diagnostics; a
+stored row that still carried them would be read with those leaves dropped.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
@@ -2403,30 +2395,13 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
-Historical pre-cutover UserRunner telemetry recorded optional constructor-start,
-constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
-facts in the existing in-memory orchestration phase. Production runner
-construction occurs between the two constructor stamps; recording and
-propagation add no request, storage write, provider call, awaited logging step,
-or second logging system. These are facts about the Durable Object instance
-activation, not about every request, so a warm request can carry stamps older
-than its Cloudflare route timestamp. The identifier-free cold-start report emits
-the route-to-constructor, constructor-initialization, and
-constructor-to-first-ensure slices only when
-`route <= constructor start <= constructor finish <= first ensure` and the
-instance's first-ensure stamp equals the current RPC-entry stamp. Warm or
-otherwise ambiguous chronology remains eligible for the existing route-to-RPC
-aggregate but emits none of the three activation-only slices.
 Because Web strictly parses phase-breakdown leaves and assistant milestone
-values, deploy Web/Vercel first so its reader accepts the additive cold-start
-fields, the already-shipped `foreground_input_selected` diagnostic event and
-`foregroundInputSelectedAtEpochMs` leaf, and the new
-`assistant_input_accepted_for_execution` event and
-`assistantInputAcceptedForExecutionAtEpochMs` leaf before a runner emits them.
-During rollout skew, a warm old runner's legacy event remains accepted and
-stored under its prior exact-attempt ownership semantics; it is not translated
-into or counted as execution acceptance. Rollback Cloudflare Worker/runner
-first, then Web/Vercel.
+values, deploy Web/Vercel first so its reader accepts any new runner-emitted
+leaf or milestone before a runner emits it, and roll back Cloudflare
+Worker/runner first, then Web/Vercel. Stored rows that carry a leaf the current
+contract no longer lists (for example the retired UserRunner, shell-prewarm,
+standby-allocation and container-start leaves) are read and merged with that
+leaf dropped, never rejected.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
@@ -3549,8 +3524,10 @@ pre-destroy state read and native destruction promise, and its caller-side guard
 keeps a separate one-second margin. Native destruction completion is the stop
 receipt; cached SDK lifecycle status and a delayed `onStop` callback are not
 additional settlement gates. A definitely stopped native container skips both
-status reads and destruction during retained-target retirement. The slot's
-existing retirement fence and exact-generation checks remain authoritative.
+status reads and destruction during retained-target retirement. After verified
+terminal retirement, the Worker clears the exact target through `target_retired`
+and reclaims through Postgres; [runtime ownership](hosted-postgres-runtime.md)
+owns the target fence and bounded admission loop.
 If the container RPC settles with a timeout or transport failure, the fresh fence is compare-cleared as
 before. If cleanup remains unsettled at its deadline or only the outer guard
 elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
@@ -5133,10 +5110,9 @@ Missing headers are valid during rollout. No private header text, payloads,
 new request, or awaited telemetry is added.
 
 Orchestration phase telemetry is interpreted causally: direct-request routing
-ends at the Cloudflare route/auth stamps, Durable Object activation ends at
-`userRunnerEnsureStartedAtEpochMs`, stale-fence recovery is the active-wake and
-replacement-clear interval, and fresh container allocation/readiness ends at
-`freshStartContainerReadyAtEpochMs`. The outer Temporal-signal-to-runner span is
+ends at the Cloudflare route/auth stamps, stale-fence recovery is the active-wake
+and replacement-clear interval, and a direct ensure's own fresh-start steps are
+the Worker step durations described above. The outer Temporal-signal-to-runner span is
 not a single Temporal activity duration; the direct wake may win before the
 Temporal activity begins.
 
@@ -5176,32 +5152,6 @@ and explicit no-child results. These fields are stamped onto the existing trace
 payload with no additional I/O. Prefer the same-call elapsed scalars when direct
 and Temporal retries may have contributed independently merged epoch
 timestamps.
-An actual cold readiness RPC also carries optional numeric-only subdivisions.
-`freshStartContainerReadinessRequestedAtEpochMs` and
-`freshStartContainerLifecycleLockAcquiredAtEpochMs` bound lifecycle-lock wait;
-`freshStartContainerStateReadFinishedAtEpochMs` and
-`freshStartContainerStartIssuedAtEpochMs` expose the state/read-to-start gap;
-`freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
-`freshStartContainerPortsReadyAtEpochMs` records resolution of
-`startAndWaitForPorts`, after both the configured port and `onStart` are ready.
-The local cold-start benchmark reports start-to-ports, process-to-listen, and
-listen-to-ports percentiles from these stamps so a hosted canary can distinguish
-container boot time from managed port-proxy delay.
-The explicit private health fetch is bounded by
-`freshStartContainerHealthStartedAtEpochMs` and
-`freshStartContainerHealthFinishedAtEpochMs`, followed by
-`freshStartContainerReadyObservedAtEpochMs` and the existing caller-side ready
-stamp. The health payload additionally supplies
-`freshStartContainerProcessStartedAtEpochMs` and
-`freshStartContainerListeningAtEpochMs`; subtract only that same-process pair
-for the exact Node-to-listen duration. The operational report also presents
-start-issue-to-process and listen-to-platform-port-ready cross-owner epoch
-deltas as directional diagnostics, dropping a sample when clock ordering is
-invalid and retaining the start-issue-to-ports total as the authoritative
-platform wait. Old warm containers may omit the health
-timestamps, and a lifecycle generation whose hook was not observed may omit the
-`onStart` stamp. Missing diagnostic fields never fail readiness. These stamps
-add no request, polling loop, persisted state owner, or reply-path work.
 
 Failed authoritative startup confirmation has one failure-only local
 observation because Durable Object RPC does not preserve custom properties on a

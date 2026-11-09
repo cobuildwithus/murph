@@ -1469,7 +1469,7 @@ describe("hosted runtime latency dashboard store", () => {
     });
   });
 
-  it("persists earliest lifecycle and legacy selection timestamps", async () => {
+  it("persists earliest lifecycle timestamps", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:50.000Z")),
     });
@@ -1505,7 +1505,6 @@ describe("hosted runtime latency dashboard store", () => {
       });
     }
     for (const milestone of [
-      "foreground_input_selected",
       "assistant_input_accepted_for_execution",
     ] as const) {
       for (const at of [
@@ -1534,8 +1533,6 @@ describe("hosted runtime latency dashboard store", () => {
       assistant: {
         assistantInputAcceptedForExecutionAtEpochMs:
           Date.parse("2026-06-02T19:11:51.500Z"),
-        foregroundInputSelectedAtEpochMs:
-          Date.parse("2026-06-02T19:11:51.500Z"),
         pendingReplyAdmittedAtEpochMs:
           Date.parse("2026-06-02T19:11:51.200Z"),
         runtimeLeaseGeneration: "1",
@@ -1544,7 +1541,6 @@ describe("hosted runtime latency dashboard store", () => {
     });
 
     for (const [milestone, runtimeLeaseGeneration] of [
-      ["foreground_input_selected", "2"],
       ["assistant_input_accepted_for_execution", "1"],
     ] as const) {
       await expect(recordHostedIngressAssistantMilestone({
@@ -1565,8 +1561,6 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       assistant: {
         assistantInputAcceptedForExecutionAtEpochMs:
-          Date.parse("2026-06-02T19:11:51.500Z"),
-        foregroundInputSelectedAtEpochMs:
           Date.parse("2026-06-02T19:11:51.500Z"),
         pendingReplyAdmittedAtEpochMs:
           Date.parse("2026-06-02T19:11:51.200Z"),
@@ -2363,7 +2357,6 @@ describe("hosted runtime latency dashboard store", () => {
           runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
           runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
           cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
-          userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
           activeWakeStartedAtEpochMs: 1_777_000_000_040,
           activeWakeFinishedAtEpochMs: 1_777_000_000_050,
           activeWakeAccepted: false,
@@ -2371,18 +2364,6 @@ describe("hosted runtime latency dashboard store", () => {
           replacedStaleFence: true,
           freshStartRequestedAtEpochMs: 1_777_000_000_070,
           freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
-          freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
-          freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
-          freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
-          freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
-          freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
-          freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
-          freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
-          freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
-          freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
-          freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
-          freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
-          freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
           freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
           freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
         },
@@ -2422,7 +2403,6 @@ describe("hosted runtime latency dashboard store", () => {
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
-        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
         activeWakeFinishedAtEpochMs: 1_777_000_000_050,
         activeWakeAccepted: false,
@@ -2430,18 +2410,6 @@ describe("hosted runtime latency dashboard store", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
-        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
-        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
-        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
-        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
-        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
-        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
-        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
-        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
-        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
-        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
       },
@@ -2501,7 +2469,6 @@ describe("hosted runtime latency dashboard store", () => {
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
-        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
         activeWakeFinishedAtEpochMs: 1_777_000_000_050,
         activeWakeAccepted: false,
@@ -2509,18 +2476,6 @@ describe("hosted runtime latency dashboard store", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
-        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
-        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
-        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
-        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
-        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
-        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
-        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
-        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
-        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
-        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
       },
@@ -2570,7 +2525,6 @@ describe("hosted runtime latency dashboard store", () => {
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
-        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
         activeWakeFinishedAtEpochMs: 1_777_000_000_050,
         activeWakeAccepted: false,
@@ -2578,18 +2532,6 @@ describe("hosted runtime latency dashboard store", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
-        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
-        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
-        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
-        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
-        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
-        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
-        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
-        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
-        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
-        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
       },

@@ -100,9 +100,6 @@ interface ColdStartSample {
   automationBootstrapMs?: number;
   archiveExtractMs?: number;
   cleanupMs?: number;
-  containerListeningToPortsReadyMs?: number;
-  containerProcessToListeningMs?: number;
-  containerStartToPortsReadyMs?: number;
   dataKeyUnwrapMs?: number;
   decryptMs?: number;
   durableRootReplaceMs?: number;
@@ -466,7 +463,6 @@ async function runColdStartTrial(
   const phaseBreakdown = requirePhaseBreakdown(trace.phaseBreakdown);
   const restore = requireRestoreBreakdown(phaseBreakdown);
   const importBreakdown = phaseBreakdown.import;
-  const orchestration = phaseBreakdown.orchestration;
   const preProviderBreakdown = phaseBreakdown.preProvider;
 
   return {
@@ -493,36 +489,6 @@ async function runColdStartTrial(
     ),
     archiveExtractMs: requireTiming(restore.archiveExtractMs, "archiveExtractMs"),
     cleanupMs: requireTiming(restore.cleanupMs, "cleanupMs"),
-    containerListeningToPortsReadyMs: elapsedEpochMs(
-      requireTiming(
-        orchestration?.freshStartContainerListeningAtEpochMs,
-        "freshStartContainerListeningAtEpochMs",
-      ),
-      requireTiming(
-        orchestration?.freshStartContainerPortsReadyAtEpochMs,
-        "freshStartContainerPortsReadyAtEpochMs",
-      ),
-    ),
-    containerProcessToListeningMs: elapsedEpochMs(
-      requireTiming(
-        orchestration?.freshStartContainerProcessStartedAtEpochMs,
-        "freshStartContainerProcessStartedAtEpochMs",
-      ),
-      requireTiming(
-        orchestration?.freshStartContainerListeningAtEpochMs,
-        "freshStartContainerListeningAtEpochMs",
-      ),
-    ),
-    containerStartToPortsReadyMs: elapsedEpochMs(
-      requireTiming(
-        orchestration?.freshStartContainerStartIssuedAtEpochMs,
-        "freshStartContainerStartIssuedAtEpochMs",
-      ),
-      requireTiming(
-        orchestration?.freshStartContainerPortsReadyAtEpochMs,
-        "freshStartContainerPortsReadyAtEpochMs",
-      ),
-    ),
     dataKeyUnwrapMs: requireTiming(restore.dataKeyUnwrapMs, "dataKeyUnwrapMs"),
     decryptMs: requireTiming(restore.decryptMs, "decryptMs"),
     durableRootReplaceMs: requireTiming(
@@ -1013,9 +979,6 @@ function buildSamplePercentileRecord(
     "automationBootstrapMs",
     "archiveExtractMs",
     "cleanupMs",
-    "containerListeningToPortsReadyMs",
-    "containerProcessToListeningMs",
-    "containerStartToPortsReadyMs",
     "dataKeyUnwrapMs",
     "decryptMs",
     "durableRootReplaceMs",

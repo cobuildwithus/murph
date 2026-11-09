@@ -1041,25 +1041,7 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 ```
 
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
-window. Its prewarm cohorts describe historical hints from older deployments;
-current Web no longer produces them. The first result groups uniquely matched Web-direct Linq runtime
-attempts by a chronology-safe typing observation or an exact attempt-id-matched
-message-routing shell-prewarm observation consumed by their container readiness
-call. It shows causal-hint lead time plus
-accepted-to-runner, provider, and reply percentiles, all from the same ingress
-trace and same reply runtime attempt. Instant-start, unknown-source, ambiguous,
-backlog, and reply-handoff rows are omitted rather than inferred. A
-`no_observed_prewarm` row is a comparison cohort, not proof that no hint was
-sent, because stop, destroy, or Durable Object eviction may clear optional
-in-memory diagnostics. `prewarm_typing_start_issued_warm` and
-`prewarm_message_routing_start_issued_warm` mean the platform start call
-completed without a newly observed lifecycle start;
-their corresponding `*_cold_start_observed` cohorts mean the same container
-lifecycle did observe a cold start. Neither means health readiness completed.
-Historical observations recorded one terminal operation outcome; later hints
-could increase only its bounded coalesced-hint count before readiness consumed
-it. Current runtime preparation no longer forwards hint observations; stored
-fields remain readable by the latency schema and report.
+window.
 
 For warm direct wakes, generic orchestration leaves can describe a competing
 Temporal request. Use the direct response durations and correlate the Worker
@@ -1079,44 +1061,21 @@ Pool acquisition overlaps query/transaction timing; these numbers are not additi
 These records contain no request body, URL, member ID or credential. Provider
 egress logs already split authority validation from upstream provider duration.
 
-The remaining report deduplicates causal rows by runtime attempt and keeps direct
-cold starts separate from Temporal recovery. A direct sample must be the only
-row in its runtime attempt whose Web direct-ensure orchestration id exactly
-matches the id attached only after that request acquires the fresh runtime
-fence. Active or warm wakes never receive launch identity. Ambiguous races,
-mismatches, backlog rows, and missing ids are omitted. Temporal-owned launches
-retain an explicit false direct-launch marker even if a later direct wake is
-merged into them. Exact direct samples
-begin only after the compatible Web and Cloudflare builds are deployed;
-historical rows are intentionally not inferred from timestamp proximity. The
-first table reports accepted-to-runner-job time only for those causal direct
-cold starts. The second reports Temporal-activity-to-runner-job time by exact
-recovery versus Temporal-only attempt; current Temporal-owned launches remain
-Temporal-only when a direct wake overlaps, while pre-deploy rows with legacy
-direct markers are labeled `legacy_unclassified` instead of being guessed.
-Current rows without either the launch-owned direct id or the explicit
-Temporal-owner marker are omitted: an activity can start before runner
-acceptance yet reach the runtime later as an active wake, so timestamp order is
-not launch evidence.
-The final cohort is resolved before attempt-level deduplication, so mailbox-local
-marker differences cannot discard a coherent multi-item invocation. Temporal
-activities that begin after runner acceptance are active wakes, not startup
-candidates, and are removed before ambiguity is assessed. Conflicting
-launch-owner evidence also fails closed. Warm direct
-wakes are omitted because they create no new runner job. The final table first
-splits an exact matched message-routing hint across Web request/auth,
-prewarm-specific Durable Object activation, consent admission, container-hint
-registration, and effective lead time. It then splits the same causal direct
-samples across Worker dispatch, runtime admission
-constructor initialization, consent locking, the existing health-data admission
-callback, runner-state operations, the parallel container-readiness and
-invocation-preparation branches, invocation launch, and runner-job acceptance.
-The three activation-only slices require route-through-first-ensure chronology
-and require the instance's first-ensure timestamp to equal the current RPC-entry
-timestamp; a warm instance therefore remains eligible only for the existing
-route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
-reversed cross-runtime clock samples. The report returns no member, mailbox,
-trace, or attempt identifiers.
+The report deduplicates causal rows by runtime attempt and returns
+Temporal-activity-to-runner-job time by exact recovery versus Temporal-only
+attempt. Current Temporal-owned launches remain Temporal-only when a direct wake
+overlaps, while pre-deploy rows with legacy direct markers are labeled
+`legacy_unclassified` instead of being guessed. Rows without either the
+launch-owned direct id or the explicit Temporal-owner marker are omitted: an
+activity can start before runner acceptance yet reach the runtime later as an
+active wake, so timestamp order is not launch evidence. The cohort is resolved
+before attempt-level deduplication, so mailbox-local marker differences cannot
+discard a coherent multi-item invocation. Temporal activities that begin after
+runner acceptance are active wakes, not startup candidates, and are removed
+before ambiguity is assessed. Conflicting launch-owner evidence also fails
+closed. The report returns no member, mailbox, trace, or attempt identifiers.
+Direct cold starts are itemised by the Worker step leaves described in
+[`hosted-runtime-protocol.md`](../../agent-docs/references/hosted-runtime-protocol.md).
 
 Admission is read once before each fresh or replacement runtime session. Active
 wakes reuse the existing write fence and make no health-data admission callback.
