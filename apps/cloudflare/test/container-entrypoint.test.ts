@@ -495,6 +495,8 @@ describe("startHostedContainerEntrypoint", () => {
       hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
       ok: true,
       poisoned: false,
+      // scripts/container-latency-boot.mjs subtracts this from hydration completion.
+      processStartedAtEpochMs: expect.any(Number),
       service: "cloudflare-hosted-runner-node",
     });
   });

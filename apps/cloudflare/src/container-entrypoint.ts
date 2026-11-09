@@ -638,6 +638,8 @@ export async function startHostedContainerEntrypoint(input: {
           hostedWorkerReleaseId,
           ok: true,
           poisoned: hostedContainerProcessFatalObserved,
+          // The container-latency boot probe measures hydration from this stamp.
+          processStartedAtEpochMs: HOSTED_CONTAINER_PROCESS_START_MS,
           service: "cloudflare-hosted-runner-node",
           ...(runnerBundle ? { runnerBundle } : {}),
           workspaceInvocationAcceptedCount,

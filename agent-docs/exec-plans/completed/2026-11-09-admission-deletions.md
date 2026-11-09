@@ -32,7 +32,9 @@ timeout or poll constant, or merge `bindStandbySlot` with readiness.
   `freshStartContainer*`, `userRunner*` (latency trace), `runnerState*`,
   `shellPrewarm*` and `foregroundInputSelectedAtEpochMs`, plus the
   `foreground_input_selected` milestone, `coldStartTiming` and the runner
-  `/health` timestamps that fed it. The cold-start report keeps only its
+  `/health` `serverListeningAtEpochMs` that fed it. `/health` keeps
+  `processStartedAtEpochMs`: `scripts/container-latency-boot.mjs` measures
+  hydration from it in the required runner bundle budget check. The cold-start report keeps only its
   Temporal recovery cohort section. A production aggregate over recent traces
   found no row carrying any deleted key; the sanitizers already drop unknown
   stored leaves, so stored rows still read.
@@ -62,7 +64,7 @@ timeout or poll constant, or merge `bindStandbySlot` with readiness.
 
 No deploy order. Old Web ignores the header; an old Worker sends none. The
 slot keeps `preparesSupervisedLaunch` for older Workers; the new Worker always
-sends launch facts. An old Worker already treats the `/health` timestamps as
+sends launch facts. An old Worker already treats `serverListeningAtEpochMs` as
 optional.
 
 ## Known gaps
