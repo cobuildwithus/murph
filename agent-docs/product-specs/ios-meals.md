@@ -382,12 +382,11 @@ Each is null when no usable daily value exists in the window; otherwise it has:
 - `unit`: respectively `bpm`, `minutes`, `steps`, `ml/kg/min`.
 - `source`: the latest value's source label, such as `WHOOP` or `Manual`, or null.
   The app ranks resting heart rate by it, because some devices read overnight.
-  RHR keeps the latest known wearable source with a reading inside the catalog's
-  14-day freshness window and returns only that source's history. A newer
-  health-store-only day cannot relabel the wearable's average. Without a recent
-  known wearable, the ordinary saved daily values remain available. An explicit
-  latest manual reading retains precedence. Apple Health
-  provenance alone does not identify an Apple Watch.
+  Source preference applies within each date; it never removes other dates from
+  history. Device changes and health-store-only days remain in the series and
+  comparisons. The latest saved reading supplies the source label, including
+  explicit manual readings. Apple Health provenance alone does not identify an
+  Apple Watch.
 - `reported`: true when the latest value is manual, whether entered in the app
   or saved through chat; false for device readings. The server shares the
   exported manual-source rule with runtime projections. The app never compares
