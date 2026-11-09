@@ -1,6 +1,6 @@
 # One conversation history
 
-Status: implemented. Reviewed by Codex c7 (adversarial) and by ReviewGPT on the mountain lane, 2026-11-09; every finding is recorded below.
+Status: completed
 Branch: `claude/one-conversation-history`
 
 ## Problem
@@ -156,4 +156,6 @@ ReviewGPT reviewed the plan and the candidate implementation. Response: `audit-p
 - **Real Codex journey** ("game private kickoff then bare Sure continues the offer on the resumed thread"): fails on main, as above, and must pass on the branch. Reply review: Ready or Hold.
 - **Existing live journeys** must stay green: group private handoff flow, approved vault-file continuity, and private-completion continuity if one exists.
 - **ReviewGPT regressions:** finalizer tests for a failed save on the same thread (bookmark kept), on a new thread (no bookmark) and on an override route (durable binding kept); a planner test for an unreadable transcript; a Web batch test with an unknown reason.
-- **Before merge:** the PR ReviewGPT loop per `agent-docs/operations/pr-reviewgpt-loop.md`.
+- **PR ReviewGPT:** round 1 PASS per `agent-docs/operations/pr-reviewgpt-loop.md`.
+Updated: 2026-11-09
+Completed: 2026-11-09
