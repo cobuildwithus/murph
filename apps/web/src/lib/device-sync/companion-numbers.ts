@@ -2,7 +2,7 @@ import "server-only";
 
 import { isCloudflareHostedControlBrowserVaultReplicaNotFoundError } from "@murphai/cloudflare-hosted-control/client";
 import { addDaysToIsoDate, toLocalDayKey } from "@murphai/contracts";
-import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, resolveWearableProviderDescriptor, selectMetricWindowComparison } from "@murphai/health-metrics";
+import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, selectMetricWindowComparison } from "@murphai/health-metrics";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { getBrowserVaultMetricBucketId, type BrowserVaultMetricSeriesCapableQueryClient } from "@murphai/query/browser-replica-client";
@@ -133,10 +133,8 @@ function presentNumber(
     if (normalized.canonicalValue === null) continue;
     byDate.set(row.date, { date: row.date, value: normalized.canonicalValue, source: row.sourceLabel, observedAt: row.observedAt });
   }
-  const savedPoints = [...byDate.values()];
-  const points = metric.key === "resting-heart-rate"
-    ? preferRecentRhrDevice(savedPoints, addDaysToIsoDate(window.through, -(definition.selectionPolicy.staleAfterDays ?? 14)))
-    : savedPoints;
+  // Source preference applies within a date, never across the saved history.
+  const points = [...byDate.values()];
   const latest = points.at(-1);
   if (!latest) return null;
   const intermittent = definition.selectionPolicy.kind === "latest-device-estimate";
@@ -168,16 +166,4 @@ function presentNumber(
         delta: round(comparison.delta),
       } : null,
   };
-}
-
-
-/** A health-store-only day must not relabel a wearable's entire average. */
-function preferRecentRhrDevice(points: NumberPoint[], freshFrom: string): NumberPoint[] {
-  if (isManualMetricSource(points.at(-1)?.source ?? null)) return points;
-  const device = points.slice().reverse().find(point => {
-    const provider = resolveWearableProviderDescriptor(point.source ?? "")?.provider;
-    return point.date >= freshFrom && (point.source === "Apple Watch"
-      || (provider && provider !== "junction" && provider !== "google-health"));
-  });
-  return device ? points.filter(point => point.source === device.source) : points;
 }

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-08",
+  "order": 200,
+  "item": {
+    "id": "complete-resting-heart-rate-history",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep your resting heart rate history across devices",
+    "summary": "Your resting heart rate chart keeps saved days from earlier devices and health stores when another wearable supplies a newer reading.",
+    "details": "The preferred reading still wins when several sources report the same day. Other saved days stay in your chart and comparisons; no readings are changed.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": []
+  }
+}

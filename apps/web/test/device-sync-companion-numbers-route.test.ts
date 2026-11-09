@@ -433,16 +433,23 @@ it.each([
 });
 
 
-it.each(["WHOOP", "Apple Watch"])("keeps active %s RHR history and source together when Apple Health reports a newer day", async source => {
-  const whoopDates = [from, addDaysToIsoDate(through, -2), addDaysToIsoDate(through, -1)];
+it.each(["WHOOP", "Apple Watch"])("keeps every saved RHR date when Apple Health reports a newer day than %s", async source => {
+  const wearableDates = [from, addDaysToIsoDate(through, -2), addDaysToIsoDate(through, -1)];
   shards = await splitBrowserVaultReplica(fixture([
-    ...whoopDates.map(date => row("resting-heart-rate", date, 54, "bpm", { sourceLabel: source })),
+    ...wearableDates.map(date => row("resting-heart-rate", date, 54, "bpm", { sourceLabel: source })),
     row("resting-heart-rate", addDaysToIsoDate(through, -3), 62, "bpm", { sourceLabel: "apple-health-kit" }),
     row("resting-heart-rate", through, 63, "bpm", { sourceLabel: "apple-health-kit" }),
   ]));
   const body = await (await GET(request())).json();
-  expect(body.numbers.restingHeartRate).toMatchObject({ source, stale: false,
-    latest: { date: whoopDates[2], value: 54 }, daily: whoopDates.map(date => ({ date, value: 54 })) });
+  expect(body.numbers.restingHeartRate).toMatchObject({ source: "apple-health-kit", stale: false,
+    latest: { date: through, value: 63 },
+    daily: [
+      { date: from, value: 54 },
+      { date: addDaysToIsoDate(through, -3), value: 62 },
+      ...wearableDates.slice(1).map(date => ({ date, value: 54 })),
+      { date: through, value: 63 },
+    ],
+  });
 });
 
 it.each(["apple-health-kit", "Google Health", null])("keeps %s RHR when no recent wearable reports it", async sourceLabel => {
@@ -463,4 +470,23 @@ it("preserves an explicit latest manual RHR reading beside a recent wearable", a
   const body = await (await GET(request())).json();
   expect(body.numbers.restingHeartRate).toMatchObject({ source: "Manual", reported: true,
     latest: { date: through, value: 63 } });
+});
+
+
+it("keeps older devices, manual and unknown-source dates in RHR history and comparisons", async () => {
+  const baseline = [0, 1, 2, 3].map(offset => ({ date: addDaysToIsoDate(from, offset), value: 60 }));
+  const sources = ["Manual", "Google Health", null, "WHOOP"];
+  const current = [0, 1, 2, 3].map(offset => ({ date: addDaysToIsoDate(through, offset - 3), value: 55 + offset * 2 }));
+  shards = await splitBrowserVaultReplica(fixture([
+    ...baseline.map(point => row("resting-heart-rate", point.date, point.value, "bpm", { sourceLabel: "Garmin" })),
+    ...current.map((point, index) => row("resting-heart-rate", point.date, point.value, "bpm", {
+      sourceLabel: sources[index], sourceKind: index === 0 ? "measurement" : "wearable-summary",
+    })),
+  ]));
+  const body = await (await GET(request())).json();
+  expect(body.numbers.restingHeartRate).toMatchObject({
+    source: "WHOOP", reported: false, stale: false,
+    latest: { date: through, value: 61 }, daily: [...baseline, ...current],
+    comparison: { baseline: { value: 60, days: 4 }, current: { value: 58, days: 4 }, delta: -2 },
+  });
 });
