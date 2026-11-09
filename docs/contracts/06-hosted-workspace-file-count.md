@@ -245,10 +245,10 @@ landing; record the chosen posture here so the decision is reviewable.
   state, so no rotation or compaction seam is planned.
 
 - `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` is canonical monthly-sharded
-  provider/import evidence. True idle-shutdown maintenance converts valid closed
-  plain/gzip shards to `.jsonl.br`; current-month plain shards are also eligible
-  at 4 MiB and remain appendable through the verified amendment writer. Smaller
-  current shards and future months remain untouched. New hosted cold references
+  provider/import evidence. True idle-shutdown maintenance converts valid plain/gzip
+  shards to `.jsonl.br` 16 days after their month closes, beyond the 14-day device
+  reconcile reach. Current, recently closed and future months stay plain; an
+  amendment to an archived month restores it to plain first. New hosted cold references
   wait 10 full days after month end, exceeding the routine 7-day lookback. Until
   then, closed shards stay inline in checkpoints and full exports. Eligible
   unambiguous Brotli months use the existing media-reference catalogue and may be

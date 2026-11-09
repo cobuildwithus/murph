@@ -1323,10 +1323,11 @@ describe("hosted workspace restore Codex continuity", () => {
       });
 
       assert.equal(restoreCallCount, 1);
-      await assert.rejects(readFile(path.join(restoredVaultRoot, logicalPath), "utf8"), {
+      // The first replayed amendment restores the month to plain; later ones append plainly.
+      await assert.rejects(readFile(path.join(restoredVaultRoot, `${logicalPath}.gz`)), {
         code: "ENOENT",
       });
-      await readFile(path.join(restoredVaultRoot, `${logicalPath}.gz`));
+      await readFile(path.join(restoredVaultRoot, logicalPath), "utf8");
       assert.deepEqual(
         (await readIntegrationIngestEntries(restoredVaultRoot)).map((entry) => entry.record.id),
         [archivedRecord.id, appendedRecord.id, secondAppendedRecord.id],

@@ -434,7 +434,6 @@ async function maintainHostedIdleStorage(input: {
   if (archiveSignal.aborted) return;
   try {
     const archiveResult = await archiveClosedIntegrationIngestShards({
-      archiveCurrentMonth: true,
       signal: archiveSignal,
       vaultRoot: input.vaultRoot,
     });

@@ -151,6 +151,10 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
     ],
     artifactStore: input.artifactStore,
   });
+  lastUploadedReceiptLogs.set(input.artifactStore, {
+    bytes: logArtifact.bytes,
+    sha256: logArtifact.ref.sha256,
+  });
   return {
     entryCount,
     logRef: logArtifact.ref,
@@ -411,6 +415,13 @@ function createHostedCanonicalWriteJsonArtifact(value: unknown): {
   return { bytes, ref };
 }
 
+// Each append reads the log the previous append uploaded through the same
+// store. Logs are content-addressed, so reusing those bytes skips a round trip.
+const lastUploadedReceiptLogs = new WeakMap<HostedRuntimeArtifactStore, {
+  bytes: Uint8Array;
+  sha256: string;
+}>();
+
 async function readHostedCanonicalWriteReceiptLogArtifact(input: {
   artifactStore: HostedRuntimeArtifactStore;
   ref: HostedCanonicalWriteReceiptContentRef;
@@ -418,9 +429,12 @@ async function readHostedCanonicalWriteReceiptLogArtifact(input: {
   if (input.ref.byteSize > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES) {
     throw new Error("Hosted canonical write receipt log ref exceeds its size limit.");
   }
-  const bytes = await input.artifactStore.get(input.ref.sha256, {
-    purpose: "canonical_write_receipt",
-  });
+  const uploaded = lastUploadedReceiptLogs.get(input.artifactStore);
+  const bytes = uploaded?.sha256 === input.ref.sha256 && uploaded.bytes.byteLength === input.ref.byteSize
+    ? uploaded.bytes
+    : await input.artifactStore.get(input.ref.sha256, {
+        purpose: "canonical_write_receipt",
+      });
   if (!bytes) {
     throw new Error("Hosted canonical write receipt log artifact is unavailable.");
   }

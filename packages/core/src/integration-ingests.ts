@@ -115,11 +115,12 @@ export interface ArchivedIntegrationIngestShardContentReceipt {
   sha256: string;
 }
 
-// Active months stay cheap to append until their plain evidence reaches this size.
-const ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES = 4 * 1024 * 1024;
+// Device reconciles date receipts by source time and reach back up to 14 days.
+// Appending to a compressed month rewrites it, so a month stays plain until
+// routine reconciles can no longer reach it. Snapshots compress it either way.
+const INTEGRATION_INGEST_ARCHIVE_DELAY_MS = 16 * 24 * 60 * 60 * 1000;
 
 export interface ArchiveClosedIntegrationIngestShardsInput {
-  archiveCurrentMonth?: boolean;
   now?: Date;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -1370,8 +1371,9 @@ export async function archiveClosedIntegrationIngestShards(
     });
     const sources = (await listClosedIntegrationIngestShardSources(
       input.vaultRoot,
-      currentMonth,
-      input.archiveCurrentMonth === true,
+      resolveIntegrationIngestArchiveCurrentMonth(
+        new Date((input.now ?? new Date()).getTime() - INTEGRATION_INGEST_ARCHIVE_DELAY_MS),
+      ),
     )).filter((source) => source.kind !== "brotli");
     let archivedByteCount = 0;
     let archivedShardCount = 0;
@@ -1381,10 +1383,6 @@ export async function archiveClosedIntegrationIngestShards(
     for (const source of sources) {
       const { logicalPath } = source;
       input.signal?.throwIfAborted();
-      if (integrationIngestMonthKeyFromLogicalPath(logicalPath) === currentMonth) {
-        const stat = await lstat(resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath);
-        if (stat.size < ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES) continue;
-      }
       const gzipPath = `${logicalPath}.gz`;
       const zipPath = `${logicalPath}.zip`;
       if (
@@ -2002,22 +2000,16 @@ export async function appendArchivedIntegrationIngestShard({
   }
 
   if (isShardCompression(source.kind)) {
-    try {
-      await rewriteCompressedIntegrationIngestArchive({
-        appendPayload: Buffer.from(appendPayload, "utf8"),
-        source,
-        vaultRoot,
-      });
-    } catch (error) {
-      if (!(error instanceof VaultError) || error.code !== "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE") throw error;
-      await restorePlainIntegrationIngestShard(vaultRoot, source, validatedBase);
-      const target = resolveVaultPath(vaultRoot, targetRelativePath);
-      await applyJsonlAppendTarget({
-        target,
-        readPayload: async () => appendPayload,
-        appendPayload: (chunk) => appendFile(target.absolutePath, chunk, "utf8"),
-      });
-    }
+    // Rewriting the archive costs a full decompress, validation and recompress
+    // per append. Restore the verified plain base once; later appends are plain
+    // and idle maintenance archives the month again once it is out of reach.
+    await restorePlainIntegrationIngestShard(vaultRoot, source, validatedBase);
+    const target = resolveVaultPath(vaultRoot, targetRelativePath);
+    await applyJsonlAppendTarget({
+      target,
+      readPayload: async () => appendPayload,
+      appendPayload: (chunk) => appendFile(target.absolutePath, chunk, "utf8"),
+    });
   } else {
     const baseContent = await readIntegrationIngestSourceText(vaultRoot, source);
     await writeIntegrationIngestArchiveText(vaultRoot, source, `${baseContent}${appendPayload}`);
@@ -2083,7 +2075,7 @@ export async function truncateArchivedIntegrationIngestShard({
     return;
   }
   if (isShardCompression(source.kind)) {
-    await rewriteCompressedIntegrationIngestArchive({
+    await truncateCompressedIntegrationIngestArchive({
       source,
       truncateByteLength: expectedBaseByteLength,
       vaultRoot,
@@ -2433,10 +2425,10 @@ async function writeIntegrationIngestArchiveText(
   );
 }
 
-async function rewriteCompressedIntegrationIngestArchive(input: {
-  appendPayload?: Buffer;
+// Rolls back an uncommitted tail that is already inside the archive.
+async function truncateCompressedIntegrationIngestArchive(input: {
   source: IntegrationIngestRowSource;
-  truncateByteLength?: number;
+  truncateByteLength: number;
   vaultRoot: string;
 }): Promise<void> {
   if (!isShardCompression(input.source.kind)) {
@@ -2446,16 +2438,13 @@ async function rewriteCompressedIntegrationIngestArchive(input: {
       { relativePath: input.source.sourcePath },
     );
   }
-  if (input.appendPayload && input.truncateByteLength !== undefined) {
-    throw new TypeError("Compressed integration ingest rewrite cannot append and truncate together.");
-  }
 
   const archivePath = resolveVaultPath(input.vaultRoot, input.source.sourcePath).absolutePath;
   await prepareFileAtomic(archivePath, async (tempAbsolutePath) => {
     const outputHash = createHash("sha256");
     let outputByteLength = 0;
     const outputChunks = async function* (): AsyncGenerator<Buffer> {
-      let remaining = input.truncateByteLength ?? Number.POSITIVE_INFINITY;
+      let remaining = input.truncateByteLength;
       for await (const chunk of readBoundedCompressedIntegrationIngestChunks(
         archivePath,
         input.source.sourcePath,
@@ -2463,9 +2452,7 @@ async function rewriteCompressedIntegrationIngestArchive(input: {
         if (remaining <= 0) {
           break;
         }
-        const output = Number.isFinite(remaining)
-          ? chunk.subarray(0, Math.min(chunk.byteLength, remaining))
-          : chunk;
+        const output = chunk.subarray(0, Math.min(chunk.byteLength, remaining));
         if (output.byteLength > 0) {
           outputHash.update(output);
           outputByteLength += output.byteLength;
@@ -2473,24 +2460,12 @@ async function rewriteCompressedIntegrationIngestArchive(input: {
           yield output;
         }
       }
-      if (Number.isFinite(remaining) && remaining !== 0) {
+      if (remaining !== 0) {
         throw new VaultError(
           "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
           `Integration ingest archive "${input.source.sourcePath}" is smaller than the rollback base.`,
           { relativePath: input.source.sourcePath },
         );
-      }
-      if (input.appendPayload && input.appendPayload.byteLength > 0) {
-        outputHash.update(input.appendPayload);
-        outputByteLength += input.appendPayload.byteLength;
-        if (outputByteLength > MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES) {
-          throw new VaultError(
-            "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
-            `Integration ingest archive "${input.source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte uncompressed size limit.`,
-            { byteSize: outputByteLength, relativePath: input.source.sourcePath },
-          );
-        }
-        yield input.appendPayload;
       }
     };
 

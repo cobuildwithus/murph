@@ -2859,8 +2859,8 @@ Current product admission, delivery and native runtime safety rules remain.
   maintenance never fetches absent history. New cold references require a month
   older than the UTC month of now minus 10 days. This keeps a newly closed month
   inline for 10 full days, exceeding the routine 7-day provider lookback and
-  avoiding repeated thaw/re-upload cycles. Compression is separate: current-month
-  shards may still compact at 4 MiB. Snapshot reconciliation keeps cold references even after materialization;
+  avoiding repeated thaw/re-upload cycles. Compression is separate and waits 16
+  days after month end. Snapshot reconciliation keeps cold references even after materialization;
   it never applies image/video TTLs or prunes canonical cold objects. Receipt replay
   still resolves only the preimages it needs; ordinary startup does not fetch cold
   months. Historical device imports remain writable when no cold reference exists.
@@ -2888,8 +2888,8 @@ Current product admission, delivery and native runtime safety rules remain.
   Reclaiming superseded remote objects is separate work.
 - Event-ledger and integration-ingest compaction share the abortable hosted
   idle-shutdown lane's existing 30-second archive budget. Core validates lossless
-  Brotli before removing the source; gzip remains readable. Current integration
-  shards become eligible at 4 MiB, while current event shards stay plain. A
+  Brotli before removing the source; gzip remains readable. Integration months
+  become eligible 16 days after they close and current event shards stay plain. A
   foreground wake aborts the pass; ordinary archive failures leave the source
   intact and do not block checkpointing. Remaining old representations are the
   worklist. Readers and amendment planning repair only encountered, independently

@@ -446,8 +446,13 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
         // A backfill can detach or replace a later month's descriptor while an
         // earlier download runs. Its local shard is now the canonical truth.
         if (!await hostedColdIngestReferenceIsCurrent(input.vaultRoot, entry)) {
-          const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
-          if (await lstat(resolved.absolutePath).then(file => file.isFile(), () => false)) materializedArtifactPaths.add(key);
+          // The backfill restores the month to plain JSONL before appending.
+          let present = false;
+          for (const candidate of [entry.relativePath, entry.relativePath.replace(/\.br$/u, "")]) {
+            const resolved = await resolveVaultPathOnDisk(input.vaultRoot, candidate);
+            present ||= await lstat(resolved.absolutePath).then(file => file.isFile(), () => false);
+          }
+          if (present) materializedArtifactPaths.add(key);
           else missingArtifactPaths.set(key, "missing");
           return;
         }

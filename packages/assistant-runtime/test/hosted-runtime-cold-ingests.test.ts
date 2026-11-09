@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { brotliCompressSync } from "node:zlib";
+import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import { materializeVaultMedia } from "@murphai/assistant-engine/assistant-codex";
 import { restoreHostedBundleRoots, snapshotHostedBundleRoots } from "@murphai/runtime-state/node";
 import { expect, test, vi } from "vitest";
@@ -76,7 +76,7 @@ test.each([
   } finally { vi.useRealTimers(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("an older runner's cold month stays cold inside the delay, but a thaw waits before publishing its new hash", async () => {
+test("an older runner's cold month stays cold, and a thawed amendment stays plain until idle maintenance archives it again", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2031-01-06T00:00:00.000Z"));
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-ingest-delay-thaw-"));
@@ -92,7 +92,8 @@ test("an older runner's cold month stays cold inside the delay, but a thaw waits
   try {
     await initializeVault({ vaultRoot, timezone: "UTC" });
     const first = await importDeviceBatch(batch);
-    await archiveClosedIntegrationIngestShards({ vaultRoot });
+    // Older runners archived a month as soon as it closed.
+    await archiveClosedIntegrationIngestShards({ vaultRoot, now: new Date("2031-01-17T00:00:00.000Z") });
     const bytes = await readFile(path.join(vaultRoot, archivePath));
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     // Same persisted shape as a runner that externalizes immediately at rollover.
@@ -115,15 +116,23 @@ test("an older runner's cold month stays cold inside the delay, but a thaw waits
     }));
     expect(backfill.applied).toBe(true);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
-    const amended = await readFile(path.join(vaultRoot, archivePath));
+    // The amendment restored the month to plain, which never externalizes.
+    await expect(readFile(path.join(vaultRoot, archivePath))).rejects.toMatchObject({ code: "ENOENT" });
+    const amended = await readFile(path.join(vaultRoot, archivePath.replace(/\.br$/, "")));
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })))
       .toMatchObject({ excludedVaultPaths: [], referenceCount: 0, uploadedMediaCount: 0 });
     expect(mediaStore.put).not.toHaveBeenCalled();
     expect((await readIntegrationIngestEntries(vaultRoot)).map(entry => entry.record.id)).toEqual([first.ingestId, backfill.ingestId]);
     vi.setSystemTime(new Date("2031-01-12T00:00:00.000Z"));
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(0);
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([]);
+    vi.setSystemTime(new Date("2031-01-17T00:00:00.000Z"));
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(1);
+    const rearchived = await readFile(path.join(vaultRoot, archivePath));
+    expect(brotliDecompressSync(rearchived)).toEqual(amended);
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
     const [next] = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
-    expect(next?.sha256).toBe(createHash("sha256").update(amended).digest("hex"));
+    expect(next?.sha256).toBe(createHash("sha256").update(rearchived).digest("hex"));
     expect(next?.sha256).not.toBe(cold.sha256);
     expect(next?.mediaId).not.toBe(cold.mediaId);
     expect(mediaStore.put).toHaveBeenCalledTimes(1);
@@ -169,12 +178,16 @@ test.each([false, true])("bulk restoration preserves a committed later-month bac
       }));
       expect(backfill.applied).toBe(true);
       const laterPath = catalogue.entries[1]!.relativePath;
-      const committed = await readFile(path.join(vaultRoot, laterPath));
+      // The backfill restored the thawed month to plain before appending.
+      const laterPlainPath = laterPath.replace(/\.br$/, "");
+      const committed = await readFile(path.join(vaultRoot, laterPlainPath));
+      await expect(readFile(path.join(vaultRoot, laterPath))).rejects.toMatchObject({ code: "ENOENT" });
       expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(entry => entry.relativePath === laterPath)).toBe(false);
       if (republish) await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
       release!();
       expect(await bulk).toEqual({ requested: 2, available: 2, removed: 0, unavailable: [] });
-      expect(await readFile(path.join(vaultRoot, laterPath))).toEqual(committed);
+      expect(await readFile(path.join(vaultRoot, laterPlainPath))).toEqual(committed);
+      await expect(readFile(path.join(vaultRoot, laterPath))).rejects.toMatchObject({ code: "ENOENT" });
       const ids = [first.ingestId, second.ingestId, backfill.ingestId];
       expect((await readIntegrationIngestEntries(vaultRoot)).map(entry => entry.record.id)).toEqual(ids);
       // The normal checkpoint externalizes the winning shard. A cold restore
@@ -187,7 +200,7 @@ test.each([false, true])("bulk restoration preserves a committed later-month bac
       await withIntegrationIngestMaterializer(restoredRoot, restoredMaterialize, async () => {
         expect((await readIntegrationIngestEntries(restoredRoot)).map(entry => entry.record.id)).toEqual(ids);
       });
-      expect(await readFile(path.join(restoredRoot, laterPath))).toEqual(committed);
+      expect(await readFile(path.join(restoredRoot, laterPlainPath))).toEqual(committed);
     } finally { release!(); await bulk; }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -271,7 +284,7 @@ test("snapshot excludes closed ingest months, retains current month and sparse r
   }
 });
 
-test("idle-compressed current month stays inline and appendable, then externalizes after the delay", async () => {
+test("a busy month stays plain and inline, then compresses and externalizes once reconciles stop reaching it", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2030-11-15T12:00:00.000Z"));
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "active-cold-ingest-"));
@@ -297,25 +310,21 @@ test("idle-compressed current month stays inline and appendable, then externaliz
     });
     await mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
     await writeFile(path.join(vaultRoot, logicalPath), `${JSON.stringify(record)}\n`);
-    expect((await archiveClosedIntegrationIngestShards({ vaultRoot, archiveCurrentMonth: true })).archivedShardCount).toBe(1);
-    await expect(readFile(path.join(vaultRoot, logicalPath))).rejects.toMatchObject({ code: "ENOENT" });
-    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([]);
-    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(0);
     const first = await importDeviceBatch(batch);
     expect(first.applied).toBe(true);
     expect((await importDeviceBatch(batch)).applied).toBe(false);
-    expect((await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id))
-      .toEqual([record.id, first.ingestId]);
-    const activeBytes = await readFile(path.join(vaultRoot, archivePath));
-    const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
-    expect(publication.excludedVaultPaths).toEqual([]);
-    const plan = await collectHostedWorkspaceSnapshotArchivePlan({ vaultRoot, durableRoot: vaultRoot,
-      excludedVaultPaths: publication.excludedVaultPaths });
-    expect(plan.entries).toContainEqual(expect.objectContaining({ relativePath: archivePath, size: activeBytes.length }));
-    expect(mediaStore.put).not.toHaveBeenCalled();
-    expect(mediaStore.get).not.toHaveBeenCalled();
+    await expect(readFile(path.join(vaultRoot, archivePath))).rejects.toMatchObject({ code: "ENOENT" });
 
+    // A closed month inside reconcile reach stays plain and inline.
     vi.setSystemTime(new Date("2030-12-11T00:00:00.000Z"));
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(0);
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([]);
+    expect(mediaStore.put).not.toHaveBeenCalled();
+
+    vi.setSystemTime(new Date("2030-12-17T12:00:00.000Z"));
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(1);
+    const archivedBytes = await readFile(path.join(vaultRoot, archivePath));
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
     const [cold] = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
     expect(cold).toBeDefined();
@@ -326,11 +335,14 @@ test("idle-compressed current month stays inline and appendable, then externaliz
     }));
     expect(historical.applied).toBe(true);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+    // The late amendment restored the month to plain; the next idle pass compresses it again.
+    await expect(readFile(path.join(vaultRoot, archivePath))).rejects.toMatchObject({ code: "ENOENT" });
     expect((await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id))
       .toEqual([record.id, first.ingestId, historical.ingestId]);
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(1);
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]?.sha256).not.toBe(cold!.sha256);
-    expect(Buffer.from(objects.get(cold!.mediaId)!)).toEqual(activeBytes);
+    expect(Buffer.from(objects.get(cold!.mediaId)!)).toEqual(archivedBytes);
   } finally {
     vi.useRealTimers();
     await rm(vaultRoot, { recursive: true, force: true });

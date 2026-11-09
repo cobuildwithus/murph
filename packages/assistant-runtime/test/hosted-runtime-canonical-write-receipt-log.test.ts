@@ -54,6 +54,27 @@ test("hosted canonical receipt log accepts the final physical entry without comp
   assert.ok(storedBytesByHash.has(update.logRef.sha256));
 });
 
+test("hosted canonical receipt log reuses the log it just uploaded through the same store", async () => {
+  const { artifactStore, getCalls, storedBytesByHash } = createHostedRuntimeArtifactStoreStub();
+  let status = null as ReturnType<typeof createReceiptLogStatus> | null;
+  for (let index = 0; index < 3; index += 1) {
+    const update = await appendHostedCanonicalWriteReceiptToArtifactLog({
+      artifactStore,
+      payloads: [],
+      previousStatus: status,
+      receipt: createReceipt([], `op_reuse_${index}`, index),
+    });
+    status = createReceiptLogStatus(update.logRef);
+  }
+  assert.deepEqual(getCalls, []);
+
+  // A later invocation's store still reads the durable log.
+  const restored = createHostedRuntimeArtifactStoreStub(Object.fromEntries(storedBytesByHash));
+  const log = await readHostedCanonicalWriteReceiptLog({ artifactStore: restored.artifactStore, status });
+  assert.equal(log.entryCount, 3);
+  assert.deepEqual(restored.getCalls, [status!.hostedCanonicalWriteReceiptLogSha256]);
+});
+
 test("hosted canonical receipt log compacts a full legacy v1 log without a reader rollout floor", async () => {
   const seeded = createSeededReceiptLog(HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES);
   const { artifactStore, putCalls, storedBytesByHash } =
