@@ -436,6 +436,8 @@ async function importHostedWorkspaceBridgeMealPhoto(
   const outcome = await importHostedMealPhotoCapturedMailboxItem({
     effectsPort: input.runtime.platform.effectsPort,
     item: input.item,
+    materializeWorkspaceArtifacts: input.context?.materializeWorkspaceArtifacts ?? null,
+    signal: input.context?.signal ?? null,
     vaultRoot: input.vaultRoot,
     wake,
   });

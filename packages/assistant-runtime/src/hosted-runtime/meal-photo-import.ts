@@ -11,6 +11,7 @@ import {
   addMeal,
   deterministicContractId,
   findEventByExternalRef,
+  linkUploadToMealWithSamePhoto,
 } from "@murphai/core";
 import type {
   HostedExecutionMealPhotoCapturedWake,
@@ -21,10 +22,13 @@ import type {
   HostedMailboxPostCheckpointEffect,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
+import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
 import type { HostedRuntimeEffectsPort } from "./platform.ts";
 
 const MEAL_PHOTO_EXTERNAL_SYSTEM = "meal-photo-capture";
 const MEAL_PHOTO_EXTERNAL_RESOURCE_TYPE = "photo";
+// A message photo Murph already holds; larger files aren't fetched to compare.
+const LOGGED_MEAL_PHOTO_MAX_BYTES = 16 * 1024 * 1024;
 
 export function isHostedManualMealPhotoWake(
   wake: HostedExecutionMealPhotoCapturedWake,
@@ -35,6 +39,8 @@ export function isHostedManualMealPhotoWake(
 export async function importHostedMealPhotoCapturedMailboxItem(input: {
   effectsPort: HostedRuntimeEffectsPort;
   item: HostedMailboxResolvedImportItem;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedExecutionMealPhotoCapturedWake;
 }): Promise<HostedMailboxItemImportOutcome> {
@@ -110,6 +116,11 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
     return blockedMealPhotoImport(integrityFailure, false);
   }
 
+  const linked = await importAsMealAlreadyHoldingPhoto(input, bytes);
+  if (linked) {
+    return linked;
+  }
+
   let temporaryDirectory: string;
   try {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), "murph-meal-photo-"));
@@ -150,6 +161,50 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
   }
 
   return importedMealPhotoOutcome(input.effectsPort, input.wake.mealPhoto.mealPhotoKey);
+}
+
+/**
+ * The phone also captures photos the member texted Murph: that capture joins
+ * the meal already holding its photo. The member's own send from the app stays
+ * a meal of its own. Null leaves the ordinary import to run.
+ */
+async function importAsMealAlreadyHoldingPhoto(
+  input: Parameters<typeof importHostedMealPhotoCapturedMailboxItem>[0],
+  bytes: Uint8Array,
+): Promise<HostedMailboxItemImportOutcome | null> {
+  if (isHostedManualMealPhotoWake(input.wake)) {
+    return null;
+  }
+  let loggedMealId: string | null;
+  try {
+    loggedMealId = await linkUploadToMealWithSamePhoto({
+      capturedAt: input.wake.mealPhoto.capturedAt,
+      jpeg: bytes,
+      materialize: input.materializeWorkspaceArtifacts
+        ? materializeVaultFile(input.materializeWorkspaceArtifacts, input.signal ?? null)
+        : null,
+      signal: input.signal ?? null,
+      uploadId: input.wake.mealPhoto.uploadId ?? input.wake.mealPhoto.captureId,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch {
+    // Unsure whether a meal holds it: a retry beats a duplicate.
+    return blockedMealPhotoImport("meal_photo.already_logged_check_failed", true);
+  }
+  if (!loggedMealId) {
+    return null;
+  }
+  if (!(await automaticMealCloseoutIsReady({
+    directRoute: input.wake.directRoute,
+    vaultRoot: input.vaultRoot,
+  }))) {
+    return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
+  }
+  return importedMealPhotoOutcome(
+    input.effectsPort,
+    input.wake.mealPhoto.mealPhotoKey,
+    "meal_photo.already_logged",
+  );
 }
 
 async function automaticMealCloseoutIsReady(input: {
@@ -209,12 +264,31 @@ function validateMealPhotoBytes(input: {
 function importedMealPhotoOutcome(
   effectsPort: HostedRuntimeEffectsPort,
   mealPhotoKey: string,
+  reasonCode = "meal_photo.imported",
 ): HostedMailboxItemImportOutcome {
   const afterCheckpoint = createMealPhotoCleanupEffect(effectsPort, mealPhotoKey);
   return {
     ...(afterCheckpoint ? { afterCheckpoint } : {}),
-    reasonCode: "meal_photo.imported",
+    reasonCode,
     status: "imported",
+  };
+}
+
+/** True when the file is local, false when it is gone for good; throws when unknown. */
+function materializeVaultFile(
+  materialize: HostedWorkspaceArtifactMaterializer,
+  signal: AbortSignal | null,
+): (relativePath: string) => Promise<boolean> {
+  return async (relativePath) => {
+    const key = `vault:${relativePath}`;
+    const result = await materialize([key], {
+      maxFileBytes: LOGGED_MEAL_PHOTO_MAX_BYTES,
+      maxTotalDownloadBytes: LOGGED_MEAL_PHOTO_MAX_BYTES,
+      signal,
+    });
+    const unavailable = result.missingArtifactPaths.get(key);
+    if (unavailable === "transport") throw new Error("Meal photo transfer failed.");
+    return unavailable === undefined && result.materializedArtifactPaths.has(key);
   };
 }
 

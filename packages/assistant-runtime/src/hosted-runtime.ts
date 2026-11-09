@@ -847,6 +847,8 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  /** Brings deferred workspace files local; it throws until the workspace is restored. */
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   /** Invocation lifetime for admitted typing; import passes can yield sooner. */
   typingSignal?: AbortSignal | null;
 }
@@ -1883,10 +1885,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       );
     let deviceSyncMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
+    let restoredMaterializer: HostedWorkspaceArtifactMaterializer | null = null;
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
       assistantBootstrap: context?.assistantBootstrap ?? null,
+      materializeWorkspaceArtifacts: async (paths, materializeOptions) => {
+        if (!restoredMaterializer) throw new Error("Hosted workspace is not restored yet.");
+        return await restoredMaterializer(paths, materializeOptions);
+      },
       providerFetch: guardedPlatform.providerFetch ?? null,
       ...(invocationAssistantTarget
         ? { assistantTarget: invocationAssistantTarget }
@@ -2009,6 +2016,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       workspaceRestoreDoneAt,
     } = await workspaceRestorePreparation.promise;
     adoptMaterializer(restored.materializeWorkspaceArtifacts);
+    restoredMaterializer = restored.materializeWorkspaceArtifacts;
     assertRuntimeNotAborted();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone

@@ -156,7 +156,8 @@ function originalCaptureTime(occurredAt: unknown, importedAt: string): string {
   return typeof occurredAt === "string" && Number.isFinite(Date.parse(occurredAt)) ? occurredAt : importedAt;
 }
 function earliest(left: string | null, right: string) { return left === null || right < left ? right : left; }
-async function latestMeals(input: MealPhotoMaintenanceInput): Promise<Meal[]> {
+/** The latest revision of every meal, deleted ones included, across all shards. */
+export async function latestMeals(input: { vaultRoot: string; signal?: AbortSignal | null }): Promise<Meal[]> {
   const latest = new Map<string, { relativePath: string; record: Meal }>();
   for (const relativePath of await listEventLedgerShardPaths(input.vaultRoot)) {
     input.signal?.throwIfAborted();
