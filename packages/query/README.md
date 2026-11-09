@@ -94,6 +94,13 @@ The lock covers strict source capture, lifecycle collapse, visibility and select
 no cache is published or certified fresh. Kind/date predicates match the existing
 indexed operation, including its date fallback. The result is unlimited and in
 canonical order so the usecase applies tag/experiment filters before its limit.
+
+A caller that needs only some event kinds passes `{ eventKinds }` to
+`readCanonicalEntityFamilySource(vaultRoot, "event", ...)`. Every ledger row is
+still parsed and checked, and revisions collapse across all kinds in the same
+order, so the result equals the full read filtered by kind; entities are built
+only for the surviving rows of those kinds. Event listing passes its kind
+filter through when it falls back to the source read.
 Event-source errors remain strict; malformed unrelated families no longer block
 this event-only read. Explicit global readers retain their existing strict errors
 and rebuild policy. No other collection endpoint changes. Manifest/status checks

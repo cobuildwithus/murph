@@ -601,7 +601,7 @@ test("readMealNutritionTotals reads only the event family before summarizing", a
     const result = await readMealNutritionTotals("./vault", options);
 
     assert.equal(readFamilySpy.mock.calls.length, 1);
-    assert.deepEqual(readFamilySpy.mock.calls[0], ["./vault", "event"]);
+    assert.deepEqual(readFamilySpy.mock.calls[0], ["./vault", "event", { eventKinds: ["meal"] }]);
     assert.deepEqual(result, summarizeMealNutritionTotals(readModel, options));
   } finally {
     readFamilySpy.mockRestore();
@@ -634,7 +634,7 @@ test("readMealNutrientTotals reads only the event family before summarizing", as
     const result = await readMealNutrientTotals("./vault", options);
 
     assert.equal(readFamilySpy.mock.calls.length, 1);
-    assert.deepEqual(readFamilySpy.mock.calls[0], ["./vault", "event"]);
+    assert.deepEqual(readFamilySpy.mock.calls[0], ["./vault", "event", { eventKinds: ["meal"] }]);
     assert.deepEqual(result, summarizeMealNutrientTotals(readModel, options));
   } finally {
     readFamilySpy.mockRestore();

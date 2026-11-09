@@ -18,17 +18,39 @@ import { asObject, firstString, firstStringArray } from "../shared.ts";
 
 export const HEALTH_HISTORY_KINDS = new Set(HEALTH_HISTORY_EVENT_KINDS);
 
+/**
+ * The fields that order revisions of one event. `data` is the row's record
+ * data: the built entity's attributes, or the normalized ledger payload.
+ */
+export function eventLedgerRevisionFields(input: {
+  eventId: string;
+  data: unknown;
+  occurredAt: string | null | undefined;
+  relativePath: string;
+}): EventRevisionCollapseFields {
+  const data =
+    typeof input.data === "object" && input.data !== null && !Array.isArray(input.data)
+      ? (input.data as Record<string, unknown>)
+      : null;
+  const recordedAt = data?.recordedAt;
+  return {
+    eventId: input.eventId,
+    lifecycle: data?.lifecycle,
+    recordedAt: typeof recordedAt === "string" ? recordedAt.trim() : "",
+    occurredAt: input.occurredAt ?? "",
+    relativePath: input.relativePath,
+  };
+}
+
 function eventLedgerEntityRevisionFields(
   entity: CanonicalEntity,
 ): EventRevisionCollapseFields {
-  const attributes = asObject(entity.attributes);
-  return {
+  return eventLedgerRevisionFields({
     eventId: entity.primaryLookupId,
-    lifecycle: attributes?.lifecycle,
-    recordedAt: attributes ? firstString(attributes, ["recordedAt"]) ?? "" : "",
-    occurredAt: entity.occurredAt ?? "",
+    data: entity.attributes,
+    occurredAt: entity.occurredAt,
     relativePath: entity.path,
-  };
+  });
 }
 
 export function collapseEventLedgerEntities(
