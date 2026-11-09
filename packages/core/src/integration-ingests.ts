@@ -12,6 +12,16 @@ import {
 
 import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
 import { materializeIntegrationIngestHistory, thawIntegrationIngestHistoryForAppend } from "./integration-ingest-cold-storage.ts";
+import {
+  addIntegrationIngestInventoryRow,
+  findIntegrationIngestInventory,
+  invalidateIntegrationIngestInventory,
+  readIngestFileFence,
+  readPlainIngestRows,
+  retainIntegrationIngestInventory,
+  type IntegrationIngestInventory,
+  type IngestRowRange,
+} from "./integration-ingest-inventory.ts";
 
 import {
   integrationIngestReceiptSchema,
@@ -41,7 +51,7 @@ import { VaultError } from "./errors.ts";
 import { isErrnoException } from "./types.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
 import { toMonthlyShardRelativePath } from "./jsonl.ts";
-import { withCanonicalWriteLock } from "./operations/canonical-write-lock.ts";
+import { assertCanonicalWriteLockScope, withCanonicalWriteLock } from "./operations/canonical-write-lock.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
 export const MAX_INTEGRATION_INGEST_PARTS = 10_000;
@@ -99,13 +109,17 @@ export interface IntegrationIngestInspection {
   entriesById: ReadonlyMap<string, IntegrationIngestRecord>;
   failOpenAppendAllowed: boolean;
   historyComplete: boolean;
+  inventoryCacheHit: boolean;
   invalidIds: ReadonlySet<string>;
   logicalPath: string;
   requestedIds: ReadonlySet<string>;
-  observedIds: ReadonlySet<string>;
+  observedIds: Pick<ReadonlySet<string>, "has">;
   unsafe: boolean;
   readError?: unknown;
   selectNovelEvidence(outputs?: IntegrationIngestEvidenceOutputs): NovelIntegrationIngestEvidenceSelection;
+  inspectEvidence(outputs: IntegrationIngestEvidenceOutputs, retainedRoles?: ReadonlySet<string>, requireExactNovelty?: boolean): Promise<NovelIntegrationIngestEvidenceSelection>;
+  inspectIds(ids: readonly string[]): Promise<IntegrationIngestInspection>;
+  recordCommittedAppend(payloads: ReadonlyMap<string, string>): Promise<void>;
 }
 
 export interface ArchivedIntegrationIngestShardText {
@@ -717,6 +731,138 @@ async function scanIntegrationIngestTail(
   }
 }
 
+function ingestInventoryEvidenceScope(provider: unknown, accountId: unknown): string {
+  return JSON.stringify([provider, accountId ?? null]);
+}
+
+function ingestInventoryEvidenceKeys(raw: Record<string, unknown>): string[] {
+  // Part and receipt fingerprints are JSON tuples of distinct lengths (4, 8, 10).
+  const keys: string[] = [];
+  for (const part of Array.isArray(raw.parts) ? raw.parts : []) {
+    const fingerprint = rawIntegrationEvidenceFingerprint(part);
+    if (fingerprint !== null) keys.push(fingerprint);
+  }
+  for (const includePayloadIdentity of [false, true]) {
+    const fingerprint = rawIntegrationIngestReceiptFingerprint(raw.receipt, includePayloadIdentity);
+    if (fingerprint !== null) keys.push(fingerprint);
+  }
+  return keys;
+}
+
+async function advanceIntegrationIngestInventory(
+  inventory: IntegrationIngestInventory,
+  payloads: ReadonlyMap<string, string>,
+): Promise<void> {
+  const payload = payloads.get(inventory.logicalPath);
+  if (!payload) return;
+  invalidateIntegrationIngestInventory(inventory.vaultRoot);
+  try {
+    const fence = await readIngestFileFence(inventory.vaultRoot, inventory.logicalPath);
+    if ((inventory.fence.missing
+      ? !fence.identity.startsWith(`${inventory.fence.identity}\0`)
+      : fence.identity !== inventory.fence.identity)
+      || fence.byteLength !== inventory.fence.byteLength + Buffer.byteLength(payload)
+      || !payload.endsWith("\n")) return;
+    let offset = inventory.fence.byteLength;
+    for (const line of payload.slice(0, -1).split("\n")) {
+      const raw: unknown = JSON.parse(line);
+      const length = Buffer.byteLength(line);
+      if (!indexInspectedIngestRow(inventory, raw, { offset, length })) return;
+      offset += length + 1;
+    }
+    inventory.fence = fence;
+    retainIntegrationIngestInventory(inventory);
+  } catch {
+    // Publication already succeeded. A disposable cache must not fail the import.
+  }
+}
+
+async function prepareIntegrationIngestInventory(
+  vaultRoot: string,
+  logicalPath: string,
+  sources: readonly IntegrationIngestRowSource[],
+  enabled: boolean,
+): Promise<{ inventory?: IntegrationIngestInventory; candidate?: IntegrationIngestInventory }> {
+  if (!enabled) return {};
+  if (sources.length > 1 || (sources.length === 1 && sources[0]?.kind !== "jsonl")) {
+    invalidateIntegrationIngestInventory(vaultRoot);
+    return {};
+  }
+  try {
+    const fence = await readIngestFileFence(vaultRoot, logicalPath);
+    return {
+      inventory: findIntegrationIngestInventory(vaultRoot, logicalPath, fence),
+      candidate: { vaultRoot, logicalPath, fence, byId: new Map(), byEvidence: new Map(), rowCount: 0, referenceCount: 0 },
+    };
+  } catch {
+    invalidateIntegrationIngestInventory(vaultRoot);
+    return {};
+  }
+}
+
+async function retainInspectedInventory(candidate: IntegrationIngestInventory | undefined): Promise<IntegrationIngestInventory | undefined> {
+  if (!candidate) return undefined;
+  try {
+    const fence = await readIngestFileFence(candidate.vaultRoot, candidate.logicalPath);
+    if (fence.fingerprint === candidate.fence.fingerprint) {
+      retainIntegrationIngestInventory(candidate);
+      return candidate;
+    }
+  } catch {
+    // Metadata read failures disable reuse; canonical inspection is still valid.
+  }
+  invalidateIntegrationIngestInventory(candidate.vaultRoot);
+  return undefined;
+}
+
+function indexInspectedIngestRow(
+  candidate: IntegrationIngestInventory,
+  raw: unknown,
+  range: IngestRowRange,
+): string[] | undefined {
+  // These are candidate offsets only. visitRaw validates requested IDs and
+  // matching evidence on both the full scan and subsequent offset reads.
+  if (!isRecord(raw) || typeof raw.id !== "string") return undefined;
+  const keys = ingestInventoryEvidenceKeys(raw);
+  return addIntegrationIngestInventoryRow(
+    candidate, raw.id, range, ingestInventoryEvidenceScope(raw.provider, raw.accountId), keys,
+  ) ? keys : undefined;
+}
+
+async function inspectPlainIngestRows(
+  vaultRoot: string,
+  source: IntegrationIngestRowSource,
+  requestedIds: ReadonlySet<string>,
+  invalidIds: Set<string>,
+  visitRaw: (raw: unknown, evidenceKeys?: readonly string[]) => void,
+  candidate: IntegrationIngestInventory | undefined,
+): Promise<{ candidate: IntegrationIngestInventory | undefined; malformedHistory: boolean }> {
+  let malformedHistory = false;
+  await readPlainIngestRows(
+    resolveVaultPath(vaultRoot, source.sourcePath).absolutePath, MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES,
+    ({ line: bytes, range, terminated }) => {
+      const line = bytes.toString("utf8");
+      if (!terminated) candidate = undefined;
+      if (line.length === 0 || line === "\r") return;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch {
+        malformedHistory = true;
+        candidate = undefined;
+        for (const id of requestedIds) {
+          if (line.includes(JSON.stringify(id))) invalidIds.add(id);
+        }
+        return;
+      }
+      const evidenceKeys = candidate ? indexInspectedIngestRow(candidate, raw, range) : undefined;
+      if (!evidenceKeys) candidate = undefined;
+      visitRaw(raw, evidenceKeys);
+    },
+  );
+  return { candidate, malformedHistory };
+}
+
 export async function inspectIntegrationIngestHistory(
   vaultRoot: string,
   importedAt: string,
@@ -724,8 +870,13 @@ export async function inspectIntegrationIngestHistory(
   options: {
     evidence?: IntegrationIngestEvidenceInput;
     canUseTail?: (inspection: IntegrationIngestInspection) => boolean;
+    useInventory?: boolean;
+    deferEvidence?: boolean;
   } = {},
 ): Promise<IntegrationIngestInspection> {
+  if (options.useInventory) assertCanonicalWriteLockScope(vaultRoot);
+  const inspectedIds = new Set(requestedIds);
+  requestedIds = inspectedIds;
   const logicalPath = integrationIngestShardPath(importedAt);
   const sources = await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, [logicalPath]);
   const source = sources.length === 1 ? sources[0] : undefined;
@@ -744,6 +895,8 @@ export async function inspectIntegrationIngestHistory(
   const entriesById = new Map<string, IntegrationIngestRecord>();
   const invalidIds = new Set<string>();
   const observedIds = new Set<string>();
+  let inventory: IntegrationIngestInventory | undefined;
+  let inventoryCandidate: IntegrationIngestInventory | undefined;
   const inspection: IntegrationIngestInspection = {
     [INTEGRATION_INGEST_INSPECTION_AUTHORITY]: true,
     archivedLogicalPaths: new Set(
@@ -752,11 +905,57 @@ export async function inspectIntegrationIngestHistory(
     entriesById,
     failOpenAppendAllowed: false,
     historyComplete: sources.length === 0,
+    inventoryCacheHit: false,
     invalidIds,
     logicalPath,
     observedIds,
-    requestedIds: new Set(requestedIds),
+    requestedIds: inspectedIds,
     unsafe: sources.length > 1,
+    inspectIds: async (ids) => {
+      const missing = ids.filter((id) => !requestedIds.has(id));
+      if (missing.length === 0) return inspection;
+      if (inventory) {
+        for (const id of missing) inspectedIds.add(id);
+        try {
+          await readInventoryCandidates(missing, []);
+          if (!missing.some((id) => invalidIds.has(id))) return inspection;
+        } catch {
+          // A duplicate, invalid row or changed fence needs the established scan.
+        }
+      } else if (inspection.historyComplete && missing.every((id) => !observedIds.has(id))) {
+        return inspection;
+      }
+      invalidateIntegrationIngestInventory(vaultRoot);
+      return inspectIntegrationIngestHistory(vaultRoot, importedAt, new Set([...requestedIds, ...ids]), {
+        evidence: options.evidence,
+      });
+    },
+    recordCommittedAppend: async (payloads) => {
+      if (inventory) await advanceIntegrationIngestInventory(inventory, payloads);
+    },
+    inspectEvidence: async (outputs, retainedRoles = new Set(), requireExactNovelty = false) => {
+      if (requireExactNovelty) retainedRoles = new Set();
+      if (inspection.inventoryCacheHit && options.deferEvidence) {
+        try {
+          await readInventoryCandidates([], evidenceKeys(retainedRoles, outputs.includeReceipt !== false), () => {
+            const selection = inspection.selectNovelEvidence(outputs);
+            return !selection.receiptIsNovel && selection.parts.every((part) => retainedRoles.has(part.role));
+          });
+        } catch {
+          // Optional evidence is retained when its indexed proof is uncertain.
+          evidenceUnsafe = true;
+          inventory = undefined;
+          inspection.inventoryCacheHit = false;
+          invalidateIntegrationIngestInventory(vaultRoot);
+        }
+      }
+      const selection = inspection.selectNovelEvidence(outputs);
+      const novelParts = new Set(selection.parts);
+      return {
+        ...selection,
+        parts: parts.filter((part) => retainedRoles.has(part.role) || novelParts.has(part)),
+      };
+    },
     selectNovelEvidence: (outputs = {}) => {
       const failOpen = !evidence?.accountId || inspection.unsafe || evidenceUnsafe;
       return {
@@ -775,20 +974,30 @@ export async function inspectIntegrationIngestHistory(
       };
     },
   };
-  if (!source) return inspection;
+  ({ inventory, candidate: inventoryCandidate } = await prepareIntegrationIngestInventory(
+    vaultRoot, logicalPath, sources, options.useInventory === true,
+  ));
+  if (!source) {
+    if (inventoryCandidate) {
+      inventory = inventoryCandidate;
+      retainIntegrationIngestInventory(inventory);
+    }
+    return inspection;
+  }
 
-  const visitRaw = (raw: unknown): void => {
+  const requestedInventoryEvidenceKeys = new Set(evidenceKeys(new Set(), true));
+  const visitRaw = (raw: unknown, indexedEvidenceKeys?: readonly string[]): void => {
     if (!isRecord(raw) || typeof raw.id !== "string") return;
     const requestedId = requestedIds.has(raw.id);
     const provesEvidence = evidence !== undefined
       && raw.provider === evidence.provider
       && integrationIngestAccountMatches(raw, evidence.accountId)
-      && rawIntegrationIngestCouldProveNovelty({
+      && (indexedEvidenceKeys ? indexedEvidenceKeys.some((key) => requestedInventoryEvidenceKeys.has(key)) : rawIntegrationIngestCouldProveNovelty({
         raw,
         receiptRequiresPayloadIdentity,
         requestedFingerprints,
         requestedReceiptFingerprint,
-      });
+      }));
     if (observedIds.has(raw.id)) {
       invalidIds.add(raw.id);
       if (requestedId) inspection.unsafe = true;
@@ -798,21 +1007,22 @@ export async function inspectIntegrationIngestHistory(
     let record: IntegrationIngestRecord;
     try {
       record = parseIntegrationIngestRecord(raw, source.sourcePath);
-      assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
+      if (record.importedAt !== importedAt) assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
       assertIntegrationIngestRecordIntegrity(record);
     } catch {
       invalidIds.add(raw.id);
       if (provesEvidence) evidenceUnsafe = true;
       return;
     }
-    // Only a requested id or a possible append match needs its full record.
-    if (requestedId || (record.importedAt === importedAt && record.parts.every((part) =>
-      requestedFingerprints.has(integrationEvidenceFingerprint(part))
-    ))) entriesById.set(record.id, record);
+    if (requestedId) entriesById.set(record.id, record);
     if (!provesEvidence) return;
+    let allPartsMatch = true;
     for (const part of record.parts) {
       const fingerprint = integrationEvidenceFingerprint(part);
-      if (!requestedFingerprints.has(fingerprint)) continue;
+      if (!requestedFingerprints.has(fingerprint)) {
+        allPartsMatch = false;
+        continue;
+      }
       existingFingerprints.add(fingerprint);
       for (const output of record.outputs.events) {
         if (output.roles.includes(part.role)) {
@@ -823,6 +1033,8 @@ export async function inspectIntegrationIngestHistory(
         existingSampleLinks.add(`${fingerprint}\u0000${id}`);
       }
     }
+    // Only a requested id or a possible append match needs its full record.
+    if (record.importedAt === importedAt && allPartsMatch) entriesById.set(record.id, record);
     if (record.receipt && integrationIngestReceiptFingerprint(
       record.receipt, receiptRequiresPayloadIdentity,
     ) === requestedReceiptFingerprint) {
@@ -830,7 +1042,70 @@ export async function inspectIntegrationIngestHistory(
     }
   };
 
-  if (source.kind === "jsonl") {
+  async function readInventoryCandidates(
+    ids: Iterable<string>, evidenceKeys: readonly string[], complete?: () => boolean,
+  ): Promise<void> {
+    if (!inventory) return;
+    const currentFence = await readIngestFileFence(vaultRoot, logicalPath);
+    if (currentFence.fingerprint !== inventory.fence.fingerprint) throw new Error("Ingest inventory generation changed.");
+    if (complete?.()) return;
+    const ranges = new Set<IngestRowRange>();
+    for (const id of ids) {
+      const range = inventory.byId.get(id);
+      if (range) ranges.add(range);
+    }
+    const evidenceIndex = inventory.byEvidence.get(ingestInventoryEvidenceScope(evidence?.provider, evidence?.accountId));
+    for (const key of evidenceKeys) {
+      const matches = evidenceIndex?.get(key);
+      if (Array.isArray(matches)) for (const range of matches) ranges.add(range);
+      else if (matches) ranges.add(matches);
+    }
+    if (ranges.size === 0) return;
+    const handle = await openFile(resolveVaultPath(vaultRoot, logicalPath).absolutePath, "r");
+    try {
+      for (const range of [...ranges].sort((a, b) => a.offset - b.offset)) {
+        const bytes = Buffer.allocUnsafe(range.length);
+        const result = await handle.read(bytes, 0, bytes.length, range.offset);
+        if (result.bytesRead !== bytes.length) throw new Error("Incomplete ingest inventory read.");
+        const raw: unknown = JSON.parse(bytes.toString("utf8"));
+        if (!isRecord(raw) || typeof raw.id !== "string" || inventory.byId.get(raw.id) !== range) {
+          throw new Error("Invalid ingest inventory candidate.");
+        }
+        observedIds.delete(raw.id);
+        visitRaw(raw);
+        if (complete?.()) return;
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
+  function evidenceKeys(retainedRoles: ReadonlySet<string>, includeReceipt: boolean): string[] {
+    const keys = parts.filter((part) => !retainedRoles.has(part.role)).map((part) =>
+      integrationEvidenceFingerprint(part));
+    if (includeReceipt && requestedReceiptFingerprint !== null) keys.push(
+      requestedReceiptFingerprint,
+    );
+    return keys;
+  }
+
+  let inventoryRejected = false;
+  if (inventory) {
+    try {
+      await readInventoryCandidates(requestedIds, options.deferEvidence ? [] : evidenceKeys(new Set(), true));
+      if (invalidIds.size > 0) throw new Error("Invalid ingest ID requires a full inspection.");
+      inspection.observedIds = inventory.byId;
+      inspection.historyComplete = true;
+      inspection.inventoryCacheHit = true;
+      return inspection;
+    } catch {
+      invalidateIntegrationIngestInventory(vaultRoot);
+      inventory = undefined;
+      inventoryRejected = true;
+    }
+  }
+
+  const inspectTail = async (): Promise<boolean> => {
     let skippedRows = false;
     try {
       const scan = await scanIntegrationIngestTail(
@@ -851,13 +1126,13 @@ export async function inspectIntegrationIngestHistory(
       );
       inspection.historyComplete = scan.historyComplete;
       inspection.unsafe ||= scan.unsafe;
-      if (scan.selectionComplete || (scan.historyComplete && !skippedRows && !inspection.unsafe)) {
-        return inspection;
-      }
+      return scan.selectionComplete || (!options.useInventory && scan.historyComplete && !skippedRows && !inspection.unsafe);
     } catch {
       inspection.unsafe = true;
+      return false;
     }
-  }
+  };
+  if (source.kind === "jsonl" && !inventoryRejected && await inspectTail()) return inspection;
 
   // A full scan replaces both partial proofs and validates archive integrity.
   entriesById.clear();
@@ -873,28 +1148,9 @@ export async function inspectIntegrationIngestHistory(
   let readFailed = false;
   try {
     if (source.kind === "jsonl") {
-      const lines = createInterface({
-        input: await openIntegrationIngestLineStream(vaultRoot, source),
-        crlfDelay: Infinity,
-      });
-      for await (const line of lines) {
-        if (line.length === 0) continue;
-        if (Buffer.byteLength(line, "utf8") > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
-          readFailed = true;
-          break;
-        }
-        let raw: unknown;
-        try {
-          raw = JSON.parse(line);
-        } catch {
-          malformedHistory = true;
-          for (const id of requestedIds) {
-            if (line.includes(JSON.stringify(id))) invalidIds.add(id);
-          }
-          continue;
-        }
-        visitRaw(raw);
-      }
+      ({ candidate: inventoryCandidate, malformedHistory } = await inspectPlainIngestRows(
+        vaultRoot, source, requestedIds, invalidIds, visitRaw, inventoryCandidate,
+      ));
     } else {
       for await (const row of readIntegrationIngestJsonlRows(vaultRoot, [source])) {
         visitRaw(row.raw);
@@ -909,6 +1165,7 @@ export async function inspectIntegrationIngestHistory(
     && ![...requestedIds].some((id) => invalidIds.has(id));
   inspection.unsafe ||= malformedHistory || readFailed;
   inspection.historyComplete = !inspection.unsafe;
+  if (inspection.historyComplete) inventory = await retainInspectedInventory(inventoryCandidate);
   return inspection;
 }
 

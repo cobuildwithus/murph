@@ -36,6 +36,8 @@ export interface DeviceProviderSnapshotImportTiming {
   canonicalWriteElapsedMs: number;
   eventIdentityIndexCacheHit: boolean;
   eventIdentityIndexElapsedMs: number;
+  ingestInspectionElapsedMs: number;
+  ingestInventoryCacheHit: boolean;
   normalizationElapsedMs: number;
 }
 
@@ -406,6 +408,8 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     canonicalWriteElapsedMs: coreTiming.canonicalWriteElapsedMs,
     eventIdentityIndexCacheHit: coreTiming.eventIdentityIndexCacheHit,
     eventIdentityIndexElapsedMs: coreTiming.eventIdentityIndexElapsedMs,
+    ingestInspectionElapsedMs: coreTiming.ingestInspectionElapsedMs,
+    ingestInventoryCacheHit: coreTiming.ingestInventoryCacheHit,
     normalizationElapsedMs,
   };
   return {

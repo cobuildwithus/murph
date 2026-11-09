@@ -672,6 +672,8 @@ test("device sync service records privacy-safe job phase timings", async () => {
             canonicalCoreElapsedMs: 1_600,
             canonicalWriteElapsedMs: 200,
             eventIdentityIndexCacheHit: true,
+            ingestInspectionElapsedMs: 250,
+            ingestInventoryCacheHit: true,
             eventIdentityIndexElapsedMs: 1_200,
             normalizationElapsedMs: 300,
           },
@@ -741,6 +743,8 @@ test("device sync service records privacy-safe job phase timings", async () => {
       snapshotCanonicalWriteElapsedMs: 200,
       snapshotEventIdentityIndexCacheHitCount: 1,
       snapshotEventIdentityIndexElapsedMs: 1_200,
+      snapshotIngestInspectionElapsedMs: 250,
+      snapshotIngestInventoryCacheHitCount: 1,
       snapshotNormalizationElapsedMs: 300,
     }]);
   } finally {

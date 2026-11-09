@@ -7,6 +7,7 @@ import path from "node:path";
 import { test, vi } from "vitest";
 
 import * as ingests from "../src/integration-ingests.ts";
+import * as inventory from "../src/integration-ingest-inventory.ts";
 import {
   importDeviceBatch,
   initializeVault,
@@ -90,10 +91,8 @@ test("one full shard inspection proves a duplicate beyond the bounded tail and p
     const reads = vi.spyOn(nodeFs, "createReadStream");
     syncBuiltinESMExports();
     // Publication separately hashes bytes for the canonical journal receipt.
-    const shardReads = () => reads.mock.calls.filter(([file, options]) =>
-      String(file).endsWith(`/${first.ingestShardPath}`)
-      && typeof options === "object" && options?.encoding === "utf8"
-    ).length;
+    const scans = vi.spyOn(inventory, "readPlainIngestRows");
+    const shardReads = () => scans.mock.calls.length;
     try {
       const replay = await importDeviceBatch(input(vaultRoot));
       assert.equal(replay.applied, false);
@@ -104,24 +103,27 @@ test("one full shard inspection proves a duplicate beyond the bounded tail and p
       ).length, 1);
       inspection.mockClear();
       reads.mockClear();
+      scans.mockClear();
       const laterDelivery = await importDeviceBatch({
         ...input(vaultRoot), importedAt: "2026-01-03T00:00:00.000Z",
       });
       assert.equal(laterDelivery.applied, false);
       assert.equal(inspection.mock.calls.length, 1);
-      assert.equal(shardReads(), 1);
+      assert.equal(shardReads(), 0);
       assert.equal(reads.mock.calls.filter(([file]) =>
         String(file).endsWith(`/${first.ingestShardPath}`)
-      ).length, 1);
+      ).length, 0);
       inspection.mockClear();
       reads.mockClear();
+      scans.mockClear();
       const corrected = await importDeviceBatch(input(vaultRoot, 2));
       assert.equal(corrected.applied, true);
       assert.equal(inspection.mock.calls.length, 1);
-      assert.equal(shardReads(), 1);
+      assert.equal(shardReads(), 0);
       assert.equal(corrected.events[0]?.id, first.events[0]?.id);
       assert.equal(corrected.events[0]?.lifecycle?.revision, 2);
     } finally {
+      scans.mockRestore();
       reads.mockRestore();
       syncBuiltinESMExports();
       inspection.mockRestore();
