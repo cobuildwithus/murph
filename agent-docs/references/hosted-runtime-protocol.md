@@ -3524,8 +3524,10 @@ pre-destroy state read and native destruction promise, and its caller-side guard
 keeps a separate one-second margin. Native destruction completion is the stop
 receipt; cached SDK lifecycle status and a delayed `onStop` callback are not
 additional settlement gates. A definitely stopped native container skips both
-status reads and destruction during retained-target retirement. The slot's
-existing retirement fence and exact-generation checks remain authoritative.
+status reads and destruction during retained-target retirement. After verified
+terminal retirement, the Worker clears the exact target through `target_retired`
+and reclaims through Postgres; [runtime ownership](hosted-postgres-runtime.md)
+owns the target fence and bounded admission loop.
 If the container RPC settles with a timeout or transport failure, the fresh fence is compare-cleared as
 before. If cleanup remains unsettled at its deadline or only the outer guard
 elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved

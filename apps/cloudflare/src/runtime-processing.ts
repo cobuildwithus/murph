@@ -64,6 +64,7 @@ const RUNTIME_PROCESSING_STEP_LATENCY_LEAVES: Partial<Record<RuntimeProcessingOp
   retire_target: "runnerTargetRetireElapsedMs",
   read_retired_binding: "runnerTargetRetireElapsedMs",
   owner_release: "runnerTargetRetireElapsedMs",
+  owner_target_retired: "runnerTargetRetireElapsedMs",
   container_readiness: "containerReadinessElapsedMs",
   start_invocation: "invocationStartElapsedMs",
 };
@@ -187,19 +188,15 @@ function ownerRecheckAtEpochMs(ctx: ProcessingContext): number {
   return Date.now() + computeHostedRuntimeProcessingRecheckDelayMs(ctx.env);
 }
 
-/** `retired` is the slot's own retirement proof, when the caller already holds it. */
-async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, retired?: HostedStandbySlotBinding): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
   if ((await ctx.command({ operation: "retire", ...identity, completed: false })).status !== "updated") return null;
   if (owner.runnerContainerName) {
     const target = owner.runnerContainerName;
-    let binding = retired;
-    if (!binding) {
-      const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
-      await ctx.step("retire_target", () => slot.retireStandbySlot({ ...(owner.allocationId ? { claimId: owner.allocationId } : {}),
-        target: { slotName: target, userId: ctx.input.userId } }));
-      binding = await ctx.step("read_retired_binding", () => slot.readStandbySlotBinding());
-    }
+    const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
+    await ctx.step("retire_target", () => slot.retireStandbySlot({ ...(owner.allocationId ? { claimId: owner.allocationId } : {}),
+      target: { slotName: target, userId: ctx.input.userId } }));
+    const binding = await ctx.step("read_retired_binding", () => slot.readStandbySlotBinding());
     if (binding.state !== "retired" || binding.slotName !== target) return retryProcessing(ctx, "retirement_pending");
   }
   await ctx.command({ operation: "release", ...identity, runnerContainerName: owner.runnerContainerName });
@@ -318,7 +315,7 @@ async function bindRuntimeTarget(ctx: ProcessingContext, owner: HostedRuntimeOwn
       region: HOSTED_RUNNER_REGION, slotName: target, userId: ctx.input.userId }));
     ctx.latency.runnerTargetPathKind ??= binding.state === "bound" ? "retained_warm" : "retained_retired";
     // Any other result is this exact slot, retired and asserted under its lifecycle lock.
-    if (binding.state !== "bound") { await retireRuntime(ctx, owner, binding); return null; }
+    if (binding.state !== "bound") { await ctx.command({ operation: "target_retired", runnerContainerName: target }); return null; }
     return { owner, binding };
   }
   if (!isHostedStandbyClaimId(owner.allocationId)) throw new Error("Hosted allocation identity is invalid.");

@@ -14,12 +14,14 @@ timeout or poll constant, or merge `bindStandbySlot` with readiness.
 
 ## Deletions
 
-- Duplicate retirement proof. `resolveRetainedStandbySlot` returns a non-bound
-  binding only after asserting, under the slot lifecycle lock, that this exact
-  slot is `retired`, and `retired` is terminal. `retireRuntime` now reuses that
-  binding instead of calling `retireStandbySlot` and `readStandbySlotBinding`
-  again. The old "pinned when not confirmed" test modelled an impossible state
-  and now covers the retiring-phase `retirement_pending` path.
+- Duplicate retirement on a retained target. `resolveRetainedStandbySlot`
+  returns a non-bound binding only after asserting, under the slot lifecycle
+  lock, that this exact slot is `retired`, and `retired` is terminal. The Worker
+  then sent `retire`, retired and read the slot again, and sent `release`. It
+  now sends the existing exact-target `target_retired` command instead: two
+  Durable Object calls and one owner round trip fewer, and `retireRuntime` is
+  unchanged. The old "pinned when not confirmed" test modelled an impossible
+  state and now covers the retiring-phase `retirement_pending` path.
 - Worker-side `prepare_launch` fallback. Every slot has advertised
   `preparesSupervisedLaunch` since #3532, so the Worker always sends launch
   facts. The slot always submits `prepare_launch` and no longer has the

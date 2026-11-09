@@ -383,7 +383,7 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
-  it("replaces a retired retained target in the same foreground request after background completion", async () => {
+  it.each(["updated", "stale"] as const)("replaces a retired retained target in the same request after %s acknowledgment", async status => {
     const { source, container, binding } = harness();
     const completed = owner({ processingMode: "system_mailbox", phase: "retiring", completedAt: new Date().toISOString() });
     const retained = owner({ attemptId: "attempt-b", generation: "2", phase: "starting", workspaceVersion: null });
@@ -393,7 +393,6 @@ describe("Postgres runtime orchestration", () => {
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
     const retired = { ...binding, state: "retired" as const, claimId: null, userId: null };
     container.resolveRetainedStandbySlot.mockResolvedValue(retired);
-    container.readStandbySlotBinding.mockResolvedValue(retired);
     vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
       if (command.operation === "claim") {
         const current = claims.shift();
@@ -401,6 +400,7 @@ describe("Postgres runtime orchestration", () => {
         return response(current, current === completed ? "existing" : "claimed");
       }
       if (command.operation === "select_target") return response({ ...fresh, runnerContainerName: command.runnerContainerName }, "updated");
+      if (command.operation === "target_retired") return response(null, status);
       return response(null, "updated");
     });
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
@@ -412,7 +412,10 @@ describe("Postgres runtime orchestration", () => {
     expect(container.readStandbySlotBinding).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
     const operations = vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation);
-    expect(operations).toEqual(["claim", "claim", "retire", "release", "claim", "select_target", "accepted"]);
+    expect(operations).toEqual(["claim", "claim", "target_retired", "claim", "select_target", "accepted"]);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
+      command: { operation: "target_retired", runnerContainerName: target },
+    }));
     // The first target decision names the path; the successor shows in select/bind.
     expect(diagnostics.orchestration).toEqual({
       runtimeOwnerClaimElapsedMs: expect.any(Number), runnerTargetPathKind: "retained_retired",
@@ -420,6 +423,27 @@ describe("Postgres runtime orchestration", () => {
       runnerTargetSelectElapsedMs: expect.any(Number), runnerTargetBindElapsedMs: expect.any(Number),
       containerReadinessElapsedMs: expect.any(Number), invocationStartElapsedMs: expect.any(Number),
     });
+  });
+
+  it("retries a lost target-retired response through fresh admission without stopping the successor", async () => {
+    const { source, container, binding } = harness();
+    const retained = owner({ phase: "starting", workspaceVersion: null });
+    const successor = owner({ attemptId: "attempt-b", generation: "2",
+      runnerContainerName: `runner--v-release_1--${"2".repeat(32)}` });
+    container.resolveRetainedStandbySlot.mockResolvedValue({ ...binding, state: "retired", claimId: null, userId: null });
+    vi.mocked(commandHostedRuntimeOwner).mockRejectedValueOnce(new DOMException("Response lost", "TimeoutError"))
+      .mockImplementation(async ({ command }) => response(command.operation === "claim" ? successor : null,
+        command.operation === "claim" ? "existing" : "stale"));
+    const input = { ...request, admission: response(retained, "claimed") };
+    expect(await ensurePostgresRuntimeProcessing(source, input)).toMatchObject({ kind: "retry_later" });
+    expect(container.ensureProcessing).not.toHaveBeenCalled();
+    expect(await ensurePostgresRuntimeProcessing(source, input)).toMatchObject({
+      kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b", action: "woken",
+    });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["target_retired", "target_retired", "claim"]);
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
   it.each(["unchanged", "blocked", "foreign"] as const)("revalidates %s canonical admission after completed-owner recovery", async state => {

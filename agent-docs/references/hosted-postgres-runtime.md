@@ -245,9 +245,17 @@ The Worker always sends the launch facts, and Web's `prepare_launch` parser
 rejects a start without them. Readiness still returns the constant
 `preparesSupervisedLaunch: true` for Workers older than this release, which read
 it before sending launch facts; delete it once the rollback floor passes them.
-A retained target whose slot already reports itself retired skips the second
-stop and readback: `resolveRetainedStandbySlot` asserted that exact retirement
-under the slot's lifecycle lock, and retirement is terminal.
+A retained target whose resolver proves exact terminal retirement uses the existing
+`target_retired` command instead of `retire` then `release`. Native destruction
+settles under the slot's lifecycle lock before its binding becomes `retired`;
+the slot cannot rebind. Web locks the owner, clears only a matching target and
+drains that owner's replica PUTs. A newer attempt still assigned that retired
+slot is also unusable; a successor assigned another target is untouched.
+Both updated and stale responses return to fresh `claim` in the same bounded
+admission loop. Recovery takes two owner requests instead of three; uncertain
+responses retry through canonical admission. Explicit resolver retirement sends
+no notice itself; independent idle cleanup sends an asynchronous notice that
+may race this command. Existing Web already accepts it, so no deploy order changes.
 Provider effects read their native controller receipt and binding.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
@@ -650,6 +658,7 @@ Web callback. Native readiness retains its 15-second bound inside the command;
 Web owner callbacks retain their shorter per-request bound. An expired command
 preserves uncertain ownership and cannot launch a detached successor.
 
-After exact native retirement and an acknowledged canonical release, processing
+After exact native retirement and an acknowledged canonical release or
+exact-target retirement command, processing
 uses the existing bounded admission loop immediately. Failed or uncertain
 retirement/release still retries; elapsed time alone never proves stoppedness.

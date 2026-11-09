@@ -1967,13 +1967,30 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     await first.$transaction(tx => revokeHostedRuntimeAiUsageTx(tx, runtime));
     expect(await authorize("synthetic-provider-slot")).toMatchObject({ platformAiUsageAllowed: false });
     expect(await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: "wrong-slot" })).toBe(false);
+    await retireHostedRuntime({ prisma: first, identity: runtime, completed: true });
+    await releaseHostedRuntimeAfterCompletion({ prisma: first, identity: runtime, runnerContainerName: "synthetic-provider-slot" });
+    const retained = (await claim(userId)).owner;
+    expect(retained).toMatchObject({ phase: "starting", runnerContainerName: "synthetic-provider-slot",
+      generation: BigInt(runtime.generation) + 1n, completedAt: null });
+    // A newer attempt can inherit A before its retirement notice arrives, but
+    // irreversible native retirement makes A unusable for every generation.
+    expect(await retireHostedRuntime({ prisma: first, identity: runtime, completed: false })).toBe(false);
     expect(await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: "synthetic-provider-slot" })).toBe(true);
+    const idle = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(idle).toEqual({ ...retained, phase: "idle", attemptId: null, processingMode: null,
+      allocationId: null, runnerContainerName: null, workspaceVersion: null, providerEgressTokenHash: null,
+      platformAiUsageAllowed: false, updatedAt: expect.any(Date) });
+    // A committed command whose response was lost can be retried unchanged.
+    expect(await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: "synthetic-provider-slot" })).toBe(false);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(idle);
     expect(await authorize(null, tokenHash)).toBeNull();
     const successor = identity((await claim(userId)).owner);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: successor,
       runnerContainerName: "synthetic-successor-slot", workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash: null });
+    const assigned = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
     expect(await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: "synthetic-provider-slot" })).toBe(false);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(assigned);
     expect(await authorize("synthetic-successor-slot")).toMatchObject({ attemptId: successor.attemptId });
     await observer.hostedMember.update({ where: { id: userId }, data: { suspendedAt: new Date() } });
     expect(await authorize("synthetic-successor-slot")).toMatchObject({ attemptId: successor.attemptId });
