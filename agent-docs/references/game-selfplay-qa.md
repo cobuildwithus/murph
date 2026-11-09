@@ -164,6 +164,11 @@ No raw bundles or screenshot assets are published in this backend repository.
   own successful commit; correcting that fixture produced green proof without
   another production change.
 - Both native schemes built, project generation and source lint passed.
+- PR CI exposed the existing account-deletion empty-table query-plan flake. A
+  fresh analyzed database reproduced it. The test now analyzes a bounded synthetic
+  event distribution and executes the original selector, asserting its actor/type
+  index and two matching rows. All 26 account-deletion tests and Web typecheck
+  passed after the fixture repair; production deletion behavior is unchanged.
 - Independent review found no further concrete defect. No physical-device,
   production messaging or release-wide claims are inferred from these checks.
 

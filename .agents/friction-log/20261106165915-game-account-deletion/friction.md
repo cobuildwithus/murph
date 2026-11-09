@@ -24,3 +24,11 @@ On an isolated migrated local test database, run ANALYZE game_event and ANALYZE 
 A complete serial hosted Web run exposed this failure while other task-specific fixture regressions were corrected. The test and production query were left unchanged; baseline reproduction isolates the test's dependence on database statistics.
 
 The actual filtered test also fails in a clean detached origin/main checkout on a fresh migrated database after analyzing the empty game tables. The corresponding task changes are absent from that checkout.
+
+## Resolution
+
+The self-play QA follow-up reproduced this failure on an empty analyzed database.
+The test now seeds 2,048 unrelated events and two matching notes, analyzes the
+tables, and executes the original paged selector with EXPLAIN ANALYZE. It checks
+both the intended actor/type index and two returned rows without disabling
+sequential scans. The synthetic event batch is rolled back after the proof.
