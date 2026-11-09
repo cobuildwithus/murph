@@ -1,6 +1,6 @@
 # Call off a live game when every player agrees
 
-Status: active
+Status: completed
 Created: 2026-11-09
 Updated: 2026-11-09
 
@@ -201,3 +201,4 @@ Results (2026-11-09):
   direct +0 from this change; group and mixed +369 bytes (+0.225%), all of it
   the `call_off` enum value and its description; after `read_game` +747 bytes
   group, +1023 mixed (guidance).
+Completed: 2026-11-09
