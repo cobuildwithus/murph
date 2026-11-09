@@ -12,7 +12,7 @@ import { createJsonResponse, readUrl } from "./helpers.ts";
 const NOW = "2026-04-03T14:00:00.000Z";
 const LATER = "2026-04-03T15:00:00.000Z";
 
-function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkEnvelope?: boolean; weightHistory?: boolean } = {}) {
+function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkEnvelope?: boolean; weightHistory?: boolean; unavailableSummary?: string } = {}) {
   let providers = [{ id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true, ...(options.weightHistory ? { weight: true } : {}) } }];
   let rows: unknown[] = [{ id: "activity-1", date: "2026-04-02", steps: 1234, source: { provider: "garmin" } }];
   let timeseriesValue = 99;
@@ -24,8 +24,13 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
     calls += 1;
     const url = new URL(readUrl(input));
     if (url.pathname.includes("/user/providers/")) return createJsonResponse({ providers });
-    if (url.pathname.includes("/summary/")) return createJsonResponse(malformed ? null
-      : options.sdkEnvelope ? { [url.pathname.split("/summary/")[1]!.split("/")[0]!]: rows } : { data: rows });
+    if (url.pathname.includes("/summary/")) {
+      if (options.unavailableSummary && url.pathname.includes(`/summary/${options.unavailableSummary}/`)) {
+        return createJsonResponse({ code: "resource_unavailable" }, 404);
+      }
+      return createJsonResponse(malformed ? null
+        : options.sdkEnvelope ? { [url.pathname.split("/summary/")[1]!.split("/")[0]!]: rows } : { data: rows });
+    }
     if (url.pathname.includes("/timeseries/")) return createJsonResponse({ groups: { garmin: [{
       source: { provider: "garmin", type: "watch" }, data: [{ timestamp: "2026-04-02T12:00:00.000Z", value: timeseriesValue, unit: "mg/dL" }],
     }] } });
@@ -136,6 +141,13 @@ test("failed import does not publish unchanged evidence", async () => {
   const h = harness();
   h.failImport();
   await assert.rejects(h.importBaseline(), /Synthetic import failure/);
+  assert.equal(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY], undefined);
+  assert.equal((await h.probe()).reason, "baseline_missing");
+});
+
+test("a skipped summary unit cannot publish a complete content proof", async () => {
+  const h = harness({ bounded: true, resources: ["activity", "body"], unavailableSummary: "body" });
+  await h.importBaseline();
   assert.equal(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY], undefined);
   assert.equal((await h.probe()).reason, "baseline_missing");
 });

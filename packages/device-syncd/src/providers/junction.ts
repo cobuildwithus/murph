@@ -1840,6 +1840,8 @@ export function createJunctionDeviceSyncProvider(
       job.kind === "reconcile" && !isCurrentSummaryReconcile && isFullUtcDayWindow(summaryWindow)
         ? "date"
         : "datetime";
+    let summaryPhaseComplete = job.kind === "reconcile" && job.payload.summaryPhaseComplete === true;
+    let boundedProfileMetadataPatch: Record<string, unknown> = {};
     if (
       job.kind === "reconcile"
       && context.shouldYield
@@ -1855,12 +1857,11 @@ export function createJunctionDeviceSyncProvider(
         summaryWindow,
         window,
       });
-      if (boundedSummaryResult) {
-        return boundedSummaryResult;
-      }
+      if (boundedSummaryResult.continuation) return boundedSummaryResult.continuation;
+      summaryPhaseComplete = true;
+      boundedProfileMetadataPatch = boundedSummaryResult.profileMetadataPatch;
+      reconcileProof = boundedSummaryResult.reconcileProof;
     }
-    const summaryPhaseComplete =
-      job.kind === "reconcile" && job.payload.summaryPhaseComplete === true;
     const summaryFetchResult: JunctionFetchedSummarySnapshots = summaryPhaseComplete
       ? { providerRecordsSeen: false, snapshots: {} }
       : await fetchSummarySnapshots(
@@ -1882,7 +1883,7 @@ export function createJunctionDeviceSyncProvider(
       : await fetchProfileSummaryOnce(context, skippedOptionalResources);
     const profileMetadataPatch = profileSummaryResult.checked
       ? buildJunctionProfileSummaryCheckedMetadataPatch(context)
-      : {};
+      : boundedProfileMetadataPatch;
     const summaries = profileSummaryResult.records.length > 0
       ? { ...historicalSummaries, [JUNCTION_PROFILE_SUMMARY_RESOURCE]: profileSummaryResult.records }
       : historicalSummaries;
@@ -4413,7 +4414,11 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[];
     summaryWindow: { windowEnd: string; windowStart: string };
     window: { windowEnd: string; windowStart: string };
-  }): Promise<ProviderJobResult | null> {
+  }): Promise<{
+    continuation: ProviderJobResult | null;
+    profileMetadataPatch: Record<string, unknown>;
+    reconcileProof: JunctionReconcileProof | null;
+  }> {
     const profileAlreadyChecked = hasCheckedJunctionProfileSummary(
       input.context.account.metadata,
     );
@@ -4425,11 +4430,94 @@ export function createJunctionDeviceSyncProvider(
     const cursorIndex = requestedCursor
       ? eligibleUnits.findIndex((unit) => unit.includes(requestedCursor))
       : 0;
-    const resources = eligibleUnits[cursorIndex >= 0 ? cursorIndex : 0] ?? null;
-    if (!resources) {
-      return null;
-    }
+    const startedAt = Date.now();
+    const capturedSourceFence = input.context.listConnectionSources
+      ? captureJunctionSourceLifecycleFence(input.context.account.sources ?? [])
+      : null;
+    const sourceFence = capturedSourceFence?.size ? capturedSourceFence : null;
+    let sawEmptyUnit = false;
+    let reconcileProof = input.reconcileProof;
+    let profileMetadataPatch: Record<string, unknown> = {};
+    let continuation: ProviderJobResult | null = null;
+    const buildContinuation = (nextResource: string | null): ProviderJobResult => {
+      const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+      const continuation = buildExactWindowJob({
+        availableAt: input.context.now,
+        kind: "reconcile",
+        payload: {
+          ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+          ...(reconcileProof && input.skippedOptionalResources.length === 0 ? {
+            reconcileProof: encodeJunctionReconcileProof(reconcileProof),
+          } : {}),
+          ...(nextResource
+            ? { summaryResourceCursor: nextResource }
+            : { summaryPhaseComplete: true }),
+        },
+        priority: input.job.priority,
+        windowEnd: input.window.windowEnd,
+        windowStart: input.window.windowStart,
+      });
+      return withJunctionSkippedResourceMetadata(
+        input.context,
+        withJunctionMetadataPatch(
+          {
+            nextReconcileAt: resolveJunctionNextReconcileAt(
+              input.context.account,
+              input.context.now,
+              addMilliseconds(input.context.now, reconcileIntervalMs),
+            ),
+            scheduledJobs: [continuation],
+          },
+          profileMetadataPatch,
+        ),
+        input.skippedOptionalResources,
+      );
+    };
+    for (let index = cursorIndex >= 0 ? cursorIndex : 0, units = 1;
+      index < eligibleUnits.length; index += 1, units += 1) {
+      const resources = eligibleUnits[index]!;
+      const unit = await executeBoundedSummaryReconcileUnit(input, resources, sourceFence);
+      const summaries = unit.summaries;
+      Object.assign(profileMetadataPatch, unit.profileMetadataPatch);
+      sawEmptyUnit ||= !hasJunctionSnapshotRecords(summaries);
 
+      if (reconcileProof) {
+        reconcileProof = appendReconcileSnapshots(reconcileProof, "summary", summaries);
+      }
+      const nextResource = eligibleUnits[index + 1]?.[0] ?? null;
+      if (
+        units < JUNCTION_JOB_MAX_OWNER_UNITS
+        && Date.now() - startedAt < JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS
+        && !input.context.shouldYield?.()
+        && !input.context.signal?.aborted
+      ) continue;
+
+      continuation = buildContinuation(nextResource);
+      break;
+    }
+    await readFencedJunctionImportSources({
+      context: input.context,
+      hasCanonicalWork: false,
+      sourceLifecycleFence: sawEmptyUnit ? sourceFence : null,
+    });
+    return {
+      continuation,
+      profileMetadataPatch,
+      reconcileProof,
+    };
+  }
+
+  async function executeBoundedSummaryReconcileUnit(
+    input: {
+      context: ProviderJobContext;
+      dateQueryFormat: JunctionDateQueryFormat;
+      skippedOptionalResources: JunctionSkippedOptionalResource[];
+      sourceProviders: readonly JunctionProviderConnection[];
+      summaryWindow: { windowEnd: string; windowStart: string };
+    },
+    resources: readonly string[],
+    sourceFence: JunctionSourceLifecycleFence | null,
+  ): Promise<{ summaries: Record<string, unknown[]>; profileMetadataPatch: Record<string, unknown> }> {
     const summaries: Record<string, unknown[]> = {};
     let profileMetadataPatch: Record<string, unknown> = {};
     const profileResource = resources.find(isJunctionProfileSummaryResource);
@@ -4440,9 +4528,7 @@ export function createJunctionDeviceSyncProvider(
         { collectionWorkLimit: JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT },
       );
       if (profileSummaryResult.checked) {
-        profileMetadataPatch = buildJunctionProfileSummaryCheckedMetadataPatch(
-          input.context,
-        );
+        profileMetadataPatch = buildJunctionProfileSummaryCheckedMetadataPatch(input.context);
       }
       if (profileSummaryResult.records.length > 0) {
         summaries[profileResource] = profileSummaryResult.records;
@@ -4470,13 +4556,19 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    // Empty summaries have no canonical records or authoritative deletions.
-    // The continuation is admitted afresh; there is no import to authorize here.
     if (hasJunctionSnapshotRecords(summaries)) {
-      const preparedSummaryImport = await prepareJunctionImportSnapshot(
-        input.context,
+      const currentSources = await readFencedJunctionImportSources({
+        context: input.context,
+        hasCanonicalWork: true,
+        sourceLifecycleFence: sourceFence,
+      });
+      if (!currentSources) throw junctionTimeseriesSourceLifecycleSuperseded();
+      const preparedSummaryImport = prepareJunctionImportSnapshotForSources(
         summaries,
         input.sourceProviders,
+        currentSources,
+        {},
+        { allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only" },
       );
       await commitPreparedJunctionCanonicalImport(
         input.context,
@@ -4491,42 +4583,7 @@ export function createJunctionDeviceSyncProvider(
         input.context.now,
       );
     }
-
-    const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
-    const sourceProviderSlug = normalizeProviderSlug(
-      input.job.payload.sourceProviderSlug,
-    );
-    const continuation = buildExactWindowJob({
-      availableAt: input.context.now,
-      kind: "reconcile",
-      payload: {
-        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
-        ...(input.reconcileProof && input.skippedOptionalResources.length === 0 ? {
-          reconcileProof: encodeJunctionReconcileProof(appendReconcileSnapshots(input.reconcileProof, "summary", summaries)),
-        } : {}),
-        ...(nextResource
-          ? { summaryResourceCursor: nextResource }
-          : { summaryPhaseComplete: true }),
-      },
-      priority: input.job.priority,
-      windowEnd: input.window.windowEnd,
-      windowStart: input.window.windowStart,
-    });
-    return withJunctionSkippedResourceMetadata(
-      input.context,
-      withJunctionMetadataPatch(
-        {
-          nextReconcileAt: resolveJunctionNextReconcileAt(
-            input.context.account,
-            input.context.now,
-            addMilliseconds(input.context.now, reconcileIntervalMs),
-          ),
-          scheduledJobs: [continuation],
-        },
-        profileMetadataPatch,
-      ),
-      input.skippedOptionalResources,
-    );
+    return { summaries, profileMetadataPatch };
   }
 
   async function fetchProfileSummaryOnce(
@@ -5461,7 +5518,7 @@ export function createJunctionDeviceSyncProvider(
     batch: JunctionDailyImportBatch,
   ): Promise<void> {
     const { context } = input;
-    const currentSources = await readJunctionTimeseriesImportSources({
+    const currentSources = await readFencedJunctionImportSources({
       context,
       hasCanonicalWork: true,
       sourceLifecycleFence: null,
@@ -5859,7 +5916,7 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const currentSources = await readJunctionTimeseriesImportSources({
+    const currentSources = await readFencedJunctionImportSources({
       context: input.context,
       deferEmptySourceCheck: input.deferEmptySourceCheck,
       hasCanonicalWork: records.length > 0 || Boolean(input.authorizedLocalDay),
@@ -9068,7 +9125,7 @@ async function readJunctionImportSources(
     : context.account.sources ?? [];
 }
 
-async function readJunctionTimeseriesImportSources(input: {
+async function readFencedJunctionImportSources(input: {
   context: ProviderJobContext;
   deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void;
   hasCanonicalWork: boolean;

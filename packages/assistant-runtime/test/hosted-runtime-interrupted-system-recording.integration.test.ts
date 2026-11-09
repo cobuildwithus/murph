@@ -393,7 +393,7 @@ test.each([
     const providerReads = () => events.filter((event) => event.startsWith("device.provider:"));
     const admittedProviderReads = providerReads();
     // Junction verifies source authority around admission; credentials are hydrated once.
-    assert.equal(deviceSyncPort.fetchSourceSnapshotCalls, 4, facts());
+    assert.equal(deviceSyncPort.fetchSourceSnapshotCalls, 3, facts());
     assert.equal(deviceSyncPort.fetchSnapshotCalls - deviceSyncPort.fetchSourceSnapshotCalls, 1, facts());
     const admittedSnapshotReads = deviceSyncPort.fetchSnapshotCalls;
     assert.ok(admittedProviderReads.includes("device.provider:/v2/summary/sleep/synthetic-whoop-account"), facts());

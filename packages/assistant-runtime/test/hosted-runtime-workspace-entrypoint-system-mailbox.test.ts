@@ -1676,7 +1676,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual(recoveredOwner?.wake.kind === "device-sync.wake" ? recoveredOwner.wake.hint?.jobs : null, futureJobs);
         assert.equal(currentWorkspace.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
         if (scenario === "followup_failure") {
-          assert.equal(providerFetch.mock.calls.length, 4, "restored recording must not rerun admitted device work");
+          assert.equal(providerFetch.mock.calls.length, 3, "restored recording must not rerun admitted device work");
           assert.equal(effectsFinished, 1, "restored import progress must not repeat effects");
           assert.equal(recovered.length, 1, "recovered recording compacts the checkpointed late request");
         }
@@ -1702,7 +1702,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(typeof returnTiming.details?.checkpointStage,
         returnTiming.details?.checkpointMs === undefined ? "undefined" : "string");
       assert.equal(lateArrived, true);
-      assert.equal(providerFetch.mock.calls.length, 4, "one Junction summary pass plus source authority and historical status reads");
+      assert.equal(providerFetch.mock.calls.length, 3, "one Junction summary pass plus source authority and historical status reads");
       assert.equal(canonicalNextReconcileAt, cadenceAt);
       assert.equal(effectsFinished, 1, "each imported prefix finishes effects once after checkpoint");
       assert.equal(result.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
@@ -1723,7 +1723,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         await rm(vaultRoot, { recursive: true, force: true });
         await mkdir(vaultRoot, { recursive: true });
         const restored = await runPass();
-        assert.equal(providerFetch.mock.calls.length, 4);
+        assert.equal(providerFetch.mock.calls.length, 3);
         assert.equal(effectsFinished, 1);
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
         assert.equal(restored.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
@@ -1968,9 +1968,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
         return;
       }
-      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, schedule === "connected" ? 6 : retainedRetry ? 5 : 1);
+      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, schedule === "connected" ? 5 : retainedRetry ? 4 : 1);
       assert.equal(fetchDirtyStatesCalls, 1);
-      assert.equal(providerFetch.mock.calls.length, schedule === "connected" ? 6 : retainedRetry ? 4 : 0);
+      assert.equal(providerFetch.mock.calls.length, schedule === "connected" ? 5 : retainedRetry ? 3 : 0);
       assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
       if (retainedRetry) {
         assert.ok(result.nextWakeAt);
@@ -6093,7 +6093,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const expectedJunctionRequestClasses = [
       "GET /v2/user/providers/synthetic-whoop-account-closed-loop",
       "GET /v2/summary/sleep/synthetic-whoop-account-closed-loop",
-      "GET /v2/user/providers/synthetic-whoop-account-closed-loop",
       "GET /v2/user/providers/synthetic-whoop-account-closed-loop",
       "GET /v2/summary/sleep/synthetic-whoop-account-closed-loop",
       "GET /v2/introspect/historical_pull",

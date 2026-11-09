@@ -247,7 +247,114 @@ test.each([false, true])("bounded summary reconcile imports only populated respo
   const result = await executeJunctionJob(provider, context, createJob("reconcile", {
     windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
   }));
-  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+  assert.equal(result.scheduledJobs, undefined);
   assert.deepEqual(events.slice(events.indexOf("summary")), populated
-    ? ["summary", "sources", "import"] : ["summary"]);
+    ? ["summary", "sources", "import", "sources"]
+    : ["summary", "sources", "sources"]);
+});
+
+function emptySummaryFixture(options: {
+  changeAtRequest?: number;
+  failSourceRead?: boolean;
+  omitSource?: boolean;
+  populatedAtRequests?: readonly number[];
+  yieldAfter?: number;
+} = {}) {
+  const originalSource = createConnectionSource({ lifecycleEpoch: 1 });
+  let liveSource = originalSource;
+  let requests = 0;
+  let sourceReads = 0;
+  let imports = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-1", slug: "garmin", status: "connected",
+        resource_availability: { activity: true, sleep: true, sleep_cycle: true, body: true },
+      }] });
+    }
+    assert.match(pathname, /^\/v2\/summary\/(activity|sleep|sleep_cycle|body)\/junction-user-1$/u);
+    requests += 1;
+    if (requests === options.changeAtRequest) {
+      liveSource = createConnectionSource({ lifecycleEpoch: 2 });
+    }
+    return createJsonResponse({ data: options.populatedAtRequests?.includes(requests)
+      ? [{ id: `synthetic-summary-${requests}`, connectionId: "provider-garmin-1", steps: 1234 }]
+      : [] });
+  }, { summaryResources: ["activity", "sleep", "sleep_cycle", "body"], timeseriesResources: [] });
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [{ ...originalSource, resourceCount: 1 }] }),
+    listConnectionSources: async () => {
+      sourceReads += 1;
+      if (options.failSourceRead && sourceReads > 1) throw new Error("Synthetic source read unavailable");
+      return options.omitSource && sourceReads > 1 ? [] : [liveSource];
+    },
+    importSnapshot: async () => { imports += 1; return { imported: true }; },
+    shouldYield: () => requests >= (options.yieldAfter ?? Infinity),
+  });
+  return {
+    run: (job = createJob("reconcile", {
+      windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+    })) => executeJunctionJob(provider, context, job),
+    counts: () => ({ requests, sourceReads, imports }),
+  };
+}
+
+test("empty summary units validate source authority before completing one job", async () => {
+  const fixture = emptySummaryFixture();
+  const result = await fixture.run();
+  assert.equal(result.scheduledJobs, undefined);
+  assert.deepEqual(fixture.counts(), { requests: 4, sourceReads: 3, imports: 0 });
+});
+
+test.each([1, 4])("empty summary reconcile rejects source reconnect at request %i", async (changeAtRequest) => {
+  const fixture = emptySummaryFixture({ changeAtRequest });
+  await assert.rejects(fixture.run, (error) => error instanceof DeviceSyncError
+    && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED");
+  assert.equal(fixture.counts().imports, 0);
+});
+
+test("empty summary reconcile rejects removal and a failed final authority read", async () => {
+  for (const options of [{ omitSource: true }, { failSourceRead: true }]) {
+    const fixture = emptySummaryFixture(options);
+    await assert.rejects(fixture.run, options.omitSource
+      ? (error) => error instanceof DeviceSyncError
+        && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      : /Synthetic source read unavailable/u);
+    assert.equal(fixture.counts().imports, 0);
+  }
+});
+
+test("empty summary reconcile validates before yielding the exact next unit", async () => {
+  const fixture = emptySummaryFixture({ yieldAfter: 1 });
+  const result = await fixture.run();
+  const suffix = result.scheduledJobs?.[0];
+  assert.ok(suffix);
+  assert.deepEqual({
+    summaryResourceCursor: suffix.payload?.summaryResourceCursor,
+    summaryPhaseComplete: suffix.payload?.summaryPhaseComplete,
+    windowStart: suffix.payload?.windowStart,
+    windowEnd: suffix.payload?.windowEnd,
+  }, {
+    summaryResourceCursor: "sleep", summaryPhaseComplete: undefined,
+    windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  assert.deepEqual(fixture.counts(), { requests: 1, sourceReads: 2, imports: 0 });
+  const resumed = await fixture.run(createJobFromInput(suffix));
+  assert.equal(resumed.scheduledJobs?.[0]?.payload?.summaryResourceCursor, "body");
+});
+
+test("yield after the last summary unit persists only the phase transition", async () => {
+  const fixture = emptySummaryFixture({ yieldAfter: 4 });
+  const result = await fixture.run();
+  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryResourceCursor, undefined);
+  assert.deepEqual(fixture.counts(), { requests: 4, sourceReads: 2, imports: 0 });
+});
+
+test("summary reconcile rechecks source lifecycle before each populated import", async () => {
+  const fixture = emptySummaryFixture({ changeAtRequest: 4, populatedAtRequests: [1, 4] });
+  await assert.rejects(fixture.run, (error) => error instanceof DeviceSyncError
+    && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED");
+  assert.deepEqual(fixture.counts(), { requests: 4, sourceReads: 3, imports: 1 });
 });

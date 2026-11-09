@@ -4,7 +4,6 @@ import {
   createAccount,
   createConnectionSource,
   createJob,
-  createJobFromInput,
   createJunctionJobContext,
   createJunctionProvider,
   executeJunctionJob,
@@ -94,7 +93,7 @@ test.each([
 });
 
 
-test.each(["resource", "reconcile"] as const)("Junction %s pass shares inventory but reads live import authority for every job", async (kind) => {
+test("Junction resource pass shares inventory but reads live import authority for every job", async () => {
   let inventoryReads = 0;
   let sourceReads = 0;
   let imports = 0;
@@ -111,23 +110,15 @@ test.each(["resource", "reconcile"] as const)("Junction %s pass shares inventory
         resource_availability: { blood_oxygen: true },
       }] });
     }
-    assert.equal(url.pathname, kind === "resource"
-      ? "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
-      : "/v2/summary/activity/junction-user-1");
+    assert.equal(url.pathname, "/v2/timeseries/junction-user-1/blood_oxygen/grouped");
     if (disconnectDuringFetch) {
       liveSource = createConnectionSource({ status: "disconnected" });
-    }
-    if (kind === "reconcile") {
-      return createJsonResponse({ data: [{
-        id: "activity-1", source: { provider: "garmin", type: "watch" },
-        calendar_date: "2026-04-02", steps: 5000,
-      }] });
     }
     return createJsonResponse({ groups: { garmin: [{
       data: [{ timestamp: "2026-04-02T14:00:00.000Z", unit: "%", value: 97 }],
       source: { provider: "garmin", type: "watch" },
     }] } });
-  }, { summaryResources: ["activity"], timeseriesResources: ["blood_oxygen"] });
+  }, { summaryResources: [], timeseriesResources: ["blood_oxygen"] });
   const context = createJunctionJobContext({
     now: "2026-04-04T12:00:00.000Z",
     account: createAccount({ sources: [{ ...liveSource, resourceCount: 1 }] }),
@@ -138,15 +129,11 @@ test.each(["resource", "reconcile"] as const)("Junction %s pass shares inventory
       return [liveSource];
     },
     importSnapshot: async (snapshot) => {
-      // Summary jobs still submit an empty, fenced snapshot after disconnect.
-      if (kind === "resource" || JSON.stringify(snapshot).includes('"steps":5000')) {
-        imports += 1;
-      }
+      imports += 1;
       return { imported: true };
     },
   });
-  if (kind === "reconcile") context.shouldYield = () => false;
-  const job = createJob(kind, {
+  const job = createJob("resource", {
     resource: "blood_oxygen", resourceCategory: "timeseries", sourceProviderSlug: "garmin",
     windowEnd: "2026-04-03T00:00:00.000Z", windowStart: "2026-04-02T00:00:00.000Z",
   });
@@ -245,26 +232,17 @@ test("Junction summary continuations preserve imports and progress with one inve
   const pass = jobExecutor.createPassExecutor();
   const run = async (shareInventory: boolean) => {
     const executor = shareInventory ? pass : jobExecutor;
-    let job = createJob("reconcile", {
+    const job = createJob("reconcile", {
       windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
     });
-    const results = [];
-    for (let index = 0; index < 4; index += 1) {
-      const result = await executor.executeJob(context, job);
-      results.push(result);
-      const continuation = result.scheduledJobs?.[0];
-      if (!continuation) {
-        assert.equal(index, 3);
-        break;
-      }
-      job = createJobFromInput(continuation, index);
-    }
-    return results;
+    const result = await executor.executeJob(context, job);
+    assert.equal(result.scheduledJobs, undefined);
+    return result;
   };
   const baselineResults = await run(false);
   const baselineImports = [...imported];
-  assert.equal(inventoryReads, 4);
-  assert.equal(sourceReads, 8);
+  assert.equal(inventoryReads, 1);
+  assert.equal(sourceReads, 5);
   assert.equal(imported.length, 3);
   assert.ok(JSON.stringify(imported).includes('"steps":5000'));
   imported.length = 0;

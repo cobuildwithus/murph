@@ -2129,6 +2129,7 @@ test("Junction summary continuations survive service restart before one terminal
   const summaryRequests: Array<{ pass: number; resource: string }> = [];
   const timeseriesRequests: Array<{ pass: number; resource: string }> = [];
   let activePass = 0;
+  let firstSummaryYielded = false;
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -2179,7 +2180,14 @@ test("Junction summary continuations survive service restart before one terminal
     config: {
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
-      shouldYieldJobExecution: () => false,
+      shouldYieldJobExecution: () => {
+        if (activePass === 1 && summaryRequests.some((request) => request.resource === "activity")
+          && !firstSummaryYielded) {
+          firstSummaryYielded = true;
+          return true;
+        }
+        return false;
+      },
       stateDatabasePath,
     },
     importer: {
@@ -2221,8 +2229,6 @@ test("Junction summary continuations survive service restart before one terminal
 
     const expectedPartialPayloads: Array<Record<string, unknown>> = [
       { summaryResourceCursor: "sleep" },
-      { summaryResourceCursor: "body" },
-      { summaryPhaseComplete: true },
       {
         timeseriesCursor: window.windowStart,
         timeseriesResourceCursor: "steps",
@@ -2257,7 +2263,7 @@ test("Junction summary continuations survive service restart before one terminal
       }
     }
 
-    activePass = 5;
+    activePass = 3;
     const terminal = await fixture.service.runWorkerOnce();
     assert.equal(terminal?.kind, "reconcile");
     assert.equal(
@@ -2276,10 +2282,10 @@ test("Junction summary continuations survive service restart before one terminal
         { pass: 1, resource: "activity" },
         { pass: 2, resource: "sleep" },
         { pass: 2, resource: "sleep_cycle" },
-        { pass: 3, resource: "body" },
+        { pass: 2, resource: "body" },
       ],
     );
-    assert.deepEqual(timeseriesRequests, [{ pass: 5, resource: "steps" }]);
+    assert.deepEqual(timeseriesRequests, [{ pass: 3, resource: "steps" }]);
   } finally {
     fixture?.close();
   }
