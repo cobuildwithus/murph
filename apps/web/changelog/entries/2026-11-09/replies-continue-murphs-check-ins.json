@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-09",
+  "order": 100,
+  "item": {
+    "id": "replies-continue-murphs-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A quick reply to Murph's check-in picks up where it left off",
+    "summary": "When Murph messages you first, like when a game starts, a short reply such as \"Sure\" now continues that conversation.",
+    "details": "Before, Murph could lose track of a message it sent on its own and answer something older instead. Now every message Murph sends in your chat is part of the conversation it replies to.",
+    "relevanceTags": [
+      "messages",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4745
+    ]
+  }
+}
