@@ -281,12 +281,12 @@ async function importHostedWorkspaceBridgeMailboxItem(
     };
   }
 
-  const healthDataOutcome = await importHostedHealthDataMailboxItem(
+  const specialSystemOutcome = await importHostedSpecialSystemMailboxItem(
     input,
     wake,
   );
-  if (healthDataOutcome) {
-    return healthDataOutcome;
+  if (specialSystemOutcome) {
+    return specialSystemOutcome;
   }
 
   if (
@@ -314,10 +314,15 @@ async function importHostedWorkspaceBridgeMailboxItem(
   });
 }
 
-async function importHostedHealthDataMailboxItem(
+async function importHostedSpecialSystemMailboxItem(
   input: HostedWorkspaceBridgeMailboxImportInput,
   wake: HostedExecutionWake,
 ): Promise<Awaited<ReturnType<HostedWorkspaceRuntimeBridgeImportItem>> | null> {
+  if (wake.kind === "member.action.completed") {
+    // The Web completion fact is already authoritative. Import progress is
+    // checkpointed by the ordinary lane watermark; no runtime item is needed.
+    return { reasonCode: "member_action.completed", status: "imported" };
+  }
   if (
     input.item.route.action === "import-group-journal-fact" &&
     wake.kind === "journal.group-fact.recorded"

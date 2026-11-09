@@ -4282,16 +4282,21 @@ to the canonical vault use case without starting an assistant turn. When a
 conversation reply already owns the foreground pass, the existing scheduler
 finishes that reply first and then selects at most one due
 `member.action.requested` item before another provider pass or unrelated system
-work; the terminal `member.action.completed` receipt receives no such priority.
-The workout
-owner resolves an exact persisted action-id replay first, then derives exactly
+work. A validated terminal `member.action.completed` receipt advances the import
+watermark without entering the executable mailbox; historical queued receipts
+still use the no-op consumer. The workout owner resolves an exact persisted
+action-id replay first, then derives exactly
 one unfinished record from the opaque revision binding, locks that canonical
 workout id, revalidates the binding and authority-free visible shape, applies
 the complete batch in one canonical write, converges exact retries, and rejects
 stale or ambiguous state. No global active or focused workout owns targeting.
-Runtime appends a typed terminal outcome through the
-same mailbox owner before the original request checkpoint is released. The
-scoped client reads that action-id-keyed receipt and reports success only for an
+For model-free system-mailbox actions, runtime refreshes Browser Vault after the
+canonical checkpoint, publishes its exact checkpointed outcome, then offers the
+vault-share projection while retaining the recording item until cleanup. A
+transient refresh failure retains that item and its retry wake for up to three
+attempts; conflicting or permanently oversized publication terminates without
+retry. The scoped client reads that action-id-keyed receipt and reports success
+only for an
 applied or already-converged result. A future data
 editor extends the closed action union and delegates to its
 existing domain owner; it reuses this auth, idempotency, mailbox, and wake path

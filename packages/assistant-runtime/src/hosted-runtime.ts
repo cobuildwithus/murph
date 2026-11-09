@@ -227,9 +227,11 @@ import {
 import {
   createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate,
   deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout,
+  deferHostedMemberActionAfterBrowserVaultFailure,
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
+  publishHostedSystemMailboxMemberActionReceipt,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemUntilDeliveryWake,
   retireHostedCoveredDeviceHintsAfterImport,
@@ -4096,26 +4098,26 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           const isVaultShareProjectionRecord =
             recordItem.postCheckpointRecord?.kind === "vault-share.projection";
-          const projectionOpportunity =
-            await offerVaultShareProjectionBeforeRecording(
+          const isMemberActionRecord =
+            recordItem.postCheckpointRecord?.kind === "member-action.outcome-recorded";
+          const offerProjection = async () => {
+            const opportunity = await offerVaultShareProjectionBeforeRecording(
               resolveHostedSystemMailboxProjectionMode(recordItem),
             );
-          if (projectionOpportunity.outcome === "preempted") {
-            return { preempted: true, prepared: true };
-          }
-          if (
-            !isVaultShareProjectionRecord
-            && projectionOpportunity.result.outcome === "error"
-          ) {
-            rememberSystemMailboxPostRecordWake(
-              await deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
-                item: recordItem,
-                vaultRoot: restored.vaultRoot,
-              }),
-            );
-            return { preempted: true, prepared: true };
-          }
-          if (shouldYieldSystemMailboxWork()) {
+            if (opportunity.outcome === "preempted") return null;
+            if (!isVaultShareProjectionRecord && opportunity.result.outcome === "error") {
+              rememberSystemMailboxPostRecordWake(
+                await deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
+                  item: recordItem,
+                  vaultRoot: restored.vaultRoot,
+                }),
+              );
+              return null;
+            }
+            return opportunity;
+          };
+          let projectionOpportunity = isMemberActionRecord ? null : await offerProjection();
+          if (!isMemberActionRecord && (!projectionOpportunity || shouldYieldSystemMailboxWork())) {
             return { preempted: true, prepared: true };
           }
           const browserVaultRefreshAttempt =
@@ -4163,46 +4165,94 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             });
             throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
           }
-          const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(
-            refresh,
-          );
-          if (refreshDisposition.action === "retry") {
+          const deferMemberActionRefreshFailure = async (): Promise<boolean> => {
+            if (!isMemberActionRecord || (
+              refresh.status !== "refresh_failed"
+              && refresh.status !== "deferred_timeout"
+              && refresh.status !== "deferred_source_changed"
+            )) return false;
             if (
               hostAbortObserved
               || runtimeAbortController.signal.aborted
               || options.shutdownSignal?.aborted === true
               || shouldYieldSystemMailboxWork()
-            ) {
-              return { preempted: true, prepared: true };
-            }
-            const retryWake =
-              await deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout({
-                item: recordItem,
-                vaultRoot: restored.vaultRoot,
-              });
-            if (retryWake) {
-              rememberSystemMailboxPostRecordWake(retryWake);
-              await checkpointSystemMailboxMode(
-                `${inputItem.stagePrefix}.checkpoint.browser_vault_timeout_retry`,
-                [retryWake],
-              );
-              return { preempted: true, prepared: true };
-            }
-          }
-          if (refreshDisposition.action === "preempt") {
-            if (refresh.status === "deferred_runtime_wake") {
-              foregroundWakeObserved = true;
-            }
+            ) return true;
+            const retryWake = await deferHostedMemberActionAfterBrowserVaultFailure({
+              item: recordItem,
+              vaultRoot: restored.vaultRoot,
+            });
+            if (!retryWake) return false;
+            rememberSystemMailboxPostRecordWake(retryWake);
+            await checkpointSystemMailboxMode(
+              `${inputItem.stagePrefix}.checkpoint.browser_vault_retry`,
+              [retryWake],
+            );
+            return true;
+          };
+          if (await deferMemberActionRefreshFailure()) {
             return { preempted: true, prepared: true };
           }
+          const refreshPreempted = async (): Promise<boolean> => {
+            const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(refresh);
+            if (refreshDisposition.action === "retry" && !isMemberActionRecord) {
+              if (
+                hostAbortObserved
+                || runtimeAbortController.signal.aborted
+                || options.shutdownSignal?.aborted === true
+                || shouldYieldSystemMailboxWork()
+              ) return true;
+              const retryWake =
+                await deferHostedBrowserVaultRefreshSystemMailboxItemAfterTimeout({
+                  item: recordItem,
+                  vaultRoot: restored.vaultRoot,
+                });
+              if (retryWake) {
+                rememberSystemMailboxPostRecordWake(retryWake);
+                await checkpointSystemMailboxMode(
+                  `${inputItem.stagePrefix}.checkpoint.browser_vault_timeout_retry`,
+                  [retryWake],
+                );
+                return true;
+              }
+            }
+            if (refreshDisposition.action === "preempt") {
+              if (refresh.status === "deferred_runtime_wake") foregroundWakeObserved = true;
+              return true;
+            }
+            return false;
+          };
+          if (await refreshPreempted()) return { preempted: true, prepared: true };
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
+          }
+          if (isMemberActionRecord) {
+            // A newer publish owner wins a conflict. Oversized replicas and
+            // exhausted transient retries retire here so later work can run.
+            // The canonical outcome is already checkpointed. A lost response is
+            // safe to repeat at the ordinary cleanup boundary below.
+            try {
+              await publishHostedSystemMailboxMemberActionReceipt({
+                item: recordItem,
+                runtime: foregroundRuntime,
+                signal: runtimeAbortController.signal,
+              });
+            } catch (error) {
+              // Cleanup publication owns the existing retry/wake behavior.
+              if (runtimeAbortController.signal.aborted) throw error;
+            }
+            if (shouldYieldSystemMailboxWork()) {
+              return { preempted: true, prepared: true };
+            }
+            projectionOpportunity = await offerProjection();
+            if (!projectionOpportunity || shouldYieldSystemMailboxWork()) {
+              return { preempted: true, prepared: true };
+            }
           }
           return await recordSystemMailboxItem({
             exactDeliveryCompleted: false,
             item: recordItem,
             ...(isVaultShareProjectionRecord
-              ? { vaultShareProjectionResult: projectionOpportunity.result }
+              ? { vaultShareProjectionResult: projectionOpportunity!.result }
               : {}),
           });
         });

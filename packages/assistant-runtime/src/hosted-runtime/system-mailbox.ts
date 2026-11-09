@@ -1210,6 +1210,46 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 }
 
+export async function publishHostedSystemMailboxMemberActionReceipt(input: {
+  item: HostedSystemMailboxPendingItem;
+  runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
+}): Promise<void> {
+  if (input.item.postCheckpointRecord?.kind !== "member-action.outcome-recorded") {
+    throw new TypeError("Expected a checkpointed member-action receipt.");
+  }
+  await recordHostedSystemMailboxPostCheckpointRecord({
+    operatorHomeRoot: null,
+    record: input.item.postCheckpointRecord,
+    runtime: input.runtime,
+    signal: input.signal,
+    vaultRoot: null,
+  });
+}
+
+export async function deferHostedMemberActionAfterBrowserVaultFailure(input: {
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<HostedRuntimeWakeCandidate | null> {
+  if (input.item.postCheckpointRecord?.kind !== "member-action.outcome-recorded"
+    || input.item.attemptCount >= 3) return null;
+  const nextWakeAt = new Date(Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS).toISOString();
+  await updateHostedSystemMailboxPendingItem({
+    item: {
+      ...input.item,
+      lastErrorCode: "HOSTED_BROWSER_VAULT_REFRESH_FAILED",
+      lastErrorMessage: "Browser Vault publication failed; retrying the checkpointed member action.",
+      nextAttemptAt: nextWakeAt,
+      status: "recording",
+    },
+    vaultRoot: input.vaultRoot,
+  });
+  return createHostedRuntimeWakeCandidate(
+    nextWakeAt,
+    resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
+  );
+}
+
 function resolveHostedDeviceSyncDirtyRemainderRetention(input: {
   item: HostedSystemMailboxPendingItem;
   nextDirtyWakeAt: string | null;
