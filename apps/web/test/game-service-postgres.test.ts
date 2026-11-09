@@ -82,6 +82,8 @@ import { decideNewTerms, gameChallengeKey, parseStoredTerms } from "@/src/lib/ga
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
+import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
+import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, markGameChatGenerationQueuedTx } from "@/src/lib/game/chat-lifecycle-receipt";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -1347,6 +1349,44 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await ok(ava, rematchOf(second!.id))).toMatchObject({ round: 3, status: "invited" });
   });
 
+  it("addresses a new one-on-one invite to someone you already play, by the number you picked, and leaves anyone else an open link", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const kat = await member("Kat", "Europe/London");
+    const sam = await member("Sam", "Europe/London");
+    const phones = new Map([[ava, "+13125550171"], [kat, "+13125550172"], [sam, "+13125550173"], [leo, "+13125550174"]]);
+    for (const [memberId, phone] of phones) await getPrisma().$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId, prisma: tx,
+      phoneNumberVerifiedAt: new Date(), signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+    // Leo and Ava are mid-game; Leo has never played Kat.
+    await startGame(ava, leo);
+    const invite = (inviteeFirstName: string, value: string): GameCommand => ({ gameId: randomUUID(), inviteeFirstName, inviteeLabel: { relationship: "my brother" }, inviteeRecipient: { kind: "phone", value }, terms: TERMS, type: "createGame" });
+
+    // Ava's number, as the app sends it: the invite is hers, under her member id, with Leo's own words for her.
+    const second = await ok(leo, invite("Avi", "+1 312-555-0171"));
+    expect((await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: second!.id, seat: 1 } } })).memberId).toBe(ava);
+    expect(await readGame(second!.id, leo)).toMatchObject({ status: "invited", players: [{ seat: 0 }, { seat: 1, memberId: ava, firstName: "Avi", relationship: "my brother" }] });
+    const accept = { termsVersion: 1, timeZone: "Europe/London", token: second!.inviteToken!, type: "join" } as const;
+    expect(await run(kat, accept)).toMatchObject({ ok: false, status: 403, error: { code: "NOT_A_PLAYER", message: "This invite is for someone else." } });
+    expect(await ok(ava, { ...accept, timeZone: "Australia/Sydney" })).toMatchObject({ status: "live" });
+
+    // Kat is a member Leo has never played, so her number says nothing: an open link anyone can take.
+    const open = await ok(leo, invite("Kat", "+13125550172"));
+    expect((await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: open!.id, seat: 1 } } })).memberId).toBeNull();
+    expect(await readGame(open!.id, leo)).toMatchObject({ players: [{ seat: 0 }, { seat: 1, memberId: null }] });
+    expect(await ok(sam, { termsVersion: 1, timeZone: "Europe/London", token: open!.inviteToken!, type: "join" })).toMatchObject({ status: "live" });
+
+    // A number that isn't anyone's, one that can't be read, or your own: an open link, and the invite still goes.
+    for (const value of ["+13125550179", "not a number", "+13125550174"]) {
+      const created = await ok(leo, invite("Pat", value));
+      expect((await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: created!.id, seat: 1 } } })).memberId).toBeNull();
+    }
+
+    // Blocked either way: never addressed, so the number says nothing about the block.
+    await getPrisma().gameBlock.create({ data: { blockerMemberId: ava, blockedMemberId: leo } });
+    const blocked = await ok(leo, invite("Ava", "+13125550171"));
+    expect((await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: blocked!.id, seat: 1 } } })).memberId).toBeNull();
+  });
+
   it("lets only the addressed opponent accept a rematch, and never copies its label onto someone else", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
@@ -1355,7 +1395,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await devSettleNow(first.gameId, leo);
     const rematch = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Emma", inviteeLabel: { relationship: "sister" }, previousGameId: first.gameId, terms: TERMS, type: "createGame" });
     const accept = { termsVersion: 1, timeZone: "Europe/London", token: rematch!.inviteToken!, type: "join" } as const;
-    expect(await run(kat, accept)).toMatchObject({ ok: false, status: 403, error: { code: "NOT_A_PLAYER", message: "This rematch is for someone else." } });
+    expect(await run(kat, accept)).toMatchObject({ ok: false, status: 403, error: { code: "NOT_A_PLAYER", message: "This invite is for someone else." } });
     expect(await run(kat, { ...accept, type: "negotiate", proposalId: randomUUID(), change: { kind: "edit", lengthDays: 10 } }))
       .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect(await getPrisma().gameContactLabel.findUnique({ where: { ownerMemberId_subjectMemberId: { ownerMemberId: leo, subjectMemberId: kat } } })).toBeNull();
