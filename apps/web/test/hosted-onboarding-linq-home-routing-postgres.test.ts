@@ -29,7 +29,6 @@ import {
 import {
   appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedMailboxEnvelopeTx,
-  appendHostedMailboxItemTx,
   HostedMailboxSourceConversationPreparationMismatchError,
   readHostedMailboxSourceConversationEntriesTx,
   readHostedMailboxSourceConversationPreparation,
@@ -2483,14 +2482,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             memberId,
             prisma: tx,
           });
-          await appendHostedMailboxItemTx({
-            dedupeKey: `linq-route-mailbox:${role}:${randomUUID()}`,
-            kind: "conversation.message",
-            lane: "conversation",
-            occurredAt: new Date(),
-            payloadSerializedJson: JSON.stringify({ kind: "lock-proof" }),
+          await appendHostedMailboxEnvelopeTx({
+            envelope: buildHostedExecutionTelegramConversationMessageWake({
+              eventId: `linq-route-mailbox:${role}:${randomUUID()}`,
+              occurredAt: new Date().toISOString(),
+              telegramMessage: {
+                messageId: "1", schema: "murph.hosted-telegram-message.v1",
+                text: "lock proof", threadId: "123", threadIsDirect: true,
+              },
+              userId: memberId,
+            }),
             tx,
-            userId: memberId,
           });
           return role;
         };

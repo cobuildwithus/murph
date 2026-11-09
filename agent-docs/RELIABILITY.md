@@ -393,16 +393,19 @@ Current product admission, delivery and native runtime safety rules remain.
   Unexpected or transient enrollment errors still fail the request and replay
   converges on the same semantic grant. The client enrollment island remains a
   fallback for members who entered the page with consent already current.
-- Standalone generic mailbox-item append resolves an already-durable dedupe
-  replay before crypto work. On a miss it unwraps the exact active ingress root
-  before `BEGIN`; the transaction locks and re-reads that root identity, then
-  seals only from the matching request-scoped cache entry. A root change rolls
-  back and permits one fresh full preparation attempt. The prepared envelope
-  transaction adapter carries the same generic crypto-only token without a
-  mailbox proxy capability or second drift error, and does not replace envelope
-  target or workspace checks. Legacy transaction append adapters stay
-  provider-capable for separately migrated producers and must not be mistaken
-  for the prepared surface.
+- Mailbox producers use envelope append entrypoints. Prepared-root callers unwrap
+  the exact active ingress root before `BEGIN`; the transaction locks and
+  re-reads that root identity, then seals only from the matching request-scoped
+  cache entry. A root change rolls back and permits one fresh full preparation
+  attempt. The crypto-only token does not replace envelope target or workspace
+  checks. Legacy envelope transaction adapters remain provider-capable and
+  must not be mistaken for the prepared surface.
+- Both mailbox append implementations allocate causal and lane sequences in one
+  store-owned SQL statement. Data dependencies enforce the causal advisory lock,
+  then causal counter upsert, then lane counter upsert; neither counter is
+  touched before the lock. The standalone causal lock remains shared with
+  freshness readers. The sealed item INSERT stays separate because sequence-bound
+  payloads include `laneSeq` in their AAD.
 - Mailbox envelope admission checks workspace existence with one narrow read
   inside its existing transaction and issues one insert-or-ignore only when
   missing. The warm read neither changes checkpoint fields/timestamps nor waits

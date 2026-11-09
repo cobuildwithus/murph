@@ -3545,7 +3545,7 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
     $queryRaw: async (...args: Parameters<Prisma.TransactionClient["$queryRaw"]>) => {
       const query = args[0] as TemplateStringsArray;
       const sql = Array.isArray(query) ? query.join("?") : "";
-      if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ seq: 1n }];
+      if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ causalSeq: 1n, laneSeq: 1n }];
       if (sql.includes("INSERT INTO hosted_mailbox_item")) {
         expect(areHostedDomainRootProviderCallsDisabled()).toBe(true);
         mailboxCiphertext = String(args[12]);

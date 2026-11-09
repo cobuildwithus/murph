@@ -396,124 +396,6 @@ async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
   });
 }
 
-export async function appendHostedMailboxItem(
-  input: AppendHostedMailboxItemBaseInput & {
-    prisma?: PrismaClient;
-  },
-): Promise<AppendHostedMailboxItemResult> {
-  const prisma = input.prisma ?? getPrisma();
-  const normalized = normalizeHostedMailboxAppendInput(input);
-  const existingBeforePreparation = await findHostedMailboxItemByDedupeKeyTx({
-    dedupeKey: normalized.dedupeKey,
-    tx: prisma,
-    userId: normalized.userId,
-  });
-  if (existingBeforePreparation) {
-    const duplicate = await buildHostedMailboxDuplicateResult({
-      existing: existingBeforePreparation,
-      normalized,
-    });
-    recordHostedMailboxDedupeConflictLog({
-      dedupeConflict: duplicate.dedupeConflict,
-      existing: existingBeforePreparation,
-      kind: normalized.kind,
-      lane: normalized.lane,
-      payloadBytes: normalized.payloadBytes,
-      payloadHash: normalized.payloadHash,
-      payloadSchema: normalized.payloadSchema,
-    });
-    return duplicate;
-  }
-
-  try {
-    return await runWithPreparedHostedMailboxItemAppendCrypto({
-      append: (prepared) =>
-        prisma.$transaction((tx) =>
-            appendHostedMailboxItemWithPreparedCryptoTx({
-              dedupeKey: normalized.dedupeKey,
-              expiresAt: normalized.expiresAt,
-              kind: normalized.kind,
-              lane: normalized.lane,
-              occurredAt: normalized.occurredAt,
-              payloadSchema: normalized.payloadSchema,
-              payloadSerializedJson: normalized.serialized,
-              prepared,
-              tx,
-              userId: normalized.userId,
-            })
-        ),
-      prisma,
-      userId: normalized.userId,
-    });
-  } catch (error) {
-    if (isPrismaUniqueConstraintError(error)) {
-      const existing = await findHostedMailboxItemByDedupeKeyTx({
-        dedupeKey: normalized.dedupeKey,
-        tx: prisma,
-        userId: normalized.userId,
-      });
-
-      if (existing) {
-        return buildHostedMailboxDuplicateResult({
-          existing,
-          normalized,
-        });
-      }
-    }
-
-    throw error;
-  }
-}
-
-/**
- * Legacy provider-capable transaction surface retained for separately migrated
- * callers. New generic owners must use the prepared transaction surface below.
- */
-export async function appendHostedMailboxItemTx(
-  input: AppendHostedMailboxItemBaseInput & {
-    tx: HostedMailboxMutationTx;
-  },
-): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
-    ...input,
-    assistantInputLookupKey: null,
-  });
-}
-
-/**
- * Transaction-safe generic append surface. Crypto must be prepared before the
- * transaction begins; this owner revalidates root authority and seals only
- * from the exact request-scoped cache entry represented by `prepared`. The
- * token does not replace any caller-owned admission or target checks.
- */
-export async function appendHostedMailboxItemWithPreparedCryptoTx(
-  input: AppendHostedMailboxItemBaseInput & {
-    prepared: PreparedHostedMailboxItemAppendCrypto;
-    tx: HostedMailboxMutationTx;
-  },
-): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxItemWithEncryptionTx({
-    ...input,
-    assistantInputLookupKey: null,
-    encryption: {
-      mode: "prepared-root",
-      prepared: input.prepared,
-    },
-  });
-}
-
-async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
-  input: AppendHostedMailboxItemInternalInput & {
-    assistantInputLookupKey: string | null;
-    tx: HostedMailboxMutationTx;
-  },
-): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxItemWithEncryptionTx({
-    ...input,
-    encryption: { mode: "legacy-transaction" },
-  });
-}
-
 async function appendHostedMailboxItemWithEncryptionTx(
   input: AppendHostedMailboxItemInternalInput & {
     assistantInputLookupKey: string | null;
@@ -599,15 +481,7 @@ async function appendHostedMailboxItemWithEncryptionTx(
   const itemId = input.itemId === undefined
     ? randomUUID()
     : requireHostedMailboxItemId(input.itemId);
-  await acquireHostedMailboxCausalAppendLockTx({
-    tx: input.tx,
-    userId,
-  });
-  const causalSeq = await allocateHostedMailboxCausalSeqTx({
-    tx: input.tx,
-    userId,
-  });
-  const laneSeq = await allocateHostedMailboxLaneSeqTx({
+  const { causalSeq, laneSeq } = await allocateHostedMailboxSequencesTx({
     lane,
     tx: input.tx,
     userId,
@@ -1029,15 +903,7 @@ export async function appendPreparedHostedMailboxEnvelopeTx(input: {
     }
     return { mailboxItemId: existing.id };
   }
-  await acquireHostedMailboxCausalAppendLockTx({
-    tx: input.tx,
-    userId: prepared.userId,
-  });
-  const causalSeq = await allocateHostedMailboxCausalSeqTx({
-    tx: input.tx,
-    userId: prepared.userId,
-  });
-  const laneSeq = await allocateHostedMailboxLaneSeqTx({
+  const { causalSeq, laneSeq } = await allocateHostedMailboxSequencesTx({
     lane: prepared.lane,
     tx: input.tx,
     userId: prepared.userId,
@@ -2610,45 +2476,39 @@ export async function readHostedMailboxConversationWakeByAssistantInputId(input:
   return wake?.kind === "conversation.message" ? wake : null;
 }
 
-export async function allocateHostedMailboxLaneSeqTx(input: {
+async function allocateHostedMailboxSequencesTx(input: {
   lane: HostedMailboxLane;
   tx: HostedMailboxMutationTx;
   userId: string;
-}): Promise<bigint> {
-  const rows = await input.tx.$queryRaw<Array<{ seq: bigint }>>`
-    INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
-    VALUES (${input.userId}, ${input.lane}, 2, NOW())
-    ON CONFLICT (user_id, lane)
-    DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq + 1,
-                  updated_at = NOW()
-    RETURNING next_seq - 1 AS seq
+}): Promise<{ causalSeq: bigint; laneSeq: bigint }> {
+  // Consume each preceding result to enforce lock -> causal -> lane ordering.
+  // ON CONFLICT updates the latest counter even if the lock waits past our snapshot.
+  const rows = await input.tx.$queryRaw<Array<{ causalSeq: bigint; laneSeq: bigint }>>`
+    WITH causal_lock AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext('mailbox-causal-seq'))
+    ), causal AS (
+      INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
+      SELECT ${input.userId}, 'causal', 2, NOW() FROM causal_lock
+      ON CONFLICT (user_id, lane)
+      DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq + 1,
+                    updated_at = NOW()
+      RETURNING user_id, next_seq - 1 AS seq
+    ), lane AS (
+      INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
+      SELECT user_id, ${input.lane}, 2, NOW() FROM causal
+      ON CONFLICT (user_id, lane)
+      DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq + 1,
+                    updated_at = NOW()
+      RETURNING next_seq - 1 AS seq
+    )
+    SELECT causal.seq AS "causalSeq", lane.seq AS "laneSeq" FROM causal CROSS JOIN lane
   `;
 
   if (rows.length !== 1) {
-    throw new Error("Hosted mailbox lane allocation failed.");
+    throw new Error("Hosted mailbox sequence allocation failed.");
   }
 
-  return rows[0].seq;
-}
-
-async function allocateHostedMailboxCausalSeqTx(input: {
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<bigint> {
-  const rows = await input.tx.$queryRaw<Array<{ seq: bigint }>>`
-    INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
-    VALUES (${input.userId}, 'causal', 2, NOW())
-    ON CONFLICT (user_id, lane)
-    DO UPDATE SET next_seq = hosted_mailbox_lane_counter.next_seq + 1,
-                  updated_at = NOW()
-    RETURNING next_seq - 1 AS seq
-  `;
-
-  if (rows.length !== 1) {
-    throw new Error("Hosted mailbox causal sequence allocation failed.");
-  }
-
-  return rows[0].seq;
+  return rows[0];
 }
 
 export async function acquireHostedMailboxCausalAppendLockTx(input: {
@@ -3038,27 +2898,6 @@ async function encryptHostedMailboxPayloadStorage(input: {
     };
 }
 
-async function buildHostedMailboxDuplicateResult(input: {
-  existing: HostedMailboxItemRow;
-  normalized: NormalizedHostedMailboxAppendInput;
-}): Promise<AppendHostedMailboxItemResult> {
-  return {
-    duplicate: true,
-    dedupeConflict: hasHostedMailboxDedupeConflict({
-      existing: input.existing,
-      kind: input.normalized.kind,
-      lane: input.normalized.lane,
-      payloadBytes: input.normalized.payloadBytes,
-      payloadHash: input.normalized.payloadHash,
-      payloadSchema: input.normalized.payloadSchema,
-    }),
-    inserted: false,
-    item: await hydrateHostedMailboxItemTx({
-      record: input.existing,
-    }),
-  };
-}
-
 function requireHostedMailboxSerializedPayload(value: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError("Hosted mailbox item requires serialized payload JSON for encrypted append.");
@@ -3344,10 +3183,4 @@ function requireDate(value: Date | string, label: string): Date {
   }
 
   return date;
-}
-
-function isPrismaUniqueConstraintError(
-  error: unknown,
-): error is Prisma.PrismaClientKnownRequestError {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

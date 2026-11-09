@@ -302,19 +302,17 @@ describe("Linq message-edit preparation composition", () => {
       "workspace-ensure",
       "mailbox-dedupe-lock",
       "mailbox-dedupe-read",
-      "mailbox-causal-lock",
-      "mailbox-causal-seq",
-      "mailbox-lane-seq",
+      "mailbox-sequences",
       "mailbox-insert",
     ]);
-    expect(harness.state.datastoreCalls).toHaveLength(19);
+    expect(harness.state.datastoreCalls).toHaveLength(17);
     expect(harness.state.datastoreCalls.map(
       (call) => call.inTransaction,
     )).toEqual([
       false,
       false,
       false,
-      ...Array.from({ length: 16 }, () => true),
+      ...Array.from({ length: 14 }, () => true),
     ]);
     expect(harness.state.kms.returnedPlaintexts).toHaveLength(6);
     expect(harness.state.kms.returnedPlaintexts.every((plaintext) =>
@@ -655,11 +653,9 @@ function createPrismaStub(input: {
       return [{ value: 1 }];
     }
     if (lowerSql.includes("insert into hosted_mailbox_lane_counter")) {
-      const label = invocation.values.length === 1
-        ? "mailbox-causal-seq"
-        : "mailbox-lane-seq";
-      recordDatastoreCall(label);
-      return [{ seq: BigInt(input.sourceRows.length + 1) }];
+      recordDatastoreCall("mailbox-sequences");
+      const seq = BigInt(input.sourceRows.length + 1);
+      return [{ causalSeq: seq, laneSeq: seq }];
     }
     if (lowerSql.includes("insert into hosted_mailbox_item")) {
       recordDatastoreCall("mailbox-insert");
@@ -703,10 +699,6 @@ function createPrismaStub(input: {
     }
     if (invocation.values.includes("hosted-linq-routing:chat")) {
       recordDatastoreCall("chat-ownership-lock");
-      return 1;
-    }
-    if (lowerSql.includes("mailbox-causal-seq")) {
-      recordDatastoreCall("mailbox-causal-lock");
       return 1;
     }
     if (lowerSql.includes("pg_advisory_xact_lock")) {
