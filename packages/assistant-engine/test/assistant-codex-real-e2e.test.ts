@@ -46892,6 +46892,93 @@ describeRealCodex('production reaction routing turn journey', () => {
   }, 240_000)
 })
 
+describeRealCodex('real Codex canonical game selfplay e2e', () => {
+  it.skipIf(!process.env.MURPH_SELFPLAY_BRIDGE_URL)('game selfplay shares canonical state across both players', async () => {
+    const bridge = new URL(process.env.MURPH_SELFPLAY_BRIDGE_URL ?? 'http://127.0.0.1:1')
+    if (bridge.protocol !== 'http:' || bridge.hostname !== '127.0.0.1' || !bridge.port) {
+      throw new Error('Self-play needs the isolated loopback PostgreSQL test bridge.')
+    }
+    const contextResponse = await fetch(new URL('/context', bridge))
+    if (!contextResponse.ok) throw new Error('Self-play bridge unavailable')
+    const context = await contextResponse.json() as { today: string; instant: string; yesterday: string; gameId: string }
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-selfplay-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const history: string[] = []
+    const turns = [
+      { seat: 0, name: 'Maya', message: 'Change the prize to breakfast in bed.', operation: 'propose' },
+      { seat: 1, name: 'Sam', message: 'Yes, breakfast in bed works for me.', operation: 'approve' },
+      { seat: 0, name: 'Maya', message: 'Change my reading task to 20 pushups.', operation: null },
+      { seat: 0, name: 'Maya', message: "I posted yesterday, but I didn't actually finish my chapter. Mark yesterday incomplete.", operation: 'mark_incomplete' },
+      { seat: 0, name: 'Maya', message: 'Correction: I did finish that chapter yesterday. Restore my completion for yesterday.', operation: 'restore_day' },
+    ] as const
+    try {
+      for (const [index, turn] of turns.entries()) {
+        const inputId = `ain_${String(index + 1).repeat(32)}`
+        const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
+        const incoming = buildAssistantAutoReplyPrompt([{
+          actorIsSelf: false, attachmentDescriptors: [],
+          attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: 'manual', status: 'available', updatedAt: context.instant },
+          conversation: { accountId: null, actorId: `synthetic-seat-${turn.seat}`, actorIsSelf: false, source: 'linq', threadId: 'synthetic-selfplay-chat', threadIsDirect: false },
+          inputId, occurredAt: context.instant, receivedAt: context.instant, projection: null, replyTarget: null, source: 'linq',
+          sourceMetadata: null, telegramMetadata: null, text: turn.message,
+          linqSpeakerLabel: { displayName: turn.name, source: 'profile-name' },
+        }], { timeZone: 'UTC' })
+        if (incoming.kind !== 'ready') throw new Error('Synthetic accepted message is not ready')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+            cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+            currentLocalDate: context.today, currentInstant: context.instant, currentTimeZone: 'UTC',
+            hostedRuntime: true, onboardingGuidance: false, turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false, vaultFileSendAvailable: false,
+            groupTool: { request: async request => {
+              calls.push(request)
+              const response = await fetch(new URL(`/tool/${turn.seat}`, bridge), {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request),
+              })
+              if (!response.ok) throw new Error('Canonical synthetic game operation failed')
+              return hostedGameToolResponseSchema.parse(await response.json())
+            } },
+            currentUserActionScope: () => ({ conversationId: 'synthetic-selfplay-chat', inboundMailboxItemIds: [],
+              recipientKey: 'synthetic-selfplay-room', acceptedInputIds: [inputId], originSessionId: 'synthetic-selfplay-session', conversationScope: 'group' }),
+            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('No file delivery authorized') },
+          },
+          prompt: `${history.join('\n')}\n${incoming.prompt}`,
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const updates = calls.filter(call => call.action === 'update_game')
+        process.stdout.write(`[canonical selfplay] ${JSON.stringify({ turn: index + 1, speaker: turn.name, reply: result.finalMessage, updates })}\n`)
+        expect(calls[0]?.action).toBe('read_game')
+        expect(updates).toHaveLength(turn.operation ? 1 : 0)
+        if (turn.operation) expect(updates[0]).toMatchObject({ action: 'update_game', update: { operation: turn.operation, gameId: context.gameId } })
+        if (index === 0) {
+          expect(result.finalMessage).toMatch(/Sam/u)
+          expect(result.finalMessage).toMatch(/breakfast/iu)
+          expect(result.finalMessage).not.toMatch(/changed|all set/iu)
+        } else if (index === 1) {
+          expect(result.finalMessage).toMatch(/breakfast|agreed|set/iu)
+          expect(result.finalMessage).not.toMatch(/waiting|confirm|pending/iu)
+        } else if (index === 2) {
+          expect(result.finalMessage).toMatch(/locked|fixed|stay|can.t|cannot/iu)
+        } else {
+          expect(updates[0]).toMatchObject({ update: { date: context.yesterday } })
+          expect(result.finalMessage).toMatch(index === 3 ? /incomplete|didn.t finish|not (?:done|complete)/iu : /restored|complete|count/iu)
+        }
+        history.push(`${turn.name}: ${turn.message}`, `Murph: ${result.finalMessage}`)
+      }
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  })
+})
+
 describeRealCodex('real Codex game v1 rules e2e', () => {
   it.each([
     { name: 'game v1 refuses live task changes without proposing', request: 'Change my task to 20 pushups.', kind: 'refusal' },

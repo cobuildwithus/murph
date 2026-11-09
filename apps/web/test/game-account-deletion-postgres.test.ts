@@ -112,18 +112,30 @@ async function deleteAccount(memberId: string) {
 
 describe.skipIf(!runPostgresProof)("weekly game when a player deletes their account", () => {
   it("uses the actor and type index for the paged note selector", async () => {
+    const owner = await member("Planner");
+    const [gameId] = await seedHistory(owner, 1);
+    const actors = [randomUUID(), randomUUID()];
     const rollback = new Error("Roll back the query plan proof");
     let plan: unknown;
     await expect(getPrisma().$transaction(async tx => {
-      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
-      plan = await tx.$queryRaw`EXPLAIN (FORMAT JSON)
+      await tx.game.update({ where: { id: gameId }, data: { maxPlayers: 10 } });
+      // Empty-table costs can favor the primary key even with seqscan disabled.
+      // A selective, analyzed fixture proves the real paged query uses its index.
+      await tx.gameEvent.createMany({ data: [
+        ...Array.from({ length: 2048 }, (_, i) => ({ gameId, actor: `synthetic-peer-${i % 128}`,
+          type: i % 2 === 0 ? "talk_requested" : "created", payload: {} })),
+        ...actors.map(actor => ({ gameId, actor, type: "talk_requested", payload: {} })),
+      ] });
+      await tx.$executeRaw`ANALYZE game_event, game`;
+      plan = await tx.$queryRaw`EXPLAIN (ANALYZE, FORMAT JSON)
         SELECT e.id, e.game_id, e.actor, e.command_key, e.payload FROM game_event e
-        WHERE e.actor IN (${randomUUID()}, ${randomUUID()}) AND e.type = 'talk_requested'
+        WHERE e.actor IN (${actors[0]}, ${actors[1]}) AND e.type = 'talk_requested'
           AND EXISTS (SELECT 1 FROM game g WHERE g.id = e.game_id AND g.max_players = 10)
         ORDER BY e.id ASC LIMIT 100`;
       throw rollback;
     })).rejects.toBe(rollback);
     expect(JSON.stringify(plan)).toContain('"Index Name":"game_event_actor_type_idx"');
+    expect(plan).toMatchObject([{ "QUERY PLAN": [{ Plan: { "Actual Rows": 2 } }] }]);
   });
   afterAll(async () => {
     await cleanupGameFixtures(getPrisma(), memberIds);

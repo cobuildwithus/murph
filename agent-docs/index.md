@@ -1,3 +1,5 @@
+The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).
+
 Device-first per-day wearable selection and complete private RHR history are owned by
 [Query](../packages/query/README.md#device-readings-and-health-store-copies) and
 [private numbers](product-specs/ios-meals.md#private-numbers). Implementation evidence
@@ -1197,6 +1199,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/feature-user-story-audit/gap-triage.md` | Triage notes for gaps found during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/feature-user-story-audit/parse-warnings.md` | Parser warnings captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
+| `agent-docs/references/game-selfplay-qa.md` | Synthetic game state map, native self-play rounds, canonical chat edits, confirmed fixes and remaining coverage gaps. | Game QA evidence | Medium | 2026-11-09 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/app-state-machines.md` | 88 cross-repository state families, invariants, transitions, confirmed failure schedules, the unified native reminder lifecycle, regression proof and release evidence. | Shared Murph/iOS audit | Medium | 2026-11-07 |
