@@ -1,0 +1,1811 @@
+{
+  "nativeBaseline": "40acb0d2",
+  "source": "MurphCompanion/Game/Prototype/GamePrototypeScenarios.swift",
+  "meaning": "Declared Debug scenarios, not every runtime state combination. Screenshot sweep status is specific to this QA round; other scenarios may have interaction-test coverage.",
+  "scenarios": [
+    "name",
+    "zero",
+    "setup",
+    "whoPicked",
+    "whoSameName",
+    "whoAgain",
+    "whoPlaying",
+    "whatTogether",
+    "whatSplit",
+    "stakes",
+    "stakesDare",
+    "stakesDareLong",
+    "whenQuickPicks",
+    "whenCustom",
+    "waiting",
+    "declined",
+    "linkText",
+    "webInvite",
+    "usedLink",
+    "invite",
+    "inviteLong",
+    "inviteOverGame",
+    "talkInvite",
+    "talkFailed",
+    "beforeDayOne",
+    "negotiating",
+    "negotiatingCalledOff",
+    "changeFailed",
+    "changeFailedFinal",
+    "changeFailedMidGame",
+    "suggestChanges",
+    "editGameMidGame",
+    "waitingForYes",
+    "beforeDayOneWaiting",
+    "changeDays",
+    "changeLength",
+    "cancelChange",
+    "longGame",
+    "longGameRecap",
+    "reveal",
+    "dayOne",
+    "twoGames",
+    "manyGames",
+    "manyGamesUnseen",
+    "theyPosted",
+    "camera",
+    "cameraFirstTime",
+    "unlocked",
+    "replyPhotoActions",
+    "replyTyping",
+    "replyRecording",
+    "replyReview",
+    "replySendFailed",
+    "replySentText",
+    "replySentVoice",
+    "replyIncomingText",
+    "replyIncomingVoice",
+    "replyEarlierDay",
+    "replyWords",
+    "replyReps",
+    "replyHeartRate",
+    "replyRoute",
+    "replyMicDenied",
+    "replyEmptyDay",
+    "replyOffDay",
+    "replyWeekDone",
+    "replyLocked",
+    "replyWaiting",
+    "theyPostedSecond",
+    "lastNightUnseen",
+    "missedDayUnseen",
+    "lastDayUnseen",
+    "proveItRest",
+    "proveItRevealed",
+    "proveItConfirm",
+    "unlockedLoading",
+    "goFirst",
+    "waitingOnThem",
+    "postKept",
+    "dayOff",
+    "anyDays",
+    "anyDaysDone",
+    "deleteRetake",
+    "termsAsk",
+    "weekDrawer",
+    "weekDrawerLong",
+    "weekDrawerMissed",
+    "you",
+    "youPhoto",
+    "pairBoard",
+    "pairBoardNotShared",
+    "youNumbers",
+    "youNumbersEmpty",
+    "youEmpty",
+    "youGames",
+    "youPerson",
+    "games",
+    "gamesEmpty",
+    "gamesFirstGoing",
+    "gamesPlayerNoPhoto",
+    "gamesPlayerPrivatePhoto",
+    "gamesPlayerOwnPhoto",
+    "gamesOneDoneOneGoing",
+    "gamesPlayingNow",
+    "prizes",
+    "prizesEmpty",
+    "prizesFirstGoing",
+    "bigTicket",
+    "owedTicket",
+    "resultsSoon",
+    "opponentLeft",
+    "lastDayLocked",
+    "lastDayGoFirst",
+    "lastDayWaiting",
+    "recapWriting",
+    "recapWritingLost",
+    "recapWritingEven",
+    "recapWritingPerfect",
+    "recapReady",
+    "recap",
+    "recapLost",
+    "recapPerfect",
+    "recapEven",
+    "recapTheyAsked",
+    "recapMurph",
+    "recapMurphLikely",
+    "afterRecap",
+    "redeem",
+    "redeemed",
+    "rematchRequested",
+    "rematchChanged",
+    "inviteSentHome",
+    "rematch",
+    "rematchSetup",
+    "words",
+    "wordsUnlocked",
+    "lockedBlur",
+    "repTape",
+    "repTapeWaiting",
+    "repTapeFirstTime",
+    "repTapeCountdown",
+    "repTapeCounting",
+    "repTapeOutOfView",
+    "repTapeTooClose",
+    "repTapeSideways",
+    "repTapeLeanedBack",
+    "repTapeDone",
+    "repTapeRange",
+    "repTapeCameraOff",
+    "repTapeLocked",
+    "repTapeSent",
+    "repTapeHeartRate",
+    "repTapeHeartRateDone",
+    "repTapeEarned",
+    "repTapeDay30",
+    "heartRate",
+    "heartRateUnlocked",
+    "heartRateFirst",
+    "whoopDrawer",
+    "route",
+    "routeDenied",
+    "routeRecording",
+    "routeDone",
+    "routeUnlocked",
+    "routeGoFirst",
+    "routeUnderWay",
+    "reportPost",
+    "reportPlayer",
+    "blockConfirm",
+    "reported",
+    "blockedSettings",
+    "notificationSettings",
+    "notificationSettingsSaving",
+    "notificationSettingsLoading",
+    "notificationSettingsFailed"
+  ],
+  "screenVariants": [
+    {
+      "scenario": "name",
+      "screen": "name",
+      "group": "setup",
+      "board": "2.2c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "zero",
+      "screen": "home",
+      "group": "setup",
+      "board": "1.1",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "setup",
+      "screen": "setup",
+      "group": "setup",
+      "board": "1.2",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "whoPicked",
+      "screen": "setup.who",
+      "group": "setup",
+      "board": "1.2b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "whoSameName",
+      "screen": "setup.who",
+      "group": "setup",
+      "board": "1.2c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "whatTogether",
+      "screen": "setup.what",
+      "group": "setup",
+      "board": "1.3",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "whatSplit",
+      "screen": "setup.what",
+      "group": "setup",
+      "board": "1.3b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "stakes",
+      "screen": "setup.stakes",
+      "group": "setup",
+      "board": "1.4",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "waiting",
+      "screen": "home",
+      "group": "setup",
+      "board": "1.6",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "declined",
+      "screen": "home",
+      "group": "setup",
+      "board": "1.7",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "linkText",
+      "screen": "linkPreview",
+      "group": "setup",
+      "board": "2.1",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "webInvite",
+      "screen": "webInvite",
+      "group": "setup",
+      "board": "2.1c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "usedLink",
+      "screen": "usedLink",
+      "group": "setup",
+      "board": "2.1d",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "usedLink",
+      "screen": "usedLink",
+      "group": "setup",
+      "board": "2.1e called off",
+      "arguments": [
+        "--called-off"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "invite",
+      "screen": "invite",
+      "group": "setup",
+      "board": "2.3",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "inviteLong",
+      "screen": "invite",
+      "group": "setup",
+      "board": "2.3c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "inviteOverGame",
+      "screen": "invite",
+      "group": "setup",
+      "board": "2.3d",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "talkInvite",
+      "screen": "talk",
+      "group": "setup",
+      "board": "Talk it over",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "talkFailed",
+      "screen": "home",
+      "group": "setup",
+      "board": "Talk it over, delivery failed",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "beforeDayOne",
+      "screen": "home",
+      "group": "setup",
+      "board": "2.4",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "negotiating",
+      "screen": "home",
+      "group": "setup",
+      "board": "2.5",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "stakesDare",
+      "screen": "setup.stakes",
+      "group": "terms",
+      "board": "B3.2",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "stakesDareLong",
+      "screen": "setup.stakes",
+      "group": "terms",
+      "board": "B3.3",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "whenQuickPicks",
+      "screen": "setup.when",
+      "group": "terms",
+      "board": "B1.3",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "whenCustom",
+      "screen": "setup.when",
+      "group": "terms",
+      "board": "B1.4",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "suggestChanges",
+      "screen": "editGame",
+      "group": "terms",
+      "board": "B1.2",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "editGameMidGame",
+      "screen": "editGame",
+      "group": "terms",
+      "board": "B1.5",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "waitingForYes",
+      "screen": "home",
+      "group": "terms",
+      "board": "B2.1",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "changeDays",
+      "screen": "changeDetail",
+      "group": "terms",
+      "board": "B2.2",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "changeLength",
+      "screen": "changeDetail",
+      "group": "terms",
+      "board": "B2.3",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "cancelChange",
+      "screen": "cancelChange",
+      "group": "terms",
+      "board": "B2.4",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "changeFailed",
+      "screen": "home",
+      "group": "terms",
+      "board": "B2.5",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "beforeDayOneWaiting",
+      "screen": "home",
+      "group": "terms",
+      "board": "B2.6",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "negotiatingCalledOff",
+      "screen": "home",
+      "group": "terms",
+      "board": "B2.7",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "changeFailedMidGame",
+      "screen": "home",
+      "group": "terms",
+      "board": "B2.5c",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "reveal",
+      "screen": "reveal",
+      "group": "day",
+      "board": "3.1",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "dayOne",
+      "screen": "home",
+      "group": "day",
+      "board": "3.2",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "twoGames",
+      "screen": "home",
+      "group": "day",
+      "board": "3.3",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "theyPosted",
+      "screen": "home",
+      "group": "day",
+      "board": "4.1",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "cameraFirstTime",
+      "screen": "camera",
+      "group": "day",
+      "board": "4.2a camera, the first time",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "unlocked",
+      "screen": "home",
+      "group": "day",
+      "board": "4.5",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "proveItRest",
+      "screen": "home",
+      "group": "day",
+      "board": "4.5d Prove it at rest",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "proveItRevealed",
+      "screen": "home",
+      "group": "day",
+      "board": "4.5e Prove it revealed",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "proveItConfirm",
+      "screen": "proveIt",
+      "group": "day",
+      "board": "4.5f Prove it confirm",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "unlocked",
+      "screen": "home",
+      "group": "day",
+      "board": "4.5b didn't finish",
+      "arguments": [
+        "--didnt-finish"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "goFirst",
+      "screen": "home",
+      "group": "day",
+      "board": "4.6",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "goFirst",
+      "screen": "home",
+      "group": "day",
+      "board": "4.6b long task",
+      "arguments": [
+        "--long-task"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "waitingOnThem",
+      "screen": "home",
+      "group": "day",
+      "board": "4.7",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "postKept",
+      "screen": "home",
+      "group": "day",
+      "board": "4.7b other post kept",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "dayOff",
+      "screen": "home",
+      "group": "day",
+      "board": "4.8",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "anyDays",
+      "screen": "home",
+      "group": "day",
+      "board": "4.9",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "anyDaysDone",
+      "screen": "home",
+      "group": "day",
+      "board": "4.10",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "deleteRetake",
+      "screen": "deleteShot",
+      "group": "day",
+      "board": "4.11",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "words",
+      "screen": "words",
+      "group": "day",
+      "board": "v1 6.3",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "wordsUnlocked",
+      "screen": "home",
+      "group": "day",
+      "board": "v1 6.4b",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "lockedBlur",
+      "screen": "home",
+      "group": "day",
+      "board": "v1 6.1b",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "weekDrawer",
+      "screen": "weekDrawer",
+      "group": "week",
+      "board": "5.1",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "weekDrawerMissed",
+      "screen": "weekDrawer",
+      "group": "week",
+      "board": "5.1b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "weekDrawerLong",
+      "screen": "weekDrawer",
+      "group": "week",
+      "board": "5.1c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "weekDrawer",
+      "screen": "weekDrawer",
+      "group": "week",
+      "board": "5.1d dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "weekDrawer",
+      "screen": "weekDrawer",
+      "group": "week",
+      "board": "5.1e didn't finish",
+      "arguments": [
+        "--didnt-finish"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "you",
+      "screen": "you",
+      "group": "week",
+      "board": "5.3",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "youPhoto",
+      "screen": "you",
+      "group": "week",
+      "board": "5.3f",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "youEmpty",
+      "screen": "you",
+      "group": "week",
+      "board": "5.3d",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "youGames",
+      "screen": "games",
+      "group": "week",
+      "board": "7b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "youPerson",
+      "screen": "pastPerson",
+      "group": "week",
+      "board": "7c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "games",
+      "screen": "games",
+      "group": "week",
+      "board": "8",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "gamesEmpty",
+      "screen": "games",
+      "group": "week",
+      "board": "10",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "gamesFirstGoing",
+      "screen": "games",
+      "group": "week",
+      "board": "11",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "gamesOneDoneOneGoing",
+      "screen": "games",
+      "group": "week",
+      "board": "12",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "gamesPlayingNow",
+      "screen": "games",
+      "group": "week",
+      "board": "12b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "prizes",
+      "screen": "prizes",
+      "group": "week",
+      "board": "9",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "prizesEmpty",
+      "screen": "prizes",
+      "group": "week",
+      "board": "13",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "prizesFirstGoing",
+      "screen": "prizes",
+      "group": "week",
+      "board": "14",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "you",
+      "screen": "crop",
+      "group": "week",
+      "board": "5.3e",
+      "arguments": [
+        "--crop-demo"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "bigTicket",
+      "screen": "bigTicket",
+      "group": "week",
+      "board": "5.3b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "owedTicket",
+      "screen": "owedTicket",
+      "group": "week",
+      "board": "5.3c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "prizes",
+      "screen": "prizes",
+      "group": "week",
+      "board": "5.3g dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "prizes",
+      "screen": "prizes",
+      "group": "week",
+      "board": "5.3j expired",
+      "arguments": [
+        "--expired-ticket"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "bigTicket",
+      "screen": "bigTicket",
+      "group": "week",
+      "board": "5.3h dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "owedTicket",
+      "screen": "owedTicket",
+      "group": "week",
+      "board": "5.3i dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.1",
+      "arguments": [
+        "--recap-still"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.2",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "2"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.3",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "3"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.4",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "4"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapPerfect",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.4c you both",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "4"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapLost",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5b",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapPerfect",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5c",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5d",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5",
+        "--recap-share"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "artifactViewer",
+      "group": "recap",
+      "board": "6.5e",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5",
+        "--recap-day",
+        "4"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "artifactViewer",
+      "group": "recap",
+      "board": "6.5g heart rate",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5",
+        "--recap-day",
+        "2",
+        "--heart-rate-days"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "longGameRecap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5f",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5h didn't finish",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5",
+        "--didnt-finish"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.5i reps, didn't finish",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "7",
+        "--rep-tape-days",
+        "--didnt-finish"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "artifactViewer",
+      "group": "recap",
+      "board": "6.5j didn't finish",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5",
+        "--recap-day",
+        "7",
+        "--didnt-finish"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapLost",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6b",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapPerfect",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6c",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapEven",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6g",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapTheyAsked",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6d",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recap",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6e dare",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6",
+        "--dare"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapLost",
+      "screen": "recap",
+      "group": "recap",
+      "board": "6.6f dare",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6",
+        "--dare"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurph",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8 full bleed",
+      "arguments": [
+        "--recap-still"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurph",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8 pair and quote",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "2"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurph",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8 print",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "3"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurph",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8 stat",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "4"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurph",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8 contact sheet",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurph",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8 card, Murph's line",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "recapMurphLikely",
+      "screen": "recap",
+      "group": "recap",
+      "board": "8b most likely to",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "6"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "resultsSoon",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0a",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "opponentLeft",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0b",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "bigTicket",
+      "screen": "bigTicket",
+      "group": "end",
+      "board": "5.3k left",
+      "arguments": [
+        "--opponent-left",
+        "--dare"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "lastDayLocked",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0c",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "lastDayGoFirst",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0d",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "lastDayWaiting",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0e",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "lastDayUnseen",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0f",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "lastDayUnseen",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0f rolling",
+      "arguments": [
+        "--film-roll",
+        "0.55"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapWriting",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0g",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapWritingLost",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0h",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapWriting",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0g dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapWritingLost",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0h dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapWritingEven",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0i",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapWritingPerfect",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0j",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "recapReady",
+      "screen": "home",
+      "group": "end",
+      "board": "6.0",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "afterRecap",
+      "screen": "home",
+      "group": "end",
+      "board": "6.7",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "rematchRequested",
+      "screen": "home",
+      "group": "end",
+      "board": "6.7b",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "rematchChanged",
+      "screen": "home",
+      "group": "end",
+      "board": "6.7c",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "redeem",
+      "screen": "redeemMessages",
+      "group": "end",
+      "board": "6.9",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "redeemed",
+      "screen": "redeemed",
+      "group": "end",
+      "board": "6.10",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "redeemed",
+      "screen": "redeemed",
+      "group": "end",
+      "board": "6.10b dare",
+      "arguments": [
+        "--dare"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "rematch",
+      "screen": "rematch",
+      "group": "end",
+      "board": "7.1",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "rematchSetup",
+      "screen": "setup",
+      "group": "end",
+      "board": "7.2",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "reportPost",
+      "screen": "report",
+      "group": "end",
+      "board": "S7.40",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "reportPlayer",
+      "screen": "report",
+      "group": "end",
+      "board": "S7.40b",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "blockConfirm",
+      "screen": "block",
+      "group": "end",
+      "board": "S7.42",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "reported",
+      "screen": "home",
+      "group": "end",
+      "board": "S7.45b",
+      "arguments": [],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "blockedSettings",
+      "screen": "settings",
+      "group": "end",
+      "board": "S7.44",
+      "arguments": [
+        "--settings-location-not-asked"
+      ],
+      "screenshotSweepPassed": true
+    },
+    {
+      "scenario": "notificationSettings",
+      "screen": "settings.notifications",
+      "group": "notifications",
+      "board": "S7.46",
+      "arguments": [
+        "--notifications-on",
+        "--settings-location-not-asked"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "notificationSettingsSaving",
+      "screen": "settings.notifications",
+      "group": "notifications",
+      "board": "S7.46b",
+      "arguments": [
+        "--notifications-on",
+        "--settings-location-not-asked"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "notificationSettingsLoading",
+      "screen": "settings.notifications",
+      "group": "notifications",
+      "board": "S7.46c",
+      "arguments": [
+        "--notifications-on",
+        "--settings-location-not-asked"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "notificationSettingsFailed",
+      "screen": "settings.notifications",
+      "group": "notifications",
+      "board": "S7.46d",
+      "arguments": [
+        "--notifications-on",
+        "--settings-location-not-asked"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeWaiting",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.1g",
+      "arguments": [
+        "--rep-tape-fixture",
+        "waiting"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeFirstTime",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.1",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTape",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.1b",
+      "arguments": [
+        "--rep-tape-fixture",
+        "framing"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeCountdown",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.2a",
+      "arguments": [
+        "--rep-tape-fixture",
+        "countdown"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeCounting",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.2",
+      "arguments": [
+        "--rep-tape-fixture",
+        "recording"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeCounting",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.2 landscape",
+      "arguments": [
+        "--rep-tape-fixture",
+        "recording",
+        "--rep-tape-landscape"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeOutOfView",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.3",
+      "arguments": [
+        "--rep-tape-fixture",
+        "outOfView"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeTooClose",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.4",
+      "arguments": [
+        "--rep-tape-fixture",
+        "tooClose"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeSideways",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.5",
+      "arguments": [
+        "--rep-tape-fixture",
+        "sideways"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeLeanedBack",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.1f",
+      "arguments": [
+        "--rep-tape-fixture",
+        "leanedBack"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeDone",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.6",
+      "arguments": [
+        "--rep-tape-fixture",
+        "done"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeRange",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.6b",
+      "arguments": [
+        "--rep-tape-fixture",
+        "range"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeCameraOff",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.1e",
+      "arguments": [
+        "--rep-tape-fixture",
+        "denied"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeLocked",
+      "screen": "home",
+      "group": "repTape",
+      "board": "v1 7.7",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeSent",
+      "screen": "home",
+      "group": "repTape",
+      "board": "v1 7.8",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeSent",
+      "screen": "home",
+      "group": "repTape",
+      "board": "v1 7.8b didn't finish",
+      "arguments": [
+        "--didnt-finish"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeHeartRate",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.1d",
+      "arguments": [
+        "--rep-tape-fixture",
+        "framing",
+        "--heart-rate-fixture"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeEarned",
+      "screen": "repTape",
+      "group": "repTape",
+      "board": "v1 7.6d",
+      "arguments": [
+        "--rep-tape-fixture",
+        "done"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeDay30",
+      "screen": "recap",
+      "group": "repTape",
+      "board": "v1 7.9 Ava's sheet",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "4"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "repTapeDay30",
+      "screen": "recap",
+      "group": "repTape",
+      "board": "v1 7.9b your sheet",
+      "arguments": [
+        "--recap-still",
+        "--recap-page",
+        "5"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "heartRate",
+      "screen": "heartRate",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.2",
+      "arguments": [
+        "--heart-rate-fixture"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "heartRate",
+      "screen": "heartRate",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.2c no wearable yet",
+      "arguments": [
+        "--heart-rate-fixture",
+        "--heart-rate-unpaired"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "heartRateUnlocked",
+      "screen": "home",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.1",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "heartRateFirst",
+      "screen": "home",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.9c",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "whoopDrawer",
+      "screen": "heartRate",
+      "group": "heartRateAndRoute",
+      "board": "v1 7.1c",
+      "arguments": [
+        "--heart-rate-fixture"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "route",
+      "screen": "route",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.3",
+      "arguments": [
+        "--route-fixture"
+      ],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "routeDenied",
+      "screen": "route",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.4b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "routeRecording",
+      "screen": "route",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.5",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "routeDone",
+      "screen": "route",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.6",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "routeUnlocked",
+      "screen": "home",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.7",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "routeGoFirst",
+      "screen": "home",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.9",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    },
+    {
+      "scenario": "routeUnderWay",
+      "screen": "home",
+      "group": "heartRateAndRoute",
+      "board": "v1 8.5b",
+      "arguments": [],
+      "screenshotSweepPassed": false
+    }
+  ]
+}
