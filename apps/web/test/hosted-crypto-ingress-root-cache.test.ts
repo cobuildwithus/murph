@@ -111,14 +111,14 @@ test("two independent prepared requests seal/open real ciphertext with one KMS u
   expect(fixture.lock).toHaveBeenCalledTimes(2);
 });
 
-test("five-minute fixed TTL survives spaced hits and expires without sliding", async () => {
+test("thirty-minute fixed TTL survives spaced hits and expires without sliding", async () => {
   const fixture = createFixture();
   await fixture.addRoot();
   await fixture.unwrap();
   vi.advanceTimersByTime(60_000);
   await fixture.unwrap();
   expect(fixture.decrypt).toHaveBeenCalledTimes(1);
-  vi.advanceTimersByTime(239_999);
+  vi.advanceTimersByTime(29 * 60_000 - 1);
   await fixture.unwrap();
   expect(fixture.decrypt).toHaveBeenCalledTimes(1);
   vi.advanceTimersByTime(1);
@@ -188,7 +188,7 @@ test("fresh status controls historical decryptability; a warm key cannot revive 
   const fixture = createFixture();
   const row = await fixture.addRoot();
   await fixture.unwrap();
-  vi.advanceTimersByTime(240_000);
+  vi.advanceTimersByTime(HOSTED_INGRESS_ROOT_CACHE_TTL_MS - 60_000);
   row.status = "decrypt_only";
   await expect(fixture.unwrap()).rejects.toThrow("not available for decrypt");
   await fixture.unwrapReference(row);
@@ -284,7 +284,7 @@ test("concurrent members retain distinct warm keys and cannot open each other's 
   };
   try {
     for (const phase of ["cold", "warm"] as const) {
-      if (phase === "warm") vi.advanceTimersByTime(240_000);
+      if (phase === "warm") vi.advanceTimersByTime(HOSTED_INGRESS_ROOT_CACHE_TTL_MS - 60_000);
       await Promise.all(members.map((userId) => runWithFreshHostedDomainRootUnwrapCache(async () => {
         const prepared = await prepareHostedDomainRootForWeb({
           domain: "ingress", prisma: fixture.prisma, reason: "test.member-isolation", userId,
