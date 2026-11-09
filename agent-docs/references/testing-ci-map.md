@@ -23,6 +23,10 @@ remain. The replacement journeys use existing runners:
   pruning, manifest rewriting, portable wrappers, publication, replacement, and
   failure preservation, then executes both relocated command names. Container
   publication/security checks and executable native-catalog validation remain.
+  `runner-bundle-cli-bundle.test.ts` also proves the vault CLI bundler inlines
+  by-name runtime imports into the one bundled graph, and that assembly fails
+  when a vault-backed read loads an installed runtime package or the
+  runtime-import helper changes shape.
 - Cloudflare transport: phone start/status/stop and personalization authority
   use real loopback HTTP with signed requests. The shared route matrix covers
   registered routes; sensitive response limits, cancellation, member binding,

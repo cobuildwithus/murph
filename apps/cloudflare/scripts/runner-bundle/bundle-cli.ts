@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-import { build, type Metafile } from "esbuild";
+import { build, type Metafile, type Plugin } from "esbuild";
 import {
   memoryDocumentSnapshotSchema,
   type MemoryDocumentSnapshot,
@@ -72,6 +72,61 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
   "",
 ].join("\n");
 
+// `loadRuntimeModule(specifier)` in these packages is a variable `import()`,
+// which esbuild cannot follow. Left alone, every vault-backed command loads a
+// second, unbundled copy of the data graph (core, query, contracts, zod: about
+// 430 files) from node_modules at run time and builds every contract schema
+// twice. The bundler rewrites the helper so each known specifier is a literal
+// import inside the one bundled graph; unknown specifiers keep the native
+// lookup. Keys are the owning package directory names.
+const VAULT_CLI_BUNDLE_RUNTIME_IMPORT_SPECIFIERS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "inbox-services": [
+    "@murphai/core",
+    "@murphai/importers",
+    "@murphai/inboxd",
+    "@murphai/parsers",
+  ],
+  "vault-usecases": [
+    "@murphai/core",
+    "@murphai/core/event-read",
+    "@murphai/health-commons/runtime",
+    "@murphai/importers",
+    "@murphai/importers/clinical-records",
+    "@murphai/parsers",
+    "@murphai/query",
+    "@murphai/runtime-state",
+  ],
+};
+const VAULT_CLI_RUNTIME_IMPORT_HELPER_FILTER =
+  /[\\/](?:inbox-services|vault-usecases)[\\/]dist[\\/]runtime-import\.js$/;
+// The helper as TypeScript emits it: one export whose body is a single
+// variable import (optionally through the relative-extension rewrite shim).
+const VAULT_CLI_RUNTIME_IMPORT_HELPER_SOURCE_PATTERN =
+  /export function loadRuntimeModule\(specifier\) \{\s*return import\((?:__rewriteRelativeImportExtension\(specifier\)|specifier)\);\s*\}\s*(?:\/\/# sourceMappingURL=\S+\s*)?$/u;
+
+// A vault-backed read is the only probe that reaches the by-name runtime
+// imports (the no-vault probes fail before them). The bundled run must not
+// resolve any of these from the installed packages.
+const VAULT_CLI_VAULT_READ_IMPORT_SURFACE_PROBE = [
+  "wearables",
+  "day",
+  "2026-01-01",
+  "--format",
+  "json",
+] as const;
+const VAULT_CLI_BUNDLE_VAULT_READ_FORBIDDEN_PACKAGE_NAMES = [
+  "@murphai/contracts",
+  "@murphai/core",
+  "@murphai/health-commons",
+  "@murphai/importers",
+  "@murphai/inboxd",
+  "@murphai/parsers",
+  "@murphai/query",
+  "zod",
+] as const;
+
 // Keep the boot-critical CLI surfaces bounded at assembly time. Total lazy
 // output is compared to the exact first parent on canonical Linux CI instead
 // of using an absolute production cap.
@@ -132,8 +187,12 @@ export async function bundleInstalledVaultCliBinary(
     logLevel: "error",
     metafile: true,
     minifySyntax: true,
+    // Whitespace minification pays for the runtime modules that now live in
+    // the bundle: total output stays below the pre-unification size.
+    minifyWhitespace: true,
     outdir: bundleOutDir,
     platform: "node",
+    plugins: [createVaultCliRuntimeImportPlugin()],
     splitting: true,
     // The bundle directory sits at the package root so `../package.json`
     // resolved through createRequire(import.meta.url) inside chunks still
@@ -166,6 +225,66 @@ export async function bundleInstalledVaultCliBinary(
     healthCommonsPackageRoot,
   });
   await retargetVaultCliBinWrappers(bundleDir, cliPackageDir);
+}
+
+function buildVaultCliRuntimeImportHelperSource(
+  specifiers: readonly string[],
+): string {
+  return [
+    "const bundledRuntimeModules = {",
+    ...specifiers.map(
+      (specifier) =>
+        `  ${JSON.stringify(specifier)}: () => import(${JSON.stringify(specifier)}),`,
+    ),
+    "};",
+    "export function loadRuntimeModule(specifier) {",
+    "  return Object.hasOwn(bundledRuntimeModules, specifier)",
+    "    ? bundledRuntimeModules[specifier]()",
+    "    : import(specifier);",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function createVaultCliRuntimeImportPlugin(): Plugin {
+  return {
+    name: "vault-cli-literal-runtime-imports",
+    setup(pluginBuild) {
+      pluginBuild.onLoad(
+        { filter: VAULT_CLI_RUNTIME_IMPORT_HELPER_FILTER },
+        async (args) => {
+          const packageDirectoryName = path.basename(
+            path.dirname(path.dirname(args.path)),
+          );
+          const specifiers =
+            VAULT_CLI_BUNDLE_RUNTIME_IMPORT_SPECIFIERS[packageDirectoryName];
+          if (!specifiers) {
+            return undefined;
+          }
+
+          // Replace only the exact helper this rewrite was written against;
+          // a helper that grew other behavior must fail the assembly instead
+          // of silently losing it.
+          const source = await readFile(args.path, "utf8");
+          if (
+            !VAULT_CLI_RUNTIME_IMPORT_HELPER_SOURCE_PATTERN.test(source) ||
+            source.split(/\bexport\b/u).length !== 2 ||
+            source.split("import(").length !== 2
+          ) {
+            throw new Error(
+              `vault-cli bundle cannot rewrite ${args.path}: the runtime-import helper no longer matches the expected single variable import. Update the bundler rewrite to match it.`,
+            );
+          }
+
+          return {
+            contents: buildVaultCliRuntimeImportHelperSource(specifiers),
+            loader: "js",
+            resolveDir: path.dirname(args.path),
+          };
+        },
+      );
+    },
+  };
 }
 
 function assertVaultCliBundleInputsStayExternal(inputPaths: string[]): void {
@@ -687,8 +806,79 @@ async function assertVaultCliJsonImportSurface(input: {
         logPath: path.join(probeDir, "bundled-resolved-imports.log"),
       }),
     ]);
+    await assertVaultCliVaultReadStaysBundled({
+      bundledEntryPath: path.join(input.bundleOutDir, "bin.js"),
+      healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+      hookPath,
+      logPath: path.join(probeDir, "bundled-vault-read-resolved-imports.log"),
+      vaultRoot: path.join(probeDir, "vault-read-home", "vault"),
+    });
   } finally {
     await rm(probeDir, { force: true, recursive: true });
+  }
+}
+
+async function assertVaultCliVaultReadStaysBundled(input: {
+  bundledEntryPath: string;
+  healthCommonsPackageRoot: string;
+  hookPath: string;
+  logPath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await createInitializedVaultCliMemoryFixture({
+    includeMemory: false,
+    vaultRoot: input.vaultRoot,
+  });
+  const label = VAULT_CLI_VAULT_READ_IMPORT_SURFACE_PROBE.join(" ");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileURL(input.hookPath).href,
+      input.bundledEntryPath,
+      ...VAULT_CLI_VAULT_READ_IMPORT_SURFACE_PROBE,
+    ],
+    {
+      cwd: input.vaultRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: path.dirname(input.vaultRoot),
+        MURPH_IMPORT_SURFACE_LOG: input.logPath,
+        [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: input.healthCommonsPackageRoot,
+        VAULT: input.vaultRoot,
+      },
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+    },
+  );
+
+  if (result.error || result.signal !== null || result.status !== 0) {
+    throw new Error(
+      `runner bundled vault-cli vault-read probe \`${label}\` failed (${
+        result.error?.message ?? `status ${result.status ?? "unknown"} signal ${result.signal ?? "none"}`
+      }); stdoutBytes=${Buffer.byteLength(result.stdout ?? "", "utf8")} stderrBytes=${Buffer.byteLength(result.stderr ?? "", "utf8")}`,
+    );
+  }
+
+  const resolvedPackageNames = new Set(
+    (await readFile(input.logPath, "utf8"))
+      .split("\n")
+      .flatMap((url) => {
+        const packageName = normalizeResolvedNodeModulePackageName(url);
+        return packageName === null ? [] : [packageName];
+      }),
+  );
+  const unbundledPackageNames =
+    VAULT_CLI_BUNDLE_VAULT_READ_FORBIDDEN_PACKAGE_NAMES.filter((packageName) =>
+      resolvedPackageNames.has(packageName),
+    );
+
+  if (unbundledPackageNames.length > 0) {
+    throw new Error(
+      `runner bundled vault-cli vault-read probe \`${label}\` loaded installed packages at run time: ${unbundledPackageNames.join(", ")}. A by-name runtime import escaped the bundle; add its specifier to VAULT_CLI_BUNDLE_RUNTIME_IMPORT_SPECIFIERS.`,
+    );
   }
 }
 
