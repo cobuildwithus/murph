@@ -160,6 +160,8 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
     orchestration: {
+      // Worker-reported step timings first, so Web's own direct-ensure leaves win.
+      ...timingRecord.timing.stepLatency,
       directWakeStartedAtEpochMs: timingRecord.timing.directWakeStartedAtEpochMs,
       directWakeAttemptCount: timingRecord.timing.directWakeAttemptCount,
       directWakeRetryWaitMs: timingRecord.timing.directWakeRetryWaitMs,

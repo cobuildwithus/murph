@@ -1,11 +1,6 @@
 import { createHmac } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-
-import {
-  readHostedIngressLatencyTraceForTest,
-  readHostedMailboxItemForTest,
-} from "#hosted-web-testing";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   buildHostedExecutionMemberActivatedWake,
@@ -207,11 +202,6 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeReply + 1,
     );
-
-    await expectNoShellPrewarmLatencyTrace({
-      mailboxDedupeKey: messageEventId,
-      userId,
-    });
   }, 300_000);
 
   it("reduces an inbound iMessage app card to fallback text and replies in the same chat", async () => {
@@ -354,10 +344,6 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeTyping + 1,
     );
-    await expectNoShellPrewarmLatencyTrace({
-      mailboxDedupeKey: messageEventId,
-      userId,
-    });
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -985,26 +971,6 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
-}
-
-async function expectNoShellPrewarmLatencyTrace(input: {
-  mailboxDedupeKey: string;
-  userId: string;
-}): Promise<void> {
-  const trace = await vi.waitFor(async () => {
-    const mailboxItem = await readHostedMailboxItemForTest({
-      dedupeKey: input.mailboxDedupeKey,
-      environment: requireScenario().runtimeEnv,
-      userId: input.userId,
-    });
-    return await readHostedIngressLatencyTraceForTest({
-      environment: requireScenario().runtimeEnv,
-      mailboxItemId: mailboxItem.id,
-      userId: input.userId,
-    });
-  }, { interval: 100, timeout: 30_000 });
-  expect(Object.keys(trace.phaseBreakdown?.orchestration ?? {})
-    .filter((key) => key.startsWith("shellPrewarm"))).toEqual([]);
 }
 
 function parseAssistantProviderRequestBody(body: string | undefined): Record<string, unknown> {

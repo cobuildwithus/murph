@@ -92,6 +92,7 @@ import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import { HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER } from "@murphai/hosted-execution/runtime-control";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
 } from "@murphai/cloudflare-hosted-control/routes";
@@ -3460,6 +3461,7 @@ describe("cloudflare worker routes", () => {
       expect(response.status).toBe(200);
       expect(response.headers.has(HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER)).toBe(false);
       expect(response.headers.has(HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER)).toBe(false);
+      expect(response.headers.has(HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER)).toBe(false);
       await expect(response.json()).resolves.toEqual({
         action: "started",
         kind: "runtime_processing_accepted",
@@ -3634,7 +3636,10 @@ describe("cloudflare worker routes", () => {
         ensureRuntimeProcessingForUser,
       });
       const env = createWorkerEnv(stub);
-      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub).ensureRuntimeProcessingForUser(request));
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request, diagnostics) => {
+        if (diagnostics) diagnostics.orchestration = { runnerTargetPathKind: "retained_warm", containerReadinessElapsedMs: 5 };
+        return stub.ensureRuntimeProcessingForUser(request);
+      });
       const execution = createWorkerExecutionContextForTest();
 
       let requestSettled = false;
@@ -3703,6 +3708,8 @@ describe("cloudflare worker routes", () => {
         String(authDurationMs),
       );
       expect(response.headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER)).toBe("37");
+      expect(JSON.parse(response.headers.get(HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER) ?? "null"))
+        .toEqual({ runnerTargetPathKind: "retained_warm", containerReadinessElapsedMs: 5 });
       await expect(response.json()).resolves.toEqual({
         action: "woken",
         kind: "runtime_processing_accepted",

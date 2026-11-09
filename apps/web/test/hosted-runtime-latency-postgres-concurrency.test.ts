@@ -1148,16 +1148,10 @@ describe.skipIf(!runPostgresProof)(
         const sanitized = requireJsonRecord(providerRows[0]?.phaseBreakdownJson);
         expect(sanitized).toEqual({
           boot: { nodeStartupMs: 3 },
+          // Stored leaves this release retired are dropped, never rejected.
           orchestration: {
             runtimeInvocationOrchestrationAttemptId:
               "web-ingress-123e4567-e89b-42d3-a456-426614174000",
-            shellPrewarmExpectedOrchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-            shellPrewarmFirstHintAtEpochMs: 1_775_908_800_001,
-            shellPrewarmOrchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-            shellPrewarmOutcome: "start_issued_warm",
-            shellPrewarmSource: "linq-typing-started",
             triggeredByWebDirect: true,
           },
           preProvider: { outboxScanPerformed: true },
@@ -1302,11 +1296,10 @@ describe.skipIf(!runPostgresProof)(
             progressUpdateAcceptedAtEpochMs: earliestProgressAt.getTime(),
           });
           if (row.assistantInputId === assistantInputIds[0]) {
-            expect(requireJsonRecord(phaseBreakdown.orchestration)).toMatchObject({
-              shellPrewarmExpectedOrchestrationAttemptId:
-                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-              shellPrewarmOrchestrationAttemptId:
-                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+            expect(requireJsonRecord(phaseBreakdown.orchestration)).toEqual({
+              runtimeInvocationOrchestrationAttemptId:
+                "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+              triggeredByWebDirect: true,
             });
           } else {
             expect(phaseBreakdown.orchestration).toBeUndefined();

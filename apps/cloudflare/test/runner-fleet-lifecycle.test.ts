@@ -320,7 +320,7 @@ function webOwner(current: HostedRuntimeOwnerSnapshot) {
     }
     if (!("attemptId" in command) || command.attemptId !== current.attemptId
       || command.generation !== current.generation) return reply("stale");
-    if (command.operation === "authorize_effect") return reply("authorized");
+    if (command.operation === "prepare_launch") return reply("updated");
     if (command.operation === "record_failure") return reply("updated");
     if (command.operation === "complete") {
       if (control.lostCompletions-- > 0) throw new Error("synthetic lost completion");
@@ -610,7 +610,8 @@ async function failedInvocation(input: Parameters<typeof runnerHarness>[0] = {})
   const h = runnerHarness({ running: true, invoke: async () => Response.json({ error: "synthetic job failure" }, { status: 500 }), ...input });
   await h.container.bindStandbySlot(claimInput());
   const web = webOwner({ ...owner("active"), workspaceVersion: "0" });
-  await h.container.startSupervisedInvocation(invocation());
+  await h.container.startSupervisedInvocation({ ...invocation(),
+    launch: { providerEgressTokenHash: null, platformAiUsageAllowed: false } });
   await Promise.all(h.pending);
   assert.equal(new RunnerInvocationReceiptStore(h.sql).read()?.state, "registered");
   return { h, web };

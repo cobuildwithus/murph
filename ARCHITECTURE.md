@@ -4631,8 +4631,7 @@ impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. Exact legacy stop
-targets retain their recovery and deletion paths, and stored shell-prewarm
-latency fields remain readable. Transport retirement adds no persistent format
+targets retain their recovery and deletion paths. Transport retirement adds no persistent format
 or rollback floor beyond the unified fleet contract.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an

@@ -241,9 +241,13 @@ Input preparation and native readiness overlap. The native slot submits the
 existing `prepare_launch` command immediately before registering its durable
 invocation receipt. That transaction binds invocation facts and verifies fresh
 Web authority together; startup does not make a second `authorize_effect` call.
-The existing readiness response advertises this capability. During mixed
-Worker/controller deployments, callers of older controllers still prepare through
-Web before the controller's authorization call; older callers remain supported.
+The Worker always sends the launch facts, and Web's `prepare_launch` parser
+rejects a start without them. Readiness still returns the constant
+`preparesSupervisedLaunch: true` for Workers older than this release, which read
+it before sending launch facts; delete it once the rollback floor passes them.
+A retained target whose slot already reports itself retired skips the second
+stop and readback: `resolveRetainedStandbySlot` asserted that exact retirement
+under the slot's lifecycle lock, and retirement is terminal.
 Provider effects read their native controller receipt and binding.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
