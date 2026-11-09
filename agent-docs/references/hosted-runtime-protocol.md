@@ -657,7 +657,9 @@ credentials, provider payloads and errors, raw health values, and private
 diagnostics. Connected sources meeting the existing source-stall or recovery-notice
 silence policy are reported as `needs-attention`, without changing stored source
 status or exposing arrival timestamps. A subsequent receipt clears that derived
-attention state. A connection sync-job time is not evidence that a health record or
+attention state. A source whose sign-in can no longer be refreshed is reported
+as `needs-reconnect`, matching the member's own connection screen; other source
+errors stay `needs-attention`. A connection sync-job time is not evidence that a health record or
 challenge metric arrived. Device data is never produced by the grantor runtime
 or stored in the share snapshot column. Duplicate public labels select one
 complete observation from the latest connection `connectedAt` and source

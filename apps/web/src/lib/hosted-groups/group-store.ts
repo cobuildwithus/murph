@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { HOSTED_GROUP_BOARD_SCOPES } from "./board-scopes";
 import { readSharedCompanionContact } from "./shared-companion-presence";
+import { requiresConnectionSourceReconnect } from "../device-sync/browser-connection-source";
 
 import {
   evaluatePushPrimarySourceStaleness,
@@ -467,6 +468,7 @@ interface HostedGroupSharedDeviceConnectionSnapshot {
   sources: Array<{
     firstSeenAt: Date;
     lastDataAt: Date | null;
+    lastErrorCode: string | null;
     sourceProviderSlug: string;
     status: string;
     updatedAt: Date;
@@ -972,6 +974,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
                 select: {
                   firstSeenAt: true,
                   lastDataAt: true,
+                  lastErrorCode: true,
                   sourceProviderSlug: true,
                   status: true,
                   updatedAt: true,
@@ -1561,6 +1564,8 @@ function resolveHostedGroupSharedSourceStatus(
   if (connectionStatus !== "connected") return connectionStatus;
   if (source.status === "disconnected") return "disconnected";
   if (source.status === "reauthorization_required") return "needs-reconnect";
+  // Only the coarse status is shared; the provider error stays private.
+  if (requiresConnectionSourceReconnect(source)) return "needs-reconnect";
   if (source.status !== "connected") return "needs-attention";
   const evidence = {
     firstSeenAt: source.firstSeenAt.toISOString(),
