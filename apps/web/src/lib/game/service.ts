@@ -769,7 +769,7 @@ async function knownInvitee(actor: string, recipient: GameInviteRecipient | unde
 }
 
 /** Prepare encrypted words and immutable row data before taking database locks. */
-async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null = null) {
+async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null) {
   const { actor } = context;
   const { gameId, inviteeLabel } = command;
   const newTerms = decideNewTerms(command.terms, {
