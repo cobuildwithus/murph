@@ -141,7 +141,7 @@ test("device import preserves a preparation failure that coincides with cancella
   await withVault(async (vaultRoot) => {
     const controller = new AbortController();
     const failure = new Error("synthetic stored-evidence failure");
-    const spy = vi.spyOn(integrationIngests, "selectNovelIntegrationIngestEvidence")
+    const spy = vi.spyOn(integrationIngests, "inspectIntegrationIngestHistory")
       .mockImplementation(async () => {
         controller.abort(new Error("synthetic foreground request"));
         throw failure;
