@@ -197,7 +197,11 @@ export interface HostedLocalLinqStub {
   requireObservedChatId(userId: string): string;
   requireLatestObservedMessageId(chatId: string): string;
   runnerBaseUrl: string;
-  setChatIsGroup(chatId: string, isGroup: boolean): void;
+  setChatIsGroup(
+    chatId: string,
+    isGroup: boolean,
+    handles?: readonly HostedLocalLinqCanonicalChatHandle[],
+  ): void;
   stop(): Promise<void>;
   waitForAdditionalRequest(input: {
     baselineCount: number;
@@ -313,7 +317,6 @@ export async function startHostedLocalLinqStub(input: {
   );
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedChatIdsByRoute = new Map<string, string>();
-  const canonicalGroupStateByChatId = new Map<string, boolean>();
   const observedMessageIdsByChat = new Map<string, string[]>();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
@@ -453,8 +456,7 @@ export async function startHostedLocalLinqStub(input: {
           status: handle.status ?? null,
         })),
         id: chatId,
-        is_group:
-          canonicalGroupStateByChatId.get(chatId) ?? canonicalChat?.isGroup ?? false,
+        is_group: canonicalChat?.isGroup ?? false,
       });
       return;
     }
@@ -805,8 +807,12 @@ export async function startHostedLocalLinqStub(input: {
       return latestMessageId;
     },
     runnerBaseUrl,
-    setChatIsGroup: (chatId, isGroup) => {
-      canonicalGroupStateByChatId.set(chatId, isGroup);
+    setChatIsGroup: (chatId, isGroup, handles) => {
+      canonicalChats.set(chatId, {
+        chatId,
+        handles: handles ?? canonicalChats.get(chatId)?.handles,
+        isGroup,
+      });
     },
     stop: async () => {
       await stopHttpStubServer(activeServer);

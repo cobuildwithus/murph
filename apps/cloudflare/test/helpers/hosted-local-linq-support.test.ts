@@ -413,22 +413,39 @@ describe("hosted local Linq provider stub", () => {
     }
   });
 
-  it("overrides canonical chat classification without changing inbound webhook fixtures", async () => {
+  it("overrides canonical chat classification and roster without changing inbound webhook fixtures", async () => {
     const stub = await startHostedLocalLinqStub();
 
     try {
-      stub.setChatIsGroup("chat_group", true);
+      stub.setChatIsGroup("chat_group", true, [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551112222", isMe: false },
+      ]);
+      const expectedHandles = [
+        { handle: "+15550000000", is_me: true, status: "active" },
+        { handle: "+15551112222", is_me: false, status: null },
+      ];
       const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
-      await expect(groupResponse.json()).resolves.toMatchObject({
+      await expect(groupResponse.json()).resolves.toEqual({
+        handles: expectedHandles,
         id: "chat_group",
         is_group: true,
       });
 
       stub.setChatIsGroup("chat_group", false);
       const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
-      await expect(directResponse.json()).resolves.toMatchObject({
+      await expect(directResponse.json()).resolves.toEqual({
+        handles: expectedHandles,
         id: "chat_group",
         is_group: false,
+      });
+
+      stub.setChatIsGroup("chat_group", true, []);
+      const emptyRosterResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
+      await expect(emptyRosterResponse.json()).resolves.toEqual({
+        handles: [],
+        id: "chat_group",
+        is_group: true,
       });
     } finally {
       await stub.stop();
