@@ -180,11 +180,12 @@ test("meal scan totals separate actual source, path, read, decode, parse and sel
       await measured.done;
       // Listing includes its existing access/containment work; every physical
       // resolution checks three formats. Decode and parsing never include reads.
-      checkReport(measured.reports, vaultRoot, "ok", 142, 139);
+      // The archived row that holds neither the owner nor the event id is not parsed.
+      checkReport(measured.reports, vaultRoot, "ok", 131, 128);
       const phases = measured.reports[0]!.commands[0]!.phases;
       for (const [pass, totals] of [
-        ["candidates", [34, 9, 15, 14, 44, 26]],
-        ["revisions", [18, 9, 15, 14, 44, 39]],
+        ["candidates", [34, 9, 15, 14, 33, 26]],
+        ["revisions", [18, 9, 15, 14, 33, 39]],
       ] as const) {
         assert.deepEqual(phases.filter((phase) => phase.phase.startsWith(`event-owner-${pass}-`))
           .map((phase) => [phase.phase, phase.count, phase.sumUs, phase.maxUs]),

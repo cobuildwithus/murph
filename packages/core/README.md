@@ -11,6 +11,13 @@ without splitting the ledger or introducing another reader. See
 [the assembled CLI experiment](bench/README.md#cold-cli-event-read-import-experiment)
 for the measured-work acceptance boundary.
 
+Reads by exact event id, and by meal or document owner id, parse a closed-month
+archive only where a row's text holds the id. Archives are parsed in full before
+they are written, so rows that cannot match are skipped unparsed. The plain
+current-month shard is always parsed in full. An id outside `[0-9A-Za-z_-]`, or
+an archive that holds a `\u` escape, falls back to the full parse, and a
+malformed row that holds the id still fails the read with its line number.
+
 Device imports cache ID/evidence byte offsets for one resident plain ingest month.
 The canonical lock, vault identity and shard inode/size/mtime/ctime fence reuse.
 Committed appends advance it; other changes, restore, failed publication, month/archive changes or capacity overflow invalidate it.
