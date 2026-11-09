@@ -36,8 +36,8 @@ vi.mock("server-only", () => ({}));
 const runUserId = `member_local_temporal_orchestration_${Date.now()}`;
 const mailboxWorkspaceUserId =
   `member_local_temporal_mailbox_workspace_${Date.now()}`;
-const pausedRetentionUserId =
-  `member_local_temporal_paused_retention_${Date.now()}`;
+const inactiveRetentionUserId =
+  `member_local_temporal_inactive_retention_${Date.now()}`;
 const modelFreeFrontierUserId =
   `member_local_temporal_model_free_frontier_${Date.now()}`;
 const defaultOwnedFrontierUserId =
@@ -224,18 +224,18 @@ describe("hosted local Temporal orchestration e2e", () => {
 
     await seedFrontierMemberWithoutRecentInbound(
       activeScenario,
-      pausedRetentionUserId,
-      "paused-retention",
+      inactiveRetentionUserId,
+      "inactive-retention",
     );
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
 
     const retainedEventId =
-      `member.preferences.updated:paused-retention:${Date.now()}`;
+      `member.preferences.updated:inactive-retention:${Date.now()}`;
     const retainedAppend = await appendHostedExecutionWakeForTest({
       environment: activeScenario.runtimeEnv,
       wake: buildHostedExecutionMemberPreferencesUpdatedWake({
         eventId: retainedEventId,
-        memberId: pausedRetentionUserId,
+        memberId: inactiveRetentionUserId,
         occurredAt: new Date().toISOString(),
         preferences: {
           personality: { detail: 6 },
@@ -243,25 +243,27 @@ describe("hosted local Temporal orchestration e2e", () => {
         },
       }),
     });
+    // Unlike paused billing, not_started without Family sponsorship is inactive.
+    // Keep suspension and consent unchanged so retention remains eligible.
     await updateHostedMemberBillingStatusForTest({
-      billingStatus: "paused",
+      billingStatus: "not_started",
       environment: activeScenario.runtimeEnv,
-      memberId: pausedRetentionUserId,
+      memberId: inactiveRetentionUserId,
     });
     await seedHostedWorkspaceInboxMediaRetentionWakeForTest({
       environment: activeScenario.runtimeEnv,
-      userId: pausedRetentionUserId,
+      userId: inactiveRetentionUserId,
       wakeAt: new Date(Date.now() - 60_000),
     });
 
     const retentionSignalStartedAt = new Date();
     const signal = await signalHostedMailboxAppendRuntimeForTest({
       environment: activeScenario.runtimeEnv,
-      expectedUserId: pausedRetentionUserId,
+      expectedUserId: inactiveRetentionUserId,
       knownCheckpoint: {
         lane: "system",
         laneSeq: retainedAppend.wake.seq,
-        userId: pausedRetentionUserId,
+        userId: inactiveRetentionUserId,
       },
       mailboxItemId: retainedAppend.wake.id,
     });
@@ -283,7 +285,7 @@ describe("hosted local Temporal orchestration e2e", () => {
 
     await expect.poll(async () => {
       const status = await activeScenario.harness.readUserStatus(
-        pausedRetentionUserId,
+        inactiveRetentionUserId,
       );
       return {
         inFlight: status.inFlight,
@@ -298,14 +300,14 @@ describe("hosted local Temporal orchestration e2e", () => {
       retentionWakeAt: null,
     });
     const finalStatus = await activeScenario.harness.readUserStatus(
-      pausedRetentionUserId,
+      inactiveRetentionUserId,
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.workspace?.inboxMediaRetentionWakeAt ?? null).toBeNull();
     await expect(readHostedMailboxItemForTest({
       dedupeKey: retainedEventId,
       environment: activeScenario.runtimeEnv,
-      userId: pausedRetentionUserId,
+      userId: inactiveRetentionUserId,
     })).resolves.toMatchObject({
       consumedAt: null,
       kind: "member.preferences.updated",

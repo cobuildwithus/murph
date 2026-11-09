@@ -523,7 +523,11 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
   }, 420_000);
 
   it("releases one multi-sender group backlog as one attributable reply", async () => {
-    requireLinqStub().setChatIsGroup(groupChatId, true);
+    requireLinqStub().setChatIsGroup(groupChatId, true, [
+      { handle: buildLinqHomePhoneNumber(groupOwnerUserId), isMe: true, status: "active" },
+      { handle: groupOwnerPhone, isMe: false, status: "active" },
+      { handle: guestPhone, isMe: false, status: "active" },
+    ]);
 
     const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
     const bootstrapSendBaseline = requireLinqStub().countObservedSends(groupReplyPath);

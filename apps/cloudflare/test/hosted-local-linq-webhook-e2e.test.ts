@@ -502,7 +502,15 @@ describe("hosted local Linq webhook e2e", () => {
     expect(baseline.personal.workspaceVersion).not.toBeNull();
     expect(baseline.thread).toBeNull();
 
-    requireLinqStub().setChatIsGroup(chatId, true);
+    requireLinqStub().setChatIsGroup(chatId, true, [
+      { handle: buildLinqHomePhoneNumber(userId), isMe: true, status: "active" },
+      { handle: buildLinqRecipientPhoneNumber(userId), isMe: false, status: "active" },
+      {
+        handle: buildLinqRecipientPhoneNumber(hostedLinqGroupIsolationGuestUserId),
+        isMe: false,
+        status: "active",
+      },
+    ]);
     const canonicalChatPath = `/chats/${encodeURIComponent(chatId)}`;
     const canonicalReadsBefore = requireLinqStub().countObservedRequests({
       expectedMethod: "GET",

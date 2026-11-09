@@ -88,7 +88,7 @@ describe("hosted local vault-file approval resume e2e", () => {
     linqStub = null;
   }, 180_000);
 
-  it("resumes an approved vault file inside the active invocation", async () => {
+  it("resumes a durable vault-file approval after the requesting invocation completes", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -119,16 +119,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     ], {
       matchInputContains: requestInboundText,
     });
-    requireLinqStub().armNextRequestDelay({
-      delayMs: 10_000,
-      expectedMethod: "POST",
-      expectedPath: replyPath,
-      matchRequest: (request) =>
-        requireLinqStub().readObservedMessageText(request)?.includes(
-          pendingReplyText,
-        ) === true,
-    });
-
     const requestResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       chatId,
@@ -170,10 +160,11 @@ describe("hosted local vault-file approval resume e2e", () => {
       expectedPath: "/attachments",
     })).toBe(attachmentCreateBaseline);
     expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline);
+    // Approval must resume from durable state after the requesting invocation
+    // has finished, regardless of how many containers its lifecycle required.
+    const pendingStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(pendingStatus.inFlight).toBe(false);
     const providerRequestCountBeforeResume = countAssistantProviderResponsesApiRequests();
-    const containerStartCountBeforeResume = countStructuredLogMessage(
-      "Hosted execution container starting.",
-    );
     const approvedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
     const approved = await approveHostedActionAndSignalRuntimeForTest({
       approvalId: challenge.approvalKey,
@@ -205,8 +196,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     expect(countAssistantProviderResponsesApiRequests()).toBe(
       providerRequestCountBeforeResume,
     );
-    expect(countStructuredLogMessage("Hosted execution container starting."))
-      .toBe(containerStartCountBeforeResume);
     const consumedChallenge = await waitForLatestChallenge((candidate) =>
       candidate.tokenHash === challenge.tokenHash && candidate.consumedAt !== null
     );
@@ -288,40 +277,6 @@ function countAttachmentUploadLogs(): number {
     requireScenario().harness.stderrTail(2_000_000),
   ].join("\n");
   return output.split(attachmentUploadLogMessage).length - 1;
-}
-
-function countStructuredLogMessage(
-  message: string,
-): number {
-  const output = [
-    requireScenario().harness.stdoutTail(2_000_000),
-    requireScenario().harness.stderrTail(2_000_000),
-  ].join("\n");
-  let count = 0;
-  for (const line of output.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (!parsed || typeof parsed !== "object") {
-      continue;
-    }
-    const record = parsed as HostedStructuredLogRecord;
-    if (record.message === message) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-interface HostedStructuredLogRecord {
-  message?: unknown;
 }
 
 function countAssistantProviderResponsesApiRequests(): number {
