@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ covered: vi.fn() }));
@@ -10,6 +11,7 @@ vi.mock("@/src/lib/game/evening-check-in", async original => ({
 }));
 
 import { getPrisma } from "@/src/lib/prisma";
+import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { isPrivateEveningCurrentTx, privateEveningEventId, reserveDuePrivateEveningCheckIns } from "@/src/lib/game/private-notification";
 import { runGameCommand } from "@/src/lib/game/service";
@@ -81,5 +83,17 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
         acceptedAt: new Date(`${day}T20:00:00Z`), createdAt: new Date(`${day}T20:00:00Z`) } });
     }
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
+  });
+
+  it("invalidates a private evening watermark after a committed conversation append", async () => {
+    const owner = await member(), id = await game(owner);
+    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, date), memberId: owner, date,
+      expiresAt: "2026-11-06T20:30:00.000Z", conversationLaneSeq: "0", batch: [{ gameId: id, termsVersion: 1, dayIndex: 0 }] };
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(true);
+    await db.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: buildHostedExecutionTelegramConversationMessageWake({
+      eventId: `private-evening-conversation-${randomUUID()}`, userId: owner, occurredAt: now.toISOString(),
+      telegramMessage: { messageId: "1", schema: "murph.hosted-telegram-message.v1", text: "hello", threadId: "123", threadIsDirect: true },
+    }) }));
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
   });
 });

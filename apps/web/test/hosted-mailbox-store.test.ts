@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedMailboxAssistantInputId,
@@ -21,7 +22,6 @@ import {
   appendPreparedHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
-  appendHostedMailboxItemTx,
   claimHostedMailboxConversationSubscriptionAction,
   decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
@@ -718,328 +718,108 @@ describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
   });
 });
 
-describe("appendHostedMailboxItemTx", () => {
-  it.each([
-    "environment-interview.completed",
-    "environment-voice.captured",
-    "group-newsletter.email-needed",
-  ] as const)("rejects writes for retired mailbox kind %s before touching storage", async (kind) => {
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem: createHostedMailboxItemDelegate(),
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    await expect(appendHostedMailboxItemTx({
-      dedupeKey: `dedupe_retired:${kind}`,
-      kind,
-      lane: "system",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      payloadSerializedJson: JSON.stringify({ kind: "retired" }),
-      tx,
-      userId: "member_mailbox_1",
-    })).rejects.toThrow("Hosted mailbox retired kinds are read-only.");
-
-    expect(tx.$executeRaw).not.toHaveBeenCalled();
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-  });
-
-  it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {
+describe("mailbox envelope storage", () => {
+  it("allocates both sequences in one statement before sealing and inserting", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-    const payloadSerializedJson = JSON.stringify({ kind: "inline-test" });
-    const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
+    const tx = createHostedMailboxTx({ hostedMailboxItem, hostedMailboxPayload });
+    const envelope = buildDirectMailboxEnvelope();
 
-    const result = await appendHostedMailboxItemTx({
-      dedupeKey: "dedupe_inline_1",
-      kind: "conversation.message",
-      lane: "conversation",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      payloadSerializedJson,
-      tx,
-      userId: "member_mailbox_1",
-    });
+    const result = await appendHostedMailboxEnvelopeTx({ envelope, tx });
 
     expect(result).toMatchObject({
-      duplicate: false,
-      dedupeConflict: false,
-      inserted: true,
-      item: {
-        causalSeq: "1",
-        dedupeKey: "dedupe_inline_1",
-        kind: "conversation.message",
-        lane: "conversation",
-        laneSeq: "1",
-        payloadInlineCiphertext: expect.any(String),
-        payloadRef: null,
-      },
+      duplicate: false, dedupeConflict: false, inserted: true,
+      item: { causalSeq: "1", laneSeq: "1", dedupeKey: envelope.eventId },
     });
-    const executeRawMock = vi.mocked(tx.$executeRaw);
-    expect(executeRawMock).toHaveBeenCalledTimes(2);
-    expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_inline_1");
-    expect(readHostedMailboxRawSql(executeRawMock.mock.calls[1])).toContain(
-      "mailbox-causal-seq",
-    );
-    const queryRawMock = vi.mocked(tx.$queryRaw);
-    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[0])).toContain(
-      "VALUES (?, 'causal', 2, NOW())",
-    );
-    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[1])).toContain(
-      "VALUES (?, ?, 2, NOW())",
-    );
-    expect(readHostedMailboxRawSql(queryRawMock.mock.calls[2])).toContain(
-      "INSERT INTO hosted_mailbox_item",
-    );
+    const execute = vi.mocked(tx.$executeRaw);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[2]).toBe(envelope.eventId);
+    const query = vi.mocked(tx.$queryRaw);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(readHostedMailboxRawSql(query.mock.calls[0])).toContain("mailbox-causal-seq");
+    expect(readHostedMailboxRawSql(query.mock.calls[1])).toContain("INSERT INTO hosted_mailbox_item");
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(query.mock.invocationCallOrder[0]!);
     expect(hostedMailboxItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        assistantInputLookupKey: null,
-        dedupeKey: "dedupe_inline_1",
-        kind: "conversation.message",
-        lane: "conversation",
-        laneSeq: 1n,
-        payloadBytes,
+        assistantInputLookupKey: expect.any(String),
+        causalSeq: 1n, laneSeq: 1n,
+        payloadBytes: Buffer.byteLength(JSON.stringify(envelope), "utf8"),
         payloadHash: expect.stringMatching(/^hmac-sha256:[A-Za-z0-9_-]+$/u),
-        payloadInlineCiphertext: expect.any(String),
-        payloadRef: null,
+        payloadInlineCiphertext: expect.any(String), payloadRef: null,
         payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-        userId: "member_mailbox_1",
       }),
     });
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
   });
 
-  it("ignores caller-supplied payload metadata when selecting storage and inserting metadata", async () => {
-    const hostedMailboxItem = createHostedMailboxItemDelegate();
-    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-    const payloadSerializedJson = JSON.stringify({ kind: "spoof-test" });
-    const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
-    const inputWithSpoofedMetadata = {
-      dedupeKey: "dedupe_spoof_1",
-      kind: "conversation.message",
-      lane: "conversation",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      payloadBytes: 128_000,
-      payloadHash: "hmac-sha256:caller-supplied-spoof",
-      payloadSerializedJson,
-      tx,
-      userId: "member_mailbox_1",
-    };
-
-    const result = await appendHostedMailboxItemTx(inputWithSpoofedMetadata);
-    const createCall = hostedMailboxItem.create.mock.calls[0]?.[0];
-
-    expect(result.item).toMatchObject({
-      payloadInlineCiphertext: expect.any(String),
-      payloadRef: null,
-    });
-    expect(createCall?.data).toMatchObject({
-      payloadBytes,
-      payloadHash: expect.stringMatching(/^hmac-sha256:[A-Za-z0-9_-]+$/u),
-      payloadInlineCiphertext: expect.any(String),
-      payloadRef: null,
-    });
-    expect(createCall?.data.payloadHash).not.toBe("hmac-sha256:caller-supplied-spoof");
-    expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
-  });
-
-  it("stores oversized opaque payload ciphertext in the payload table", async () => {
-    const hostedMailboxItem = createHostedMailboxItemDelegate();
-    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-    const payloadSerializedJson = JSON.stringify({
-      body: "x".repeat(140_000),
-      kind: "sidecar-test",
-    });
-    const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
-
-    const result = await appendHostedMailboxItemTx({
-      dedupeKey: "dedupe_ref_1",
-      kind: "assistant.notification.requested",
-      lane: "system",
-      occurredAt: FIXED_NOW,
-      payloadSerializedJson,
-      tx,
-      userId: "member_mailbox_1",
-    });
-    const createCall = hostedMailboxItem.create.mock.calls[0]?.[0];
-
-    expect(result.item).toMatchObject({
-      payloadInlineCiphertext: null,
-      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-    });
-    expect(result.item).not.toHaveProperty("payloadCiphertext");
-    expect(createCall?.data.payloadRef).toBe(`hosted-mailbox-payload:${createCall?.data.id}`);
-    expect(createCall?.data.payloadSchema).toBe(HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA);
-    expect(createCall?.data.payloadBytes).toBe(payloadBytes);
-    expect(result.item.payloadRef).toBe(`hosted-mailbox-payload:${result.item.id}`);
-    expect(hostedMailboxPayload.create).toHaveBeenCalledWith({
-      data: {
-        mailboxItemId: result.item.id,
-        payloadCiphertext: expect.any(String),
-        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-        userId: "member_mailbox_1",
-      },
-    });
-  });
-
-  it("decrypts inline payloads with item-schema AAD and sidecar payloads with payload-schema AAD", async () => {
+  it.each([false, true])("round trips ciphertext and derived metadata with sidecar=%s", async (sidecar) => {
     installAadCheckingHostedSecureBoxTestCodec();
-
     try {
-      const inlineTx = createHostedMailboxTx({
-        hostedMailboxItem: createHostedMailboxItemDelegate(),
-        hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-      });
-      const inlinePayload = { kind: "inline-aad-test" };
-      const inlineResult = await appendHostedMailboxItemTx({
-        dedupeKey: "dedupe_inline_aad_1",
-        kind: "conversation.message",
-        lane: "conversation",
-        occurredAt: FIXED_NOW,
-        payloadSerializedJson: JSON.stringify(inlinePayload),
-        tx: inlineTx,
-        userId: "member_mailbox_1",
-      });
-      const inlineCiphertext = inlineResult.item.payloadInlineCiphertext;
-      if (!inlineCiphertext) {
-        throw new Error("Expected inline mailbox ciphertext.");
-      }
-
-      await expect(decodeHostedMailboxStoredPayload({
-        dedupeKey: "dedupe_inline_aad_1",
-        kind: "conversation.message",
-        lane: "conversation",
-        laneSeq: inlineResult.item.laneSeq,
-        mailboxItemId: inlineResult.item.id,
-        occurredAt: inlineResult.item.occurredAt,
-        payloadInlineCiphertext: inlineCiphertext,
-        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-        userId: "member_mailbox_1",
-      })).resolves.toEqual(inlinePayload);
-      await expect(decodeHostedMailboxStoredPayload({
-        dedupeKey: "dedupe_inline_aad_1",
-        kind: "conversation.message",
-        lane: "conversation",
-        laneSeq: inlineResult.item.laneSeq,
-        mailboxItemId: inlineResult.item.id,
-        occurredAt: inlineResult.item.occurredAt,
-        payloadInlineCiphertext: inlineCiphertext,
-        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-        userId: "member_mailbox_1",
-      })).rejects.toThrow("Hosted secure-box AAD mismatch.");
-
-      const sidecarMailboxPayload = createHostedMailboxPayloadDelegate();
-      const sidecarTx = createHostedMailboxTx({
-        hostedMailboxItem: createHostedMailboxItemDelegate(),
-        hostedMailboxPayload: sidecarMailboxPayload,
-      });
-      const sidecarPayload = {
-        body: "x".repeat(140_000),
-        kind: "sidecar-aad-test",
+      const hostedMailboxItem = createHostedMailboxItemDelegate();
+      const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+      const tx = createHostedMailboxTx({ hostedMailboxItem, hostedMailboxPayload });
+      const envelope = buildDirectMailboxEnvelope(sidecar ? "x".repeat(140_000) : "hello");
+      const { item } = await appendHostedMailboxEnvelopeTx({ envelope, tx });
+      expect(hostedMailboxItem.create.mock.calls[0]?.[0].data.payloadBytes).toBe(
+        Buffer.byteLength(JSON.stringify(envelope), "utf8"),
+      );
+      const metadata = {
+        dedupeKey: envelope.eventId, kind: envelope.kind, lane: "conversation",
+        laneSeq: item.laneSeq, mailboxItemId: item.id, occurredAt: item.occurredAt,
+        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA, userId: envelope.userId,
       };
-      const sidecarResult = await appendHostedMailboxItemTx({
-        dedupeKey: "dedupe_sidecar_aad_1",
-        kind: "assistant.notification.requested",
-        lane: "system",
-        occurredAt: FIXED_NOW,
-        payloadSerializedJson: JSON.stringify(sidecarPayload),
-        tx: sidecarTx,
-        userId: "member_mailbox_1",
-      });
-      const sidecarCreateCall = sidecarMailboxPayload.create.mock.calls[0]?.[0];
-      if (!sidecarCreateCall || typeof sidecarCreateCall.data.payloadCiphertext !== "string") {
-        throw new Error("Expected sidecar mailbox ciphertext.");
+      if (sidecar) {
+        const stored = hostedMailboxPayload.create.mock.calls[0]?.[0].data;
+        expect(item.payloadInlineCiphertext).toBeNull();
+        expect(item.payloadRef).toBe(`hosted-mailbox-payload:${item.id}`);
+        expect(stored).toMatchObject({
+          mailboxItemId: item.id, payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+          payloadCiphertext: expect.any(String), userId: envelope.userId,
+        });
+        await expect(decodeHostedMailboxStoredPayload({
+          ...metadata, payloadCiphertext: stored!.payloadCiphertext,
+        })).resolves.toEqual(envelope);
+      } else {
+        expect(item.payloadRef).toBeNull();
+        await expect(decodeHostedMailboxStoredPayload({
+          ...metadata, payloadInlineCiphertext: item.payloadInlineCiphertext,
+        })).resolves.toEqual(envelope);
+        await expect(decodeHostedMailboxStoredPayload({
+          ...metadata, payloadInlineCiphertext: item.payloadInlineCiphertext,
+          payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        })).rejects.toThrow("Hosted secure-box AAD mismatch.");
       }
-
-      await expect(decodeHostedMailboxStoredPayload({
-        dedupeKey: "dedupe_sidecar_aad_1",
-        kind: "assistant.notification.requested",
-        lane: "system",
-        laneSeq: sidecarResult.item.laneSeq,
-        mailboxItemId: sidecarResult.item.id,
-        occurredAt: sidecarResult.item.occurredAt,
-        payloadCiphertext: sidecarCreateCall.data.payloadCiphertext,
-        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-        userId: "member_mailbox_1",
-      })).resolves.toEqual(sidecarPayload);
-      expect(sidecarCreateCall.data.payloadSchema).toBe(HOSTED_MAILBOX_PAYLOAD_SCHEMA);
-    } finally {
-      restoreDefaultHostedSecureBoxTestCodec();
-    }
+    } finally { restoreDefaultHostedSecureBoxTestCodec(); }
   });
 
-  it("returns the first item for duplicate dedupe keys without rewriting payload storage", async () => {
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const existing = buildHostedMailboxItemRow({
-      dedupeKey: "dedupe_existing_1",
-      kind: "conversation.message",
-      lane: "conversation",
-      payloadBytes: 64,
-      payloadInlineCiphertext: "cipher_first_1",
-    });
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      findUnique: vi.fn<HostedMailboxFindUnique>(async () => existing),
-    });
-    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-
-    const result = await appendHostedMailboxItemTx({
-      dedupeKey: "dedupe_existing_1",
-      kind: "member.activated",
-      lane: "system",
-      occurredAt: FIXED_NOW,
-      payloadSerializedJson: JSON.stringify({ kind: "duplicate-test" }),
-      tx,
-      userId: "member_mailbox_1",
-    });
-
-    expect(result).toMatchObject({
-      duplicate: true,
-      dedupeConflict: true,
-      inserted: false,
-      item: {
-        id: existing.id,
-        payloadInlineCiphertext: "cipher_first_1",
-      },
-    });
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
-    const executeRawMock = vi.mocked(tx.$executeRaw);
-    expect(readHostedMailboxRawSql(executeRawMock.mock.calls[0])).toContain(
-      "pg_advisory_xact_lock",
-    );
-    expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_existing_1");
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(consoleWarn).toHaveBeenCalledWith("Hosted mailbox dedupe conflict.", {
-      component: "mailbox",
-      eventCode: "mailbox.dedupe_conflict",
-      existingBytes: 64,
-      existingHasHash: false,
-      existingKind: "conversation.message",
-      existingLane: "conversation",
-      existingSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-      requestedBytes: expect.any(Number),
-      requestedHasHash: true,
-      requestedKind: "member.activated",
-      requestedLane: "system",
-      requestedSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-    });
-    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("dedupe_existing_1");
-    consoleWarn.mockRestore();
-    expect(hostedMailboxItem.create).not.toHaveBeenCalled();
-    expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+  it.each([false, true])("preserves the first envelope on duplicate with changed payload=%s", async (changed) => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      let existing: HostedMailboxItemRow | null = null;
+      const hostedMailboxItem = createHostedMailboxItemDelegate({
+        create: vi.fn<HostedMailboxCreate>(async (args) => {
+          existing = buildHostedMailboxItemRow(args.data);
+          return existing;
+        }),
+        findUnique: vi.fn<HostedMailboxFindUnique>(async () => existing),
+      });
+      const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+      const tx = createHostedMailboxTx({ hostedMailboxItem, hostedMailboxPayload });
+      const first = await appendHostedMailboxEnvelopeTx({ envelope: buildDirectMailboxEnvelope(), tx });
+      vi.mocked(tx.$queryRaw).mockClear();
+      const replay = await appendHostedMailboxEnvelopeTx({
+        envelope: buildDirectMailboxEnvelope(changed ? "world" : "hello"), tx,
+      });
+      expect(replay).toMatchObject({
+        inserted: false, duplicate: true, dedupeConflict: changed,
+        item: { id: first.item.id, payloadInlineCiphertext: first.item.payloadInlineCiphertext },
+      });
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+      expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+      expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledTimes(changed ? 1 : 0);
+      expect(JSON.stringify(warning.mock.calls)).not.toContain(first.item.dedupeKey);
+    } finally { warning.mockRestore(); }
   });
 
   it("reads checkpoint ownership without hydrating mailbox payload fields", async () => {
@@ -1084,63 +864,6 @@ describe("appendHostedMailboxItemTx", () => {
     });
   });
 
-  it("compares duplicate dedupe metadata derived from serialized payloads instead of caller spoof fields", async () => {
-    const rows: HostedMailboxItemRow[] = [];
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      create: vi.fn<HostedMailboxCreate>(async (args) => {
-        const row = buildHostedMailboxItemRow(args.data);
-        rows.push(row);
-        return row;
-      }),
-      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
-        const where = readHostedMailboxFindUniqueWhere(args);
-        return rows.find((row) => (
-          row.userId === where.userId && row.dedupeKey === where.dedupeKey
-        )) ?? null;
-      }),
-    });
-    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-    const payloadSerializedJson = JSON.stringify({ kind: "duplicate-stable" });
-
-    const first = await appendHostedMailboxItemTx({
-      dedupeKey: "dedupe_duplicate_spoof_1",
-      kind: "conversation.message",
-      lane: "conversation",
-      occurredAt: FIXED_NOW,
-      payloadSerializedJson,
-      tx,
-      userId: "member_mailbox_1",
-    });
-    const duplicateInputWithSpoofedMetadata = {
-      dedupeKey: "dedupe_duplicate_spoof_1",
-      kind: "conversation.message",
-      lane: "conversation",
-      occurredAt: FIXED_NOW,
-      payloadBytes: 999_999,
-      payloadHash: "hmac-sha256:spoofed-duplicate-hash",
-      payloadSerializedJson,
-      tx,
-      userId: "member_mailbox_1",
-    };
-
-    const duplicate = await appendHostedMailboxItemTx(duplicateInputWithSpoofedMetadata);
-
-    expect(first.inserted).toBe(true);
-    expect(duplicate).toMatchObject({
-      duplicate: true,
-      dedupeConflict: false,
-      inserted: false,
-      item: {
-        id: first.item.id,
-        payloadInlineCiphertext: first.item.payloadInlineCiphertext,
-      },
-    });
-    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
@@ -1266,7 +989,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       }),
     });
     const executeRawMock = vi.mocked(tx.$executeRaw);
-    expect(executeRawMock).toHaveBeenCalledTimes(3);
+    expect(executeRawMock).toHaveBeenCalledTimes(2);
     expect(
       executeRawMock.mock.calls.map(readHostedMailboxRawSql).join("\n"),
     ).not.toContain("mailbox-source-message");
@@ -3170,7 +2893,7 @@ function createHostedMailboxTx(input: {
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");
       if (sql.includes("hosted_mailbox_lane_counter")) {
-        return [{ seq: 1n }];
+        return [{ causalSeq: 1n, laneSeq: 1n }];
       }
 
       if (sql.includes("INSERT INTO hosted_mailbox_item")) {
@@ -3217,7 +2940,7 @@ function createHostedMailboxTx(input: {
       findUnique: vi.fn(async () => null),
       createMany: vi.fn(async () => null),
     },
-  }) as Parameters<typeof appendHostedMailboxItemTx>[0]["tx"];
+  }) as Parameters<typeof appendHostedMailboxEnvelopeTx>[0]["tx"];
 }
 
 function buildHostedGroupLinqEnvelope(userId: string) {
@@ -3595,3 +3318,15 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
     });
   });
 });
+
+function buildDirectMailboxEnvelope(text = "hello") {
+  return buildHostedExecutionTelegramConversationMessageWake({
+    eventId: "synthetic-envelope-storage",
+    occurredAt: FIXED_NOW.toISOString(),
+    telegramMessage: {
+      messageId: "1", schema: "murph.hosted-telegram-message.v1",
+      text, threadId: "123", threadIsDirect: true,
+    },
+    userId: "member_mailbox_1",
+  });
+}

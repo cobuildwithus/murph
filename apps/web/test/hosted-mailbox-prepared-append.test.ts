@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import {
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -60,7 +61,6 @@ import {
 } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hashHostedMailboxStoredPayload } from "../src/lib/hosted-mailbox/fingerprint";
 import {
-  appendHostedMailboxItem,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   appendHostedMealPhotoMailboxEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
@@ -178,7 +178,7 @@ interface MailboxFixture {
   events: string[];
   hostedMailboxPayloadCreate: ReturnType<typeof vi.fn>;
   prisma: {
-    $transaction: ReturnType<typeof vi.fn<MailboxFixtureTransaction>>;
+    $transaction: MailboxFixtureTransaction;
     hostedMailboxItem: {
       findUnique: ReturnType<typeof vi.fn>;
     };
@@ -243,7 +243,7 @@ function createMailboxFixture(input: {
     async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");
       if (sql.includes("hosted_mailbox_lane_counter")) {
-        return [{ seq: 1n }];
+        return [{ causalSeq: 1n, laneSeq: 1n }];
       }
       if (sql.includes("INSERT INTO hosted_mailbox_item")) {
         const row = buildMailboxRow({
@@ -306,7 +306,8 @@ function createMailboxFixture(input: {
     events,
     hostedMailboxPayloadCreate,
     prisma: {
-      $transaction: transaction,
+      // The mock forwards the generic callback result unchanged.
+      $transaction: transaction as MailboxFixtureTransaction,
       hostedMailboxItem: { findUnique: rootFindUnique },
     },
     rollbacks,
@@ -314,15 +315,19 @@ function createMailboxFixture(input: {
   };
 }
 
-function buildAppendInput(payloadSerializedJson = JSON.stringify({ body: "hello" })) {
-  return {
-    dedupeKey: "dedupe-prepared-mailbox",
-    kind: "conversation.message",
-    lane: "conversation",
-    occurredAt: FIXED_NOW,
-    payloadSerializedJson,
+function buildAppendEnvelope(text = "hello") {
+  return buildHostedExecutionTelegramConversationMessageWake({
+    eventId: "dedupe-prepared-mailbox",
+    occurredAt: FIXED_NOW.toISOString(),
+    telegramMessage: {
+      messageId: "1",
+      schema: "murph.hosted-telegram-message.v1",
+      text,
+      threadId: "123",
+      threadIsDirect: true,
+    },
     userId: USER_ID,
-  };
+  });
 }
 
 beforeEach(() => {
@@ -385,7 +390,7 @@ beforeEach(() => {
     );
 });
 
-describe("appendHostedMailboxItem prepared crypto owner", () => {
+describe("prepared envelope crypto owner", () => {
   it("settles provider preparation before starting the transaction", async () => {
     const fixture = createMailboxFixture();
     const gate = createDeferred<string>();
@@ -404,9 +409,14 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
         return `cipher:${input.payloadStorage}`;
       });
 
-    const pending = appendHostedMailboxItem({
-      ...buildAppendInput(),
+    const pending = runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope(), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     });
     await vi.waitFor(() => {
       expect(domainRootMocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(1);
@@ -903,9 +913,14 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     });
     installPreparedRootSequence({ rootKeyIds: [rootKeyId] });
 
-    await expect(appendHostedMailboxItem({
-      ...buildAppendInput(),
+    await expect(runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope(), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     })).rejects.toThrow(
       "Hosted mailbox append prepared root is not the exact scoped cache entry.",
     );
@@ -924,9 +939,14 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     const providerFailure = new Error("kms unavailable");
     domainRootMocks.unwrapHostedDomainRootForWeb.mockRejectedValue(providerFailure);
 
-    await expect(appendHostedMailboxItem({
-      ...buildAppendInput(),
+    await expect(runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope(), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     })).rejects.toBe(providerFailure);
 
     expect(fixture.prisma.$transaction).not.toHaveBeenCalled();
@@ -945,9 +965,14 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
       .mockResolvedValueOnce("root-won-by-another-writer")
       .mockResolvedValueOnce("root-after-drift");
 
-    await expect(appendHostedMailboxItem({
-      ...buildAppendInput(),
+    await expect(runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope(), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     })).resolves.toMatchObject({
       duplicate: false,
       inserted: true,
@@ -956,7 +981,7 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     expect(domainRootMocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
     expect(fixture.prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(fixture.rollbacks.count).toBe(1);
-    expect(fixture.tx.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(fixture.tx.$executeRaw).toHaveBeenCalledTimes(1);
     expect(
       mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot,
     ).toHaveBeenCalledTimes(1);
@@ -979,9 +1004,14 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
       .mockResolvedValueOnce("root-current-1")
       .mockResolvedValueOnce("root-current-2");
 
-    await expect(appendHostedMailboxItem({
-      ...buildAppendInput(),
+    await expect(runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope(), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     })).rejects.toBeInstanceOf(domainRootMocks.PreparationMismatchError);
 
     expect(domainRootMocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
@@ -1000,9 +1030,14 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
       .mockRejectedValue(transactionFailure);
 
-    await expect(appendHostedMailboxItem({
-      ...buildAppendInput(),
+    await expect(runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope(), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     })).rejects.toBe(transactionFailure);
 
     expect(domainRootMocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(1);
@@ -1013,50 +1048,19 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("returns an already durable dedupe replay without crypto preparation or a transaction", async () => {
-    const payloadSerializedJson = JSON.stringify({ body: "hello" });
-    const existing = buildMailboxRow({
-      dedupeKey: "dedupe-prepared-mailbox",
-      payloadBytes: Buffer.byteLength(payloadSerializedJson, "utf8"),
-      payloadHash: hashHostedMailboxStoredPayload({
-        serialized: payloadSerializedJson,
-        userId: USER_ID,
-      }),
-    });
-    const fixture = createMailboxFixture({
-      existingBeforePreparation: existing,
-    });
-
-    await expect(appendHostedMailboxItem({
-      ...buildAppendInput(payloadSerializedJson),
-      prisma: fixture.prisma as never,
-    })).resolves.toMatchObject({
-      duplicate: true,
-      inserted: false,
-      item: {
-        id: existing.id,
-      },
-    });
-
-    expect(domainRootMocks.unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
-    expect(fixture.prisma.$transaction).not.toHaveBeenCalled();
-    expect(
-      mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot,
-    ).not.toHaveBeenCalled();
-  });
-
   it("keeps oversized payloads sidecar-backed with sequence-bound prepared AAD", async () => {
     const fixture = createMailboxFixture();
     installPreparedRootSequence({ rootKeyIds: ["root-sidecar"] });
     domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
       .mockResolvedValue("root-sidecar");
-    const payloadSerializedJson = JSON.stringify({ body: "x".repeat(140_000) });
-
-    const result = await appendHostedMailboxItem({
-      ...buildAppendInput(payloadSerializedJson),
-      kind: "assistant.notification.requested",
-      lane: "system",
+    const result = await runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildAppendEnvelope("x".repeat(140_000)), prepared, tx: tx as never,
+        })
+      ),
       prisma: fixture.prisma as never,
+      userId: USER_ID,
     });
 
     expect(result.item).toMatchObject({
