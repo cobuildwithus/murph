@@ -926,6 +926,8 @@ class DeviceSyncServiceController {
     let snapshotCanonicalWriteElapsedMs = 0;
     let snapshotEventIdentityIndexCacheHitCount = 0;
     let snapshotEventIdentityIndexElapsedMs = 0;
+    let snapshotIngestInspectionElapsedMs = 0;
+    let snapshotIngestInventoryCacheHitCount = 0;
     let snapshotNormalizationElapsedMs = 0;
     const finishPass = (): {
       job: DeviceSyncJobRecord;
@@ -981,6 +983,8 @@ class DeviceSyncServiceController {
         snapshotCanonicalWriteElapsedMs,
         snapshotEventIdentityIndexCacheHitCount,
         snapshotEventIdentityIndexElapsedMs,
+        snapshotIngestInspectionElapsedMs,
+        snapshotIngestInventoryCacheHitCount,
         snapshotNormalizationElapsedMs,
       });
       return {
@@ -1353,6 +1357,8 @@ class DeviceSyncServiceController {
               ? 1
               : 0;
             snapshotEventIdentityIndexElapsedMs += importTiming.eventIdentityIndexElapsedMs;
+            snapshotIngestInspectionElapsedMs += importTiming.ingestInspectionElapsedMs;
+            snapshotIngestInventoryCacheHitCount += importTiming.ingestInventoryCacheHit ? 1 : 0;
             snapshotNormalizationElapsedMs += importTiming.normalizationElapsedMs;
           }
           const canonicalEventCount = readCanonicalDeviceImportEventCount(importResult);
@@ -2927,6 +2933,8 @@ function readDeviceProviderSnapshotImportTiming(value: unknown): {
   canonicalWriteElapsedMs: number;
   eventIdentityIndexCacheHit: boolean;
   eventIdentityIndexElapsedMs: number;
+  ingestInspectionElapsedMs: number;
+  ingestInventoryCacheHit: boolean;
   normalizationElapsedMs: number;
 } | null {
   const timing = toPlainRecord(toPlainRecord(value)?.deviceProviderSnapshotImportTiming);
@@ -2956,6 +2964,8 @@ function readDeviceProviderSnapshotImportTiming(value: unknown): {
     canonicalWriteElapsedMs,
     eventIdentityIndexCacheHit: timing.eventIdentityIndexCacheHit,
     eventIdentityIndexElapsedMs,
+    ingestInspectionElapsedMs: readDuration("ingestInspectionElapsedMs") ?? 0,
+    ingestInventoryCacheHit: timing.ingestInventoryCacheHit === true,
     normalizationElapsedMs,
   };
 }

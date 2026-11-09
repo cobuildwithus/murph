@@ -3258,6 +3258,8 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
       canonicalCoreElapsedMs: number;
       canonicalWriteElapsedMs: number;
       eventIdentityIndexCacheHit: boolean;
+      ingestInspectionElapsedMs: number;
+      ingestInventoryCacheHit: boolean;
       eventIdentityIndexElapsedMs: number;
       normalizationElapsedMs: number;
     };
@@ -3288,6 +3290,8 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
         options?.onTiming?.({
           canonicalWriteElapsedMs: 12,
           eventIdentityIndexCacheHit: true,
+          ingestInspectionElapsedMs: 25,
+          ingestInventoryCacheHit: true,
           eventIdentityIndexElapsedMs: 34,
           totalElapsedMs: 56,
         });
@@ -3307,6 +3311,8 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
     canonicalCoreElapsedMs: 56,
     canonicalWriteElapsedMs: 12,
     eventIdentityIndexCacheHit: true,
+    ingestInspectionElapsedMs: 25,
+    ingestInventoryCacheHit: true,
     eventIdentityIndexElapsedMs: 34,
     normalizationElapsedMs: result.deviceProviderSnapshotImportTiming.normalizationElapsedMs,
   });

@@ -11,10 +11,12 @@ without splitting the ledger or introducing another reader. See
 [the assembled CLI experiment](bench/README.md#cold-cli-event-read-import-experiment)
 for the measured-work acceptance boundary.
 
-Device imports reuse their prepared persistence plan under the canonical lock
-when delivery history inspection is unchanged. Expanding a bounded
-inspection to full history still rebuilds the plan before publication, preserving
-exact-delivery replay and evidence-repair checks.
+Device imports cache ID/evidence byte offsets for one resident plain ingest month.
+The canonical lock, vault identity and shard inode/size/mtime/ctime fence reuse.
+Committed appends advance it; other changes, restore, failed publication, month/archive changes or capacity overflow invalidate it.
+Duplicate IDs, malformed/archived histories and invalid selected rows use the slow path; offset reads validate candidates.
+`ingestInspectionElapsedMs` measures inspection plus evidence and late-ID lookups.
+`ingestInventoryCacheHit` reports complete inventory reuse through importer, sync and hosted diagnostics.
 
 Core retains one event-identity index across drains in the same process, under
 the existing canonical write lock. Vault identity and shard metadata fence reuse;

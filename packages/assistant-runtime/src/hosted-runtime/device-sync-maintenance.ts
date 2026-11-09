@@ -2017,6 +2017,8 @@ function summarizeHostedDeviceSyncJobTimings(
       snapshotEventIdentityIndexCacheHitCount:
         diagnostic.snapshotEventIdentityIndexCacheHitCount,
       snapshotEventIdentityIndexElapsedMs: diagnostic.snapshotEventIdentityIndexElapsedMs,
+      snapshotIngestInspectionElapsedMs: diagnostic.snapshotIngestInspectionElapsedMs,
+      snapshotIngestInventoryCacheHitCount: diagnostic.snapshotIngestInventoryCacheHitCount,
       snapshotNormalizationElapsedMs: diagnostic.snapshotNormalizationElapsedMs,
     })),
     truncated: diagnostics.length > HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,

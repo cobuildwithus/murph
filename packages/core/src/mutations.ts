@@ -1,3 +1,4 @@
+import { invalidateIntegrationIngestInventory } from "./integration-ingest-inventory.ts";
 import { mealNameViolation, MEAL_NAME_GUIDANCE } from "@murphai/contracts";
 import { createHash } from "node:crypto";
 import { normalizeOptionalText } from "./domains/shared.ts";
@@ -376,6 +377,8 @@ export interface DeviceBatchImportTiming {
   canonicalWriteElapsedMs: number;
   eventIdentityIndexCacheHit: boolean;
   eventIdentityIndexElapsedMs: number;
+  ingestInspectionElapsedMs: number;
+  ingestInventoryCacheHit: boolean;
   totalElapsedMs: number;
 }
 
@@ -7114,6 +7117,8 @@ export async function importDeviceBatch(
     canonicalWriteElapsedMs: 0,
     eventIdentityIndexCacheHit: false,
     eventIdentityIndexElapsedMs: 0,
+    ingestInspectionElapsedMs: 0,
+    ingestInventoryCacheHit: false,
     totalElapsedMs: 0,
   };
   try {
@@ -7123,6 +7128,7 @@ export async function importDeviceBatch(
     return { ...result, events: structuredClone(result.events) };
   } catch (error) {
     deviceEventIdentityCache.delete(input.vaultRoot);
+    invalidateIntegrationIngestInventory(input.vaultRoot);
     throw error;
   } finally {
     timing.totalElapsedMs = Math.max(0, performance.now() - startedAt);
@@ -7506,11 +7512,14 @@ timing: DeviceBatchImportTiming,
       currentEventIdsByRole.set(role, ids);
     }
   }
+  const ingestInspectionStartedAt = performance.now();
   ingestInspection = await inspectIntegrationIngestHistory(
     vaultRoot,
     deviceBatchPlan.importedAt,
     candidateImportIds,
     {
+      useInventory: true,
+      deferEvidence: true,
       evidence: {
         provider: deviceBatchPlan.provider,
         accountId: deviceBatchPlan.accountId,
@@ -7532,6 +7541,8 @@ timing: DeviceBatchImportTiming,
       },
     },
   );
+  timing.ingestInspectionElapsedMs = Math.max(0, performance.now() - ingestInspectionStartedAt);
+  timing.ingestInventoryCacheHit = ingestInspection.inventoryCacheHit;
   const preparePersistence = async (exactState: ExactDeliveryState) => {
     const { evidenceRepairRequired } = exactState;
     if (exactState.untrustedExactIdentityObserved) {
@@ -7881,11 +7892,20 @@ timing: DeviceBatchImportTiming,
         eventIdsByEvidenceRole.set(role, eventIds);
       }
     }
-    const novelty = ingestInspection.selectNovelEvidence({
+    const appendedEventEvidenceRoles = new Set(
+      [...appendedPreparedEventIds].flatMap((preparedId) =>
+        persistenceEvidenceRolesByPreparedRecordId.get(preparedId) ?? []
+      ),
+    );
+    // Appended-event support is retained regardless of novelty. A partial marker
+    // still needs the real novelty result to decide whether to repair all parts.
+    const evidenceInspectionStartedAt = performance.now();
+    const novelty = await ingestInspection.inspectEvidence({
       includeReceipt: !hasAppendedOutputs,
       eventIdsByRole: eventIdsByEvidenceRole,
       sampleIds: new Set(sampleRecords.map((record) => record.id)),
-    });
+    }, appendedEventEvidenceRoles, partialStoredDelivery() !== undefined);
+    timing.ingestInspectionElapsedMs += Math.max(0, performance.now() - evidenceInspectionStartedAt);
     const hasNovelEvidence = novelty.parts.length > 0 || novelty.receiptIsNovel;
     const partialMarkerNeedsEvidenceRepair = partialStoredDelivery() !== undefined
       && hasNovelEvidence;
@@ -7902,11 +7922,6 @@ timing: DeviceBatchImportTiming,
     );
     const hasSharedCanonicalEventOwner = new Set(preparedCanonicalEventIds).size
       !== preparedCanonicalEventIds.length;
-    const appendedEventEvidenceRoles = new Set(
-      [...appendedPreparedEventIds].flatMap((preparedId) =>
-        persistenceEvidenceRolesByPreparedRecordId.get(preparedId) ?? []
-      ),
-    );
     const novelEvidenceParts = new Set(novelty.parts);
     const retainedEvidenceParts = evidenceRepairRequired
       || partialMarkerNeedsEvidenceRepair
@@ -8021,6 +8036,10 @@ timing: DeviceBatchImportTiming,
     sampleCount: sampleRecords.length,
     provenance: deviceBatchPlan.provenance,
   });
+  const finalIngestInspectionStartedAt = performance.now();
+  ingestInspection = await ingestInspection.inspectIds([persistedImportId]);
+  timing.ingestInspectionElapsedMs += Math.max(0, performance.now() - finalIngestInspectionStartedAt);
+  timing.ingestInventoryCacheHit = ingestInspection.inventoryCacheHit;
   const ingestAppendPlan = buildIntegrationIngestAppendPlanFromInspection(
     [ingestRecord], ingestInspection, { allowArchivedShardAmendments: true },
   );
@@ -8085,6 +8104,7 @@ timing: DeviceBatchImportTiming,
     0,
     performance.now() - canonicalWriteStartedAt,
   );
+  await ingestInspection.recordCommittedAppend(ingestAppendPlan.payloads);
   const publishedCache = deviceEventIdentityCache.get(vaultRoot);
   if (publishedCache && eventAppendPlan.appendedRecordIds.length > 0) {
     // Only the append payloads represent rows actually published. Reconciliation

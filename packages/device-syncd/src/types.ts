@@ -273,6 +273,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   snapshotCanonicalWriteElapsedMs: number;
   snapshotEventIdentityIndexCacheHitCount: number;
   snapshotEventIdentityIndexElapsedMs: number;
+  snapshotIngestInspectionElapsedMs: number;
+  snapshotIngestInventoryCacheHitCount: number;
   snapshotNormalizationElapsedMs: number;
 }
 
