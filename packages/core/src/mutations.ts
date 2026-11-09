@@ -1915,9 +1915,6 @@ interface EventExternalRefReconciliation {
   records: EventRecord[];
   forceAppendIds: ReadonlySet<string>;
   retainedPreparedIds: ReadonlySet<string>;
-  skippedDuplicateCount: number;
-  supersededCount: number;
-  retractedCount: number;
 }
 
 // externalRef.version is intentionally NOT part of the reconcile identity:
@@ -4820,8 +4817,7 @@ function retractMissingAuthoritativeDeviceFacets(
   index: EventExternalRefIndex,
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[],
   stageProviderRevision: (input: DeviceProviderRevisionStage) => void,
-): number {
-  let retractedCount = 0;
+): void {
   for (const set of authoritativeEventSets) {
     const ownsFacet = (facet: string): boolean => set.facetPrefixes.some((prefix) =>
       facet === prefix || facet.startsWith(`${prefix}-`)
@@ -4895,10 +4891,8 @@ function retractMissingAuthoritativeDeviceFacets(
           : undefined,
         indexedRelativePath: latestPath,
       });
-      retractedCount += 1;
     }
   }
-  return retractedCount;
 }
 
 // Device-sync ingestion invariant 4: merge is idempotent on the record's own
@@ -4924,9 +4918,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
   const recordsByEntryIndex = new Map<number, EventRecord>();
   const forceAppendIds = new Set<string>();
   const retainedPreparedIds = new Set<string>();
-  let skippedDuplicateCount = 0;
-  let supersededCount = 0;
-  let retractedCount = 0;
 
   const retainRecord = (entryIndex: number, record: EventRecord, retainPreparedId = true) => {
     if (retainPreparedId) {
@@ -4970,7 +4961,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         providerEntry.record.id,
       );
       recordsByEntryIndex.set(input.entryIndex, current);
-      supersededCount += 1;
     }
   };
 
@@ -5002,8 +4992,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       aliasRepair.overlaySurvivor ?? aliasRepair.providerSurvivor,
     );
     applyJunctionDailyAggregateAliasRepairToIndex(aliasRepair, index);
-    supersededCount += 1;
-    retractedCount += 1;
   }
 
   for (const [entryIndex, entry] of entries.entries()) {
@@ -5019,7 +5007,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         && !isDeletedEventSpineRecord(current)
         && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
       ) {
-        skippedDuplicateCount += 1;
         retainRecord(entryIndex, current);
         continue;
       }
@@ -5069,7 +5056,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         entry.record,
       );
     if (replaysJunctionNoIdProfileTimestamp) {
-      skippedDuplicateCount += 1;
       retainRecord(entryIndex, latest);
       continue;
     }
@@ -5095,7 +5081,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       isDeletedEventSpineRecord(latest)
       && (migratesJunctionStableProfileTimestamp || retainsDeletedJunctionStableProfile)
     ) {
-      skippedDuplicateCount += 1;
       retainRecord(entryIndex, latest);
       continue;
     }
@@ -5114,7 +5099,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       matchesIndexedProviderContent,
       migratesJunctionStableProfileTimestamp,
     })) {
-      skippedDuplicateCount += 1;
       recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
@@ -5143,7 +5127,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
       && !reassertsRetractedSetMember
     ) {
-      skippedDuplicateCount += 1;
       retainRecord(entryIndex, latest);
       continue;
     }
@@ -5175,7 +5158,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         continue;
       }
       if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
-        skippedDuplicateCount += 1;
         retainRecord(entryIndex, latest);
         continue;
       }
@@ -5203,7 +5185,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         })
       )
     ) {
-      skippedDuplicateCount += 1;
       retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
       continue;
     }
@@ -5222,7 +5203,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       && !authoritativeSet,
     );
     if (replaysProviderOwnedRetractionWithoutSetAuthority) {
-      skippedDuplicateCount += 1;
       retainRecord(entryIndex, latest);
       continue;
     }
@@ -5232,7 +5212,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       // dead under authoritative replay: no append, no index change, so a
       // later empty-then-populated cadence cannot launder the deletion away.
       if (authoritativeSet && indexedSourceVersionComparison === null) {
-        skippedDuplicateCount += 1;
         retainRecord(entryIndex, latest);
         continue;
       }
@@ -5269,7 +5248,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     });
   }
 
-  retractedCount += retractMissingAuthoritativeDeviceFacets(
+  retractMissingAuthoritativeDeviceFacets(
     index,
     authoritativeEventSets,
     stageProviderRevision,
@@ -5292,9 +5271,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     records,
     forceAppendIds,
     retainedPreparedIds,
-    skippedDuplicateCount,
-    supersededCount,
-    retractedCount,
   };
 }
 
@@ -7771,10 +7747,6 @@ timing: DeviceBatchImportTiming,
     const persistenceReconciliationEntries = reconciliationEntries.filter((entry) =>
       !storedEventRepairIds.has(entry.record.id)
     );
-    const repairedProtectedPreparedEventCount =
-      [...historicalRepairEntryByPreparedId.keys()].filter((preparedId) =>
-        persistenceProtectedPreparedEventIds.has(preparedId)
-      ).length;
     const reconciled = evidenceRepairRequired
       ? await reconcileDeviceEventEntriesByExternalRef(
           vaultRoot,
@@ -7825,9 +7797,6 @@ timing: DeviceBatchImportTiming,
         ...reconciled.retainedPreparedIds,
         ...persistenceProtectedPreparedEventIds,
       ]),
-      skippedDuplicateCount: reconciled.skippedDuplicateCount
-        + persistenceProtectedPreparedEventIds.size
-        - repairedProtectedPreparedEventCount,
     };
     const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
       dedupeWithinPlan: true,
@@ -8073,11 +8042,6 @@ timing: DeviceBatchImportTiming,
     eventCount: eventOutputs.length,
     sampleCount: sampleRecords.length,
     provenance: deviceBatchPlan.provenance,
-    publication: {
-      skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
-      supersededCount: eventReconciliation.supersededCount,
-      retractedCount: eventReconciliation.retractedCount,
-    },
   });
   const persistedImportIdWasInspected = ingestIdInspection.requestedIds.has(persistedImportId);
   const ingestAppendPlan = !persistedImportIdWasInspected
