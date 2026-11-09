@@ -63,6 +63,23 @@ stateDiagram-v2
 | 2: groups | canonical group lifecycle, membership, score and challenge boundaries | 166 isolated PostgreSQL tests passed; no claim of native group UI. |
 | 3: artifacts and replies | photo unlock, rep tape, route, heart rate, replies, capture-mode changes | 57 tests passed on SE; 52 screenshot attachments captured, with representative reply, route and heart-rate states visually inspected. |
 
+## Additional edge-case passes
+
+The follow-up request added two passes over interruption and terminal boundaries:
+
+- Pass 4: held post acknowledgements, lost responses, deletion/retake while a send
+  remains in flight, access denial racing an older Home, first-Home recovery,
+  replies, keyboard Return and screenshot variants. Reproduced the three follow-up
+  defects above. Initial UI result: 14 of 15 tests passed; Return lost punctuation.
+- Pass 5: calendar/DST and 3 AM boundaries, settlement, late recap, member deletion,
+  small-phone recap/ticket/rematch exits and the repaired reply interactions.
+  Canonical PostgreSQL/calendar proof: 132 tests passed. All 58 small-phone
+  reply/recap/ticket/rematch UI tests passed after fixes. The Return regression
+  also passed on Pro Max.
+
+The reply comparison uses actual simulator captures in Paper; no layout redesign
+is part of these fixes. The linked native PR carries the final screenshot evidence.
+
 ## Composed local reproduction
 
 Use an isolated, migrated loopback database whose name begins `murph_test_`.
@@ -87,17 +104,26 @@ read/update game tools and closes after the journey. Delivery providers are mock
 
 1. A post committed, Home observed it plus an opponent post or chat correction,
    then the delayed POST response erased that newer state. The post outbox now
-   remembers when a server projection observed its exact entry identity; its
-   acknowledgement retires the outbox without replacing later Home state.
+   retires when a server projection observes its exact entry identity. A late
+   acknowledgement cannot replace later Home state or remove a newer pending post.
 2. A subsequent deletion or retake on another phone could be undone by the same
-   delayed response. The witness persists for the in-flight send even when the
-   current Home no longer contains the original entry.
+   delayed response. Exact-entry retirement keeps the late send from merging,
+   even when the current Home no longer contains the original entry.
 3. An outgoing reply response could remove an opponent reply observed by Home.
    Existing server-observed reply retirement now prevents that stale merge.
 4. Overlapping Home reads could return out of order. Started and accepted read
    sequences prevent older responses and non-auth failures from replacing an
    accepted newer read; a later-started explicit refresh still applies if an
    older background read finishes first. Command ordering remains separate.
+5. Follow-up pass: a lost acknowledgement left a Home-confirmed post in the
+   durable queue, showing retry or overlaying a later deletion. Home now retires
+   it immediately from memory and disk; late errors cannot recreate that work.
+6. Follow-up pass: a newer GAME_DISABLED response did not fence an older success,
+   allowing it to reopen the game and overwrite the kept denial. Authoritative
+   denial now advances accepted-read ordering as well.
+7. Follow-up pass: Return could drop the final reply character when SwiftUI
+   coalesced it with a newline. The reply field now keeps the newest text,
+   separates pasted lines with spaces, and dismisses the keyboard.
 
 Regression evidence lives in `GamePendingShotsTests`, `GamePendingRepliesTests`,
 `GameServerMappingTests`, and the adjacent native Home/auth/safety tests. The
@@ -124,8 +150,22 @@ The initial three UI failures are tracked separately from product defects:
   all 62 tests in the changed setup/navigation classes then passed on Pro Max,
   and both changed setup interactions also passed on SE.
 
-Screenshots and raw test bundles stay local under the native checkout’s ignored
-`build/qa` directory. They are not committed or published.
+Raw test bundles stay local under the native checkout’s ignored `build/qa`
+directory. The follow-up reply fix has synthetic before/after captures in Paper;
+its native PR includes the required final screen captures in that private repo.
+No raw bundles or screenshot assets are published in this backend repository.
+
+## Follow-up verification
+
+- 136 native tests passed across pending shots/replies, access, block cache and
+  reply composition. One additional adversarial retake test passed: a new post
+  stays pending when the original acknowledgement arrives, then completes.
+- The new retake fixture initially returned an impossible stale Home after its
+  own successful commit; correcting that fixture produced green proof without
+  another production change.
+- Both native schemes built, project generation and source lint passed.
+- Independent review found no further concrete defect. No physical-device,
+  production messaging or release-wide claims are inferred from these checks.
 
 ## Verification summary
 
