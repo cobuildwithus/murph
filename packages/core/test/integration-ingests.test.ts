@@ -44,8 +44,7 @@ import {
 } from "../src/write-policy.ts";
 import {
   buildIntegrationIngestAppendPlanFromInspection,
-  inspectIntegrationIngestIdsForImportedAt,
-  selectNovelIntegrationIngestEvidence,
+  inspectIntegrationIngestHistory,
 } from "../src/integration-ingests.ts";
 
 const corePackageDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -133,7 +132,7 @@ function runArchivedNoveltySelectionInChild(
   const source = `
     import {
       buildIntegrationEvidencePart,
-      selectNovelIntegrationIngestEvidence,
+      inspectIntegrationIngestHistory,
     } from "./packages/core/src/integration-ingests.ts";
 
     const vaultRoot = process.argv[1];
@@ -148,13 +147,10 @@ function runArchivedNoveltySelectionInChild(
       mediaType: "application/json",
       content: JSON.stringify({ revision: 1, stages: [] }),
     });
-    const selection = await selectNovelIntegrationIngestEvidence({
-      vaultRoot,
-      provider: "junction",
-      accountId: "account-a",
-      importedAt,
-      parts: [part],
+    const inspection = await inspectIntegrationIngestHistory(vaultRoot, importedAt, new Set(), {
+      evidence: { provider: "junction", accountId: "account-a", parts: [part] },
     });
+    const selection = inspection.selectNovelEvidence();
     await new Promise((resolve) => setTimeout(resolve, 100));
     process.stdout.write(JSON.stringify(selection));
   `;
@@ -817,13 +813,9 @@ test("integration evidence novelty reads bounded gzip and zip target archives", 
       await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [record]);
     }
 
-    const selection = await selectNovelIntegrationIngestEvidence({
-      vaultRoot,
-      provider: "junction",
-      accountId: "account-a",
-      importedAt,
-      parts: [part],
-    });
+    const selection = (await inspectIntegrationIngestHistory(vaultRoot, importedAt, new Set(), {
+      evidence: { provider: "junction", accountId: "account-a", parts: [part] },
+    })).selectNovelEvidence();
 
     assert.deepEqual(selection, { parts: [], receiptIsNovel: false });
   }
@@ -1013,20 +1005,8 @@ test("full exact-id inspection reuses one complete history for append planning a
   await writeIntegrationIngestJsonl(vaultRoot, logicalPath, historicalRecords);
   const requestedIds = new Set([requestedRecord.id]);
 
-  const boundedInspection = await inspectIntegrationIngestIdsForImportedAt(
-    vaultRoot,
-    importedAt,
-    requestedIds,
-  );
-  assert.equal(boundedInspection.historyComplete, false);
-  assert.equal(boundedInspection.unsafe, false);
-  assert.equal(boundedInspection.entriesById.size, 0);
-
-  const fullInspection = await inspectIntegrationIngestIdsForImportedAt(
-    vaultRoot,
-    importedAt,
-    requestedIds,
-    { fullScan: true },
+  const fullInspection = await inspectIntegrationIngestHistory(
+    vaultRoot, importedAt, requestedIds,
   );
   assert.equal(fullInspection.historyComplete, true);
   assert.equal(fullInspection.unsafe, false);
@@ -1038,6 +1018,34 @@ test("full exact-id inspection reuses one complete history for append planning a
   );
   assert.deepEqual(appendPlan.appendedIds, [requestedRecord.id]);
   assert.deepEqual(appendPlan.targetShardPaths, [logicalPath]);
+});
+
+test("one inspection authorizes a later append id and rejects ids owned by unrelated evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-late-append-id");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const importedAt = "2026-06-03T21:00:00.000Z";
+  const retained = {
+    ...makeIntegrationIngestRecord({ id: "xfm_RetainedAssociation", eventId: "evt_Retained", importedAt }),
+    accountId: "account-a",
+  };
+  const unrelated = { ...retained, id: "xfm_UnrelatedOwner", accountId: "account-b" };
+  await writeIntegrationIngestJsonl(vaultRoot, integrationIngestShardPath(importedAt), [retained, unrelated]);
+  const inspection = await inspectIntegrationIngestHistory(vaultRoot, importedAt, new Set(), {
+    evidence: { provider: retained.provider, accountId: retained.accountId, parts: retained.parts },
+  });
+  assert.equal(inspection.historyComplete, true);
+  assert.deepEqual(buildIntegrationIngestAppendPlanFromInspection([retained], inspection).appendedIds, []);
+  const fresh = { ...retained, id: "xfm_NewAssociation" };
+  assert.deepEqual(buildIntegrationIngestAppendPlanFromInspection([fresh], inspection).appendedIds, [fresh.id]);
+  assert.throws(() => buildIntegrationIngestAppendPlanFromInspection(
+    [{ ...retained, id: unrelated.id }], inspection,
+  ), (error) => error instanceof VaultError && error.code === "INTEGRATION_INGEST_ID_CONFLICT");
+  assert.deepEqual(inspection.selectNovelEvidence({
+    eventIdsByRole: new Map([[retained.parts[0]!.role, new Set(["evt_Retained"])]]),
+  }).parts, []);
+  assert.deepEqual(inspection.selectNovelEvidence({
+    eventIdsByRole: new Map([[retained.parts[0]!.role, new Set(["evt_OtherOwner"])]]),
+  }).parts, retained.parts);
 });
 
 test("selective ingest reads ignore malformed unrequested rows but validate the requested id", async () => {

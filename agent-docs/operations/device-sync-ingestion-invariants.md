@@ -106,30 +106,23 @@ snapshot is already reconciled; it does not need an empty Web callback.
    completed by this operation; unresolved planning eligibility alone cannot
    authorize an association. An intentionally raw-only row still converges when
    its prepared deterministic id is physically occupied by a corrected owner.
-   The exact-id
-   check reads a live shard backward from its append
-   tail and ordinarily stops after 8 MiB or 64 complete rows. If the newest row
-   itself crosses 8 MiB, the reader may finish only that row, bounded by the 128
-   MiB journal-row limit plus its preceding delimiter. A tail miss may perform
-   one authoritative target-shard scan whose result is reused by append
-   planning; it never performs a second full id scan. Core separately
-   suppresses a repeated row and audit when the same provider account has no
-   new canonical output, receipt state, or evidence identity. When a repeated
-   multi-part delivery changes only some evidence, the new ingest row retains
-   only those novel parts and only their output-role links under a distinct
-   per-delivery incremental-evidence marker inspected with the original
-   delivery ids. The marker is only a locator: it cannot authorize a no-op or
-   repair from incomplete proof. Missing canonical outputs fail closed before
-   reconciliation; otherwise the existing novelty owner proves every incoming
-   evidence fingerprint, receipt, and output link. When that proof is missing
-   or unsafe, ingestion fails open by retaining one complete received evidence
-   set, after which the next replay converges. On a live shard, novelty reads
-   backward up to 8 MiB with no row-count limit and parses only rows that name
-   a requested payload hash (every row while a generic receipt is unproven), so
-   a reconcile cycle that replays hundreds of payloads still finds each one's
-   last copy instead of storing it again. A repair delivery also
-   retains the complete received evidence set rather than trusting damaged
-   historical proof. A batch whose novel evidence cannot be associated with
+   One invocation-scoped inspection under the canonical lock owns delivery ids,
+   evidence fingerprints, receipts, and event/sample links. The live tail reads
+   backward up to 8 MiB, validating the newest 64 rows and prefiltering older
+   rows by requested ids and payload hashes. An unproven generic receipt requires
+   parsing each row. If the newest row crosses 8 MiB, the reader may finish only
+   that row within the 128 MiB journal-row limit plus its delimiter. A proved
+   exact replay or complete evidence-and-output match may stop early; otherwise
+   one full shard scan supplies both proofs for persistence and append planning.
+   A tail budget limit alone never decides evidence novelty. Full scans also
+   retain observed ids so a final association id cannot require another scan.
+   Repeated deliveries with no new output, receipt, or evidence remain no-ops.
+   A multi-part delivery retains only novel parts and their output-role links
+   under its deterministic incremental-evidence marker. The marker is a locator,
+   never sufficient proof for a no-op or repair. Missing or unsafe proof retains
+   the complete incoming evidence set; ambiguous output ownership fails closed.
+   A repair delivery also retains the complete received evidence set rather than
+   trusting damaged historical proof. A batch whose novel evidence cannot be associated with
    its accepted prepared event, or whose prepared events share one canonical
    owner, likewise remains complete so later repair cannot lose the
    evidence-role mapping needed to reject ambiguity. Evidence for a newly
@@ -149,11 +142,11 @@ snapshot is already reconciled; it does not need an empty Web callback.
    whose stored event outputs are empty therefore returns `events: []`, even
    when another current record owns the incoming external ref; a manual edit or
    tombstone is not counted as a newly canonical import, and the result never
-   exposes an ambiguous input draft or distinct replacement owner. For a closed gzip/ZIP shard,
-   novelty uses the existing bounded archive reader because the amended
-   representation remains archived and cannot create a live-tail proof.
-   Missing, corrupt, unmatched oversized, or out-of-budget history fails open
-   by retaining one copy. A replay that first crosses a month boundary is
+   exposes an ambiguous input draft or distinct replacement owner. For a closed
+   gz/br/ZIP shard, the same inspection consumes the bounded archive reader through its integrity
+   check before any match can authorize a no-op. Missing or damaged evidence
+   proof retains incoming evidence only when delivery identity permits it.
+   A replay that first crosses a month boundary is
    likewise retained once and then
    dedupes in that new month. Changed and raw-only evidence remains durable. Thus
    importing a record more than once — or via a different path — is overlap-free

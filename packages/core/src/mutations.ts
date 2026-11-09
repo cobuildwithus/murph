@@ -130,13 +130,12 @@ import {
 } from "./raw.ts";
 import {
   buildIntegrationEvidencePart,
-  buildIntegrationIngestAppendPlan,
   buildIntegrationIngestAppendPlanFromInspection,
   buildIntegrationIngestRecord,
   stageIntegrationIngestAppendPlan,
   compactIntegrationIngestReceipt,
-  inspectIntegrationIngestIdsForImportedAt,
-  selectNovelIntegrationIngestEvidence,
+  inspectIntegrationIngestHistory,
+  type IntegrationIngestInspection,
   type IntegrationIngestAppendPlan,
 } from "./integration-ingests.ts";
 import type { IntegrationEvidencePart, IntegrationIngestEventOutput } from "@murphai/contracts";
@@ -7376,11 +7375,7 @@ timing: DeviceBatchImportTiming,
     associationImportId,
     incrementalEvidenceImportId,
   ]);
-  let ingestIdInspection = await inspectIntegrationIngestIdsForImportedAt(
-    vaultRoot,
-    deviceBatchPlan.importedAt,
-    candidateImportIds,
-  );
+  let ingestInspection: IntegrationIngestInspection;
   const orderedCandidateImportIds = [
     deviceBatchPlan.importId,
     associationImportId,
@@ -7388,9 +7383,9 @@ timing: DeviceBatchImportTiming,
     incrementalEvidenceImportId,
   ];
   const candidateStoredDeliveries = () => orderedCandidateImportIds
-    .map((id) => ingestIdInspection.invalidIds.has(id)
+    .map((id) => ingestInspection.invalidIds.has(id)
       ? undefined
-      : ingestIdInspection.entriesById.get(id))
+      : ingestInspection.entriesById.get(id))
     .filter((record): record is IntegrationIngestRecord =>
       record !== undefined
       && record.id !== incrementalEvidenceImportId
@@ -7400,7 +7395,7 @@ timing: DeviceBatchImportTiming,
     storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
   );
   const partialStoredDelivery = () => {
-    const record = ingestIdInspection.entriesById.get(incrementalEvidenceImportId);
+    const record = ingestInspection.entriesById.get(incrementalEvidenceImportId);
     return record && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
       ? record
       : undefined;
@@ -7436,16 +7431,16 @@ timing: DeviceBatchImportTiming,
       storedDelivery,
     });
   const authorizedStoredDelivery = () => {
-    if (ingestIdInspection.unsafe) {
+    if (ingestInspection.unsafe) {
       return undefined;
     }
     return matchingStoredDeliveries().find(storedDeliveryRetainsCurrentOutputs);
   };
   const hasInvalidCandidateId = () => orderedCandidateImportIds.some((id) =>
-    ingestIdInspection.invalidIds.has(id)
+    ingestInspection.invalidIds.has(id)
   );
   const assertNoCurrentImportIdConflict = (): void => {
-    const current = ingestIdInspection.entriesById.get(deviceBatchPlan.importId);
+    const current = ingestInspection.entriesById.get(deviceBatchPlan.importId);
     if (current && !storedIntegrationIngestIsDeviceDeliveryCandidate(current, deviceBatchPlan)) {
       throw new VaultError(
         "INTEGRATION_INGEST_ID_CONFLICT",
@@ -7453,7 +7448,7 @@ timing: DeviceBatchImportTiming,
         { ingestId: deviceBatchPlan.importId },
       );
     }
-    const partial = ingestIdInspection.entriesById.get(incrementalEvidenceImportId);
+    const partial = ingestInspection.entriesById.get(incrementalEvidenceImportId);
     if (partial && !storedIntegrationIngestIsDeviceDeliveryCandidate(partial, deviceBatchPlan)) {
       throw new VaultError(
         "INTEGRATION_INGEST_ID_CONFLICT",
@@ -7482,20 +7477,6 @@ timing: DeviceBatchImportTiming,
     return affectedSparseCalendarTargets.length > 0
       ? { ...result, affectedEventDayKeys, affectedSparseCalendarTargets }
       : result;
-  };
-  let fullInspectionAttempted = false;
-  const ensureFullInspection = async (required = true): Promise<boolean> => {
-    if (!required || fullInspectionAttempted || (ingestIdInspection.historyComplete && !ingestIdInspection.unsafe)) {
-      return false;
-    }
-    fullInspectionAttempted = true;
-    ingestIdInspection = await inspectIntegrationIngestIdsForImportedAt(
-      vaultRoot,
-      deviceBatchPlan.importedAt,
-      candidateImportIds,
-      { fullScan: true },
-    );
-    return true;
   };
   type ExactDeliveryState = {
     authorizedStoredDelivery?: IntegrationIngestRecord;
@@ -7541,6 +7522,40 @@ timing: DeviceBatchImportTiming,
         || candidateDeliveries.length > 0,
     };
   };
+  const currentEventIdsByRole = new Map<string, Set<string>>();
+  for (const output of currentEventOutputs) {
+    for (const role of output.roles) {
+      const ids = currentEventIdsByRole.get(role) ?? new Set<string>();
+      ids.add(output.id);
+      currentEventIdsByRole.set(role, ids);
+    }
+  }
+  ingestInspection = await inspectIntegrationIngestHistory(
+    vaultRoot,
+    deviceBatchPlan.importedAt,
+    candidateImportIds,
+    {
+      evidence: {
+        provider: deviceBatchPlan.provider,
+        accountId: deviceBatchPlan.accountId,
+        parts: deviceBatchPlan.preparedEvidenceParts,
+        receipt: deviceBatchPlan.ingestReceipt,
+      },
+      canUseTail: (inspection) => {
+        ingestInspection = inspection;
+        const exact = inspectExactDeliveryState();
+        if (exact.authorizedStoredDelivery) return true;
+        if (exact.evidenceRepairRequired || unresolvedBaselinePreparedIds.size > 0
+          || currentEventReconciliation.appendEntries.length > 0
+          || sampleAppendPlan.appendedRecordIds.length > 0) return false;
+        const novelty = inspection.selectNovelEvidence({
+          eventIdsByRole: currentEventIdsByRole,
+          sampleIds: new Set(sampleRecords.map((record) => record.id)),
+        });
+        return novelty.parts.length === 0 && !novelty.receiptIsNovel;
+      },
+    },
+  );
   const preparePersistence = async (exactState: ExactDeliveryState) => {
     const { evidenceRepairRequired } = exactState;
     if (exactState.untrustedExactIdentityObserved) {
@@ -7897,21 +7912,11 @@ timing: DeviceBatchImportTiming,
         eventIdsByEvidenceRole.set(role, eventIds);
       }
     }
-    const shouldCheckReceiptNovelty = !hasAppendedOutputs;
-    const novelty = deviceBatchPlan.preparedEvidenceParts.length > 0 || (
-        shouldCheckReceiptNovelty && deviceBatchPlan.ingestReceipt
-      )
-      ? await selectNovelIntegrationIngestEvidence({
-          vaultRoot,
-          provider: deviceBatchPlan.provider,
-          accountId: deviceBatchPlan.accountId,
-          importedAt: deviceBatchPlan.importedAt,
-          parts: deviceBatchPlan.preparedEvidenceParts,
-          receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
-          eventIdsByRole: eventIdsByEvidenceRole,
-          sampleIds: new Set(sampleRecords.map((record) => record.id)),
-        })
-      : { parts: [], receiptIsNovel: false };
+    const novelty = ingestInspection.selectNovelEvidence({
+      includeReceipt: !hasAppendedOutputs,
+      eventIdsByRole: eventIdsByEvidenceRole,
+      sampleIds: new Set(sampleRecords.map((record) => record.id)),
+    });
     const hasNovelEvidence = novelty.parts.length > 0 || novelty.receiptIsNovel;
     const partialMarkerNeedsEvidenceRepair = partialStoredDelivery() !== undefined
       && hasNovelEvidence;
@@ -7988,32 +7993,16 @@ timing: DeviceBatchImportTiming,
     };
   };
 
-  let exactState = inspectExactDeliveryState();
+  const exactState = inspectExactDeliveryState();
   if (exactState.authorizedStoredDelivery) {
     return buildExactNoopResult(exactState.authorizedStoredDelivery);
   }
-  let persistence;
-  try {
-    persistence = await preparePersistence(exactState);
-  } catch (error) {
-    if (options.signal?.aborted) {
-      throw error;
-    }
-    await ensureFullInspection();
-    exactState = inspectExactDeliveryState();
-    if (exactState.authorizedStoredDelivery) {
-      return buildExactNoopResult(exactState.authorizedStoredDelivery);
-    }
-    if (!exactState.evidenceRepairRequired) {
-      throw error;
-    }
-    persistence = await preparePersistence(exactState);
-  }
+  const persistence = await preparePersistence(exactState);
   const unresolvedBaselineMember = unresolvedBaselinePreparedIds.size > 0;
   const assertInspectionCanAuthorizeNoop = (): void => {
     if (
       unresolvedBaselineMember
-      && (!ingestIdInspection.historyComplete || ingestIdInspection.unsafe)
+      && (!ingestInspection.historyComplete || ingestInspection.unsafe)
     ) {
       throw new VaultError(
         "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
@@ -8021,17 +8010,6 @@ timing: DeviceBatchImportTiming,
       );
     }
   };
-  const incompleteInspectionCannotAuthorizeNoop = unresolvedBaselineMember
-    && (!ingestIdInspection.historyComplete || ingestIdInspection.unsafe);
-  // The canonical lock still owns this snapshot. Rebuild only when a fuller
-  // delivery inspection supplies new evidence, not after an unchanged read.
-  if (await ensureFullInspection(persistence.shouldPersistDelivery || incompleteInspectionCannotAuthorizeNoop)) {
-    const authoritativeExactState = inspectExactDeliveryState();
-    if (authoritativeExactState.authorizedStoredDelivery) {
-      return buildExactNoopResult(authoritativeExactState.authorizedStoredDelivery);
-    }
-    persistence = await preparePersistence(authoritativeExactState);
-  }
   if (!persistence.shouldPersistDelivery) {
     assertInspectionCanAuthorizeNoop();
     return persistence.buildNoopResult();
@@ -8048,8 +8026,8 @@ timing: DeviceBatchImportTiming,
     retainedEvidenceParts,
   } = persistence;
 
-  const currentImportIdOccupied = ingestIdInspection.entriesById.has(deviceBatchPlan.importId)
-    || ingestIdInspection.invalidIds.has(deviceBatchPlan.importId);
+  const currentImportIdOccupied = ingestInspection.entriesById.has(deviceBatchPlan.importId)
+    || ingestInspection.invalidIds.has(deviceBatchPlan.importId);
   const finalAssociationImportId = buildAssociationImportId(eventOutputs);
   const evidenceWasFiltered = retainedEvidenceParts.length
     !== deviceBatchPlan.preparedEvidenceParts.length;
@@ -8079,15 +8057,9 @@ timing: DeviceBatchImportTiming,
       retractedCount: eventReconciliation.retractedCount,
     },
   });
-  const persistedImportIdWasInspected = ingestIdInspection.requestedIds.has(persistedImportId);
-  const ingestAppendPlan = !persistedImportIdWasInspected
-      || (ingestIdInspection.unsafe && !ingestIdInspection.failOpenAppendAllowed)
-    ? await buildIntegrationIngestAppendPlan(vaultRoot, [ingestRecord], {
-        allowArchivedShardAmendments: true,
-      })
-    : buildIntegrationIngestAppendPlanFromInspection([ingestRecord], ingestIdInspection, {
-        allowArchivedShardAmendments: true,
-      });
+  const ingestAppendPlan = buildIntegrationIngestAppendPlanFromInspection(
+    [ingestRecord], ingestInspection, { allowArchivedShardAmendments: true },
+  );
   const [ingestShardPath] = ingestAppendPlan.targetShardPaths;
   if (!ingestShardPath) {
     throw new VaultError(

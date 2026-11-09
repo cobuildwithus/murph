@@ -34,7 +34,7 @@ import {
   stableStringifyWearableRawPayload,
 } from "../src/index.ts";
 import {
-  selectNovelIntegrationIngestEvidence,
+  inspectIntegrationIngestHistory,
 } from "../src/integration-ingests.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
 
@@ -5348,7 +5348,7 @@ test("importDeviceBatch dedupes replay when JSON escaping expands the tail row p
   assert.equal(replay.persistedEvidencePartCount, 0);
 });
 
-test("importDeviceBatch retains evidence when the newest complete row exceeds the novelty byte budget", async () => {
+test("importDeviceBatch proves redundancy with a full scan beyond an oversized unrelated tail row", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-novelty-tail-byte-budget");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const buildInput = (importedAt: string) => ({
@@ -5381,8 +5381,8 @@ test("importDeviceBatch retains evidence when the newest complete row exceeds th
   );
 
   const replay = await importDeviceBatch(buildInput("2026-06-04T21:00:00.000Z"));
-  assert.ok(replay.applied);
-  assert.equal(replay.persistedEvidencePartCount, 1);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.persistedEvidencePartCount, 0);
 });
 
 test("importDeviceBatch dedupes evidence retained in an archived target shard", async () => {
@@ -5414,13 +5414,12 @@ test("importDeviceBatch dedupes evidence retained in an archived target shard", 
   const archivePath = `${absoluteShardPath}.gz`;
   const beforeReplay = await fs.readFile(archivePath);
   const replay = await importDeviceBatch(buildInput("2026-06-04T21:00:00.000Z"));
-  const selection = await selectNovelIntegrationIngestEvidence({
-    vaultRoot,
-    provider: "junction",
-    accountId: "account-a",
-    importedAt: "2026-06-04T21:00:00.000Z",
-    parts: [evidencePart],
-  });
+  const inspection = await inspectIntegrationIngestHistory(
+    vaultRoot, "2026-06-04T21:00:00.000Z", new Set(), {
+      evidence: { provider: "junction", accountId: "account-a", parts: [evidencePart] },
+    },
+  );
+  const selection = inspection.selectNovelEvidence();
 
   assert.equal(replay.applied, false);
   assert.equal(replay.ingestId, null);

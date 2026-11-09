@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { promises as fs } from "node:fs";
+import nodeFs, { promises as fs } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -42,16 +43,16 @@ function input(vaultRoot: string, value = 1) {
 
 test("new and corrected device imports inspect evidence once when delivery history is complete", async () => {
   await withVault(async (vaultRoot) => {
-    const novelty = vi.spyOn(ingests, "selectNovelIntegrationIngestEvidence");
+    const inspection = vi.spyOn(ingests, "inspectIntegrationIngestHistory");
     try {
       const first = await importDeviceBatch(input(vaultRoot));
       assert.equal(first.applied, true);
-      assert.equal(novelty.mock.calls.length, 1);
-      novelty.mockClear();
+      assert.equal(inspection.mock.calls.length, 1);
+      inspection.mockClear();
 
       const corrected = await importDeviceBatch(input(vaultRoot, 2));
       assert.equal(corrected.applied, true);
-      assert.equal(novelty.mock.calls.length, 1);
+      assert.equal(inspection.mock.calls.length, 1);
       assert.equal(corrected.events[0]?.id, first.events[0]?.id);
       assert.equal(corrected.events[0]?.lifecycle?.revision, 2);
       const event = await readEvent({ vaultRoot, eventId: corrected.events[0]!.id });
@@ -59,18 +60,18 @@ test("new and corrected device imports inspect evidence once when delivery histo
       assert.equal(event.event.value, 2);
       assert.ok(corrected.ingestId);
       assert.ok(await readIntegrationIngestById(vaultRoot, corrected.ingestId));
-      novelty.mockClear();
+      inspection.mockClear();
 
       const replay = await importDeviceBatch(input(vaultRoot, 2));
       assert.equal(replay.applied, false);
-      assert.equal(novelty.mock.calls.length, 0);
+      assert.equal(inspection.mock.calls.length, 1);
     } finally {
-      novelty.mockRestore();
+      inspection.mockRestore();
     }
   });
 });
 
-test("device imports rebuild preparation when the bounded inspection expands to full history", async () => {
+test("one full shard inspection proves a duplicate beyond the bounded tail and prepares a correction once", async () => {
   await withVault(async (vaultRoot) => {
     const first = await importDeviceBatch(input(vaultRoot));
     assert.ok(first.ingestId);
@@ -78,20 +79,88 @@ test("device imports rebuild preparation when the bounded inspection expands to 
     const stored = await readIntegrationIngestById(vaultRoot, first.ingestId);
     assert.ok(stored);
     // Unrelated rows push the original delivery outside the bounded tail.
-    const unrelated = `${JSON.stringify({ ...stored.record, id: "xfm_00000000000000000000000000", provider: "unrelated" })}\n`;
-    await fs.appendFile(path.join(vaultRoot, first.ingestShardPath), unrelated.repeat(65));
-    const inspection = vi.spyOn(ingests, "inspectIntegrationIngestIdsForImportedAt");
-    const novelty = vi.spyOn(ingests, "selectNovelIntegrationIngestEvidence");
+    const unrelated = Array.from({ length: 65 }, (_, index) => JSON.stringify({
+      ...stored.record,
+      id: `xfm_${index.toString(16).padStart(24, "0")}`,
+      provider: "unrelated",
+      provenance: { padding: "x".repeat(140_000) },
+    })).join("\n") + "\n";
+    await fs.appendFile(path.join(vaultRoot, first.ingestShardPath), unrelated);
+    const inspection = vi.spyOn(ingests, "inspectIntegrationIngestHistory");
+    const reads = vi.spyOn(nodeFs, "createReadStream");
+    syncBuiltinESMExports();
+    // Publication separately hashes bytes for the canonical journal receipt.
+    const shardReads = () => reads.mock.calls.filter(([file, options]) =>
+      String(file).endsWith(`/${first.ingestShardPath}`)
+      && typeof options === "object" && options?.encoding === "utf8"
+    ).length;
     try {
+      const replay = await importDeviceBatch(input(vaultRoot));
+      assert.equal(replay.applied, false);
+      assert.equal(inspection.mock.calls.length, 1);
+      assert.equal(shardReads(), 1);
+      assert.equal(reads.mock.calls.filter(([file]) =>
+        String(file).endsWith(`/${first.ingestShardPath}`)
+      ).length, 1);
+      inspection.mockClear();
+      reads.mockClear();
+      const laterDelivery = await importDeviceBatch({
+        ...input(vaultRoot), importedAt: "2026-01-03T00:00:00.000Z",
+      });
+      assert.equal(laterDelivery.applied, false);
+      assert.equal(inspection.mock.calls.length, 1);
+      assert.equal(shardReads(), 1);
+      assert.equal(reads.mock.calls.filter(([file]) =>
+        String(file).endsWith(`/${first.ingestShardPath}`)
+      ).length, 1);
+      inspection.mockClear();
+      reads.mockClear();
       const corrected = await importDeviceBatch(input(vaultRoot, 2));
       assert.equal(corrected.applied, true);
-      assert.equal(inspection.mock.calls.filter((call) => call[3]?.fullScan).length, 1);
-      assert.equal(novelty.mock.calls.length, 2);
+      assert.equal(inspection.mock.calls.length, 1);
+      assert.equal(shardReads(), 1);
       assert.equal(corrected.events[0]?.id, first.events[0]?.id);
       assert.equal(corrected.events[0]?.lifecycle?.revision, 2);
     } finally {
+      reads.mockRestore();
+      syncBuiltinESMExports();
       inspection.mockRestore();
-      novelty.mockRestore();
+    }
+  });
+});
+
+test("recent evidence beyond 64 rows uses the byte prefilter without a full scan", async () => {
+  await withVault(async (vaultRoot) => {
+    const first = await importDeviceBatch(input(vaultRoot));
+    assert.ok(first.ingestId);
+    assert.ok(first.ingestShardPath);
+    const stored = await readIntegrationIngestById(vaultRoot, first.ingestId);
+    assert.ok(stored);
+    const unrelated = Array.from({ length: 300 }, (_, index) => JSON.stringify({
+      ...stored.record,
+      id: `xfm_${index.toString(16).padStart(24, "0")}`,
+      provider: "unrelated",
+      parts: [],
+      outputs: { events: [], eventIdsComplete: true, sampleIds: [], sampleIdsComplete: true },
+      counts: { eventCount: 0, sampleCount: 0 },
+    })).join("\n") + "\n";
+    await fs.appendFile(path.join(vaultRoot, first.ingestShardPath), unrelated);
+    const reads = vi.spyOn(nodeFs, "createReadStream");
+    syncBuiltinESMExports();
+    const parses = vi.spyOn(JSON, "parse");
+    try {
+      const replay = await importDeviceBatch({
+        ...input(vaultRoot), importedAt: "2026-01-03T00:00:00.000Z",
+      });
+      assert.equal(replay.applied, false);
+      assert.equal(reads.mock.calls.filter(([file]) =>
+        String(file).endsWith(`/${first.ingestShardPath}`)
+      ).length, 0);
+      assert.equal(parses.mock.calls.filter(([text]) => text.includes('"provider":"unrelated"')).length, 64);
+    } finally {
+      parses.mockRestore();
+      reads.mockRestore();
+      syncBuiltinESMExports();
     }
   });
 });
