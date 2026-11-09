@@ -42,6 +42,7 @@ import {
   HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
   parseHostedVaultShareProjectionSnapshot,
   decryptHostedVaultShareProjectionSnapshots,
+  decryptHostedVaultShareProjectionSnapshotsWithAgeGroups,
   serializeHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
 import {
@@ -52,6 +53,7 @@ const RUNTIME_MEMBER_ID = "member_group_runtime";
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const STEPS_SCOPE = hostedVaultShareProjectionKindToScope("steps-days.v0");
+const RHR_SCOPE = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
 const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
 const DEEP_SLEEP_SOURCES_SCOPE = hostedVaultShareProjectionKindToScope(
   "deep-sleep-sources-days.v1",
@@ -82,6 +84,7 @@ type TestProjectionScope =
   | typeof PROFILE_SCOPE
   | typeof PROTEIN_SCOPE
   | typeof STEPS_SCOPE
+  | typeof RHR_SCOPE
   | typeof DEEP_SLEEP_SCOPE
   | typeof DEEP_SLEEP_SOURCES_SCOPE
   | typeof REM_SLEEP_SCOPE
@@ -2085,6 +2088,28 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
 
 
 describe("plain-grant group history reads", () => {
+  it("keeps age groups in the board opt-in and out of read_shared", async () => {
+    const share = { ...shareRow({ id: "age", memberId: "member_a", projectionScope: RHR_SCOPE }), projectionScope: RHR_SCOPE };
+    const memberAgeGroup = { biologicalSex: "female", ageFrom: 30 } as const;
+    const plaintext = serializeHostedVaultShareProjectionSnapshot({ share, records: [], memberTimeZone: "UTC", memberAgeGroup });
+    expect(parseHostedVaultShareProjectionSnapshot({ share, plaintext })).toEqual([]);
+    expect(() => parseHostedVaultShareProjectionSnapshot({ share, plaintext: JSON.stringify({ ...JSON.parse(plaintext),
+      memberAgeGroup: { ...memberAgeGroup, birthYear: 2000 } }) })).toThrow();
+    const stepsShare = { ...share, projectionKind: STEPS_SCOPE.projectionKind, projectionScope: STEPS_SCOPE,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE) };
+    expect(() => serializeHostedVaultShareProjectionSnapshot({ share: stepsShare, records: [], memberAgeGroup })).toThrow();
+    installCiphertexts({ age: plaintext });
+    await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext: "age" }] })).resolves.toEqual([[]]);
+    await expect(decryptHostedVaultShareProjectionSnapshotsWithAgeGroups({ entries: [{ ...share, ciphertext: "age" }] }))
+      .resolves.toEqual([{ records: [], memberAgeGroup }]);
+    const { prisma } = createPrisma({ group: { members: [{ id: "participant_a", memberId: "member_a" }] }, shares: [
+      shareRow({ ciphertext: "age", id: "age", memberId: "member_a", projectionScope: RHR_SCOPE }),
+    ] });
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID, projectionScopes: [RHR_SCOPE] });
+    expect(result.status).toBe("ok");
+    expect(JSON.stringify(result)).not.toContain("memberAgeGroup");
+    expect(JSON.stringify(result)).not.toContain("demographics");
+  });
   const date = (age: number) => new Date(Date.now() - age * 86_400_000).toISOString().slice(0, 10);
   const records = (count: number): HostedVaultShareDeliveryRecord[] => Array.from({ length: count }, (_, age) => ({
     recordKey: `${date(age)}.whoop`, occurredAt: `${date(age)}T00:00:00.000Z`,

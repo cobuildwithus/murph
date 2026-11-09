@@ -51,6 +51,7 @@ import {
 } from "@/src/lib/hosted-vault-share/projection-store";
 import {
   decryptHostedVaultShareProjectionSnapshots,
+  decryptHostedVaultShareProjectionSnapshotsWithAgeGroups,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
 
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
@@ -381,6 +382,25 @@ describe("findActiveHostedVaultSharePage", () => {
 });
 
 describe("replaceHostedVaultShareProjectionSnapshot", () => {
+  it("round-trips an age group through replacement and leaves old snapshots without it", async () => {
+    createSnapshotTestCodec();
+    const { prisma, updateMany } = createPrisma();
+    const scope = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
+    const share = { ...SHARE, projectionKind: scope.projectionKind, projectionScope: scope,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(scope) };
+    const memberAgeGroup = { biologicalSex: "female", ageFrom: 30 } as const;
+    const read = async (ciphertext: string) => decryptHostedVaultShareProjectionSnapshotsWithAgeGroups({
+      entries: [{ ...share, ciphertext }], prisma,
+    });
+    await replaceHostedVaultShareProjectionSnapshot({ prisma, records: [], share,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION, memberTimeZone: "UTC", memberAgeGroup });
+    const ciphertext = updateMany.mock.calls.at(-1)?.[0]?.data?.projectionSnapshotCiphertext;
+    expect(await read(ciphertext)).toEqual([{ records: [], memberAgeGroup }]);
+    await replaceHostedVaultShareProjectionSnapshot({ prisma, records: [], share,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION, memberTimeZone: "UTC" });
+    const oldCiphertext = updateMany.mock.calls.at(-1)?.[0]?.data?.projectionSnapshotCiphertext;
+    expect(await read(oldCiphertext)).toEqual([{ records: [] }]);
+  });
   it("preserves a typed destination-local failure when its ingress root is absent", async () => {
     setHostedSecureBoxStringTestCodecForTests(null);
     const transaction = vi.fn();

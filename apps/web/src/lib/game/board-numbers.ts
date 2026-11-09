@@ -1,6 +1,6 @@
 import { normalizeMetricValue, resolveMetricDefinition, selectMetricWindowComparison, type MetricSeriesPoint } from "@murphai/health-metrics";
 import type { HostedRuntimeGroupSharedRecord } from "@murphai/hosted-execution/runtime-control";
-import { HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS } from "@murphai/hosted-execution/vault-share";
+import { HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS, type HostedVaultShareAgeGroup } from "@murphai/hosted-execution/vault-share";
 import type { HostedGroupBoardProjection } from "../hosted-groups/group-store";
 import { addDays } from "./time";
 
@@ -25,11 +25,12 @@ export interface BoardComparison {
   improvement: number; sinceFirstGame: boolean;
 }
 export type BoardNumber = { state: "not_shared" | "hidden" } | { state: "pending"; reason?: "no_readings" } | {
-  state: "available"; unit: string; latest: BoardDayValue; stale: boolean;
+  state: "available"; unit: string; source?: string; latest: BoardDayValue; stale: boolean;
   daily: BoardDayValue[]; comparison: BoardComparison | null;
 };
 export interface BoardPerson {
   memberId: string; me: boolean; member: boolean; inARow: number | null;
+  demographics?: HostedVaultShareAgeGroup;
   numbers: Record<BoardMetric, BoardNumber>;
 }
 export interface PairBoard {
@@ -96,13 +97,17 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
   const daily = selected.points.filter(point => point.date >= window.from)
     .map(point => ({ date: point.date, value: round(point.value!) }));
   const delta = result.delta;
-  return { state: "available", unit: policy.unit, daily, latest: daily.at(-1)!,
+  return { state: "available", unit: policy.unit, ...sourceField(selected.source), daily, latest: daily.at(-1)!,
     stale: selected.latest.date < addDays(window.through, -(metric === "vo2Max" ? resolveMetricDefinition(policy.key)!.selectionPolicy.staleAfterDays! : 7)),
     comparison: selected.comparable && delta !== null && result.baseline.value !== null && result.comparison.value !== null ? {
       baseline: { from: selected.baselineFrom, through: selected.baselineThrough, value: result.baseline.value, days: result.baseline.daysWithData },
       current: { from: selected.currentFrom, through: selected.latest.date, value: result.comparison.value, days: result.comparison.daysWithData },
       delta, improvement: delta * policy.direction, sinceFirstGame: selected.sinceFirstGame,
     } : null };
+}
+
+function sourceField(source: string): { source?: string } {
+  return source ? { source } : {};
 }
 
 function laterDate(a: string, b: string): string { return a > b ? a : b; }

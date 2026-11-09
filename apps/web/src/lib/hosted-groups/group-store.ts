@@ -37,6 +37,7 @@ import {
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeviceSyncSource,
   type HostedVaultShareDeviceSyncSourceStatus,
+  type HostedVaultShareAgeGroup,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareSelectableProjectionScope,
@@ -86,6 +87,7 @@ import {
 } from "../hosted-vault-share/projection-maintenance";
 import {
   decryptHostedVaultShareProjectionSnapshots,
+  decryptHostedVaultShareProjectionSnapshotsWithAgeGroups,
   type HostedVaultShareProjectionSnapshotEntry,
 } from "../hosted-vault-share/projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "../hosted-vault-share/row-projection-scope";
@@ -1192,7 +1194,7 @@ export async function readHostedGroupBoardData(input: {
   };
   // Key access and decryption stay outside both authority transactions.
   const snapshots = await readHostedGroupSharedSnapshots({ capture, prisma, now: input.now,
-    options: {}, retainedHistory: true, runtimeMemberId: input.runtimeMemberId }).catch(() => null);
+    options: {}, retainedHistory: true, boardAgeGroups: true, runtimeMemberId: input.runtimeMemberId }).catch(() => null);
   const current = await captureAuthority();
   if (!current) return null;
   const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
@@ -1203,7 +1205,8 @@ export async function readHostedGroupBoardData(input: {
     people: ids.map(memberId => {
       const membership = current.members.find(member => member.memberId === memberId);
       const sameMembership = membership && captured.members.some(member => member.id === membership.id);
-      return { memberId, member: Boolean(membership), projections: scopeKeys.map(projectionScopeKey => {
+      const ageGroups: HostedVaultShareAgeGroup[] = [];
+      const projections = scopeKeys.map(projectionScopeKey => {
         let projection: HostedGroupBoardProjection;
         const grant = current.grants.find(grant => grant.grantorMemberId === memberId && grant.projectionScopeKey === projectionScopeKey);
         if (memberId !== input.viewerId && !viewerCurrent) projection = { state: "hidden", records: [] };
@@ -1212,12 +1215,53 @@ export async function readHostedGroupBoardData(input: {
           const exact = grants.some(previous => previous.id === grant.id && previous.grantedAt.getTime() === grant.grantedAt.getTime());
           const records = exact && sameMembership && current.readableIds.has(grant.id)
             ? snapshots?.recordsByMemberAndScope.get(memberId)?.get(projectionScopeKey) : null;
+          ageGroups.push(...readableBoardAgeGroup(records,
+            snapshots?.ageGroupsByMemberAndScope, memberId, projectionScopeKey));
           projection = { state: records == null ? "pending" : records.length ? "available" : "missing", records: records ?? [] };
         }
         return { projectionScopeKey, ...projection };
-      }) };
+      });
+      const demographics = consistentBoardAgeGroup(ageGroups);
+      return { memberId, member: Boolean(membership), projections,
+        ...(demographics ? { demographics } : {}) };
     }),
   };
+}
+
+function readableBoardAgeGroup(
+  records: HostedRuntimeGroupSharedRecord[] | null | undefined,
+  ageGroups: Map<string, Map<string, HostedVaultShareAgeGroup>> | undefined,
+  memberId: string,
+  scopeKey: string,
+): HostedVaultShareAgeGroup[] {
+  const group = records == null ? undefined : ageGroups?.get(memberId)?.get(scopeKey);
+  return group ? [group] : [];
+}
+
+function consistentBoardAgeGroup(groups: readonly HostedVaultShareAgeGroup[]): HostedVaultShareAgeGroup | undefined {
+  const first = groups[0];
+  return first && groups.every(group => group.biologicalSex === first.biologicalSex && group.ageFrom === first.ageFrom)
+    ? first : undefined;
+}
+
+async function decryptSharedSnapshotBatch(
+  input: Parameters<typeof decryptHostedVaultShareProjectionSnapshots>[0],
+  boardAgeGroups: boolean | undefined,
+) {
+  if (boardAgeGroups) return decryptHostedVaultShareProjectionSnapshotsWithAgeGroups(input);
+  return (await decryptHostedVaultShareProjectionSnapshots(input))
+    .map(records => records === null ? null : { records, memberAgeGroup: undefined });
+}
+
+function rememberSnapshotAgeGroup(
+  groups: Map<string, Map<string, HostedVaultShareAgeGroup>> | undefined,
+  share: { grantorMemberId: string; projectionScopeKey: string },
+  snapshot: { memberAgeGroup?: HostedVaultShareAgeGroup } | null,
+): void {
+  if (!snapshot?.memberAgeGroup || !groups) return;
+  const memberGroups = groups.get(share.grantorMemberId) ?? new Map();
+  memberGroups.set(share.projectionScopeKey, snapshot.memberAgeGroup);
+  groups.set(share.grantorMemberId, memberGroups);
 }
 
 async function readHostedGroupSharedSnapshots(input: {
@@ -1226,6 +1270,7 @@ async function readHostedGroupSharedSnapshots(input: {
   now: Date;
   options: HostedGroupSharedReadOptions;
   retainedHistory?: boolean;
+  boardAgeGroups?: boolean;
   runtimeMemberId: string;
 }) {
   const { capture, prisma, now, options } = input;
@@ -1242,6 +1287,8 @@ async function readHostedGroupSharedSnapshots(input: {
   const recordsByMemberAndScope = new Map<
     string, Map<string, HostedRuntimeGroupSharedRecord[] | null>
   >();
+  const ageGroupsByMemberAndScope = input.boardAgeGroups
+    ? new Map<string, Map<string, HostedVaultShareAgeGroup>>() : undefined;
   let recordsBytes = 0;
   let dateCoverage: HostedGroupSharedDateCoverage | undefined;
   for (let offset = 0; offset < candidates.length; offset += 4) {
@@ -1265,17 +1312,18 @@ async function readHostedGroupSharedSnapshots(input: {
     const shares = batch.filter((share) => byId.has(share.id)).map((share) => ({
       ...share, ciphertext: byId.get(share.id),
     }));
-    const snapshots = await decryptHostedVaultShareProjectionSnapshots({
+    const snapshots = await decryptSharedSnapshotBatch({
       entries: shares, prisma, nowMs: now.getTime(),
       requestedHistoryDays: input.retainedHistory ? HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS : options.history ? 90 : 7,
-    });
+    }, input.boardAgeGroups);
     for (const [index, share] of shares.entries()) {
       readableGrantIds.add(share.id);
       const snapshot = snapshots[index];
       if (snapshot === undefined) throw new Error("Shared snapshot result is missing.");
-      let records = snapshot?.map(({ data, occurredAt, recordKey, source }) => ({
+      let records = snapshot?.records.map(({ data, occurredAt, recordKey, source }) => ({
         data, occurredAt, recordKey, ...(source ? { source } : {}),
       })) ?? null;
+      rememberSnapshotAgeGroup(ageGroupsByMemberAndScope, share, snapshot);
       if (options.history && isHostedVaultShareRecentDateProjectionKind(share.projectionScope.projectionKind)) {
         const page = pageHostedGroupSharedHistory(records ?? [], options.history);
         dateCoverage = page.dateCoverage;
@@ -1291,7 +1339,7 @@ async function readHostedGroupSharedSnapshots(input: {
     }
   }
 
-  return { recordsByMemberAndScope, readableGrantIds, dateCoverage };
+  return { recordsByMemberAndScope, readableGrantIds, dateCoverage, ageGroupsByMemberAndScope };
 }
 
 function sharedReadCapacityUnavailable(): HostedRuntimeGroupSharedReadResult {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { readMemoryDemographics } from "@murphai/core";
 
 import {
   activityTextMatchesKind,
@@ -32,6 +33,7 @@ import {
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   hostedVaultShareRetainedHistoryDays,
+  memberAgeGroupFromBirthYear,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
@@ -53,6 +55,7 @@ import {
   type HostedVaultShareActivityMinutesProjectionSpec,
   type HostedVaultShareActivitySessionCountProjectionSpec,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareAgeGroup,
   type HostedVaultShareDataSource,
   type HostedVaultShareDailyMetricProjectionSpec,
   type HostedVaultShareActiveProjectionKindsResponse,
@@ -118,6 +121,7 @@ export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = HOSTED_VA
 
 export function buildHostedVaultShareProjectionContentDigest(input: {
   memberTimeZone?: string;
+  memberAgeGroup?: HostedVaultShareAgeGroup;
   projectionScope: HostedVaultShareProjectionScope;
   records: readonly HostedVaultShareDeliveryRecord[];
 }): string {
@@ -255,6 +259,7 @@ export interface HostedVaultShareProjectionCapture {
   snapshots: Array<{
     contentDigest?: string;
     memberTimeZone?: string;
+    memberAgeGroup?: HostedVaultShareAgeGroup;
     generationToken: string;
     projectionScope: HostedVaultShareProjectionScope;
     records: HostedVaultShareDeliveryRecord[];
@@ -263,6 +268,30 @@ export interface HostedVaultShareProjectionCapture {
 
 type HostedVaultShareProjectionCaptureSnapshot =
   HostedVaultShareProjectionCapture["snapshots"][number];
+
+function ageGroupEnvelopeField(group: HostedVaultShareAgeGroup | null | undefined): { memberAgeGroup?: HostedVaultShareAgeGroup } {
+  return group ? { memberAgeGroup: group } : {};
+}
+
+async function readMemberAgeGroupBestEffort(vaultRoot: string, timeZone: string | null): Promise<HostedVaultShareAgeGroup | null> {
+  if (!timeZone) return null;
+  try {
+    const demographics = await readMemoryDemographics(vaultRoot);
+    if (demographics.status !== "resolved" || demographics.birthYear === null || demographics.biologicalSex === null) return null;
+    return memberAgeGroupFromBirthYear({ birthYear: demographics.birthYear, biologicalSex: demographics.biologicalSex,
+      now: new Date(), timeZone });
+  } catch {
+    return null;
+  }
+}
+
+function createAgeGroupCaptureReader(vaultRoot: string, timeZone: string | null) {
+  let read: Promise<HostedVaultShareAgeGroup | null> | undefined;
+  return (kind: HostedVaultShareProjectionKind): Promise<HostedVaultShareAgeGroup | null> => {
+    if (kind !== "resting-heart-rate-days.v0" && kind !== "vo2-max-days.v0") return Promise.resolve(null);
+    return read ??= readMemberAgeGroupBestEffort(vaultRoot, timeZone);
+  };
+}
 
 export type HostedVaultShareProjectionCaptureResult =
   | {
@@ -363,6 +392,7 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
   const snapshots: HostedVaultShareProjectionCapture["snapshots"] = [];
   const context: HostedVaultShareProjectionReadContext = {};
   const memberTimeZone = await readProjectableVaultTimeZone(input.vaultRoot);
+  const ageGroupForScope = createAgeGroupCaptureReader(input.vaultRoot, memberTimeZone);
 
   for (const projectionScope of input.projectionScopes) {
     const readRecords = resolveProjectableRecordReader(projectionScope);
@@ -380,22 +410,26 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
       if (dated && !memberTimeZone) return { outcome: "error" };
       const records = await readRecords({ context, vaultRoot: input.vaultRoot });
       assertCompleteProjectionRecords(records, getHostedVaultShareProjectionMaxRecords(projectionScope));
+      const memberAgeGroup = await ageGroupForScope(projectionScope.projectionKind);
       const projectionRequest = parseHostedVaultShareDeliverRequest({
         projectionScope, projectionKind: projectionScope.projectionKind, records,
         expectedGenerationToken: generationToken, sourceWorkspaceVersion: input.sourceWorkspaceVersion,
         ...(dated && memberTimeZone ? { memberTimeZone } : {}),
+        ...ageGroupEnvelopeField(memberAgeGroup),
       });
       snapshots.push({
         contentDigest: buildHostedVaultShareProjectionContentDigest({
           ...(projectionRequest.memberTimeZone
             ? { memberTimeZone: projectionRequest.memberTimeZone }
             : {}),
+          ...ageGroupEnvelopeField(projectionRequest.memberAgeGroup),
           projectionScope: projectionRequest.projectionScope,
           records: projectionRequest.records,
         }),
         ...(projectionRequest.memberTimeZone
           ? { memberTimeZone: projectionRequest.memberTimeZone }
           : {}),
+        ...ageGroupEnvelopeField(projectionRequest.memberAgeGroup),
         generationToken,
         projectionScope: projectionRequest.projectionScope,
         records: projectionRequest.records,
@@ -482,6 +516,7 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
       }
       const request = {
         ...(snapshot.memberTimeZone ? { memberTimeZone: snapshot.memberTimeZone } : {}),
+        ...(snapshot.memberAgeGroup ? { memberAgeGroup: snapshot.memberAgeGroup } : {}),
         expectedGenerationToken: snapshot.generationToken,
         ...(input.capture.projectionMode
           ? { projectionMode: input.capture.projectionMode }

@@ -43,6 +43,7 @@ import {
 import {
   executeScheduledLogOccurrence,
   initializeVault,
+  readMemoryDemographics,
   upsertScheduledLog,
 } from "@murphai/core";
 import { describe, expect, it, vi } from "vitest";
@@ -82,6 +83,7 @@ import {
   formatTimeZoneDateTimeParts,
   formatMemoryDisplayNameRecordText,
   renderMemoryDocument,
+  setMemoryDemographics,
   setMemoryDisplayName,
   upsertMemoryRecord,
 } from "@murphai/contracts";
@@ -6608,6 +6610,68 @@ describe("readProjectableProfileName", () => {
 
 
 describe("canonical history capture", () => {
+  it("carries resolved demographics through capture and offer only on ranking scopes", async () => {
+    const vaultRoot = await createActivitySessionVault([]);
+    const now = new Date("2030-06-01T00:00:00Z");
+    await mkdir(join(vaultRoot, "bank"), { recursive: true });
+    const document = setMemoryDemographics(createEmptyMemoryDocument(now), { birthYear: 2000, biologicalSex: "female", now });
+    await writeFile(join(vaultRoot, "bank", "memory.md"), renderMemoryDocument({ document }), "utf8");
+    const scopes = (["resting-heart-rate-days.v0", "vo2-max-days.v0", "steps-days.v0"] as const).map(hostedVaultShareProjectionKindToScope);
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
+    try {
+      const result = await captureHostedVaultShareProjectionBestEffort({
+        generationTokensByProjectionScopeKey: Object.fromEntries(scopes.map(scope => [buildHostedVaultShareProjectionScopeKey(scope), GENERATION_TOKEN])),
+        hasDeferredProjectionWork: false, projectionScopes: scopes,
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION, vaultRoot,
+      });
+      expect(result.outcome).toBe("captured");
+      if (result.outcome !== "captured") throw new Error("expected capture");
+      expect(result.capture.snapshots.map(snapshot => snapshot.memberAgeGroup)).toEqual([
+        { biologicalSex: "female", ageFrom: 30 }, { biologicalSex: "female", ageFrom: 30 }, undefined,
+      ]);
+      const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+      await offerCapturedHostedVaultShareProjectionBestEffort({ capture: result.capture,
+        vaultSharePort: { deliver, listActiveProjectionScopes: async () => activeProjectionResponse(scopes[0]!) } });
+      expect(deliver.mock.calls[0]?.[0]).toMatchObject({ memberAgeGroup: { biologicalSex: "female", ageFrom: 30 } });
+    } finally { vi.useRealTimers(); await rm(vaultRoot, { recursive: true, force: true }); }
+  });
+
+  it("omits missing and unreadable demographics without failing capture", async () => {
+    const vaultRoot = await createActivitySessionVault([]);
+    const scope = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
+    const capture = () => captureHostedVaultShareProjectionBestEffort({
+      generationTokensByProjectionScopeKey: { [buildHostedVaultShareProjectionScopeKey(scope)]: GENERATION_TOKEN },
+      hasDeferredProjectionWork: false, projectionScopes: [scope], sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION, vaultRoot,
+    });
+    try {
+      const missing = await capture();
+      expect(missing.outcome).toBe("captured");
+      if (missing.outcome === "captured") expect(missing.capture.snapshots[0]).not.toHaveProperty("memberAgeGroup");
+      await mkdir(join(vaultRoot, "bank"), { recursive: true });
+      await writeFile(join(vaultRoot, "bank", "memory.md"), "invalid memory", "utf8");
+      const unreadable = await capture();
+      expect(unreadable.outcome).toBe("captured");
+      if (unreadable.outcome === "captured") expect(unreadable.capture.snapshots[0]).not.toHaveProperty("memberAgeGroup");
+      let conflicting = setMemoryDemographics(createEmptyMemoryDocument(new Date("2026-07-01T00:00:00Z")),
+        { birthYear: 2000, biologicalSex: "female", now: new Date("2026-07-01T00:00:01Z") });
+      conflicting = upsertMemoryRecord(conflicting, { now: new Date("2026-07-01T00:00:02Z"), section: "Identity",
+        text: "Synthetic note" }).document;
+      conflicting = { ...conflicting, records: conflicting.records.map(record =>
+        record.text === "Synthetic note" ? { ...record, text: "Biological sex: male" } : record) };
+      await writeFile(join(vaultRoot, "bank", "memory.md"), renderMemoryDocument({ document: conflicting }), "utf8");
+      expect((await readMemoryDemographics(vaultRoot)).status).toBe("unresolved");
+      const unresolved = await capture();
+      expect(unresolved.outcome).toBe("captured");
+      if (unresolved.outcome === "captured") expect(unresolved.capture.snapshots[0]).not.toHaveProperty("memberAgeGroup");
+      const steps = hostedVaultShareProjectionKindToScope("steps-days.v0");
+      const nonRanking = await captureHostedVaultShareProjectionBestEffort({
+        generationTokensByProjectionScopeKey: { [buildHostedVaultShareProjectionScopeKey(steps)]: GENERATION_TOKEN },
+        hasDeferredProjectionWork: false, projectionScopes: [steps], sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION, vaultRoot,
+      });
+      expect(nonRanking.outcome).toBe("captured");
+      if (nonRanking.outcome === "captured") expect(nonRanking.capture.snapshots[0]).not.toHaveProperty("memberAgeGroup");
+    } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+  });
   const boardNowMs = Date.parse("2026-09-17T23:00:00.000Z");
   const boardDate = (age: number) => new Date(boardNowMs - age * 86_400_000).toISOString().slice(0, 10);
   const metricEvents = (metric: string, unit: string, providers: readonly string[], ages: number, junctionOnlyAge?: number) =>
