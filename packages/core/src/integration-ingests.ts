@@ -51,7 +51,7 @@ export const MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES = 128 * 1024 * 1024;
 export const MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
 const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES = 8 * 1024 * 1024;
-const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS = 64;
+const INTEGRATION_INGEST_ID_TAIL_MAX_SCAN_ROWS = 64;
 const INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES = 64 * 1024;
 const INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY = Symbol("integration-ingest-append-plan-authority");
 const INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY = Symbol("integration-ingest-id-inspection-authority");
@@ -521,9 +521,42 @@ function rawIntegrationIngestCouldProveNovelty(input: {
     ) === input.requestedReceiptFingerprint;
 }
 
+// A reconcile replays hundreds of payloads per cycle, so a payload's last copy
+// sits far behind the newest rows. Only rows that name a requested payload can
+// prove it is stored, so the rest are skipped without parsing. A generic
+// receipt fingerprint can match any row, so rows are parsed until it does.
+function createIntegrationIngestNoveltyRowReader(input: {
+  parts: readonly IntegrationEvidencePart[];
+  receipt: IntegrationIngestReceipt | undefined;
+  receiptRequiresPayloadIdentity: boolean;
+  receiptUnproven: () => boolean;
+  visit: (raw: unknown) => IntegrationIngestNoveltyTailDecision;
+}): (line: Buffer) => IntegrationIngestNoveltyTailDecision {
+  const payloadHashes = input.parts.map((part) => part.sha256);
+  if (input.receiptRequiresPayloadIdentity && input.receipt) {
+    payloadHashes.push(input.receipt.payloadHash);
+  }
+  const needles = [...new Set(payloadHashes)].map((value) => Buffer.from(value, "utf8"));
+  const parseEveryRow = (): boolean => !input.receiptRequiresPayloadIdentity && input.receiptUnproven();
+
+  return (line) => {
+    if (!parseEveryRow() && !needles.some((needle) => line.includes(needle))) {
+      return "continue";
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line.toString("utf8"));
+    } catch {
+      return "unsafe";
+    }
+    return input.visit(raw);
+  };
+}
+
 async function scanIntegrationIngestNoveltyTail(
   absolutePath: string,
-  visitLine: (line: string) => IntegrationIngestNoveltyTailDecision,
+  visitLine: (line: Buffer) => IntegrationIngestNoveltyTailDecision,
+  maxRows: number,
 ): Promise<IntegrationIngestNoveltyTailScanResult> {
   const handle = await openFile(absolutePath, "r");
 
@@ -550,7 +583,7 @@ async function scanIntegrationIngestNoveltyTail(
       if (lineBytes.length === 0) {
         return null;
       }
-      const decision = visitLine(lineBytes.toString("utf8"));
+      const decision = visitLine(lineBytes);
       if (decision === "complete") {
         return {
           historyComplete: false,
@@ -571,7 +604,7 @@ async function scanIntegrationIngestNoveltyTail(
     while (
       position > 0
       && bytesReadTotal < scanByteLimit
-      && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+      && rowsVisited < maxRows
     ) {
       const readSize = Math.min(
         position,
@@ -606,7 +639,7 @@ async function scanIntegrationIngestNoveltyTail(
 
       while (
         segmentEnd > 0
-        && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+        && rowsVisited < maxRows
       ) {
         const newlineIndex = chunk.lastIndexOf(0x0a, segmentEnd - 1);
         if (newlineIndex < 0) {
@@ -635,7 +668,7 @@ async function scanIntegrationIngestNoveltyTail(
         segmentEnd = newlineIndex;
       }
 
-      if (rowsVisited >= INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS) {
+      if (rowsVisited >= maxRows) {
         return {
           historyComplete: position === 0 && segmentEnd === 0 && lineSuffixChunks.length === 0,
           selectionComplete: false,
@@ -662,7 +695,7 @@ async function scanIntegrationIngestNoveltyTail(
     if (
       position === 0
       && lineSuffixChunks.length > 0
-      && rowsVisited < INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS
+      && rowsVisited < maxRows
     ) {
       const firstLineChunk = lineSuffixChunks[0];
       const lineBytes = lineSuffixChunks.length === 1 && firstLineChunk
@@ -823,7 +856,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
     scan = await scanIntegrationIngestNoveltyTail(absolutePath, (line) => {
       let raw: unknown;
       try {
-        raw = JSON.parse(line);
+        raw = JSON.parse(line.toString("utf8"));
       } catch {
         return "unsafe";
       }
@@ -832,7 +865,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
         return "unsafe";
       }
       return entriesById.size > 0 ? "complete" : "continue";
-    });
+    }, INTEGRATION_INGEST_ID_TAIL_MAX_SCAN_ROWS);
   } catch {
     scan = { historyComplete: false, selectionComplete: false, unsafe: true };
   }
@@ -1012,9 +1045,9 @@ export async function selectNovelIntegrationIngestEvidence(
     return unsafe ? failOpenSelection() : buildSelection();
   }
 
-  // Live shards use a bounded reverse-tail scan. Archived shards above use
-  // their already-bounded representation reader because an amendment remains
-  // archived and cannot create a future live-tail proof.
+  // Live shards use a reverse-tail scan bounded by bytes. Archived shards above
+  // use their already-bounded representation reader because an amendment
+  // remains archived and cannot create a future live-tail proof.
   const absolutePath = resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath;
   if (!(await pathExists(absolutePath))) {
     return failOpenSelection();
@@ -1022,15 +1055,13 @@ export async function selectNovelIntegrationIngestEvidence(
 
   let scan: IntegrationIngestNoveltyTailScanResult;
   try {
-    scan = await scanIntegrationIngestNoveltyTail(absolutePath, (line) => {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(line);
-      } catch {
-        return "unsafe";
-      }
-      return visitRaw(raw, source.sourcePath, source.logicalPath);
-    });
+    scan = await scanIntegrationIngestNoveltyTail(absolutePath, createIntegrationIngestNoveltyRowReader({
+      parts: input.parts,
+      receipt: input.receipt,
+      receiptRequiresPayloadIdentity,
+      receiptUnproven: () => receiptIsNovel,
+      visit: (raw) => visitRaw(raw, source.sourcePath, source.logicalPath),
+    }), Number.POSITIVE_INFINITY);
   } catch {
     return failOpenSelection();
   }
