@@ -573,8 +573,9 @@ test("integration ingest migration amends archived ingest months and stays idemp
   assert.equal(result.appendedBundleCount, 1);
   assert.equal(result.deletedFileCount, 2);
   assert.equal(result.finalized, true);
-  assert.equal(await fileExists(logicalAbsolutePath), false);
-  assert.equal(await fileExists(`${logicalAbsolutePath}.gz`), true);
+  // The amendment restores the archived month to plain before appending.
+  assert.equal(await fileExists(logicalAbsolutePath), true);
+  assert.equal(await fileExists(`${logicalAbsolutePath}.gz`), false);
   assert.ok(await readIntegrationIngestById(vaultRoot, archivedImportId));
   const migrated = await readIntegrationIngestById(vaultRoot, bundle.importId);
   assert.ok(migrated);
@@ -586,8 +587,8 @@ test("integration ingest migration amends archived ingest months and stays idemp
   });
   assert.equal(rerun.mutated, false);
   assert.equal(rerun.appendedBundleCount, 0);
-  assert.equal(await fileExists(logicalAbsolutePath), false);
-  assert.equal(await fileExists(`${logicalAbsolutePath}.gz`), true);
+  assert.equal(await fileExists(logicalAbsolutePath), true);
+  assert.equal(await fileExists(`${logicalAbsolutePath}.gz`), false);
 });
 
 test("integration ingest migration preserves BOM-prefixed evidence bytes", async () => {

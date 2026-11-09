@@ -7,7 +7,7 @@ import nodeFs, { promises as fs } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { brotliDecompressSync, crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
+import { brotliDecompressSync, crc32, deflateRawSync, gzipSync } from "node:zlib";
 import { test, vi } from "vitest";
 
 import type { IntegrationIngestRecord } from "@murphai/contracts";
@@ -523,7 +523,6 @@ test("closed integration ingest months archive deterministically while current a
     vaultRoot: firstVaultRoot,
   });
   const secondResult = await archiveClosedIntegrationIngestShards({
-    archiveCurrentMonth: true,
     now: new Date("2026-06-20T12:00:00.000Z"),
     vaultRoot: secondVaultRoot,
   });
@@ -644,9 +643,10 @@ test("first canonical amendment repairs an interrupted archive only in its targe
         await stageIntegrationIngestAppendPlan(batch, plan);
       },
     });
-    await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
-    const rows = gunzipSync(await fs.readFile(path.join(vaultRoot, `${logicalPath}.gz`)))
-      .toString("utf8").trim().split("\n").map((line) => JSON.parse(line).id);
+    // The amendment restores the archived month to plain before appending.
+    await assert.rejects(fs.access(path.join(vaultRoot, `${logicalPath}.gz`)));
+    const rows = (await fs.readFile(path.join(vaultRoot, logicalPath), "utf8"))
+      .trim().split("\n").map((line) => JSON.parse(line).id);
     assert.deepEqual(rows, [first.id, second.id]);
     assert.equal(await fs.readFile(path.join(vaultRoot, unrelatedPath), "utf8"), "unrelated malformed source");
     assert.equal(await fs.readFile(path.join(vaultRoot, `${unrelatedPath}.gz`), "utf8"), "unrelated malformed archive");
@@ -1760,7 +1760,7 @@ test("integration ingest archive amendments roll back with canonical write batch
   assert.equal(await fs.readFile(path.join(vaultRoot, conflictPath), "utf8"), "existing\n");
 });
 
-test("automatic Brotli integration ingest archive amendments stream and roll back", async () => {
+test("automatic Brotli integration ingest archive amendments restore plain and roll back", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-gzip-amendment");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
 
@@ -1807,8 +1807,12 @@ test("automatic Brotli integration ingest archive amendments stream and roll bac
       && error.code === "VAULT_FILE_EXISTS",
   );
 
-  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
-  assert.deepEqual(await fs.readFile(archivePath), originalGzip);
+  // Rollback keeps the verified plain base the amendment restored.
+  await assert.rejects(fs.access(archivePath));
+  assert.deepEqual(
+    await fs.readFile(path.join(vaultRoot, logicalPath)),
+    brotliDecompressSync(originalGzip),
+  );
   assert.deepEqual(
     (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
     ["xfm_GzipAmendment1"],
@@ -1823,9 +1827,9 @@ test("automatic Brotli integration ingest archive amendments stream and roll bac
     },
   });
 
-  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
-  assert.deepEqual(
-    brotliDecompressSync(await fs.readFile(archivePath)).toString("utf8"),
+  await assert.rejects(fs.access(archivePath));
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, logicalPath), "utf8"),
     `${JSON.stringify(archivedRecord)}\n${JSON.stringify(newRecord)}\n`,
   );
   assert.deepEqual(
@@ -2227,47 +2231,60 @@ test("validateVault reports integration ingest archive conflicts and invalid arc
 });
 
 
-test("large active ingest shards compress losslessly and remain writable and replayable", async () => {
-  const vaultRoot = await makeTempDirectory("murph-active-ingest-compression");
-  const now = new Date();
-  const importedAt = now.toISOString();
+test("ingest months stay plain while reconciles reach them and an archived amendment restores plain once", async () => {
+  const vaultRoot = await makeTempDirectory("murph-ingest-archive-delay");
+  const importedAt = "2026-05-20T09:00:00.000Z";
   const logicalPath = integrationIngestShardPath(importedAt);
+  const plainPath = path.join(vaultRoot, logicalPath);
+  const archivePath = `${plainPath}.br`;
+  const archive = (now: string) => archiveClosedIntegrationIngestShards({ vaultRoot, now: new Date(now) });
   try {
     await initializeVault({ vaultRoot, createdAt: importedAt });
-    const small = makeIntegrationIngestRecord({ id: "xfm_ActiveSmall", eventId: "evt_ActiveSmall", importedAt });
-    await writeIntegrationIngestJsonl(vaultRoot, logicalPath, [small]);
-    assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true })).archivedShardCount, 0);
     const large = makeIntegrationIngestRecord({
-      id: "xfm_ActiveLarge", eventId: "evt_ActiveLarge", importedAt,
+      id: "xfm_DelayLarge", eventId: "evt_DelayLarge", importedAt,
       partContent: JSON.stringify({ evidence: "source evidence ".repeat(300_000) }),
     });
-    await writeIntegrationIngestJsonl(vaultRoot, logicalPath, [small, large]);
-    const original = await fs.readFile(path.join(vaultRoot, logicalPath));
-    assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now })).archivedShardCount, 0);
-    const compressed = await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true });
+    await writeIntegrationIngestJsonl(vaultRoot, logicalPath, [large]);
+    const original = await fs.readFile(plainPath);
+    // Current month, then still inside the 16-day reconcile reach after it closes.
+    assert.equal((await archive("2026-05-31T23:00:00.000Z")).archivedShardCount, 0);
+    assert.equal((await archive("2026-06-16T00:00:00.000Z")).archivedShardCount, 0);
+    const compressed = await archive("2026-06-17T12:00:00.000Z");
     assert.equal(compressed.archivedShardCount, 1);
     assert.ok(compressed.archivedByteCount < compressed.sourceByteCount / 10);
-    assert.deepEqual(brotliDecompressSync(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`))), original);
-    const input = {
+    assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), original);
+
+    const input = (value: number) => ({
       vaultRoot, provider: "synthetic", importedAt,
-      evidenceParts: [{ role: "reading", fileName: "reading.json", content: { value: 12 } }],
+      evidenceParts: [{ role: "reading", fileName: "reading.json", content: { value } }],
       events: [], samples: [],
-    };
-    const imported = await importDeviceBatch(input);
-    assert.ok(imported.applied);
-    const archiveAfterImport = await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`));
-    assert.deepEqual(brotliDecompressSync(archiveAfterImport).subarray(0, original.length), original);
-    assert.equal((await readIntegrationIngestById(vaultRoot, imported.ingestId))?.record.id, imported.ingestId);
-    assert.equal((await importDeviceBatch(input)).applied, false);
-    assert.deepEqual(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`)), archiveAfterImport);
-    assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true })).archivedShardCount, 0);
-    await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+    });
+    const first = await importDeviceBatch(input(12));
+    assert.ok(first.applied);
+    await assert.rejects(fs.access(archivePath));
+    const afterFirst = await fs.readFile(plainPath);
+    assert.deepEqual(afterFirst.subarray(0, original.length), original);
+    assert.equal((await importDeviceBatch(input(12))).applied, false);
+    assert.deepEqual(await fs.readFile(plainPath), afterFirst);
+    const second = await importDeviceBatch(input(13));
+    assert.ok(second.applied);
+    await assert.rejects(fs.access(archivePath));
+    assert.deepEqual(
+      (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
+      ["xfm_DelayLarge", first.ingestId, second.ingestId],
+    );
+
+    const plain = await fs.readFile(plainPath);
+    assert.equal((await archive("2026-06-17T12:00:00.000Z")).archivedShardCount, 1);
+    await assert.rejects(fs.access(plainPath));
+    assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), plain);
     // Conflicting partial publication must never discard either representation.
-    await fs.writeFile(path.join(vaultRoot, logicalPath), original);
+    const archived = await fs.readFile(archivePath);
+    await fs.writeFile(plainPath, original);
     await assert.rejects(readIntegrationIngestEntries(vaultRoot), (error: unknown) =>
       error instanceof VaultError && error.code === "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT");
-    assert.deepEqual(await fs.readFile(path.join(vaultRoot, logicalPath)), original);
-    assert.deepEqual(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`)), archiveAfterImport);
+    assert.deepEqual(await fs.readFile(plainPath), original);
+    assert.deepEqual(await fs.readFile(archivePath), archived);
   } finally { await fs.rm(vaultRoot, { recursive: true, force: true }); }
 });
 

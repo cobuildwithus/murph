@@ -72,7 +72,7 @@ test("Brotli event shards preserve logical reads, late writes and rollback recei
   await assert.rejects(listEventLedgerShardSources(vaultRoot), { code: "EVENT_LEDGER_SHARD_AMBIGUOUS" });
 });
 
-test("Brotli integration shards preserve exact content through append replay and rollback", async () => {
+test("Brotli integration shards restore exact content to plain through append and rollback", async () => {
   const vaultRoot = await createVault();
   const logicalPath = "ledger/integration-ingests/2026/2026-01.jsonl";
   const makeRecord = (id: string) => buildIntegrationIngestRecord({
@@ -83,9 +83,11 @@ test("Brotli integration shards preserve exact content through append replay and
   const first = makeRecord("xfm_SyntheticFirst");
   const next = makeRecord("xfm_SyntheticNext");
   const bytes = Buffer.from(`${JSON.stringify(first)}\n`);
-  const archivePath = path.join(vaultRoot, `${logicalPath}.br`);
+  const plainPath = path.join(vaultRoot, logicalPath);
+  const archivePath = `${plainPath}.br`;
+  const retainedArchive = brotliCompressSync(bytes);
   await fs.mkdir(path.dirname(archivePath), { recursive: true });
-  await fs.writeFile(archivePath, brotliCompressSync(bytes));
+  await fs.writeFile(archivePath, retainedArchive);
   assert.ok(await readIntegrationIngestById(vaultRoot, first.id));
   const receipt = await createArchivedIntegrationIngestShardContentReceipt(vaultRoot, logicalPath);
   assert.equal(receipt?.sha256, createHash("sha256").update(bytes).digest("hex"));
@@ -93,10 +95,16 @@ test("Brotli integration shards preserve exact content through append replay and
     expectedBaseByteLength: bytes.length, expectedBaseSha256: receipt!.sha256 };
   const payload = `${JSON.stringify(next)}\n`;
   await appendArchivedIntegrationIngestShard({ ...input, payload });
-  await appendArchivedIntegrationIngestShard({ ...input, payload });
+  await assert.rejects(fs.access(archivePath));
+  assert.deepEqual(await fs.readFile(plainPath), Buffer.concat([bytes, Buffer.from(payload)]));
   assert.ok(await readIntegrationIngestById(vaultRoot, next.id));
+
+  // An archived base still truncates exactly in place.
+  await fs.rm(plainPath);
+  await fs.writeFile(archivePath, brotliCompressSync(Buffer.concat([bytes, Buffer.from(payload)])));
   await truncateArchivedIntegrationIngestShard(input);
   assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), bytes);
+
   const plan = await buildIntegrationIngestAppendPlan(vaultRoot, [next], { allowArchivedShardAmendments: true });
   const conflictPath = "bank/synthetic-conflict.md";
   await fs.mkdir(path.dirname(path.join(vaultRoot, conflictPath)), { recursive: true });
@@ -108,10 +116,12 @@ test("Brotli integration shards preserve exact content through append replay and
       await batch.stageTextWrite(conflictPath, "replacement\n", { overwrite: false });
     },
   }), { code: "VAULT_FILE_EXISTS" });
-  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
-  assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), bytes);
+  await assert.rejects(fs.access(archivePath));
+  assert.deepEqual(await fs.readFile(plainPath), bytes);
+
+  await fs.rm(plainPath);
+  await fs.writeFile(archivePath, retainedArchive);
   const gzipPath = path.join(vaultRoot, `${logicalPath}.gz`);
-  const retainedArchive = await fs.readFile(archivePath);
   await fs.writeFile(gzipPath, compressShard(bytes, "gzip"));
   assert.deepEqual((await readIntegrationIngestById(vaultRoot, first.id))?.record, first);
   await assert.rejects(fs.access(gzipPath), { code: "ENOENT" });
@@ -139,7 +149,7 @@ test("malformed Brotli shards fail closed through both public readers", async ()
 for (const family of ["events", "integration-ingests"] as const) {
   const archive = (vaultRoot: string) => (family === "events"
     ? archiveClosedEventLedgerShards
-    : archiveClosedIntegrationIngestShards)({ vaultRoot, now: new Date("2026-02-15T00:00:00.000Z") });
+    : archiveClosedIntegrationIngestShards)({ vaultRoot, now: new Date("2026-02-17T00:00:00.000Z") });
   const record = family === "events" ? { id: "evt_SyntheticArchive", kind: "note" }
     : buildIntegrationIngestRecord({
       id: "xfm_SyntheticArchive", provider: "synthetic", source: "device", importedAt: "2026-01-02T00:00:00.000Z",

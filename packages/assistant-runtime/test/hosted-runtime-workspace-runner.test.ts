@@ -12441,7 +12441,10 @@ describe("foreground device ingestion", () => {
         assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "sleep-score"));
         for (const effect of fixture.effects.splice(0)) await effect();
         assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
-        assert.notEqual(createHash("sha256").update(await readFile(path.join(fixture.vaultRoot, relativePath))).digest("hex"), cold.sha256);
+        // The thawed month is restored to plain before the historical append.
+        await assert.rejects(readFile(path.join(fixture.vaultRoot, relativePath)), { code: "ENOENT" });
+        assert.ok((await readFile(path.join(fixture.vaultRoot, relativePath.replace(/\.br$/u, "")), "utf8"))
+          .startsWith(`${JSON.stringify(prior)}\n`));
         assert.deepEqual(Buffer.from(objects.get(cold.mediaId)!), original, "older snapshots retain immutable ciphertext source");
         await fixture.owner?.quiesce();
         // A durable append receipt may replay onto the previous sparse snapshot.

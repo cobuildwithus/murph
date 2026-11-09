@@ -5,19 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, test, vi } from "vitest";
 
-const faults = vi.hoisted(() => ({ compressedLimit: false, archiveRemoval: false }));
+const faults = vi.hoisted(() => ({ archiveRemoval: false }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
-    lstat: async (...args: Parameters<typeof actual.lstat>) => {
-      const result = await actual.lstat(...args);
-      if (faults.compressedLimit && /\.br\.[a-f0-9]+\.tmp$/.test(String(args[0]))) {
-        faults.compressedLimit = false;
-        Object.defineProperty(result, "size", { value: 128 * 1024 * 1024 + 1 });
-      }
-      return result;
-    },
     unlink: async (...args: Parameters<typeof actual.unlink>) => {
       if (faults.archiveRemoval && String(args[0]).endsWith(".br")) {
         faults.archiveRemoval = false;
@@ -38,7 +30,6 @@ import {
 
 const vaults: string[] = [];
 afterEach(async () => {
-  faults.compressedLimit = false;
   faults.archiveRemoval = false;
   for (const vaultRoot of vaults.splice(0)) await fs.rm(vaultRoot, { recursive: true, force: true });
 });
@@ -47,7 +38,8 @@ async function fixture(bytesPerRecord = 5 * 1024 * 1024, count = 1) {
   const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-ingest-overflow-"));
   vaults.push(vaultRoot);
   const now = new Date();
-  const importedAt = now.toISOString();
+  // A month idle maintenance has already archived.
+  const importedAt = "2026-01-15T12:00:00.000Z";
   await initializeVault({ vaultRoot, createdAt: importedAt });
   const logicalPath = integrationIngestShardPath(importedAt);
   const plainPath = path.join(vaultRoot, logicalPath);
@@ -63,7 +55,7 @@ async function fixture(bytesPerRecord = 5 * 1024 * 1024, count = 1) {
   }
   const baseSize = (await fs.stat(plainPath)).size;
   const baseHash = await prefixHash(plainPath, baseSize);
-  assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now, archiveCurrentMonth: true })).archivedShardCount, 1);
+  assert.equal((await archiveClosedIntegrationIngestShards({ vaultRoot, now })).archivedShardCount, 1);
   return { vaultRoot, now, importedAt, logicalPath, plainPath, archivePath: `${plainPath}.br`, baseSize, baseHash };
 }
 
@@ -106,10 +98,9 @@ test("valid device publication crosses the real uncompressed archive ceiling wit
   assert.ok((await fs.stat(base.plainPath)).size > MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES);
 }, 240_000);
 
-test("compressed-size overflow and interrupted base publication recover before the device append", async () => {
+test("an interrupted plain restore recovers before the device append", async () => {
   const base = await fixture();
   const originalArchive = await fs.readFile(base.archivePath);
-  faults.compressedLimit = true;
   faults.archiveRemoval = true;
   const input = deviceInput(base.vaultRoot, base.importedAt);
   await assert.rejects(importDeviceBatch(input), /synthetic interruption/);
@@ -118,11 +109,10 @@ test("compressed-size overflow and interrupted base publication recover before t
   await assert.rejects(fs.access(base.plainPath));
   assert.deepEqual(await fs.readFile(base.archivePath), originalArchive);
   assert.equal((await recoverInterruptedClosedIntegrationIngestArchives({ vaultRoot: base.vaultRoot, now: base.now })).repairedShardCount, 0);
-  faults.compressedLimit = true;
   await assertImportedAndReplay(input, base);
 });
 
-test("a later canonical failure rolls an overflow append back to the unchanged plain base", async () => {
+test("a later canonical failure rolls an archived-month append back to the unchanged plain base", async () => {
   const base = await fixture();
   const record = buildIntegrationIngestRecord({
     id: "xfm_OverflowRollback", provider: "synthetic", source: "device", importedAt: base.importedAt,
@@ -133,7 +123,6 @@ test("a later canonical failure rolls an overflow append back to the unchanged p
   const conflict = "bank/overflow-conflict.md";
   await fs.mkdir(path.dirname(path.join(base.vaultRoot, conflict)), { recursive: true });
   await fs.writeFile(path.join(base.vaultRoot, conflict), "existing");
-  faults.compressedLimit = true;
   await assert.rejects(runCanonicalWrite({
     vaultRoot: base.vaultRoot, operationType: "overflow_rollback", summary: "verify overflow rollback",
     mutate: async ({ batch }) => {

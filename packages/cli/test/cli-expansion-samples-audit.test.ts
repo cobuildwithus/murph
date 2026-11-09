@@ -1364,7 +1364,7 @@ test('audit receipt inspects archived automatic publications without an audit ro
     })
     assert.ok(result.applied)
     assert.equal(result.auditPath, null)
-    await archiveClosedIntegrationIngestShards({ vaultRoot, now: new Date('2026-02-01T00:00:00.000Z') })
+    await archiveClosedIntegrationIngestShards({ vaultRoot, now: new Date('2026-02-17T00:00:00.000Z') })
     const envelope = await runSliceCli<{ receipt: { record: { id: string; publication: { retractedCount: number }; parts: unknown[] } } }>([
       'audit', 'receipt', result.ingestId, '--vault', vaultRoot,
     ])
