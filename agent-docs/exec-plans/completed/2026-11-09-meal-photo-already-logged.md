@@ -1,6 +1,6 @@
 # Skip an automatic meal photo Murph already logged from a message
 
-Status: active
+Status: completed
 Created: 2026-11-09
 Updated: 2026-11-09
 
@@ -255,3 +255,4 @@ snapshot could not be opened. The retry on the same head reported one finding.
 - Expected outcomes:
   - the new tests pass and the existing meal-photo-import tests pass unchanged;
   - no contract or web diff.
+Completed: 2026-11-09
