@@ -17,7 +17,7 @@ import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGame
 import { isGameRecapGenerationRetired } from "./recap-witness";
 import { gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
-import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
+import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 
@@ -89,32 +89,34 @@ async function refreshGameChatAudience(input: Input, players: readonly string[])
   }
   const audience = await readGameChatAudience(input.memberId);
   const previous = input.audience;
-  if (!previous || audience.threadId !== previous.threadId
-    || !audience.keys.candidates.some(key => previous.keys.candidates.includes(key))
-    || !sameRoomIdentities(audience.memberIds, players)) return null;
+  if (!previous || audience.threadId !== previous.threadId) return null;
+  await assertHostedThreadRouteEgressAuthority({ authority: audience.route, prisma: getPrisma() });
   return { ...input, audience };
 }
 
 function supportsGameChatRoster(input: Input, players: readonly string[]): boolean {
-  return input.multiplayer === true ? players.length > 0 && players.length <= 10 && new Set(players).size === players.length : isGameMemberSet(players) && players.length === 2;
+  return input.multiplayer === true ? players.length > 0 && new Set(players).size === players.length : isGameMemberSet(players) && players.length === 2;
 }
 
 async function gameChatToolResponse(input: Input, playerMemberIds: readonly string[], actor: string,
   dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"],
   photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null): Promise<HostedGameToolResponse> {
-  const state = await readGameToolState(input, playerMemberIds, actor);
-  const lore = input.request.action === "read_game" ? await readGameToolLore(state, playerMemberIds) : {};
+  const state = await readGameToolState(input, input.audience?.memberIds ?? playerMemberIds, actor);
+  const lore = input.request.action === "read_game" ? await readGameToolLore(state, input.audience) : {};
   return { action: input.request.action, result: { status: "ok", state, ...lore, ...(dayOutcome ? { dayOutcome } : {}), ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
 }
 
 /** Resolve only authorized returned games, including non-live games; never expose audience keys. */
-async function readGameToolLore(state: HostedGameChatState, players: readonly string[]): Promise<{ loreGuidance?: string; loreFingerprint?: string }> {
+async function readGameToolLore(state: HostedGameChatState, audience?: GameChatAudience): Promise<{ loreGuidance?: string; loreFingerprint?: string }> {
   if (!state.games.some(game => game.status === "live")) return {};
   const rows = await getPrisma().game.findMany({ where: { id: { in: state.games.map(game => game.id) } },
     select: { id: true, maxPlayers: true, audienceKey: true }, take: state.games.length });
   const keys = state.games.map(game => {
     const row = rows.find(row => row.id === game.id);
     if (row?.maxPlayers === 10) return row.audienceKey ? gameGroupLoreFingerprint(row.audienceKey) : null;
+    const players = game.players.map(player => player.memberId);
+    // Pair notebooks can contain app-only recap details; never expose them to bystanders.
+    if (audience && (audience.contacts.length > 2 || !sameGamePlayers(audience.memberIds, players))) return null;
     return row?.maxPlayers === 2 && players.length === 2 ? gamePairLoreFingerprint(players) : null;
   });
   const key = keys[0];
@@ -128,8 +130,7 @@ function sameRoomIdentities(left: readonly string[], right: readonly string[]): 
 /** Preserve the unmarked response shape for older strict runtime readers. */
 async function readGameToolState(input: Input, playerMemberIds: readonly string[], actor?: string) {
   const state = await readGameChatState(input.memberId, playerMemberIds, actor, input.multiplayer === true, ...(input.audience ? [input.audience] : []));
-  const groupRoom = input.multiplayer && (state.games.some(game => game.maxPlayers === 10) || Boolean(await getPrisma().game.findFirst({ where: { maxPlayers: 10, chatContainerMemberId: input.memberId }, select: { id: true } })));
-  const visiblePlayers = groupRoom
+  const visiblePlayers = input.multiplayer && state.games.length > 0
     ? [...new Set(state.games.flatMap(game => game.players.map(player => player.memberId)))] : playerMemberIds;
   return hostedGameChatStateSchema.parse({ ...state,
     ...(input.request.action === "read_game" && input.request.includePlayers && visiblePlayers.length ? { players: (await readGameChatProfiles(visiblePlayers)).map(player => ({ ...player, isSender: player.memberId === actor })) } : {}),
@@ -158,7 +159,7 @@ async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResp
   if (!input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
   if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
   const state = await readGameToolState(input, players);
-  const lore = await readGameToolLore(state, players);
+  const lore = await readGameToolLore(state, input.audience);
   return { action: "read_game", result: { status: "ok", state, ...lore } };
 }
 
@@ -188,13 +189,13 @@ async function canRunGameChatRequestTx(input: Input, players: readonly string[],
   // The yes that calls off a pair game voids it; a retry of that yes must still reach its recorded outcome.
   const replayableApproval = input.request.action === "update_game" && input.request.update.operation === "approve" && input.request.update.proposalId !== undefined;
   const game = await tx.game.findFirst({
-    where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled", ...(replayableApproval ? ["void" as const] : [])] } }, addressedGameRematchWhere(players), ...(input.multiplayer ? [{ maxPlayers: 10, chatContainerMemberId: input.memberId }] : [])], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
+    where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled", ...(replayableApproval ? ["void" as const] : [])] } }, addressedGameRematchWhere(players), ...(input.multiplayer ? [{ chatContainerMemberId: input.memberId }] : [])], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
     include: { invitees: true, players: { take: 11 } },
   });
   if (!game || !isGameOn(game)) return false;
-  if (game.maxPlayers === 10) {
-    if (!input.multiplayer || !input.audience || game.chatContainerMemberId !== input.memberId || !await readGroupGameChatAuthority(game, input.memberId, input.audience, tx)) return false;
-  } else if (input.audience && input.audience.contacts.length !== 2 || !areGamePlayersAllowed(game, players)) return false;
+  if (input.multiplayer) {
+    if (!input.audience || !await readGameChatAuthority(game, input.memberId, input.audience, tx)) return false;
+  } else if (game.maxPlayers === 10 || !areGamePlayersAllowed(game, players)) return false;
   return true;
 }
 
@@ -210,12 +211,13 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: input.request.action, result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
-  const players = await requireExactGameChat(input.memberId, input.multiplayer);
-  if (!supportsGameChatRoster(input, players)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const audience = input.multiplayer ? await readGameChatAudience(input.memberId) : undefined;
-  const material = await readGameRecapMaterial(gameId, input.memberId, players, eventId);
+  const roomPlayers = audience?.memberIds ?? await requireExactGameChat(input.memberId);
+  if (!supportsGameChatRoster(input, roomPlayers)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  const material = await readGameRecapMaterial(gameId, input.memberId, roomPlayers, eventId, audience);
   if (!material) return unavailable();
-  if ((!input.multiplayer && material.validation.group) || !material.validation.group && audience && (audience.contacts.length !== 2 || await hasGameChatRestriction(prisma, audience.memberIds))) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  const players = material.validation.playerNamesByMemberId.map(player => player.memberId);
+  if (!input.multiplayer && material.validation.group) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   if (input.request.action === "read_game") return { action: "read_game", result: { status: "ok", recapGame: material.game } };
   const authorizeMutation = async (tx: Prisma.TransactionClient) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);

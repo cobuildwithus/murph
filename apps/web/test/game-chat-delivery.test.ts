@@ -10,7 +10,9 @@ vi.mock("../src/lib/prisma", () => {
   const db = {
     $executeRaw: (...args: unknown[]) => String(args[0]).includes("pg_advisory_xact_lock") ? Promise.resolve(0) : m.updateStatus(...args),
     game: { findFirst: m.game, findUnique: m.game, updateMany: m.updateGame, update: m.updateGame },
-    hostedMember: { count: async () => 2 },
+    hostedMember: { count: async () => 2, findFirst: async () => null },
+    gameBlock: { findFirst: async () => null },
+    hostedMemberIdentity: { findMany: async () => [{ memberId: "person-a", phoneLookupKey: "line-key" }, { memberId: "person-b", phoneLookupKey: "line-key" }] },
     gameProfile: { findMany: async () => [{ memberId: "person-a", firstNameEncrypted: "Alex" }, { memberId: "person-b", firstNameEncrypted: "Sam" }] },
     hostedThreadContainer: { findMany: m.candidates, findUnique: async () => ({ participants: [{ participantMemberId: "person-a" }, { participantMemberId: "person-b" }] }) },
     hostedLinqDelivery: { findUnique: m.receipt, update: m.saveReceipt, updateMany: m.saveReceipt },
@@ -21,7 +23,11 @@ vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.b
 vi.mock("../src/lib/game/crypto", () => ({ openGameTexts: async (items: Array<{ value: string }>) => items.map((item) => item.value) }));
 vi.mock("../src/lib/hosted-crypto/secure-box", () => ({ openHostedUserSecureBoxString: m.decode, sealHostedUserSecureBoxString: m.encode }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identities }));
-vi.mock("../src/lib/hosted-onboarding/contact-privacy", () => ({ createHostedPhoneLookupKeyReadCandidates: () => ["line-key"] }));
+vi.mock("../src/lib/hosted-onboarding/contact-privacy", async original => ({ ...await original<object>(), createHostedPhoneLookupKeyReadCandidates: () => ["line-key"] }));
+vi.mock("../src/lib/hosted-groups/participant-member", () => ({ lookupHostedGroupParticipantMemberIdsByHandles: async () => new Map([["+15555550101", "person-a"], ["+15555550102", "person-b"]]) }));
+vi.mock("../src/lib/hosted-onboarding/linq-participant-contact", async original => ({ ...await original<object>(), createHostedLinqParticipantContactLookupKeyReadCandidates: () => ["line-key"] }));
+vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ readHostedThreadRouteByThreadIdentity: async () => ({ containerMemberId: "room" }) }));
+vi.mock("../src/lib/game/chat-delivery-authority", () => ({ assertGameProposalDeliveryCurrentTx: async () => true }));
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
 vi.mock("../src/lib/hosted-onboarding/linq-client", () => ({ createHostedLinqChat: m.create, getHostedLinqChatSummary: m.chat }));
 vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHostedLinqDeliveryId: () => "delivery", claimHostedLinqDeliveryProviderDispatchTx: m.claim, markHostedLinqDeliveryAcceptedTx: m.accepted }));
@@ -36,7 +42,7 @@ import { deliverGameChangeProposal, isExactGameChat, buildGameProposalInstructio
 const phones = ["+15555550101", "+15555550102"];
 const proposal: GamePendingChange = { id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] }, lengthDays: 14 }, effectiveFromDay: 2, deliveryStatus: "pending", startsOn: null };
 const chat = linqRoster({ isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] });
-const game = (container: string | null = null) => ({ id: "game", lengthDays: 7, status: "live", pendingChange: { v: 1, ...proposal }, chatContainerMemberId: container, players: [{ memberId: "person-a", seat: 0, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }, { memberId: "person-b", seat: 1, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }] });
+const game = (container: string | null = null) => ({ id: "game", maxPlayers: 2, previousGameId: null, createdBy: "person-a", invitees: [], audienceKey: null, lengthDays: 7, status: "live", pendingChange: { v: 1, ...proposal }, chatContainerMemberId: container, players: [{ memberId: "person-a", seat: 0, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }, { memberId: "person-b", seat: 1, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }] });
 const candidate = (memberId: string, name: string | null = null, activity: string | null = "2030-03-04T12:00:00Z", created = "2030-03-01T12:00:00Z") => ({
   memberId, createdAt: new Date(created), member: {
     hostedGroupRuntime: { displayName: name },
@@ -147,10 +153,11 @@ describe("game proposal chat delivery", () => {
     expect(m.bootstrap).toHaveBeenCalledExactlyOnceWith("game", "game-change:game:proposal", expect.stringContaining("one concise conversational message"));
     expect(m.create).not.toHaveBeenCalled(); expect(m.enqueue).not.toHaveBeenCalled();
   });
-  it("does not send to an expanded bound room or to unverified identities", async () => {
+  it("sends to an expanded bound room and rejects unverified players", async () => {
     m.game.mockResolvedValue(game("room")); m.chat.mockResolvedValue({ ...chat, handles: [...chat.handles, { handle: "+15555550103", isMe: false, status: "active" }] });
-    await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("participants have changed");
-    expect(m.enqueue).not.toHaveBeenCalled(); expect(m.create).not.toHaveBeenCalled();
+    await expect(deliverGameChangeProposal("game", "proposal")).resolves.toBe(true);
+    expect(m.enqueue).toHaveBeenCalledOnce(); expect(m.create).not.toHaveBeenCalled();
+    m.game.mockResolvedValue(game());
     m.identities.mockResolvedValue({ phoneNumber: phones[0], phoneNumberVerifiedAt: null });
     await expect(deliverGameChangeProposal("game", "proposal")).rejects.toThrow("verified phone");
   });
@@ -184,9 +191,10 @@ describe("game proposal chat delivery", () => {
     m.chat.mockResolvedValue({ ...chat, handlesComplete: false });
     await expect(requireExactGameChat("room")).rejects.toThrow("participants have changed");
   });
-  it.each(["game-rematch:game", "game-challenge:game:entry"])("revalidates the exact roster for delivery: %s", async key => {
+  it.each(["game-rematch:game", "game-challenge:game:entry"])("revalidates the bound room for delivery: %s", async key => {
+    m.game.mockResolvedValue(game("room"));
     await expect(readGameProposalDeliveryPlayers(key, "room"))
-      .resolves.toEqual(["person-a", "person-b"]);
+      .resolves.toMatchObject({ memberIds: ["person-a", "person-b"], threadId: "chat" });
     await expect(readGameProposalDeliveryPlayers("assistant-outbox:scheduled", "room"))
       .resolves.toBeUndefined();
   });

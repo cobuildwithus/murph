@@ -5,6 +5,17 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ApplePushRequest } from "@/src/lib/apple-push/send";
 
 const mocks = vi.hoisted(() => ({ send: vi.fn(), actor: "" }));
+// Inject provider/route evidence while retaining real shared-room database checks.
+vi.mock("@/src/lib/game/chat-membership", async original => ({ ...await original<typeof import("@/src/lib/game/chat-membership")>(),
+  readGameChatAudience: async (room: string) => {
+    const { getPrisma } = await import("@/src/lib/prisma");
+    const players = await getPrisma().gamePlayer.findMany({ where: { game: { chatContainerMemberId: room } }, select: { memberId: true } });
+    const memberIds = [...new Set(players.flatMap(player => player.memberId ? [player.memberId] : []))];
+    return { memberIds, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room };
+  } }));
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
+  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }) }));
+
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMember: async () => mocks.actor, requireGameMemberAuth: async () => ({ member: { id: mocks.actor }, sessionId: "synthetic-session" }), assertGameMemberAuthCurrentTx: async () => {}, requireCurrentTermsFor: async () => {} }));
 // The provider boundary is fake; real AES envelopes still bind bytes to owner and row.

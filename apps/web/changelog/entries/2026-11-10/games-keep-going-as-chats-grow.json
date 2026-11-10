@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 300,
+  "item": {
+    "id": "games-keep-going-as-chats-grow",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Your game keeps going as the chat grows",
+    "summary": "Adding someone to your game chat no longer stops players from checking in or agreeing to changes.",
+    "details": "Pair and group games stay in their established chat while all current players remain there. Newcomers can follow along without becoming players, and only players can check in or agree to game changes.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4812
+    ]
+  }
+}

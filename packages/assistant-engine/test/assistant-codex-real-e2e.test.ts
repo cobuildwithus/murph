@@ -49798,6 +49798,23 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
 }
 
 describeRealCodex('plan D ordinary group hosting', () => {
+  it('bound pair game edit keeps working after a bystander joins the chat', async () => {
+    const pair = hostingGame({ id: 'game_expanded_pair', maxPlayers: undefined })
+    const result = await runHostingTurn({ name: 'expanded-pair-edit', state: { games: [pair] },
+      prompt: 'Alex added Taylor to this chat earlier. Taylor is chatting with us but is not playing. Alex: Murph, ask Sam to make our walking game 12 days instead of 7.',
+      update: update => {
+        expect(update).toMatchObject({ operation: 'propose', gameId: pair.id, expectedTermsVersion: 1, change: { kind: 'edit', lengthDays: 12 } })
+        pair.pendingChange = { id: 'proposal_expanded_pair', proposedByMemberId: 'player_0', expectedTermsVersion: 1,
+          origin: 'chat', deliveryStatus: 'conversation', startsOn: null, effectiveFromDay: 0, change: { kind: 'edit', lengthDays: 12 } }
+      } })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+    expect(result.saves).toHaveLength(0)
+    expect(result.reply).toMatch(/Sam/iu)
+    expect(result.reply).toMatch(/12/u)
+    expect(result.reply).toMatch(/\?/u)
+    expect(result.reply).not.toMatch(/Taylor|join|new chat|separate chat|remove|cannot|can't|already.*(?:changed|extended)/iu)
+  }, 360_000)
+
   it('game chat remind me at 6 writes only the speaker setting', async () => {
     const game = hostingGame()
     const result = await runHostingTurn({ name: 'remind-me-at-six', state: { games: [game] },

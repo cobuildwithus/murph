@@ -5924,7 +5924,7 @@ incomplete event permanently concedes it, even after score restoration. Cases
 are bounded by admitted players (two or ten), two attempts and game length;
 the batched query returns only the latest accused/day concession id per case.
 App group admission prepares the bound provider audience before locking and
-revalidates it through `readGroupGameChatAuthority` before spending the case.
+revalidates it through `readGameChatAuthority` before spending the case.
 Notice facts contain only profile names from that game's remaining-player cohort,
 the target day's inherited task (the shared default for groups), day and posting time.
 Private task overrides, app views, labels, captions, excuses, replies and media never enter notices.
@@ -6454,36 +6454,42 @@ isolates association failures from ordinary message ingestion. A verified starte
 or seated sender can bind an unbound game or replay the same room. Association
 never claims invitees; later link messages naturally retry it.
 
-`readGroupGameChatAuthority` is the sole group room check for association,
-shared reads, commands, lifecycle enqueue and final egress. It requires a current
-Linq route, a complete provider roster with exactly one active Murph handle,
-remaining players with identities in addressed seats (0–9) who resolve in the
-current text on both exact and subset paths, and either rotating keyed equality
-with the original addressed audience or a proven subset with at least two people. Each
-subset contact must resolve to an addressed player (left or not) or bound
-invitee, or match its own unbound invitation's lookup read keys, whether or not
-it resolves. Bound invitation keys grant nothing. Adding anyone outside the
-original audience or losing a remaining player from the text detaches the game.
+`readGameChatAuthority` owns prepared game-room authority for pairs and groups.
+A complete provider roster with exactly one active Murph handle, distinct valid
+handles, unambiguous identities and a usable sending line supplies room evidence.
+Bound games require a current Linq route and every current player in the room;
+extra people and invitation seat numbers do not affect eligibility. An unbound
+group needs the exact original keyed audience and cannot change an existing
+binding. Pairs remain visible in exact two-person rooms even when unbound or
+bound elsewhere; an expanded room needs the pair's binding. Pair rematches
+include their invited addressee in the current-player projection. Keys are
+computed only for two to ten people; larger rooms cannot claim an unbound game.
 Deleting the room owner removes the room and clears the binding; ownership is
-not transferred.
-Resolved verified room members plus all extant player IDs, including leavers,
-are checked for blocks, suspension and revoked consent. Unresolved handles need original audience
-proof; resolving an account alone grants nothing. A stored binding never
-permits retargeting.
-Runtime funding checks remaining addressed players and requires one in the room
-roster. It never grants projection or delivery authority.
+not transferred. Resolved verified room members plus all extant player IDs,
+including leavers, retain block, suspension and revoked-consent checks.
+Unresolved bystanders acquire no account rights.
 
-After a chat mutation and before recap sealing, tools compare the complete fresh
-keyed audience. Response projections and scheduled reads retain the full proof;
-equal resolved member IDs alone cannot hide an added unregistered handle. Group
-lifecycle context carries its bound room. Roomless notice lookups remain pair-only.
-Pair room reuse selects only pair games, so a partially joined larger group
-cannot supply its room merely because its two seated members match the pair.
+Runtime funding remains one database-only admission query over at most 32 fresh
+resolved participants. Every current player must be present. Expanded pair
+rooms require their own game binding, then use that game's pair to retain the
+primary room's single allowance beneficiary, just like exact alternate rooms. Funding never proves content authority.
+
+After a chat mutation, tools refresh provider and route evidence and let each
+game's authority decide the response projection. They do not compare the old
+and new whole room. Player lists use game players; a room with no games still
+exposes verified profiles for first-game setup. Pair lore can contain app-only
+recap details, so its fingerprint remains private to the exact pair audience.
+Pair recap and missed-day text retain that boundary at final dispatch, even
+when queued before a bystander arrives. App recap generation remains available. Group lore
+keeps its original audience key. Legacy non-multiplayer tools stay exact.
+Group lifecycle context carries its bound room. Roomless notice lookups remain
+pair-only. Pair room reuse selects only pair games and deliberately lets a new
+pair game inherit its established room even after bystanders join.
 
 Approval matches an addressed invitee by memberId or verified contact read keys
 and calls ordinary join, including legal and profile prerequisites. Unaddressed
-bearer acceptance remains app-only, and an outside joiner suppresses chat until
-they leave. Shared names, tasks, progress and scores describe remaining players
+bearer acceptance remains app-only; a link joiner must be present in the room
+for its game to remain available there. Shared names, tasks, progress and scores describe remaining players
 only; invitees without any player row appear as a pending count. Departed seats
 cannot rejoin. Kickoff is withheld once anyone has left. Private labels never
 leave the starter.
@@ -6740,7 +6746,7 @@ failed and chat-origin pair requests do not reserve a cancellation notice. Group
 announce cancellation of a conversational ask when cancelled outside its bound
 chat. App deciding votes reserve `game_change_resolved`; bound-chat replies
 suppress that extra outcome. All group producers and final egress use
-`readGroupGameChatAuthority` without pair discovery or bootstrap. Keyed outcomes
+`readGameChatAuthority` without pair discovery or bootstrap. Keyed outcomes
 describe only the resolved ask, with shared canonical task disambiguation and
 neutral departure reasons. Updated Web receipt readers are the rollback floor
 once these new receipts exist; deploy Web, then runner, then iOS with production
@@ -6794,7 +6800,9 @@ That exception requires the original lifecycle reservation template and no
 sender, payload or provider receipt evidence; frozen effects keep their existing
 reconciliation contract.
 Provider lookup and encryption stay outside database transactions. Existing-room
-delivery rechecks the primary route, exact pair and source before provider dispatch.
+delivery rechecks the primary route, shared game-room authority and source before
+provider dispatch. Pair and group notices carry the same prepared room evidence;
+final database checks retain restrictions on every resolved participant.
 Only that validated game notification bypasses iMessage inactivity; other route,
 runtime, health and dispatch fences remain authoritative.
 
@@ -6827,9 +6835,10 @@ behavior even with two players. For each missed date, the room cutoff is the
 latest next-day 9am among all eligible scheduled game/player slots in their
 frozen zones, including people who posted. The inclusive two-hour window starts
 at that cutoff. Mixed pair/group rooms use this horizon; the pair path cannot
-claim earlier. The shared reservation function takes `lockGamePair` only for a
-verified actual two-contact audience, before any game locks, then consults
-immutable pair and group delivery hashes. One `game_group_missed` receipt keyed
+claim earlier. The shared reservation function derives distinct pair locks from
+bound live and recently settled pair-game rosters, takes them in stable order
+before game locks, then consults immutable pair and group delivery hashes.
+Room size does not affect the lock or receipt identity. One `game_group_missed` receipt keyed
 by `game-missed:<roomId>:group:<firstMissedDate>` survives quiet, retries,
 settlement and uncertain sends.
 
@@ -6840,7 +6849,7 @@ watermark. Transcript reads stop at that watermark and include remaining-player
 authors only. Preparation decrypts public names and their task words outside
 transactions; private labels, unjoined overrides, captions and media are absent.
 Publication and final egress acquire contributing game rows in ID order, reload
-structural evidence, and call `readGroupGameChatAuthority`. These locks span
+structural evidence, and call `readGameChatAuthority`. These locks span
 mailbox publication/receipt advancement or the existing provider-dispatch claim.
 Any new departure, corrected miss, terms/binding change or unsafe audience
 suppresses frozen output. Historical departures before the snapshot are valid.
@@ -6854,10 +6863,11 @@ receipt is skipped unless its mailbox item already exists, and a published one
 leaves the sweep without being skipped. Final egress refuses either past the same
 deadline, which also bounds outbox retries.
 
-`evening-check-in.ts` reuses the room collector, rule state and lifecycle
-publication path for pair, group and mixed rooms. The five-minute room sweep
-stays inside the minute drain's budget. Real audience membership and current
-profile zones gate the room before the latest scheduled 8pm horizon; posting and
+`evening-check-in.ts` independently validates each candidate game against one
+prepared room audience, then reuses rule state and lifecycle publication for
+pair, group and mixed rooms. It does not inherit morning lore eligibility. The five-minute room sweep
+stays inside the minute drain's budget. Current players must be in the room,
+and only their current profile zones gate the latest scheduled 8pm horizon; posting and
 per-game opt-outs affect the addressed set only. One `game_evening` receipt per
 room/date owns the claim, with the room as payload owner. Its immutable event
 key survives delivery metadata rewrites and identifies each of the previous

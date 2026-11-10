@@ -17,7 +17,7 @@ import { isHostedMailboxItemConsumed, appendPreparedHostedMailboxEnvelopeTx, pre
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { GameChatAudienceError, readGroupGameChatAuthority, readGroupGameNoticeAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
+import { GameChatAudienceError, readGameChatAuthority, readGroupGameNoticeAuthority, bindPairGameChat, findExistingGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -371,10 +371,12 @@ async function recoverGameNotificationWake(receiptId: string, gameId: string, ev
     return false;
   }
   if (!game.chatContainerMemberId) return false;
-  if (game.maxPlayers === 10 && !await revalidateGroupNotificationWake(game, eventId, now)) return false;
   const room = game.chatContainerMemberId;
-  return recoverGameNotificationPointer(receiptId, room, eventId, game.maxPlayers === 10 ? undefined
-    : async () => requireExactChat(room, await readPairGamePhones(lifecyclePlayerMemberIds(game, kind), prisma)));
+  return recoverGameNotificationPointer(receiptId, room, eventId, async () => {
+    // Bootstrap recovery precedes its provider route; the bootstrap owner proves it.
+    const needsProof = game.maxPlayers === 10 || await prisma.hostedThreadRoute.findFirst({ where: { containerMemberId: room }, select: { containerMemberId: true } });
+    return !needsProof || revalidateGameNotificationWake(game, eventId, now);
+  });
 }
 
 function isRoomCheckInEvent(eventId: string): boolean {
@@ -395,7 +397,7 @@ async function recoverRoomCheckInWake(receiptId: string, roomId: string, eventId
   return recoverGameNotificationPointer(receiptId, roomId, eventId);
 }
 
-async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string, verifyRoster?: () => Promise<unknown>): Promise<boolean> {
+async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string, beforeSignal?: () => Promise<boolean>): Promise<boolean> {
   const prisma = getPrisma();
   const mailbox = await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: roomId, prisma });
   if (!mailbox) return false;
@@ -404,23 +406,22 @@ async function recoverGameNotificationPointer(receiptId: string, roomId: string,
     // provider truth intact and stop this pre-generation wake sweep.
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { retryAfterAt: null } });
   } else {
-    // A bootstrap wake precedes its route, so its fresh container has no provider roster to read yet.
-    if (verifyRoster && await prisma.hostedThreadRoute.findFirst({ where: { containerMemberId: roomId }, select: { containerMemberId: true } })) await verifyRoster();
+    if (beforeSignal && !await beforeSignal()) return false;
     await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: mailbox.id });
   }
   return true;
 }
 
-async function revalidateGroupNotificationWake(game: GameChatLifecycleRecord, eventId: string, now: Date): Promise<boolean> {
+async function revalidateGameNotificationWake(game: GameChatLifecycleRecord, eventId: string, now: Date): Promise<boolean> {
   if (!eventId.startsWith("game-talk:") && !eventId.startsWith("game-challenge:")) {
-    return Boolean(await readGroupGameChatAuthority(game, game.chatContainerMemberId!));
+    return Boolean(await readGameChatAuthority(game, game.chatContainerMemberId!));
   }
   const prisma = getPrisma();
   try {
     const authority = await readGameProposalDeliveryPlayers(eventId, game.chatContainerMemberId!);
     await prisma.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
       containerMemberId: game.chatContainerMemberId!, now,
-      ...(Array.isArray(authority) ? { playerMemberIds: authority } : { audience: authority as GameNoticeAudience | undefined }) }));
+      audience: authority && !("policy" in authority) ? authority : undefined }));
   } catch (error) {
     if (!isStaleNotice(error)) throw error;
     return skipGameNotice(createHostedLinqDeliveryIdempotencyLookupKey(eventId)!, prisma, now);
@@ -674,16 +675,17 @@ async function deliverCurrentGameChatLifecycle(input: {
     if (!destination || destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") return false;
     return enqueueGameLifecycle({ audience, game, containerMemberId: game.chatContainerMemberId, gameId, kind, eventId, instructions, destination, players, termsVersion: input.termsVersion });
   }
-  const phones = await readPairGamePhones(players, prisma);
   let containerMemberId = game.chatContainerMemberId;
   if (!containerMemberId) {
+    const phones = await readPairGamePhones(players, prisma);
     containerMemberId = await bindPairGameChat(gameId, players, await findExistingGameChat(players, phones));
   }
   const destination = containerMemberId ? await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma }) : null;
   if (!destination) return boundOnly ? false : (await prepareGameChatBootstrap(gameId, eventId, instructions)) !== null;
   if (destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") throw new Error("Game chat route is unavailable.");
-  await requireExactChat(containerMemberId!, phones);
-  return enqueueGameLifecycle({ game, containerMemberId: containerMemberId!, gameId, kind, eventId, instructions, destination, players });
+  const audience = await readGroupGameNoticeAuthority({ ...game, chatContainerMemberId: containerMemberId }, containerMemberId!);
+  if (!audience) return false;
+  return enqueueGameLifecycle({ audience, game, containerMemberId: containerMemberId!, gameId, kind, eventId, instructions, destination, players });
 }
 
 /** Read shared context only for notices that actually describe game terms. */
@@ -747,7 +749,7 @@ async function isGameLifecycleAppendCurrentTx(input: Parameters<typeof enqueueGa
     const resolution = await readGameChangeResolution(tx, input.gameId, notice.proposalId);
     if (!resolution || gameResolutionNoticeKind(resolution.outcome) !== input.kind) return false;
   }
-  return !input.audience || Boolean(await readGroupGameChatAuthority(current, input.containerMemberId, input.audience, tx));
+  return Boolean(input.audience && await readGameChatAuthority(current, input.containerMemberId, input.audience, tx));
 }
 
 async function enqueueGameLifecycle(input: {

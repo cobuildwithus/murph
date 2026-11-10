@@ -10,7 +10,7 @@ import { prepareGameChatBootstrap } from "@/src/lib/game/chat-bootstrap";
 import { deliverGameChangeProposal } from "@/src/lib/game/chat-delivery";
 import { markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx, reserveGameChatProposalTx } from "@/src/lib/game/chat-lifecycle-receipt";
 
-const m = vi.hoisted(() => ({ published: [] as HostedExecutionAssistantNotificationRequestedWake[], room: "" }));
+const m = vi.hoisted(() => ({ published: [] as HostedExecutionAssistantNotificationRequestedWake[], room: "", players: [] as string[] }));
 // Keep the real mailbox query and database transaction. Only envelope crypto,
 // provider roster/identity discovery and runtime signalling are test boundaries.
 vi.mock("@/src/lib/hosted-mailbox/store", async (original) => ({
@@ -24,15 +24,24 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (original) => ({
     return { mailboxItemId: id };
   },
 }));
-// Its placeholder terms are not real stored terms, so skip the shared-room label
-// (it reads every game of the pair); game-service-postgres proves that label.
+// Shared-room labels are covered by game-service-postgres; this proof owns
+// cancellation ordering through the actual mailbox and delivery validator.
 vi.mock("@/src/lib/game/service", async (original) => ({ ...await original<typeof import("@/src/lib/game/service")>(), readGameNoticeRoom: async () => undefined }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/game/crypto", () => ({ openGameTexts: async (values: unknown[]) => values.map(() => "Player") }));
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   readHostedMemberIdentity: async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId.startsWith("first_") ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: new Date() }),
 }));
-vi.mock("@/src/lib/game/chat-membership", async (original) => ({ ...await original<typeof import("@/src/lib/game/chat-membership")>(), requireExactChat: vi.fn(async () => {}) }));
+vi.mock("@/src/lib/game/chat-membership", async original => {
+  const actual = await original<typeof import("@/src/lib/game/chat-membership")>();
+  return { ...actual, requireExactChat: vi.fn(async () => {}),
+    readGameChatAuthority: async (...[game, room, prepared, prisma]: Parameters<typeof actual.readGameChatAuthority>) =>
+      actual.readGameChatAuthority(game, room, prepared ?? { memberIds: m.players, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room }, prisma),
+    readGroupGameNoticeAuthority: async (...[game, room, prepared, prisma]: Parameters<typeof actual.readGroupGameNoticeAuthority>) =>
+      actual.readGameChatAuthority(game, room, prepared ?? { memberIds: m.players, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room }, prisma, true) };
+});
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
+  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }) }));
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
   resolveHostedAssistantNotificationDestination: async () => ({ conversationShape: "thread-container", route: { channel: "linq" } }),
   bindHostedAssistantNotificationDestination: () => ({ route: { actorId: null, channel: "linq", identityId: m.room, threadId: "synthetic-chat", threadIsDirect: false, delivery: { kind: "thread", target: "synthetic-chat" } } }),
@@ -46,12 +55,12 @@ const members: string[] = [];
 async function fixture() {
   const db = getPrisma(), suffix = randomUUID(), now = new Date();
   const first = `first_${suffix}`, second = `second_${suffix}`, room = `room_${suffix}`, gameId = `game_${suffix}`;
-  members.push(first, second, room); m.room = room;
+  members.push(first, second, room); m.room = room; m.players = [first, second];
   await db.hostedMember.createMany({ data: [first, second, room].map(id => ({ id, billingStatus: "not_started" })) });
   await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
     participants: { create: [first, second].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })) } } });
   await db.gameProfile.createMany({ data: [first, second].map(memberId => ({ memberId, firstNameEncrypted: "synthetic", timeZone: "UTC" })) });
-  await db.game.create({ data: { id: gameId, createdBy: first, wordsOwnerMemberId: first, status: "negotiating", chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
+  await db.game.create({ data: { id: gameId, createdBy: first, wordsOwnerMemberId: first, status: "negotiating", chatContainerMemberId: room, terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes: [] }] }, termsWordsEncrypted: "synthetic",
     players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC" })) } } });
   const oldProposal = randomUUID(), cancellation = `game-change-cancelled:${gameId}:${oldProposal}`;
   await reserveGameChatProposalTx({ gameId, proposalId: oldProposal, now, tx: db });

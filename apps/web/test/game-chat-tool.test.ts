@@ -12,7 +12,7 @@ vi.mock("../src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedG
 vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.route }));
 vi.mock("../src/lib/game/chat-membership", async (importOriginal) => ({
   ...await importOriginal<object>(), requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
-  readGameChatAudience: m.audience, readGroupGameChatAuthority: m.groupAuthority, readGroupGameNoticeAuthority: m.groupAuthority,
+  readGameChatAudience: m.audience, readGameChatAuthority: m.groupAuthority, readGroupGameNoticeAuthority: m.groupAuthority,
   hasGameChatRestriction: async () => false,
 }));
 vi.mock("../src/lib/game/service", () => ({
@@ -47,7 +47,7 @@ describe("game chat tool authority", () => {
     m.recapMaterial.mockResolvedValue(null);
     expect(await handleGameChatTool({ memberId: group, runtimeIdentity: null, request }))
       .toEqual({ action, result: { status: "unavailable", error: "recap_authority_unavailable" } });
-    expect(m.recapMaterial).toHaveBeenCalledExactlyOnceWith(origin.gameId, group, [actor, "other_synthetic"], origin.eventId);
+    expect(m.recapMaterial).toHaveBeenCalledExactlyOnceWith(origin.gameId, group, [actor, "other_synthetic"], origin.eventId, undefined);
     m.recapMaterial.mockClear();
     const unavailable = new Error("Synthetic roster unavailable");
     m.exact.mockRejectedValueOnce(unavailable);
@@ -101,6 +101,14 @@ describe("game chat tool authority", () => {
     expect(next.result).toHaveProperty("state.players", players.map(p => ({ ...p, isSender: p.memberId === actor })));
     expect(m.profiles).toHaveBeenCalledExactlyOnceWith([actor, "other_synthetic"]);
     expect(m.read).toHaveBeenLastCalledWith(group, [actor, "other_synthetic"], actor, false);
+  });
+  it("keeps verified room profiles available when setting up the first game", async () => {
+    const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: "Sam", timeZone: "UTC" }];
+    m.audience.mockResolvedValue({ memberIds: players.map(player => player.memberId), threadId: "chat_synthetic" });
+    m.profiles.mockResolvedValue(players);
+    const result = await handleGameChatTool({ ...read, multiplayer: true, request: { ...read.request, includePlayers: true } });
+    expect(result.result).toHaveProperty("state.players", players.map(player => ({ ...player, isSender: player.memberId === actor })));
+    expect(m.profiles).toHaveBeenCalledExactlyOnceWith(players.map(player => player.memberId));
   });
   it("reads a scheduled exact pair neutrally without sender or photo authority", async () => {
     const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: "Sam", timeZone: "UTC" }];
@@ -231,22 +239,18 @@ describe("game chat tool authority", () => {
     const photo = { operation: "save" as const, gameId: "game_synthetic", sourceMessageRef: origin.assistantInputId, attachmentOrdinal: 1 };
     const request = action === "update_game" ? update.request : { action, origin, photo };
     m.photo.mockResolvedValue({ status: "ok", photoOutcome: "saved" });
-    for (const change of ["addition", "replacement", "unchanged", "rotation"] as const) {
+    for (const change of ["addition", "member_addition", "replacement", "unchanged", "rotation"] as const) {
       m.read.mockClear(); m.run.mockClear(); m.photo.mockClear();
       const groupGame = change === "replacement";
       const before = groupGame ? { ...initial, contacts: [...initial.contacts, { kind: "email", value: "unjoined@example.test" }] } : initial;
       m.game.mockResolvedValue({ id: "game_synthetic", maxPlayers: groupGame ? 10 : 2, chatContainerMemberId: group, invitees: [], players: initial.memberIds.map(memberId => ({ memberId })) });
       m.groupAuthority.mockResolvedValue(before);
       const after = { ...before, keys: change === "rotation" ? { current: "key-new", candidates: ["key-new", "key-old"] } : change === "unchanged" ? before.keys : { current: "different-audience", candidates: ["different-audience"] },
-        contacts: change === "addition" ? [...before.contacts, { kind: "email", value: "outside@example.test" }] : change === "replacement" ? [...initial.contacts, { kind: "email", value: "replacement@example.test" }] : before.contacts };
+        memberIds: change === "member_addition" ? [...before.memberIds, "bystander"] : before.memberIds,
+        contacts: change === "addition" || change === "member_addition" ? [...before.contacts, { kind: "email", value: "outside@example.test" }] : change === "replacement" ? [...initial.contacts, { kind: "email", value: "replacement@example.test" }] : before.contacts };
       m.audience.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
-      if (change === "addition" || change === "replacement") {
-        await expect(handleGameChatTool({ ...read, multiplayer: true, request })).rejects.toThrow("participants changed");
-        expect(m.read).not.toHaveBeenCalled();
-      } else {
-        expect((await handleGameChatTool({ ...read, multiplayer: true, request })).result.status).toBe("ok");
-        expect(m.read).toHaveBeenCalledExactlyOnceWith(group, initial.memberIds, actor, true, after);
-      }
+      expect((await handleGameChatTool({ ...read, multiplayer: true, request })).result.status).toBe("ok");
+      expect(m.read).toHaveBeenCalledExactlyOnceWith(group, after.memberIds, actor, true, after);
       expect(action === "update_game" ? m.run : m.photo).toHaveBeenCalledOnce();
     }
   });
@@ -256,10 +260,17 @@ describe("game chat tool authority", () => {
   });
   it("returns lore guidance only when this room's shared game is live", async () => {
     const game = { id: "game_synthetic", status: "live" as const, startsOn: null, lengthDays: 7,
-      terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] }, players: [], pendingChange: null,
+      terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] }, players: [actor, "other_synthetic"].map((memberId, seat) => ({ memberId, seat, firstName: "Player", dayOne: null, timeZone: "UTC" })), pendingChange: null,
       changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null } };
     m.read.mockResolvedValue({ games: [game] });
     expect((await handleGameChatTool(read)).result).toMatchObject({ status: "ok", loreGuidance: expect.stringContaining("murph.game_lore"), loreFingerprint: gamePairLoreFingerprint([actor, "other_synthetic"]) });
+    for (const registered of [false, true]) {
+      m.audience.mockResolvedValue({ memberIds: registered ? [actor, "other_synthetic", "bystander"] : [actor, "other_synthetic"],
+        contacts: ["player-a", "player-b", "bystander"], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: "chat" });
+      const expanded = await handleGameChatTool({ ...read, multiplayer: true });
+      expect(expanded.result).toMatchObject({ status: "ok" });
+      expect(expanded.result).not.toHaveProperty("loreFingerprint");
+    }
     m.read.mockResolvedValue({ games: [{ ...game, status: "settled" }] });
     expect((await handleGameChatTool(read)).result).not.toHaveProperty("loreGuidance");
   });
@@ -321,7 +332,7 @@ describe("game chat tool authority", () => {
       priorChatLines: ["Sauna citizenship held. Earlier evidence arrived."], recap };
 
     const rejected = await handleGameChatTool({ memberId: group, request, runtimeIdentity: null });
-    expect(m.recapMaterial).toHaveBeenLastCalledWith("game_synthetic", group, [actor, "other_synthetic"], request.origin.eventId);
+    expect(m.recapMaterial).toHaveBeenLastCalledWith("game_synthetic", group, [actor, "other_synthetic"], request.origin.eventId, undefined);
     expect(rejected.result).toMatchObject({ status: "rejected", recapOutcome: expect.stringContaining('chatLine: repeats "sauna citizenship held"') });
     // A recap written after the game reads only that game's chat, never the next game's.
     expect(m.mailbox).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
@@ -360,7 +371,8 @@ describe("game chat tool authority", () => {
     m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
     const changed = await handleGameChatTool({ memberId: group, multiplayer: true, request: { ...request, recap: saved }, runtimeIdentity: null });
     expect(changed).toEqual({ action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } });
-    expect(m.sealRecap).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recap: null }));
+    expect(m.sealRecap).toHaveBeenCalledTimes(2);
+    expect(m.sealRecap).toHaveBeenNthCalledWith(2, expect.objectContaining({ recap: saved }));
   });
   it("returns the authorized stored recap on replay and records its server chat line", async () => {
     const stored = {

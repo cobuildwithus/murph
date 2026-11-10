@@ -2342,7 +2342,7 @@ describe("hosted Linq egress authority", () => {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey: eventId, target: "chat-authorized-group", targetKind: "thread" }),
     }));
-    if (["exact", "unjoined-started", "unjoined-recap", "rotation", "shrunk-recap", "rematch-current", "rematch-two-human"].includes(scenario)) {
+    if (["exact", "extra", "outside-join", "added-after-prepare", "outsider-after-shrink", "unjoined-started", "unjoined-recap", "rotation", "shrunk-recap", "rematch-current", "rematch-two-human"].includes(scenario)) {
       expect(response.status).toBe(200);
       expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
       if (rematch) await expect(response.json()).resolves.toMatchObject({ gameRematchAuthorityChecked: true });
@@ -2377,7 +2377,7 @@ describe("hosted Linq egress authority", () => {
         payload: { v: 1, entryId: "entry", ...(scenario === "legacy-deadline" ? { deadlineAt: new Date(now.getTime() - 1).toISOString() } : {}) },
         concessionEventId: ["conceded", "restored"].includes(scenario) ? 11n : null,
       }] : []);
-      mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "outsider"] : ["person-a", "person-b"]);
+      mocks.readGameProposalDeliveryPlayers.mockResolvedValue(gameNoticeAudience(scenario === "other-audience" ? ["person-a", "outsider"] : ["person-a", "person-b", "bystander"]));
       mocks.getPrisma.mockReturnValue(prisma);
       const dispatch = () => postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ authorityCheckOnly: false,
@@ -2423,7 +2423,7 @@ describe("hosted Linq egress authority", () => {
       prisma.game.findMany.mockResolvedValue([game]);
       prisma.game.findUnique.mockResolvedValue(game);
       prisma.gameEvent.findUnique.mockResolvedValue(["recap", "regenerated-recap"].includes(scenario) ? null : { gameId: "game", type: "change_expired", payload: { proposalId: "proposal", reason: "A check-in arrived first." } });
-      mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "person-c"] : ["person-a", "person-b"]);
+      mocks.readGameProposalDeliveryPlayers.mockResolvedValue(gameNoticeAudience(scenario === "other-audience" ? ["person-a", "person-c"] : ["person-a", "person-b", "bystander"]));
       if (scenario === "line-blocked") {
         const line = await prisma.hostedLinqLine.findFirst();
         prisma.hostedLinqLine.findFirst.mockResolvedValue({ ...line, providerServiceStatus: "FLAGGED" });
@@ -2434,6 +2434,14 @@ describe("hosted Linq egress authority", () => {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
       }));
+      if (["recap", "regenerated-recap"].includes(scenario)) {
+        // The queued pair text may quote app-only posts. A fresh expanded
+        // audience must fail before claiming any provider dispatch.
+        expect((await dispatch()).status).toBe(500);
+        expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+        mocks.readGameProposalDeliveryPlayers.mockResolvedValue(gameNoticeAudience(["person-a", "person-b"]));
+        prisma.game.findFirst.mockClear();
+      }
       const response = await dispatch();
       if (scenario === "current" || scenario === "refusal" || ["recap", "regenerated-recap"].includes(scenario)) {
         expect(response.status).toBe(200);
@@ -3115,6 +3123,10 @@ function routeAuthorityRequest(body: Record<string, unknown>): Request {
   });
 }
 
+function gameNoticeAudience(memberIds: string[]): import("@/src/lib/game/chat-membership").GameChatAudience {
+  return { memberIds, contacts: [], resolvedContacts: [], keys: { candidates: [], current: null }, threadId: "chat-authorized-group" };
+}
+
 function createPrismaStub(input: {
   activeMemberAccess?: boolean;
   homeChatId?: string;
@@ -3162,6 +3174,7 @@ function createPrismaStub(input: {
     gameEntry: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     gameEvent: { findUnique: vi.fn().mockResolvedValue(null) },
     gameReport: { findMany: vi.fn().mockResolvedValue([]) },
+    gameBlock: { findFirst: vi.fn().mockResolvedValue(null) },
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue(null),
     },
@@ -3172,6 +3185,7 @@ function createPrismaStub(input: {
       findFirst: vi.fn().mockResolvedValue({ memberId: "member-1" }),
     },
     hostedMember: {
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(input.activeMemberAccess === false
         ? null
         : {

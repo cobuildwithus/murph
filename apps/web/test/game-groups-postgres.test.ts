@@ -15,7 +15,7 @@ import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-deliver
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
 import { requestGameRecapRegeneration } from "@/src/lib/game/recap-regeneration";
 import { markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
-import { readGameChatAudience, readGroupGameChatAuthority, readGroupGameNoticeAuthority } from "@/src/lib/game/chat-membership";
+import { bindPairGameChat, readGameChatAudience, readGameChatAuthority, readGroupGameNoticeAuthority } from "@/src/lib/game/chat-membership";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import type { HostedGameRecap, HostedGameUpdate } from "@murphai/hosted-execution/runtime-control";
 import { hostedGameChatStateSchema } from "@murphai/hosted-execution/runtime-control";
@@ -938,6 +938,159 @@ async function exactRoom(people: Person[]) {
 }
 
 describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
+  it.each([false, true])("keeps a bound pair's reads, commands, photos and inherited room with a bystander (registered: %s)", async registered => {
+    const people = [await person(), await person()];
+    const bystander = registered ? await person() : { id: "", email: "bystander@example.test" };
+    const room = await exactRoom(people);
+    const makePair = async () => {
+      const result = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+        terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Pair walk" }, { seat: 1, text: "Pair read" }] } }, now: createdAt });
+      if (!result.ok || !result.game?.inviteToken) throw new Error("Pair fixture creation failed");
+      expect(await runGameCommand({ actorMemberId: people[1].id, command: join(result.game.inviteToken), now: createdAt })).toMatchObject({ ok: true });
+      return result.game.id;
+    };
+    const gameId = await makePair();
+    const players = people.map(p => p.id);
+    expect(await bindPairGameChat(gameId, players, room)).toBe(room);
+    chatProof.rooms.set(room, [...people.map(p => p.email), bystander.email]);
+    const audience = await readGameChatAudience(room);
+    expect(await readGameChatAuthority(await gameRow(gameId), room, audience)).not.toBeNull();
+    expect(await readGameChatFundingRooms({ memberIds: [room], now: new Date(), prisma: db })).toEqual(new Map([[room, room]]));
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    const input = { memberId: room, multiplayer: true, runtimeIdentity: null };
+    const origin = { kind: "accepted_input" as const, assistantInputId: "ain_synthetic_open_room" };
+    chatProof.sender = people[0].id; chatProof.wake = leaverChatWake(room);
+    const read = await handleGameChatTool({ ...input, request: { action: "read_game", origin, includePlayers: true } });
+    expect(read).toMatchObject({ result: { status: "ok", state: { games: [{ id: gameId }], players: expect.any(Array) } } });
+    expect(read.result).not.toHaveProperty("loreFingerprint");
+    expect(read.result.state?.players?.map(p => p.memberId).sort()).toEqual([...players].sort());
+    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-09T12:00:01Z").getTime() - Date.now()) } });
+    const download = vi.spyOn(await import("@/src/lib/game/chat-photo-media"), "downloadGameChatPhoto").mockResolvedValue({ bytes: new Uint8Array([255, 216, 255]), contentType: "image/jpeg" });
+    const { mediaKeyPrefixFor } = await import("@/src/lib/game/access");
+    vi.spyOn(await import("@/src/lib/game/media"), "putGameMedia").mockResolvedValue(`${mediaKeyPrefixFor(people[0].id)}${"a".repeat(64)}.jpg`);
+    vi.spyOn(await import("@/src/lib/game/media"), "statGameMedia").mockResolvedValue({ byteLength: 3, contentType: "image/jpeg" });
+    const photo = { action: "game_photo" as const, origin, photo: { operation: "save" as const, gameId, sourceMessageRef: origin.assistantInputId, attachmentOrdinal: 1 } };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const saved = await handleGameChatTool({ ...input, request: photo });
+      expect(saved.result.error).toBeUndefined();
+      expect(saved).toMatchObject({ result: { status: "ok", photoOutcome: "saved" } });
+    }
+    expect(download).toHaveBeenCalledOnce();
+    expect(await db.gameEntry.count({ where: { gameId, memberId: people[0].id, kind: "photo" } })).toBe(1);
+    chatProof.sender = people[1].id;
+    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-10T12:00:00Z").getTime() - Date.now()) } });
+    chatProof.rooms.set(room, people.map(p => p.email));
+    const service = await import("@/src/lib/game/service");
+    const applyUpdate = service.runGameChatUpdate;
+    vi.spyOn(service, "runGameChatUpdate").mockImplementation(async input => {
+      const result = await applyUpdate(input);
+      chatProof.rooms.set(room, [...people.map(p => p.email), bystander.email]);
+      return result;
+    });
+    const command = { action: "update_game" as const, origin, update: { operation: "mark_complete" as const, gameId, date: "2030-03-09", text: "Read outside" } };
+    const changed = await handleGameChatTool({ ...input, request: command });
+    expect(changed.result.error).toBeUndefined();
+    expect(changed).toMatchObject({ result: { status: "ok", state: { games: [{ id: gameId }] } } });
+    expect(await handleGameChatTool({ ...input, request: command })).toMatchObject({ result: { status: "ok" } });
+    expect(await db.gameEvent.count({ where: { gameId, type: "day_credited" } })).toBe(1);
+    if (registered) {
+      chatProof.sender = bystander.id;
+      expect(await handleGameChatTool({ ...input, request: command })).toMatchObject({ result: { status: "rejected" } });
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: new Date() } });
+      expect(await readGameChatAuthority(await gameRow(gameId), room, audience)).toBeNull();
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: null } });
+      await db.gameBlock.create({ data: { blockerMemberId: bystander.id, blockedMemberId: players[0] } });
+      expect(await readGameChatAuthority(await gameRow(gameId), room, audience)).toBeNull();
+      await db.gameBlock.deleteMany({ where: { blockerMemberId: bystander.id } });
+    }
+    const inherited = await makePair();
+    expect(await bindPairGameChat(inherited, players, null)).toBe(room);
+    expect(await readGameChatAuthority(await gameRow(inherited), room)).not.toBeNull();
+    chatProof.rooms.set(room, [people[0].email, bystander.email]);
+    expect(await readGameChatAuthority(await gameRow(gameId), room)).toBeNull();
+  });
+
+  it.each([false, true])("keeps the app recap but holds private pair text in an expanded room (registered bystander: %s)", async registered => {
+    const people = [await person(), await person()], members = people.map(person => person.id);
+    const bystander = registered ? await person() : { id: "", email: "bystander@example.test" };
+    const room = await exactRoom(people);
+    const created = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }] } }, now: createdAt });
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Expected pair invitation");
+    const game = { id: created.game.id, token: created.game.inviteToken };
+    await ok(people[1].id, join(game.token));
+    await bindPairGameChat(game.id, members, room);
+    chatProof.rooms.set(room, [...people.map(person => person.email), bystander.email]);
+    prepareGroupLifecycle(room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    const { readGameProposalDeliveryPlayers } = await import("@/src/lib/game/chat-delivery");
+    expect(await deliverGameChatLifecycle(game.id, "started")).toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+    const authority = await readGameProposalDeliveryPlayers(`game-started:${game.id}`, room, room);
+    if (!authority || "policy" in authority) throw new Error("Expected game room authority");
+    const dispatch = () => db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room,
+      deliveryIdempotencyKey: `game-started:${game.id}`, audience: authority }));
+    expect(await dispatch()).toBe(true);
+    if (registered) {
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: createdAt } });
+      await expect(dispatch()).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: null } });
+    }
+    await settle(game.id, people[0].id);
+    expect((await readGameRecapMaterial(game.id, room, authority.memberIds, undefined, authority))?.validation.result).toHaveLength(2);
+    const sealing = await queuedGroupRecap({ game, room, people, members });
+    if (registered) {
+      expect(await sealGameRecap({ ...sealing, beforeMutationTx: async tx => {
+        await tx.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: createdAt } });
+      } })).toBeNull();
+      expect((await gameRow(game.id)).recapEncrypted).toBeNull();
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: null } });
+    }
+    expect(await sealGameRecap(sealing)).toEqual(sealing.recap);
+    expect(await readGame(game.id, people[1].id)).toMatchObject({ recap: sealing.recap });
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room,
+      deliveryIdempotencyKey: `game-recap:${game.id}`, audience: authority }))).rejects.toMatchObject({ reason: "participants_changed" });
+    chatProof.rooms.set(room, people.map(person => person.email));
+    const privateAudience = await readGameChatAudience(room);
+    expect(await db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room,
+      deliveryIdempotencyKey: `game-recap:${game.id}`, audience: privateAudience }))).toBe(true);
+  });
+
+  it("rechecks a pair room restriction after notice preparation before append", async () => {
+    const people = [await person(), await person()], bystander = await person(), room = await exactRoom(people);
+    const created = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }] } }, now: createdAt });
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Expected pair invitation");
+    await ok(people[1].id, join(created.game.inviteToken));
+    await bindPairGameChat(created.game.id, people.map(person => person.id), room);
+    chatProof.rooms.set(room, [...people.map(person => person.email), bystander.email]);
+    prepareGroupLifecycle(room);
+    lifecycleProof.prepare.mockImplementationOnce(async () => {
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: createdAt } }); return {};
+    });
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(created.game.id, "started")).toBe(false);
+    expect(lifecycleProof.append).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("reads and funds ten players plus a bystander through real room evidence (registered: %s)", async registered => {
+    const people = await Promise.all(Array.from({ length: 10 }, () => person()));
+    const room = await exactRoom(people);
+    const game = await create(people[0], people.slice(1));
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    const bystander = registered ? await person() : { id: "", email: "outside@example.test" };
+    chatProof.rooms.set(room, [...people.map(p => p.email), bystander.email]);
+    const audience = await readGameChatAudience(room);
+    expect(audience.contacts).toHaveLength(11); expect(audience.keys.candidates).toEqual([]);
+    expect(await readGameChatAuthority(await gameRow(game.id), room, audience)).not.toBeNull();
+    expect(await readGameChatFundingRooms({ memberIds: [room], now: new Date(), prisma: db })).toEqual(new Map([[room, room]]));
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    chatProof.sender = people[0].id; chatProof.wake = leaverChatWake(room);
+    expect(await handleGameChatTool({ memberId: room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game",
+      origin: { kind: "accepted_input", assistantInputId: "ain_synthetic_large_room" } } })).toMatchObject({ result: { status: "ok", state: { games: [{ id: game.id, players: expect.any(Array) }] } } });
+    expect(await readGameChatAuthority({ ...await gameRow(game.id), chatContainerMemberId: null }, room, audience)).toBeNull();
+  });
+
   it("delivers and replays pair kickoff in the exact pair room beside a partially joined group", async () => {
     Object.values(lifecycleProof).forEach(mock => mock.mockReset());
     const people = await Promise.all([person(), person()]);
@@ -1602,9 +1755,9 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(await prepareGameChatInvite(`Join https://example.test/g/${g.game.token}`, g.room)).toBeNull();
     expect(await runGameCommand({ ...g.context, actorMemberId: g.people[0].id, now: new Date("2030-03-09T12:00:00Z"),
       command: { type: "post", gameId: g.game.id, entryId: randomUUID(), kind: "words", text: "A walk" } })).toMatchObject({ ok: true });
-    // Re-adding an original person is allowed; adding an outsider is not.
+    // Both original invitees and bystanders may remain beside the current players.
     chatProof.rooms.set(g.room, [...g.people.slice(0, 2).map(p => p.email), "outsider@example.test"]);
-    await expectSharedGame(g.room, g.game.id, false);
+    await expectSharedGame(g.room, g.game.id, true);
     chatProof.rooms.set(g.room, g.people.map(p => p.email));
     await expectSharedGame(g.room, g.game.id, true);
     await db.gameBlock.create({ data: { blockerMemberId: g.people[2].id, blockedMemberId: g.people[0].id } });
@@ -1642,7 +1795,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     }
   });
 
-  it("keeps a registered but unaccepted unbound addressee without binding or lending its key to another contact", async () => {
+  it("keeps a registered unaccepted addressee and bystanders without binding their invitations", async () => {
     const people = await Promise.all([person(), person(), person()]);
     const invitee = { id: "", email: `${randomUUID()}@example.test` };
     const room = await exactRoom(people);
@@ -1666,12 +1819,12 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     const delivery = { tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: sealInput.eventId };
     expect(await assertGameProposalDeliveryCurrentTx(delivery)).toBe(true);
     chatProof.rooms.set(room, [...people.slice(0, 2).map(p => p.email), invitee.email, "unrelated@example.test"]);
-    await expectSharedGame(room, game.id, false);
-    expect(await sealGameRecap(sealInput)).toBeNull();
-    await expect(assertGameProposalDeliveryCurrentTx({ ...delivery, audience: await readGameChatAudience(room) })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expectSharedGame(room, game.id, true);
+    expect(await sealGameRecap(sealInput)).toEqual(sealInput.recap);
+    expect(await assertGameProposalDeliveryCurrentTx({ ...delivery, audience: await readGameChatAudience(room) })).toBe(true);
   });
 
-  it("rejects a bound invitee's obsolete phone in a shrunk room", async () => {
+  it("allows an unseated invitee's obsolete phone as a bystander", async () => {
     const people = await Promise.all([person(), person(), person()]);
     const invited = await person();
     const oldPhone = "+12025550172";
@@ -1691,10 +1844,10 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     await phoneIdentity("+12025550173");
     await ok(people[2].id, { type: "leave", gameId: game.id });
     chatProof.rooms.set(room, [...people.slice(0, 2).map(p => p.email), oldPhone]);
-    await expectSharedGame(room, game.id, false);
+    await expectSharedGame(room, game.id, true);
   });
 
-  it("does not grant a departed bearer an addressed seat in the shrunk text", async () => {
+  it("allows a departed bearer to remain as a bystander in the shrunk text", async () => {
     const g = await leaverChatGame();
     const bearer = await person();
     await ok(bearer.id, join(g.game.token));
@@ -1703,21 +1856,21 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
     await expectSharedGame(g.room, g.game.id, true);
     chatProof.rooms.set(g.room, [...g.people.slice(0, 2).map(p => p.email), bearer.email]);
-    await expectSharedGame(g.room, g.game.id, false);
+    await expectSharedGame(g.room, g.game.id, true);
   });
 
   it("rejects a room with only one human", async () => {
     const g = await leaverChatGame();
     chatProof.rooms.set(g.room, [g.people[0].email]);
-    await expect(readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).rejects.toThrow("participants have changed");
+    expect(await readGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
   });
 
-  it("rejects a deleted player still present in a shrunk room", async () => {
+  it("allows a deleted departed player to remain as an unresolved bystander", async () => {
     const g = await leaverChatGame(4);
     await erase(g.people[3].id);
     await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
     chatProof.rooms.set(g.room, [g.people[0].email, g.people[1].email, g.people[3].email]);
-    await expectSharedGame(g.room, g.game.id, false);
+    await expectSharedGame(g.room, g.game.id, true);
     chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
     await expectSharedGame(g.room, g.game.id, true);
   });
@@ -1742,7 +1895,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", newKey);
     const audience = await readGameChatAudience(room);
     expect(audience.memberIds.sort()).toEqual(people.slice(0, 2).map(p => p.id).sort());
-    expect(await readGroupGameChatAuthority(await gameRow(game.id), room, audience)).toBeNull();
+    expect(await readGameChatAuthority(await gameRow(game.id), room, audience)).toBeNull();
   });
 
   it("keeps remaining-player reads, funding, check-ins and majority edits while refusing leaver mutations", async () => {
@@ -1754,7 +1907,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect((await handleGameChatTool(request)).result).toMatchObject(lore);
     await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
     expect((await handleGameChatTool(request)).result).toMatchObject(lore);
-    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).not.toBeNull();
+    expect(await readGameChatAuthority(await gameRow(g.game.id), g.room)).not.toBeNull();
     const shared = (await readGameChatState(g.room, g.members, g.people[2].id)).games[0];
     expect(shared).toMatchObject({ id: g.game.id, pendingInviteeCount: 0 });
     expect(shared.players.map(p => p.memberId).sort()).toEqual(g.members.slice(0, 2).sort());
@@ -1786,7 +1939,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(await post(g.people[2].id)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     // Restrictions still include departed identities, even if the caller omits them.
     await db.gameBlock.create({ data: { blockerMemberId: g.people[2].id, blockedMemberId: g.people[0].id } });
-    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room, { ...g.context.chatAudience, memberIds: g.members.slice(0, 2) })).toBeNull();
+    expect(await readGameChatAuthority(await gameRow(g.game.id), g.room, { ...g.context.chatAudience, memberIds: g.members.slice(0, 2) })).toBeNull();
   });
 
   it("refuses a leaver's photo offer and save before selection, offer writes or media import", async () => {
@@ -1813,13 +1966,17 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     const bearer = await person();
     await ok(bearer.id, join(g.game.token));
     expect((await gameRow(g.game.id)).players.at(-1)?.seat).toBeGreaterThan(9);
-    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
+    expect(await readGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
     expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).size).toBe(0);
+    chatProof.rooms.set(g.room, [...g.people.map(p => p.email), bearer.email]);
+    const audience = await readGameChatAudience(g.room);
+    expect(await readGameChatAuthority(await gameRow(g.game.id), g.room, audience)).not.toBeNull();
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).get(g.room)).toBe(g.room);
     await ok(bearer.id, { type: "leave", gameId: g.game.id });
     expect((await readGameChatState(g.room, g.members)).games[0]?.players).toHaveLength(3);
     expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).get(g.room)).toBe(g.room);
     chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
-    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
+    expect(await readGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
   });
 
   it.each([0, 2])("keeps the room after non-owner account deletion at seat %i, including the creator", async seat => {
@@ -1830,7 +1987,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     const row = await gameRow(g.game.id);
     expect(row.players[seat]).toMatchObject({ memberId: null, leftAt: expect.any(Date) });
     expect(row.createdBy).toBe(seat === 0 ? null : g.people[0].id);
-    expect(await readGroupGameChatAuthority(row, g.room)).not.toBeNull();
+    expect(await readGameChatAuthority(row, g.room)).not.toBeNull();
     const shared = (await readGameChatState(g.room, g.members.filter((_, i) => i !== seat))).games[0];
     expect(shared).toMatchObject({ pendingInviteeCount: 0, players: expect.any(Array) });
     expect(shared.players).toHaveLength(2);
@@ -2142,7 +2299,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     expect(await run(people[0].id, command, new Date())).toMatchObject({ ok: true });
     await phone("+12025550175");
     const audience = await readGameChatAudience(room);
-    expect(await readGroupGameChatAuthority(await gameRow(game.id), room, audience)).toBeNull();
+    expect(await readGameChatAuthority(await gameRow(game.id), room, audience)).toBeNull();
     expect((await readGameChatState(room, people.map(p => p.id))).games).toEqual([]);
     expect(await run(people[0].id, { ...command, proposalId: randomUUID() })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect(await runGameChatUpdate({ actorMemberId: people[1].id, multiplayer: true, chatContainerMemberId: room,
@@ -2151,7 +2308,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room, audience,
       deliveryIdempotencyKey: `game-change:${game.id}:${proposalId}`, now: createdAt }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     await phone(oldPhone);
-    expect(await readGroupGameChatAuthority(await gameRow(game.id), room)).not.toBeNull();
+    expect(await readGameChatAuthority(await gameRow(game.id), room)).not.toBeNull();
   });
 
   it.each(["vote", "departure", "post", "join"] as const)("serializes the final dispatch claim with %s in both lock orders", async mutation => {
@@ -2435,10 +2592,10 @@ describe.skipIf(!enabled)("group Prove it and Talk", () => {
     const f = await talkGroup(4, true);
     await Promise.all(f.people.slice(0, 2).map(p => groupPhoto(f.group.id, p.id)));
     const target = await db.gameEntry.findFirstOrThrow({ where: { gameId: f.group.id, memberId: f.people[1].id } });
-    chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
+    chatProof.rooms.set(f.context.chatContainerMemberId, [f.people[0].email, "outsider@example.test"]);
     expect(await run(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: target.id }, caseNow)).toMatchObject({ ok: false, error: { code: "CHAT_UNAVAILABLE" } });
     expect(await db.gameEvent.count({ where: { gameId: f.group.id, type: "challenged" } })).toBe(0);
-    chatProof.rooms.set(f.context.chatContainerMemberId, f.people.map(p => p.email));
+    chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
     // A structural revision inherits the earlier default task words.
     const row = await gameRow(f.group.id);
     const stored = row.terms as { v: number; versions: Array<{ n: number; fromDay: number }> };
@@ -2463,7 +2620,7 @@ describe.skipIf(!enabled)("group exact notice ordering", () => {
     vi.spyOn(await import("@/src/lib/game/service"), "reserveDueGameMissedDayCheckIns").mockResolvedValue(0);
   });
 
-  it("retries provider outages but skips a changed challenge audience during recovery", async () => {
+  it("retries provider outages and keeps a challenge after a bystander arrives during recovery", async () => {
     const f = await talkGroup(3, true);
     const photos = await Promise.all(f.people.slice(0, 2).map(p => groupPhoto(f.group.id, p.id)));
     await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: photos[1].id }, caseNow);
@@ -2482,10 +2639,10 @@ describe.skipIf(!enabled)("group exact notice ordering", () => {
     expect(await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } })).toMatchObject({ status: "generation_queued" });
     provider.mockRestore();
     chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
-    expect(await recover()).toMatchObject({ attempted: 1, queued: 0 });
-    expect(await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } })).toMatchObject({ status: "skipped" });
+    expect(await recover()).toMatchObject({ attempted: 1, queued: 1 });
+    expect(await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } })).toMatchObject({ status: "generation_queued" });
     expect(lifecycleProof.append).toHaveBeenCalledOnce();
-    expect(lifecycleProof.signal).toHaveBeenCalledOnce();
+    expect(lifecycleProof.signal).toHaveBeenCalledTimes(2);
   });
 
   it.each(["concession", "retake", "withdrawal", "departure", "end"])("suppresses prepared challenge publication and final dispatch after %s", async change => {
@@ -2782,12 +2939,12 @@ describe.skipIf(!enabled)("group block keeps the room", () => {
     await expect(f.dispatch()).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
-  it("still supersedes an outsider audience without a block", async () => {
+  it("keeps a bystander audience without a block", async () => {
     const f = await blockedGroupNotice("talk");
     chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
     await recoverBlockedGroupNotice((await f.receipt()).id);
-    expect(await f.receipt()).toMatchObject({ status: "skipped", skipReason: "game_lifecycle_superseded" });
-    expect(lifecycleProof.append).not.toHaveBeenCalled();
+    expect(await f.receipt()).toMatchObject({ status: "generation_queued", skipReason: null });
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
   });
 
   it.each(["before settlement", "while waiting", "after publication"])("resumes the recap after a block %s", async timing => {

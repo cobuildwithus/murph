@@ -8,7 +8,7 @@ import { getPrisma } from "../prisma";
 import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { isGameOn } from "./access";
 import { gameGroupLoreFingerprint } from "./audience";
-import { GameChatAudienceError, readGroupGameChatAuthority, sameGamePlayers, type GameChatAudience } from "./chat-membership";
+import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { gameGroupMissedDayEventId, reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInHorizons, gameMissedCheckInRuns, isMissedCheckInDueNow } from "./missed-check-in";
 import { currentTerms, remainingPlayers } from "./rules";
@@ -24,21 +24,19 @@ export async function readGroupMissedDayRoom(roomId: string, gameIds?: readonly 
   if (ids.length > GAME_MISSED_ROOM_MAX_GAMES) return null;
   const candidates = await loadGameMissedCheckInGames(prisma, ids);
   if (!worthProving(candidates)) return null;
-  let audience: GameChatAudience | undefined;
+  const audience = await readGameChatAudience(roomId);
   const games: Games = [];
   for (const game of candidates.filter(game => game.row.maxPlayers === 10)) {
     if (game.row.status !== "live" || game.row.chatContainerMemberId !== roomId || !isGameOn(game.row)) continue;
-    const allowed = await readGroupGameChatAuthority(game.row, roomId, audience);
+    const allowed = await readGameChatAuthority(game.row, roomId, audience);
     if (!allowed) continue;
-    audience = allowed;
     games.push(game);
   }
   if (!audience || games.length === 0) return null;
-  // A mixed two-contact room may include pair facts, never the pair's notebook.
+  // Mixed rooms may include each eligible pair's facts, never its notebook.
   for (const game of candidates.filter(game => game.row.maxPlayers === 2)) {
     if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameOn(game.row)
-      && audience.contacts.length === 2 && sameGamePlayers(game.row.players.map(player => player.memberId), audience.memberIds)
-      && game.row.players.every(player => !player.leftAt)) games.push(game);
+      && await readGameChatAuthority(game.row, roomId, audience)) games.push(game);
   }
   const fingerprints = new Set(games.filter(game => game.row.maxPlayers === 10).map(game => gameGroupLoreFingerprint(game.row.audienceKey!)));
   if (fingerprints.size !== 1) return null;
@@ -86,7 +84,6 @@ export async function reserveGroupGameMissedDay(roomId: string, gameIds: readonl
     const policy = gameGroupMissedCheckInPolicySchema.parse({ kind: "game_group_missed_check_in", roomId, firstMissedDate,
       eventId: gameGroupMissedDayEventId(roomId, firstMissedDate), batch, pairFingerprint: room.pairFingerprint, conversationLaneSeq: "0" });
     const added = await getPrisma().$transaction(tx => reserveGameMissedDayTx({ roomId, firstMissedDate, dueAt, now, tx,
-      pairMemberIds: room.audience.contacts.length === 2 ? room.audience.memberIds : [],
       beforeClaim: tx => isGroupMissedDayBatchCurrentTx(policy, room.audience, tx, now, false),
     }));
     if (added) reserved += 1;
@@ -117,11 +114,10 @@ export async function isGroupMissedDayBatchCurrentTx(policy: HostedGameGroupMiss
   for (const { row } of games) {
     if (row.status !== "live" || row.chatContainerMemberId !== policy.roomId || !isGameOn(row)) return false;
     if (row.maxPlayers === 10) {
-      if (!row.audienceKey || gameGroupLoreFingerprint(row.audienceKey) !== policy.pairFingerprint
-        || !await readGroupGameChatAuthority(row, policy.roomId, audience, tx)) return false;
+      if (!row.audienceKey || gameGroupLoreFingerprint(row.audienceKey) !== policy.pairFingerprint) return false;
       groupCount += 1;
-    } else if (audience.contacts.length !== 2 || !sameGamePlayers(row.players.map(player => player.memberId), audience.memberIds)
-      || row.players.some(player => player.leftAt)) return false;
+    }
+    if (!await readGameChatAuthority(row, policy.roomId, audience, tx)) return false;
   }
   if (groupCount === 0 || JSON.stringify(freezeBatch(games, policy.firstMissedDate, now))
     !== JSON.stringify([...policy.batch].sort((a, b) => a.gameId.localeCompare(b.gameId)).map(game => ({ ...game,
@@ -144,7 +140,7 @@ export async function readGroupMissedDayDeliveryAuthority(eventId: string, roomI
   const games = await loadGameMissedCheckInGames(getPrisma(), parsed.batch.map(game => game.gameId));
   const group = games.find(game => game.row.maxPlayers === 10);
   if (!group || group.row.chatContainerMemberId !== roomId) return null;
-  const audience = await readGroupGameChatAuthority(group.row, roomId);
+  const audience = await readGameChatAuthority(group.row, roomId);
   if (!audience || target != null && audience.threadId !== target) return null;
   return { audience, policy: parsed };
 }

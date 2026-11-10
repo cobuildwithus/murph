@@ -12,7 +12,7 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
-import { readGroupGameNoticeAuthority, sameGamePlayers } from "./chat-membership";
+import { GameChatAudienceError, readGroupGameNoticeAuthority, sameGamePlayers } from "./chat-membership";
 import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
 import { isEveningBatchCurrentTx } from "./evening-check-in";
@@ -97,7 +97,7 @@ async function assertGameTalkDeliveryCurrentTx(input: Parameters<typeof assertGa
   if (candidate?.maxPlayers === 10 && !input.audience) return stale();
   const current = await readCurrentGameTalk(input.tx, match[1], match[2], input.now ?? new Date(), input.audience);
   if (!current || current.game.chatContainerMemberId !== input.containerMemberId
-    || current.game.maxPlayers !== 10 && !sameGamePlayers(current.game.players.map(player => player.memberId), input.playerMemberIds ?? [])) return stale();
+    || !await deliveryAudienceCurrent(input, current.game)) return stale();
   return true;
 }
 
@@ -113,7 +113,7 @@ async function assertGameChallengeDeliveryCurrentTx(input: Parameters<typeof ass
   if (!current || current.status !== "open" || current.row.chatContainerMemberId !== input.containerMemberId
     || (current.row.maxPlayers !== 10 && !isPairRoster(players)) || !players.includes(current.challenge.actor) || !entry || entry.memberId === current.challenge.actor
     || !players.includes(entry.memberId) || entry.incomplete
-    || !await deliveryAudienceCurrent(input, current.row, input.playerMemberIds ?? [])) return stale();
+    || !await deliveryAudienceCurrent(input, current.row)) return stale();
   return true;
 }
 
@@ -121,13 +121,13 @@ async function assertGameRecapDeliveryCurrentTx(
   input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string, regenerationId?: string,
 ): Promise<true> {
   await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
-  const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }],
       ...(regenerationId ? { events: { some: { commandKey: `${input.deliveryIdempotencyKey}:accepted`, type: "recap_regeneration_accepted" } } } : {}) },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || game.maxPlayers === 10 && !groupGameRecapPlayers(game) || !await deliveryAudienceCurrent(input, game, players)) return stale();
+  if (!game || game.maxPlayers === 10 && !groupGameRecapPlayers(game) || !await deliveryAudienceCurrent(input, game)) return stale();
+  requirePrivatePairNoticeAudience(input, game);
   if (!await readGameRecapEntryIdsTx(input.tx, game, input.deliveryIdempotencyKey!)) return stale();
   return true;
 }
@@ -135,13 +135,13 @@ async function assertGameRecapDeliveryCurrentTx(
 async function assertGameMissedDeliveryCurrentTx(
   input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string, addressedMemberId: string,
 ): Promise<true> {
-  const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "live" },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || game.maxPlayers === 10 || !players.includes(addressedMemberId)
-    || !await deliveryAudienceCurrent(input, game, players)) return stale();
+  if (!game || game.maxPlayers === 10 || !game.players.some(player => player.memberId === addressedMemberId && !player.leftAt)
+    || !await deliveryAudienceCurrent(input, game)) return stale();
+  requirePrivatePairNoticeAudience(input, game);
   return true;
 }
 
@@ -155,7 +155,7 @@ async function assertGameChangeProposalDeliveryCurrentTx(
   const { readCurrentGameChange } = await import("./service");
   const current = await readCurrentGameChange(input.tx, match[1], match[2], input.now ?? new Date());
   if (!current || current.row.chatContainerMemberId !== input.containerMemberId
-    || !await deliveryAudienceCurrent(input, current.row, input.playerMemberIds ?? [])) return stale();
+    || !await deliveryAudienceCurrent(input, current.row)) return stale();
   return true;
 }
 
@@ -169,20 +169,20 @@ async function assertGameRematchDeliveryCurrentTx(
   });
   if (game?.maxPlayers === 10) {
     if (currentTerms(parseStoredTerms(game.terms)).n !== input.rematchTermsVersion || isGameInviteExpired(game, input.now ?? new Date())) return stale();
-    if (!await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
+    if (!await deliveryAudienceCurrent(input, game)) return stale();
     return true;
   }
   return assertPairRematchDeliveryCurrent(input, game);
 }
 
-function assertPairRematchDeliveryCurrent(
+async function assertPairRematchDeliveryCurrent(
   input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0],
   game: Prisma.GameGetPayload<{ include: { invitees: true; players: true } }> | null,
-): true {
+): Promise<true> {
   if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1
     || isGameInviteExpired(game, input.now ?? new Date())
     || game.players[0]?.memberId !== game.createdBy
-    || !sameGamePlayers([game.createdBy, game.invitees[0]?.memberId], input.playerMemberIds ?? [])) return stale();
+    || !await deliveryAudienceCurrent(input, game)) return stale();
   return true;
 }
 
@@ -203,7 +203,7 @@ async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof ass
       events: { some: { type: "cancelled" } } },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
+  if (!game || !await deliveryAudienceCurrent(input, game)) return stale();
   return true;
 }
 async function assertGameChangeResolvedDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
@@ -212,7 +212,7 @@ async function assertGameChangeResolvedDeliveryCurrentTx(input: Parameters<typeo
   const resolution = await readGameChangeResolution(input.tx, notice.gameId, notice.proposalId);
   if (!resolution || gameResolutionNoticeKind(resolution.outcome) !== notice.kind
     || resolution.game.chatContainerMemberId !== input.containerMemberId
-    || !await deliveryAudienceCurrent(input, resolution.game, input.playerMemberIds ?? [])) return stale();
+    || !await deliveryAudienceCurrent(input, resolution.game)) return stale();
   return true;
 }
 async function assertGameStartedDeliveryCurrentTx(
@@ -223,7 +223,7 @@ async function assertGameStartedDeliveryCurrentTx(
     include: { invitees: true, players: { take: 11 } },
   });
   if (!game || game.maxPlayers === 10 && game.players.some(player => player.leftAt)
-    || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
+    || !await deliveryAudienceCurrent(input, game)) return stale();
   return true;
 }
 
@@ -231,7 +231,17 @@ function stale(): never {
   throw hostedOnboardingError({ code: "GAME_CHANGE_SUPERSEDED", httpStatus: 409, message: "This proposed game change is no longer current.", retryable: false });
 }
 
-async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameNoticeAuthority>[0], players: readonly string[]): Promise<boolean> {
-  if (game.maxPlayers !== 10) return sameGamePlayers(game.players.map(player => player.memberId), players);
+async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameNoticeAuthority>[0]): Promise<boolean> {
   return Boolean(input.audience && await readGroupGameNoticeAuthority(game, input.containerMemberId, input.audience, input.tx));
+}
+
+/** Pair recap and missed-day writers can read app-only pair lore. Hold their
+ * queued text while bystanders are present; never retire it as stale game work.
+ */
+function requirePrivatePairNoticeAudience(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameNoticeAuthority>[0]): void {
+  if (game.maxPlayers !== 2) return;
+  const players = game.players.map(player => player.memberId);
+  if (!input.audience || input.audience.contacts.length > 2 || !sameGamePlayers(input.audience.memberIds, players)) {
+    throw new GameChatAudienceError("participants_changed", "This pair notice requires only its players in the chat.");
+  }
 }

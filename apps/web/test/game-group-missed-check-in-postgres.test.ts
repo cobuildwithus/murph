@@ -295,10 +295,11 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await prepareGameEveningCheckIn(f.roomId, date, at))?.policy.batch.map(game => game.gameId)).toEqual([open]);
   });
 
-  it("suppresses unjoined and far-apart audiences, and excludes a switched-off player", async () => {
+  it("ignores unjoined bystanders, suppresses far-apart players, and excludes a switched-off player", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);
-    expect(await reserveGameEveningCheckIn(unjoined.roomId, [unjoinedId], eveningAt)).toBe(0);
+    events.push(gameEveningEventId(unjoined.roomId, date));
+    expect(await reserveGameEveningCheckIn(unjoined.roomId, [unjoinedId], eveningAt)).toBe(1);
     const far = await fixture(3), farId = await far.addGame();
     await db.gameProfile.update({ where: { memberId: far.people[2]!.id }, data: { timeZone: "America/Los_Angeles" } });
     expect(await reserveGameEveningCheckIn(far.roomId, [farId], eveningAt)).toBe(0);
@@ -309,28 +310,22 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await prepareGameEveningCheckIn(close.roomId, date, eveningAt))?.policy.batch[0]?.memberIds).toEqual(close.people.slice(0, 2).map(person => person.id).sort());
   });
 
-  it("reserves the same evening family for an exact two-player pair room", async () => {
+  it("reserves the same evening family for a pair with verified email contacts", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(2), id = await f.addGame(2);
-    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
-    const phones = ["+12025550181", "+12025550182"];
-    for (const [index, person] of f.people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({
-      ...buildHostedMemberPhoneIdentityFields(phones[index]!), memberId: person.id, prisma: tx,
-      phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
-    proof.rooms.set(f.roomId, phones);
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
     expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
     expect((await prepareGameEveningCheckIn(f.roomId, date, eveningAt))?.policy.batch[0]?.memberIds).toEqual(f.people.map(person => person.id).sort());
   });
 
-  it("does not reserve when an authorized room recipient has unresolved identity", async () => {
+  it("ignores an unresolved bystander when reserving the players evening", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const unknown = `${randomUUID()}@example.test`;
     await db.gameInvitee.create({ data: { gameId: id, seat: 3, memberId: null, recipientLookupKey: createHostedEmailLookupKey(unknown) } });
     proof.rooms.set(f.roomId, [...f.people.map(person => person.email), unknown]);
-    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
+    events.push(gameEveningEventId(f.roomId, date));
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
   });
 
   it("combines pair and group games in one mixed-room evening witness", async () => {
@@ -339,6 +334,32 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
     expect(await reserveGameEveningCheckIn(f.roomId, [pair, group], eveningAt)).toBe(1);
     expect((await prepareGameEveningCheckIn(f.roomId, date, eveningAt))?.policy.batch.map(game => game.gameId).sort()).toEqual([pair, group].sort());
+  });
+
+  it("combines independently eligible pair and group evenings without addressing bystanders", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), pair = await f.addGame(2, [], 2), group = await f.addGame();
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
+    events.push(gameEveningEventId(f.roomId, date));
+    expect(await reserveGameEveningCheckIn(f.roomId, [pair, group], eveningAt)).toBe(1);
+    const prepared = await prepareGameEveningCheckIn(f.roomId, date, eveningAt);
+    expect(prepared?.policy.batch).toEqual(expect.arrayContaining([
+      expect.objectContaining({ gameId: pair, memberIds: f.people.slice(0, 2).map(person => person.id).sort() }),
+      expect.objectContaining({ gameId: group, memberIds: f.people.map(person => person.id).sort() }),
+    ]));
+    expect(prepared?.policy.batch).toHaveLength(2);
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(true);
+  });
+
+  it.each([false, true])("a prior pair receipt suppresses the larger room after settlement: %s", async settled => {
+    const f = await fixture(2), pair = await f.addGame(2);
+    events.push(gameMissedDayEventId(pair, f.people[0]!.id, date));
+    expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: pair, memberId: f.people[0]!.id,
+      playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now }))).toBe(true);
+    if (settled) await db.game.update({ where: { id: pair }, data: { status: "settled", settledAt: now } });
+    const group = await f.addGame();
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
+    expect(await reserveGroupGameMissedDay(f.roomId, settled ? [group] : [pair, group], now)).toBe(0);
   });
 
   it("keeps the flag off and rejects expiry", async () => {
@@ -506,8 +527,8 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await readGroupMissedDayDeliveryAuthority(gameGroupMissedDayEventId(f.roomId, date), f.roomId))?.policy.batch).toHaveLength(2);
   });
 
-  it("skips a room with one person left in the text, and its next shard visit retries", async () => {
-    const bad = await drainPastBrokenRoom("participants_changed", f => { proof.rooms.set(f.roomId, [f.people[0]!.email]); });
+  it("skips duplicate provider handles, and its next shard visit retries", async () => {
+    const bad = await drainPastBrokenRoom("participants_changed", f => { proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); });
     // Nothing was recorded, so the room's next shard visit inside the window claims normally.
     proof.rooms.set(bad.roomId, bad.people.map(person => person.email));
     await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000));
@@ -605,7 +626,6 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   });
 
   it.each([
-    ["a pair game in a three-person room", 3, (f: Fixture) => f.addGame(2, ["America/Los_Angeles", "America/Los_Angeles"], 2)],
     ["a group game with a player outside the text", 4, (f: Fixture) => f.addGame(10, f.people.map(() => "America/Los_Angeles"))],
   ] as const)("claims at the kept game's time when %s has a later horizon", async (_excluded, count, addExcluded) => {
     const f = await fixture(count), kept = await f.addGame(10, [], 3), excluded = await addExcluded(f);
@@ -613,6 +633,15 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await reserveGroupGameMissedDay(f.roomId, [kept, excluded], now)).toBe(1);
     expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).retryAfterAt).toEqual(now);
     expect((await prepareGroupMissedDay(f.roomId, date, now))?.policy.batch.map(game => game.gameId)).toEqual([kept]);
+  });
+
+  it("includes a bound pair in a larger room and waits for its later morning horizon", async () => {
+    const f = await fixture(3), group = await f.addGame(), pair = await f.addGame(2, ["America/Los_Angeles", "America/Los_Angeles"], 2);
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
+    expect(await reserveGroupGameMissedDay(f.roomId, [group, pair], now)).toBe(0);
+    const later = new Date("2030-03-05T17:00:00Z");
+    expect(await reserveGroupGameMissedDay(f.roomId, [group, pair], later)).toBe(1);
+    expect((await prepareGroupMissedDay(f.roomId, date, later))?.policy.batch.map(game => game.gameId).sort()).toEqual([group, pair].sort());
   });
 
   it("claims at a horizon set by a game with no miss of its own", async () => {
@@ -628,7 +657,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it("skips a due room with an unsendable audience and warns", async () => {
     const f = await fixture(), id = await f.addGame();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(0);
     expect(proof.audienceReads).toEqual([`route:${f.roomId}`, `chat:${f.roomId}`]);
@@ -637,7 +666,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it("reads nothing and logs nothing for a not-due room with an unsendable audience", async () => {
     const f = await fixture(), id = await f.addGame();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await reserveGroupGameMissedDay(f.roomId, [id], new Date(now.getTime() - 1_000))).toBe(0);
     expect(proof.audienceReads).toEqual([]);
@@ -648,7 +677,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   const deadline = hours(2), justLate = new Date(deadline.getTime() + 1);
   const outage = () => hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Linq chat read timed out.", retryable: true });
   const heldUp = [
-    ["an unsendable room", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email]); }],
+    ["an unsendable room", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); }],
     ["a provider outage", (f: Fixture) => { proof.chatFailures.set(f.roomId, outage()); }],
   ] as const;
   const recover = (f: Fixture) => { proof.chatFailures.clear(); proof.rooms.set(f.roomId, f.people.map(person => person.email)); };
@@ -710,7 +739,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it.each([["exactly at", deadline, "awaiting_generation"], ["just past", justLate, "skipped"]] as const)("treats a receipt %s its deadline correctly", async (_side, at, status) => {
     const { f, eventId } = await reservedRoom();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     await turn(eventId, at);
     expect((await receipt(eventId)).status).toBe(status);
   });
@@ -733,7 +762,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
       const item = await db.hostedMailboxItem.findFirstOrThrow({ where: { userId: f.roomId, lane: "system" } });
       await advanceHostedMailboxConsumedSeqByLane({ userId: f.roomId, prisma: db, lanes: [{ lane: "system", consumedSeq: item.laneSeq }] });
     }
-    proof.rooms.set(f.roomId, [f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });
     expect(await receipt(eventId)).toMatchObject({ status: "generation_queued", retryAfterAt: null, skippedAt: null });
@@ -782,7 +811,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it("clears a receipt that was already stuck, with no migration", async () => {
     const { f, eventId } = await reservedRoom();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     // A row from before this change: a database-default createdAt and a months-old retry history.
     await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { createdAt: hours(-24 * 90), retryAfterAt: hours(-1) } });
     await turn(eventId, now);
@@ -794,6 +823,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     events.push(eventId);
     expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: id, memberId: f.people[0]!.id, playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now }))).toBe(true);
     if (settled) await db.game.update({ where: { id }, data: { status: "settled", settledAt: now } });
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     expect(await turn(eventId, hours(.5))).toMatchObject({ attempted: 1, queued: 0 });
     expect((await receipt(eventId)).status).toBe("awaiting_generation");
     proof.audienceReads.length = 0;
@@ -802,13 +832,14 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     await expectEnded(f, eventId, warn);
   });
 
-  it("serializes pair and group contenders under the verified two-contact pair lock", async () => {
+  it("serializes pair and group contenders with a bystander under the game pair lock", async () => {
     const f = await fixture(2), pair = await f.addGame(2), group = await f.addGame();
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
     const prepared = await prepareGroupMissedDay(f.roomId, date, now);
     if (!prepared) throw new Error("Expected authorized mixed room");
     const locked = barrier(), release = barrier();
     const groupClaim = db.$transaction(tx => reserveGameMissedDayTx({ tx, roomId: f.roomId, firstMissedDate: date, dueAt: now, now,
-      pairMemberIds: prepared.audience.memberIds, beforeClaim: async tx => {
+      beforeClaim: async tx => {
         const current = await isGroupMissedDayBatchCurrentTx(prepared.policy, prepared.audience, tx, now);
         locked.release(); await release.promise; return current;
       } }));
@@ -948,12 +979,12 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     await expect(db.$transaction(tx => assertAndDispatch(authority, tx))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
-  it("requires exact encrypted mailbox authority and rejects added outsiders at egress", async () => {
+  it("keeps bystanders at egress and still requires exact encrypted mailbox authority", async () => {
     const f = await fixture(), id = await f.addGame(), authority = await publish(f.roomId, [id]);
     expect(await readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).toMatchObject({ policy: authority.policy });
     await expect(readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, "other-room")).rejects.toThrow();
     proof.rooms.get(f.roomId)!.push("outsider@example.test");
-    await expect(readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).rejects.toThrow();
+    expect(await readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).toMatchObject({ policy: authority.policy });
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, deliveryIdempotencyKey: authority.policy.eventId, containerMemberId: f.roomId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 });
@@ -1157,7 +1188,7 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
 
   it("retries a failing receipt when its lease ends, not sooner", async () => {
     const [room] = await dueRooms(1);
-    proof.rooms.set(room!.f.roomId, [room!.f.people[0]!.email]);
+    proof.rooms.set(room!.f.roomId, [room!.f.people[0]!.email, room!.f.people[0]!.email]);
     let clock = now.getTime();
     vi.spyOn(Date, "now").mockImplementation(() => clock);
     await drainGameChatLifecycle({ now });
@@ -1173,7 +1204,7 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
   it.each([
     ["an unexpected defect", "TypeError", (f: Fixture) => { proof.chatFailures.set(f.roomId, new TypeError(`Synthetic detail about ${f.roomId}.`)); }],
     ["a provider failure", "LINQ_SEND_FAILED", (f: Fixture) => { proof.chatFailures.set(f.roomId, hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: `Synthetic detail about ${f.roomId}.`, retryable: true })); }],
-    ["an unsendable room", "participants_changed", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email]); }],
+    ["an unsendable room", "participants_changed", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); }],
   ] as const)("logs one fixed-code diagnostic for %s and keeps its siblings going", async (_cause, reason, breakRoom) => {
     const rooms = await dueRooms(3), failed = rooms[1]!;
     breakRoom(failed.f);

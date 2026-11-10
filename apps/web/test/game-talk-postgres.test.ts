@@ -50,7 +50,7 @@ async function fixture(existingRoom = false) {
   m.first = first; m.lineKey = `synthetic-line-${randomUUID()}`;
   members.push(first, second, ...(existingRoom ? [room] : [])); games.push(gameId); lines.push(m.lineKey);
   await db.hostedMember.createMany({ data: [first, second, ...(existingRoom ? [room] : [])].map(id => ({ id, billingStatus: "not_started" })) });
-  await db.hostedMemberIdentity.createMany({ data: [first, second].map((memberId, index) => ({ memberId, phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
+  await db.hostedMemberIdentity.createMany({ data: [first, second].map((memberId, index) => ({ memberId, phoneNumberVerifiedAt: new Date(), phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
   await db.hostedLinqLine.create({ data: { phoneNumberLookupKey: m.lineKey, phoneNumberHint: "0100", healthStatus: "healthy" } });
   if (existingRoom) await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
     participants: { create: [first, second].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: new Date(), lastSeenAt: new Date() })) } } });
@@ -182,10 +182,11 @@ describe.skipIf(!enabled)("talk it over PostgreSQL", () => {
     expect(wake).toMatchObject({ notification: { deliveryDispatchMode: "queue-only", responsePolicy: { kind: "require_send" } } });
     if (wake?.kind === "assistant.notification.requested") expect(wake.notification.gameChatBootstrap).toBeUndefined();
     const players = await readGameProposalDeliveryPlayers(f.eventId, f.room);
-    expect(players).toEqual(expect.arrayContaining([f.first, f.second]));
-    expect(await f.db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ deliveryIdempotencyKey: f.eventId, containerMemberId: f.room, playerMemberIds: [f.first, f.second], tx }))).toBe(true);
+    expect(players).toMatchObject({ memberIds: expect.arrayContaining([f.first, f.second]) });
+    if (!players || "policy" in players) throw new Error("Expected room audience");
+    expect(await f.db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ deliveryIdempotencyKey: f.eventId, containerMemberId: f.room, audience: players, tx }))).toBe(true);
     m.expanded = true;
-    await expect(readGameProposalDeliveryPlayers(f.eventId, f.room)).rejects.toThrow("participants have changed");
+    await expect(readGameProposalDeliveryPlayers(f.eventId, f.room)).resolves.toMatchObject({ memberIds: expect.arrayContaining([f.first, f.second]) });
     expect(m.create).not.toHaveBeenCalled();
   });
   it("recovers empty reservations and failed signals without duplicate publication", async () => {
@@ -209,7 +210,7 @@ describe.skipIf(!enabled)("talk it over PostgreSQL", () => {
     else await run(f.first, { type: "block", memberId: f.second });
     expect(await prepareGameChatBootstrap(f.gameId, f.eventId, "stale")).toBeNull();
     expect(await control(f)).toMatchObject({ result: { status: "unavailable" } });
-    await expect(f.db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ deliveryIdempotencyKey: f.eventId, containerMemberId: f.room, playerMemberIds: [f.first, f.second], tx }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(f.db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ deliveryIdempotencyKey: f.eventId, containerMemberId: f.room, tx }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     await sweep(f);
     expect(await receipt(f)).toMatchObject({ status: "skipped", retryAfterAt: null });
     expect(m.create).not.toHaveBeenCalled();

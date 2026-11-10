@@ -7,6 +7,17 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
+// Service tests inject provider/route evidence; room integration lives in the group suite.
+vi.mock("@/src/lib/game/chat-membership", async original => ({ ...await original<typeof import("@/src/lib/game/chat-membership")>(),
+  readGameChatAudience: async (room: string) => {
+    const { getPrisma } = await import("@/src/lib/prisma");
+    const players = await getPrisma().gamePlayer.findMany({ where: { game: { chatContainerMemberId: room } }, select: { memberId: true } });
+    const memberIds = [...new Set(players.flatMap(player => player.memberId ? [player.memberId] : []))];
+    return { memberIds, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room };
+  } }));
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
+  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }) }));
+
 // Real roots and sealing for the crypto case; only KMS is the local provider.
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
   const { generateKeyPairSync } = await import("node:crypto");

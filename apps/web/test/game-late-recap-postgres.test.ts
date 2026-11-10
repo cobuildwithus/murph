@@ -1,3 +1,4 @@
+import { readGameChatAudience } from "../src/lib/game/chat-membership";
 import { requestGameRecapRegeneration } from "../src/lib/game/recap-regeneration";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -11,6 +12,17 @@ import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx, reserveGameCh
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../src/lib/hosted-onboarding/linq-observability-identifiers";
 import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "../src/lib/hosted-onboarding/linq-delivery-store";
 import { applyHostedWebContractMigrations, listHostedWebContractMigrations } from "../scripts/run-production-contract-migrations";
+
+// Inject provider/route evidence while retaining real shared-room database checks.
+vi.mock("@/src/lib/game/chat-membership", async original => ({ ...await original<typeof import("@/src/lib/game/chat-membership")>(),
+  readGameChatAudience: async (room: string) => {
+    const { getPrisma } = await import("@/src/lib/prisma");
+    const players = await getPrisma().gamePlayer.findMany({ where: { game: { chatContainerMemberId: room } }, select: { memberId: true } });
+    const memberIds = [...new Set(players.flatMap(player => player.memberId ? [player.memberId] : []))];
+    return { memberIds, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room };
+  } }));
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
+  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }) }));
 
 vi.mock("../src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: async () => false }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: async () => false }));
@@ -100,11 +112,11 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     const stored = await db.game.findUniqueOrThrow({ where: { id: gameId } });
     expect(stored.recapEncrypted).toBeTruthy(); expect(stored.recapEncrypted).not.toContain("synthetic");
     expect((await db.game.findUniqueOrThrow({ where: { id: newerId } })).recapEncrypted).toBeNull();
-    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).resolves.toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: eventId })).resolves.toBe(true);
     await db.game.update({ where: { id: gameId }, data: { players: { update: { where: { gameId_seat: { gameId, seat: 1 } }, data: { leftAt: new Date() } } } } });
     expect(await readGameRecapMaterial(gameId, room, players)).toBeNull();
     expect(await sealGameRecap(sealInput)).toBeNull();
-    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
   it.each([false, true])("saves, reads and replays the exact recap shape; legacy scoreLine=%s", async (legacy) => {
@@ -126,7 +138,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     await markGameChatGenerationQueuedTx(eventId, db, room);
     expect(await readGameRecapMaterial(gameId, room, players)).toBeNull();
     expect(await sealGameRecap(sealInput)).toBeNull();
-    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
   it.each(["accepted", "sent_no_receipt_expected"])("regenerates after %s once, replacing only on acceptance without touching the rematch", async (sentStatus) => {
@@ -156,14 +168,14 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     expect(await sealGameRecap({ ...regenerate, recap: null })).toBeNull();
     await expect(sealGameRecap({ ...regenerate, beforeMutationTx: async () => { throw new Error("synthetic turn failure"); } })).rejects.toThrow("synthetic turn failure");
     expect((await readGame(gameId, players[0]!))?.recap).toEqual(recap);
-    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: regeneratedEventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: regeneratedEventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     const replacement = { ...recap, chatLine: "A fresh synthetic story from the same finished game." };
     const accepted = await Promise.all([replacement, { ...replacement, chatLine: "Ignored second candidate" }].map((candidate) => sealGameRecap({ ...regenerate, recap: candidate })));
     expect(accepted[0]).toEqual(accepted[1]);
     expect((await readGame(gameId, players[0]!))?.recap).toEqual(accepted[0]);
     expect(await sealGameRecap({ ...regenerate, recap: null })).toEqual(accepted[0]);
     expect(await db.gameEvent.count({ where: { gameId, type: "recap_regeneration_accepted" } })).toBe(1);
-    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: regeneratedEventId })).resolves.toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: regeneratedEventId })).resolves.toBe(true);
     expect(await db.game.findUniqueOrThrow({ where: { id: newerId } })).toEqual(newer);
     const deliveryKey = createHostedLinqDeliveryIdempotencyLookupKey(regeneratedEventId)!;
     const reserved = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: deliveryKey } });
@@ -171,7 +183,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     const postToGroup = vi.fn();
     const dispatch = async () => {
       const claim = await db.$transaction(async (tx) => {
-        await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: regeneratedEventId });
+        await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: regeneratedEventId });
         return recordHostedLinqRuntimeProviderDispatchFenceTx({ idempotencyKey: regeneratedEventId, linqChatId: "synthetic-chat",
           sourceRef: regeneratedEventId, targetKind: "thread", prisma: tx });
       });
