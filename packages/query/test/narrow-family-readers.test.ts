@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
-import { QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { test } from "vitest";
 
 import {
@@ -12,7 +12,7 @@ import {
   resolveCanonicalEntityInFamily,
 } from "../src/vault-source.ts";
 
-test("bounded event-family reads preserve lifecycle, display identity, aliases, and visibility without query.sqlite", async () => {
+test.each(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS))("bounded event-family reads preserve lifecycle, display identity, aliases, and visibility without query projection files" + " (%s)", async (queryRelativePath) => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-narrow-event-"));
 
   try {
@@ -92,7 +92,7 @@ test("bounded event-family reads preserve lifecycle, display identity, aliases, 
       "{\n",
     );
 
-    const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    const queryDatabasePath = path.join(vaultRoot, queryRelativePath);
     await assert.rejects(
       () => stat(queryDatabasePath),
       (error): boolean => (error as NodeJS.ErrnoException).code === "ENOENT",
@@ -129,7 +129,7 @@ test("bounded event-family reads preserve lifecycle, display identity, aliases, 
   }
 });
 
-test("bounded family reads do not open or replace an existing query.sqlite", async () => {
+test.each(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS))("bounded family reads do not open or replace existing query projection files" + " (%s)", async (queryRelativePath) => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-narrow-sentinel-"));
 
   try {
@@ -151,7 +151,7 @@ test("bounded family reads do not open or replace an existing query.sqlite", asy
       "{\n",
     );
 
-    const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    const queryDatabasePath = path.join(vaultRoot, queryRelativePath);
     await mkdir(path.dirname(queryDatabasePath), { recursive: true });
     await writeFile(queryDatabasePath, "query-sentinel\n", "utf8");
     const beforeBytes = await readFile(queryDatabasePath);

@@ -4697,11 +4697,9 @@ printf 'ZIP: %s (%s bytes)\n' \
       'utf8',
     )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
-    writeFileSync(
-      path.join(vaultRoot, '.runtime', 'projections', 'query.sqlite'),
-      'rebuildable projection\n',
-      'utf8',
-    )
+    for (const section of ['entities', 'metrics', 'wearables']) {
+      writeFileSync(path.join(vaultRoot, '.runtime', 'projections', `query-${section}.sqlite`), 'rebuildable projection\n', 'utf8')
+    }
     writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
@@ -4842,7 +4840,9 @@ printf 'ZIP: %s (%s bytes)\n' \
         `${bundleDir}/vault/.runtime/operations/assistant/generated-deliveries/transient.pdf`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
-      expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
+      for (const section of ['entities', 'metrics', 'wearables']) {
+        expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query-${section}.sqlite`)
+      }
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )

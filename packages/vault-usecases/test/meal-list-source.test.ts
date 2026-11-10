@@ -19,7 +19,7 @@ test("meal listing preserves canonical ordering and date/limit semantics without
     const filters = { vault, from: "2026-04-10", to: "2026-04-10", limit: 1 };
     const actual = await listMealRecords(filters);
     assert.equal(actual.count, 1);
-    await assert.rejects(stat(path.join(vault, ".runtime/projections/query.sqlite")), { code: "ENOENT" });
+    await assert.rejects(stat(path.join(vault, ".runtime/projections")), { code: "ENOENT" });
     const baseline = await listCanonicalEntities(vault, {
       family: "event", kinds: ["meal"], from: filters.from, to: filters.to, limit: null,
     });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,8 +9,8 @@ import { wearableProviderRowKey } from "../src/projection/provider-scope.ts";
 import {
   currentQueryProjectionLocation,
   expectString,
-  ensureQueryProjectionSectionSchema,
-  openQueryProjectionDatabase,
+  publishQueryProjectionSection,
+  openQueryProjectionSection,
 } from "../src/projection/schema.ts";
 import {
   insertWearableSummaryRows,
@@ -23,10 +23,7 @@ test("bounded sleep reads decode only sleep rows in range while retaining source
   const location = currentQueryProjectionLocation(vaultRoot);
 
   try {
-    await mkdir(path.dirname(location.absolutePath), { recursive: true });
-    const database = openQueryProjectionDatabase(location, { create: true });
-    ensureQueryProjectionSectionSchema(database, "wearables");
-    try {
+    publishQueryProjectionSection(location, "wearables", "[]", database => {
       const provider = "oura";
       const providerScopeKey = wearableProviderRowKey(provider);
       const row = (
@@ -50,9 +47,7 @@ test("bounded sleep reads decode only sleep rows in range while retaining source
         row("sleep-after-range", "sleep", "2026-08-01"),
         row("source-health-stale", "source_health", "2026-05-01"),
       ]);
-    } finally {
-      database.close();
-    }
+    });
 
     const result = readWearableSummaryRows(location, {
       from: "2026-07-01",
@@ -65,10 +60,7 @@ test("bounded sleep reads decode only sleep rows in range while retaining source
       "source-health-stale",
     ]);
 
-    const readOnlyDatabase = openQueryProjectionDatabase(location, {
-      create: false,
-      readOnly: true,
-    });
+    const readOnlyDatabase = openQueryProjectionSection(location, "wearables");
     try {
       const indexNames = readOnlyDatabase
         .prepare("PRAGMA index_list(query_wearable_summaries)")

@@ -1,3 +1,4 @@
+import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -6,7 +7,7 @@ import { expect, test } from 'vitest'
 
 import type { CanonicalEntity } from '../src/canonical-entities.ts'
 import { insertQueryEntities, listStoredCanonicalEntities } from '../src/projection/entity-store.ts'
-import { currentQueryProjectionLocation, openQueryProjectionDatabase } from '../src/projection/schema.ts'
+import { currentQueryProjectionLocation, queryProjectionSectionPath } from '../src/projection/schema.ts'
 import { rebuildQueryProjection } from '../src/query-projection.ts'
 
 function meal(id: string, occurredAt: string, attributes: Record<string, unknown> = {}): CanonicalEntity {
@@ -27,7 +28,7 @@ test('closeout selection bounds materialized rows after filtering and preserves 
     await initializeVault({ vaultRoot })
     await rebuildQueryProjection(vaultRoot)
     const location = currentQueryProjectionLocation(vaultRoot)
-    const database = openQueryProjectionDatabase(location)
+    const database = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "entities"))
     try {
       database.exec('BEGIN')
       insertQueryEntities(database, [

@@ -73,7 +73,7 @@ repo/
 - `packages/inbox-services` owns lower-level inbox runtime, read, and promotion service composition used by CLI/assistant flows without becoming the canonical inbox-capture owner.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments, writes one versioned derived result bundle per attempt under `derived/inbox/**`, and owns the strict reader plus legacy-attempt compactor.
 - `packages/health-metrics` owns neutral MetricPoint contracts, health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports.
-- `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`, and adapts canonical/wearable evidence through `@murphai/health-metrics` MetricPoints.
+- `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection in three write-once section files (`query-entities.sqlite`, `query-metrics.sqlite`, `query-wearables.sqlite`) under `.runtime/projections/`, replaced by rename, that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`, and adapts canonical/wearable evidence through `@murphai/health-metrics` MetricPoints.
 - `packages/vault-usecases` owns CLI/headless vault usecase orchestration over core, importers, and query. It exposes the neutral service surface, lazy runtime loaders, command-shaped input normalization, and assistant-safe vault path helpers used by CLI and headless runtimes. It is not a canonical write owner, query-model owner, inbox/device runtime owner, assistant/session owner, or broad re-export layer.
 - `packages/health-commons` owns the public Health Commons for biomarker, Goal guide, measurement-method, source, and source-person pages, plus build-time catalog generation and scoped runtime artifacts consumed by local and hosted surfaces.
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, and assistant-specific vault/inbox/knowledge tools.
@@ -119,7 +119,7 @@ repo/
   - `.runtime/operations/parsers/toolchain.json`
   - `.runtime/operations/device-sync/state.sqlite`
   - `.runtime/projections/inboxd.sqlite`
-  - `.runtime/projections/query.sqlite`
+  - `.runtime/projections/query-{entities,metrics,wearables}.sqlite`
   - `.runtime/cache/**` and `.runtime/tmp/**` for ephemeral scratch state only
 - Assistant runtime state:
   - `vault/.runtime/operations/assistant/**`

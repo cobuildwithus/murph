@@ -110,8 +110,11 @@ async function worker(checkout: string, scenario: Scenario): Promise<WorkerResul
     assert.equal(observations, 8760);
     assert.equal(shards.size, 12);
     const workload = { days: 365, providers: 3, observations, eventLedgers: shards.size, sourceBytes };
-    const indexPath = path.join(root, ".runtime/projections/query.sqlite");
-    assert.equal(existsSync(indexPath), false);
+    const indexPath = path.join(root, ".runtime/projections/query-wearables.sqlite");
+    // Cross-revision comparisons also accept the baseline's retired layout.
+    const legacyIndexPath = path.join(root, ".runtime/projections/query.sqlite");
+    const publishedIndexPath = () => existsSync(indexPath) ? indexPath : legacyIndexPath;
+    assert.equal(existsSync(indexPath) || existsSync(legacyIndexPath), false);
     async function read(stage: string, operation: Sample["operation"] = "source") {
       const start = performance.now();
       const cpu = process.cpuUsage();
@@ -132,7 +135,7 @@ async function worker(checkout: string, scenario: Scenario): Promise<WorkerResul
       samples.push({
         stage, operation, wallMs, cpuMs: (used.user + used.system) / 1000,
         outputBytes: Buffer.byteLength(text), sha256: createHash("sha256").update(text).digest("hex"),
-        outputCount: result.count, sourceRecords, observations, indexExists: existsSync(indexPath),
+        outputCount: result.count, sourceRecords, observations, indexExists: existsSync(publishedIndexPath()),
       });
       if (operation === "source") {
         // Runtime discriminator is not carried by the union's item type. The
@@ -202,19 +205,19 @@ async function worker(checkout: string, scenario: Scenario): Promise<WorkerResul
       assert.equal(samples.length, 15);
       cumulativeSequenceMs = performance.now() - sequenceStart;
       cumulativeSourceReadMs = samples.reduce((total, sample) => total + sample.wallMs, 0);
-      projectionStates.push(inspectProjection(indexPath));
+      projectionStates.push(inspectProjection(publishedIndexPath()));
       // No ignored/preloaded accelerator work: this is an actual public global
       // read with its own timer, bytes/hash and a source-sequence+global total.
       await read("source-sequence-global", "global");
       sourceThenGlobalMs = cumulativeSourceReadMs + samples.at(-1)!.wallMs;
-      projectionStates.push(inspectProjection(indexPath));
+      projectionStates.push(inspectProjection(publishedIndexPath()));
       await repeat("fresh-index-accelerator", changedHash);
       await sourceWrite(true);
       await read("invalidated-index-sleep-write");
       const sleepHash = samples.at(-1)!.sha256;
       assert.notEqual(sleepHash, changedHash);
       await repeat("invalidated-index-repeat", sleepHash);
-      projectionStates.push(inspectProjection(indexPath));
+      projectionStates.push(inspectProjection(publishedIndexPath()));
     } else {
       async function composedRead(stage: string) {
         const order: Sample["operation"][] = scenario === "source-global" ? ["source", "global"] : ["global", "source"];
@@ -252,20 +255,40 @@ async function worker(checkout: string, scenario: Scenario): Promise<WorkerResul
 }
 
 function inspectProjection(indexPath: string): ProjectionState {
+  const rows = new Map<string, number>();
+  const globalMeta: unknown[] = [];
+  let built = false;
+  const legacy = path.basename(indexPath) === "query.sqlite";
+  const globalFiles = legacy
+    ? [["legacy", indexPath]]
+    : ["entities", "metrics"].map(section => [section, path.join(path.dirname(indexPath), `query-${section}.sqlite`)]);
+  for (const [section, file] of globalFiles) {
+    if (!existsSync(file)) continue;
+    const database = new DatabaseSync(file, { readOnly: true });
+    try {
+      for (const table of ["query_entities", "query_metric_points", "query_metric_targets", "query_search_document", "query_search_fts"]) {
+        if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
+          rows.set(table, Number(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()!.count));
+        }
+      }
+      const meta = database.prepare(legacy
+        ? "SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key"
+        : "SELECT * FROM query_meta ORDER BY key").all();
+      globalMeta.push({ section, meta });
+      built ||= meta.some(row => row.key === "built_at");
+    } finally { database.close(); }
+  }
   const database = new DatabaseSync(indexPath, { readOnly: true });
   try {
-    const tables = ["query_entities", "query_metric_points", "query_metric_targets", "query_search_document"];
-    const hasTable = (table: string) => Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
-    const globalRows = tables.map(table => hasTable(table)
-      ? Number(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()!.count) : 0);
-    const globalMeta = database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all();
-    const wearable = database.prepare("SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'").get();
+    const globalRows = ["query_entities", "query_metric_points", "query_metric_targets", "query_search_document"].map(table => rows.get(table) ?? 0);
+    const wearable = database.prepare("SELECT value FROM query_meta WHERE key = ?")
+      .get(legacy ? "wearable_source_manifest" : "source_manifest");
     return {
-      globalTables: [...tables, "query_search_fts"].filter(hasTable),
+      globalTables: ["query_entities", "query_metric_points", "query_metric_targets", "query_search_document", "query_search_fts"].filter(table => rows.has(table)),
       globalRows,
       globalStamp: createHash("sha256").update(JSON.stringify([globalMeta, globalRows])).digest("hex"),
       wearableStamp: wearable ? createHash("sha256").update(String(wearable.value)).digest("hex") : null,
-      built: globalMeta.some(row => row.key === "built_at"),
+      built,
       version: Number(database.prepare("PRAGMA user_version").get()!.user_version),
     };
   } finally { database.close(); }

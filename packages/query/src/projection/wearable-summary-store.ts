@@ -1,10 +1,9 @@
 import {
-  assertQueryProjectionTables,
   expectEnumString,
   expectNullableString,
   expectNumber,
   expectString,
-  openQueryProjectionDatabase,
+  openQueryProjectionSection,
   type DatabaseSync,
   type QueryProjectionLocation,
   type SqliteRow,
@@ -103,17 +102,10 @@ export function readWearableSummaryRows(
     };
   }
 
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openQueryProjectionSection(location, "wearables");
 
   try {
-    // Dictionary and rows belong to one generation, even during a concurrent
-    // publication. Closing this read-only connection ends its read transaction.
-    database.exec("BEGIN");
-    assertQueryProjectionTables(database, location, "wearables");
-
+    // Dictionary and rows come from this one open file, which is one generation.
     return {
       providerFilterWasProvided,
       providers,

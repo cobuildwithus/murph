@@ -86,6 +86,10 @@ async function runTrial(vault: string, scenario: string) {
   assert.ok(operations, "Expected a supported event-list scenario");
   // Only the disposable fixture's derived query files are removed. Canonical
   // files and their mtimes remain identical across revisions and all pairs.
+  for (const section of ["entities", "metrics", "wearables"]) {
+    await rm(path.join(vault, `.runtime/projections/query-${section}.sqlite`), { force: true });
+  }
+  // Retire the baseline's cache too when comparing a pre-section checkout.
   for (const suffix of ["", "-wal", "-shm"]) {
     await rm(path.join(vault, `.runtime/projections/query.sqlite${suffix}`), { force: true });
   }

@@ -8,7 +8,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, test, vi } from "vitest";
 import * as core from "@murphai/core";
-import { QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { timeCliDispatch, withCliTiming } from "@murphai/runtime-state/node/cli-timing";
 import type { CliTiming } from "@murphai/runtime-state/cli-timing";
 import { getQueryProjectionStatus, listBloodTests, listCanonicalEntities, showBloodTest } from "../src/index.ts";
@@ -62,9 +62,9 @@ test("blood lists classify/filter before limit, preserve aliases, dates, orderin
   assert.deepEqual([...await readFreshQueryProjectionSections(
     currentQueryProjectionLocation(root), await source.listCanonicalSourceManifest(root),
   )], ["entities"]);
-  let database = await readFile(path.join(root, QUERY_DB_RELATIVE_PATH));
+  let database = await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
   assert.deepEqual(await Promise.all(options.map(selection => measuredList(root, selection))), cold);
-  assert.deepEqual(await readFile(path.join(root, QUERY_DB_RELATIVE_PATH)), database);
+  assert.deepEqual(await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities)), database);
   for (const revision of [2, 3]) {
     await core.withCanonicalWriteLock(root, () => appendFile(path.join(root, shard), JSON.stringify({ ...rows[3],
       title: "Corrected target", occurredAt: "2026-03-07T08:00:00Z",
@@ -73,7 +73,7 @@ test("blood lists classify/filter before limit, preserve aliases, dates, orderin
     const corrected = await measuredList(root);
     assert.equal(corrected.some(row => row.id === "evt_target_a"), revision === 2);
     if (revision === 2) assert.equal(corrected[0]?.title, "Corrected target");
-    assert.deepEqual(await readFile(path.join(root, QUERY_DB_RELATIVE_PATH)), database);
+    assert.deepEqual(await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities)), database);
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
     // Explicit entity publication is still required, not silently certified by the list.
     await listCanonicalEntities(root, { limit: null });
@@ -82,7 +82,7 @@ test("blood lists classify/filter before limit, preserve aliases, dates, orderin
     )], ["entities"]);
     assert.equal(JSON.stringify(await measuredList(root)), JSON.stringify(corrected));
     // Compare the next stale read against this last committed entity generation.
-    database = await readFile(path.join(root, QUERY_DB_RELATIVE_PATH));
+    database = await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
   }
 });
 
@@ -99,7 +99,7 @@ test("blood lists isolate unrelated families but reject malformed selected event
   } });
   assert.equal((await getQueryProjectionStatus(root)).exists, false);
   await rm(unrelated); await listCanonicalEntities(root);
-  const before = await readFile(path.join(root, QUERY_DB_RELATIVE_PATH));
+  const before = await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
   await core.withCanonicalWriteLock(root, () => appendFile(path.join(root, shard), "{malformed synthetic event\n"));
   const error = await source.readCanonicalEntityFamilySource(root, "event").then(() => null, (error: unknown) => error);
   assert.ok(error instanceof Error);
@@ -108,7 +108,7 @@ test("blood lists isolate unrelated families but reject malformed selected event
       assert.ok(actual instanceof Error); assert.equal(actual.constructor, error.constructor); assert.equal(actual.message, error.message); return true;
     });
   }
-  assert.deepEqual(await readFile(path.join(root, QUERY_DB_RELATIVE_PATH)), before);
+  assert.deepEqual(await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities)), before);
 });
 
 test("a blood reader captures the locked event generation and remains reentrant with a queued reader", async () => {

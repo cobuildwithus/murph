@@ -1,13 +1,13 @@
 import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { importDeviceBatch, initializeVault } from "@murphai/core";
 import type { MetricPoint } from "@murphai/health-metrics";
-import { withImmediateTransaction } from "@murphai/runtime-state/node";
+import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murphai/runtime-state/node";
 import { afterEach, test } from "vitest";
 
 import { listMetricPoints } from "../src/index.ts";
@@ -15,8 +15,9 @@ import { insertMetricPoints, listStoredMetricPoints } from "../src/projection/me
 import {
   QUERY_PROJECTION_SQLITE_VERSION,
   currentQueryProjectionLocation,
-  ensureQueryProjectionSectionSchema,
-  openQueryProjectionDatabase,
+  publishQueryProjectionSection,
+  openQueryProjectionSection,
+  queryProjectionSectionPath,
   type DatabaseSync,
 } from "../src/projection/schema.ts";
 import { getQueryProjectionStatus } from "../src/query-projection.ts";
@@ -109,13 +110,13 @@ test("a populated v35 file rebuilds to the current schema through an ordinary me
   const expected = await listMetricPoints(root, { limit: null });
   assert.equal(expected.length, 12);
   const location = currentQueryProjectionLocation(root);
-  const old = openQueryProjectionDatabase(location);
+  const old = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "metrics"));
   try { restoreV35MetricTable(old); } finally { old.close(); }
   assert.deepEqual(listStoredMetricPoints(location, { limit: null }), expected);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
   assert.deepEqual(await listMetricPoints(root, { limit: null }), expected);
   assert.deepEqual([...await readFreshQueryProjectionSections(location, await listCanonicalSourceManifest(root))], ["metrics"]);
-  const rebuilt = openQueryProjectionDatabase(location, { readOnly: true });
+  const rebuilt = openQueryProjectionSection(location, "metrics");
   try {
     assert.equal(rebuilt.prepare("PRAGMA user_version").get()?.user_version, QUERY_PROJECTION_SQLITE_VERSION);
     assert.equal(rebuilt.prepare("PRAGMA table_info(query_metric_points)").all()
@@ -130,12 +131,11 @@ test("clustered metric reads match v35 byte for byte across filters, limits and 
   const legacy = currentQueryProjectionLocation(path.join(root, "legacy"));
   const points = Array.from({ length: 240 }, (_, index) => point(index));
   for (const location of [current, legacy]) {
-    const database = openQueryProjectionDatabase(location);
-    ensureQueryProjectionSectionSchema(database, "metrics");
-    try {
-      withImmediateTransaction(database, () => insertMetricPoints(database, points));
-      if (location === legacy) restoreV35MetricTable(database);
-    } finally { database.close(); }
+    publishQueryProjectionSection(location, "metrics", "[]", database => insertMetricPoints(database, points));
+    if (location === legacy) {
+      const database = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "metrics"));
+      try { restoreV35MetricTable(database); } finally { database.close(); }
+    }
   }
   for (const metricKey of [undefined, "steps", "apob", "absent"]) {
     for (const biomarkerKey of [undefined, "biomarker:apob", "absent"]) {
@@ -150,8 +150,7 @@ test("clustered metric reads match v35 byte for byte across filters, limits and 
       }
     }
   }
-  const database = openQueryProjectionDatabase(current, { readOnly: true });
-  ensureQueryProjectionSectionSchema(database, "metrics");
+  const database = openQueryProjectionSection(current, "metrics");
   try {
     const plan = database.prepare(`
       EXPLAIN QUERY PLAN SELECT id, metric_point_json FROM query_metric_points
@@ -170,13 +169,16 @@ test.each([
   { effectiveDate: "2026-09-04" },
   { observedAt: "2026-09-01T18:00:00Z" },
 ])("duplicate IDs across clustered key components still abort publication: %j", async override => {
-  const database = openQueryProjectionDatabase(currentQueryProjectionLocation(await tempRoot()));
-  ensureQueryProjectionSectionSchema(database, "metrics");
+  const location = currentQueryProjectionLocation(await tempRoot());
+  publishQueryProjectionSection(location, "metrics", "[]", () => undefined);
+  const before = await readFile(queryProjectionSectionPath(location, "metrics"));
+  const original = point(0);
+  assert.throws(() => publishQueryProjectionSection(location, "metrics", "[]", database => insertMetricPoints(database, [
+    original, { ...original, ...override },
+  ])), /UNIQUE constraint failed: query_metric_points.id/u);
+  assert.deepEqual(await readFile(queryProjectionSectionPath(location, "metrics")), before);
+  const database = openQueryProjectionSection(location, "metrics");
   try {
-    const original = point(0);
-    assert.throws(() => withImmediateTransaction(database, () => insertMetricPoints(database, [
-      original, { ...original, ...override },
-    ])), /UNIQUE constraint failed: query_metric_points.id/u);
     assert.equal(database.prepare("SELECT count(*) AS count FROM query_metric_points").get()?.count, 0);
     assert.equal(database.prepare("SELECT count(*) AS count FROM query_metric_payloads").get()?.count, 0);
   } finally { database.close(); }

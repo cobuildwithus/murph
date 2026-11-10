@@ -198,7 +198,7 @@ describe('assistant context snapshot device availability', () => {
       const vaultRoot = path.join(parentRoot, 'vault')
       const queryProjectionPath = path.join(
         vaultRoot,
-        '.runtime/projections/query.sqlite',
+        '.runtime/projections',
       )
 
       try {
@@ -269,7 +269,7 @@ describe('assistant context snapshot device availability', () => {
     const vaultRoot = path.join(parentRoot, 'vault')
     const queryProjectionPath = path.join(
       vaultRoot,
-      '.runtime/projections/query.sqlite',
+      '.runtime/projections',
     )
 
     try {
@@ -492,7 +492,7 @@ describe('assistant context snapshot device availability', () => {
       const vaultRoot = path.join(parentRoot, 'vault')
       const queryProjectionPath = path.join(
         vaultRoot,
-        '.runtime/projections/query.sqlite',
+        '.runtime/projections',
       )
 
       try {
@@ -612,7 +612,7 @@ describe('assistant context snapshot device availability', () => {
       const vaultRoot = path.join(parentRoot, 'vault')
       const queryProjectionPath = path.join(
         vaultRoot,
-        '.runtime/projections/query.sqlite',
+        '.runtime/projections',
       )
 
       try {
@@ -758,7 +758,7 @@ describe('assistant context snapshot device availability', () => {
     const vaultRoot = path.join(parentRoot, 'vault')
     const queryProjectionPath = path.join(
       vaultRoot,
-      '.runtime/projections/query.sqlite',
+      '.runtime/projections',
     )
 
     try {
@@ -860,7 +860,7 @@ describe('assistant context snapshot device availability', () => {
     const vaultRoot = path.join(parentRoot, 'vault')
     const queryProjectionPath = path.join(
       vaultRoot,
-      '.runtime/projections/query.sqlite',
+      '.runtime/projections',
     )
 
     try {
@@ -1045,7 +1045,7 @@ describe('assistant context snapshot device availability', () => {
     const { parentRoot, vaultRoot } = await createDeviceMeasurementVault()
     const queryProjectionPath = path.join(
       vaultRoot,
-      '.runtime/projections/query.sqlite',
+      '.runtime/projections',
     )
 
     try {

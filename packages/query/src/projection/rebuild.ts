@@ -1,5 +1,4 @@
 import { withCanonicalWriteLock } from "@murphai/core";
-import { withImmediateTransaction } from "@murphai/runtime-state/node";
 import { startCliPhase, timeCliPhase, timeCliPhaseSync } from "@murphai/runtime-state/node/cli-timing";
 
 import { isDefaultProjectedQueryEntity, isSearchIndexedQueryEntity } from "../query-visibility.ts";
@@ -23,7 +22,6 @@ import { insertQueryEntities } from "./entity-store.ts";
 import {
   encodeSourceManifest,
   readFreshQueryProjectionSections,
-  resetUnsupportedQueryProjection,
 } from "./freshness.ts";
 import {
   extractMetricTargetsFromCanonicalEntities,
@@ -32,11 +30,8 @@ import {
 } from "./metric-store.ts";
 import { insertSearchDocuments } from "./search-store.ts";
 import {
-  QUERY_PROJECTION_SCHEMA_ID,
-  QUERY_PROJECTION_SECTIONS,
   currentQueryProjectionLocation,
-  ensureQueryProjectionSectionSchema,
-  openQueryProjectionDatabase,
+  publishQueryProjectionSection,
   writeMeta,
   type QueryProjectionLocation,
   type QueryProjectionSection,
@@ -59,8 +54,8 @@ export interface PublishQueryProjectionSectionsOptions {
 }
 
 /** The one owner of projection publication. Under the canonical write lock it
- * publishes the requested sections whose certificate is not the current
- * manifest, then runs `capture` before releasing the lock.
+ * replaces the file of each requested section whose certificate is not the
+ * current manifest, then runs `capture` before releasing the lock.
  *
  * Source files and their manifest must describe one committed state, so the
  * existing cross-process writer boundary is held through publication: a query
@@ -170,55 +165,29 @@ async function publishSections(input: {
     })
     : null;
 
-  await resetUnsupportedQueryProjection(location);
-  // Include opening/schema setup and close, even when either throws.
+  // Each section is written as a new file and renamed into place, so one that
+  // fails leaves its previous file, and any section already renamed stays valid
+  // under its own certificate.
   timeCliPhaseSync("query-publication", () => {
-    const database = openQueryProjectionDatabase(location, { create: true });
-    try {
-      // Rows, their dependent structures, the tables themselves and the
-      // certificate commit together or not at all.
-      withImmediateTransaction(database, () => {
-        for (const section of sections) ensureQueryProjectionSectionSchema(database, section);
-        if (entities) {
-          database.exec(`
-            DELETE FROM query_entities;
-            DELETE FROM query_search_document;
-          `);
-          insertQueryEntities(database, entities.projected);
-          insertSearchDocuments(database, entities.searchDocuments);
-          writeMeta(database, "built_at", new Date().toISOString());
-          writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
-        }
-        if (metrics) {
-          database.exec(`
-            DELETE FROM query_metric_points;
-            DELETE FROM query_metric_payloads;
-            DELETE FROM query_metric_targets;
-          `);
-          insertMetricPoints(database, metrics.points);
-          insertMetricTargets(database, metrics.targets);
-        }
-        if (wearableRows) {
-          database.exec(`
-            DELETE FROM query_wearable_summaries;
-            DELETE FROM query_wearable_summary_shapes;
-          `);
-          insertWearableSummaryRows(database, wearableRows);
-        }
-        const certificate = encodeSourceManifest(input.manifest);
-        for (const section of sections) {
-          writeMeta(database, QUERY_PROJECTION_SECTIONS[section].certificateKey, certificate);
-        }
-        writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
+    const certificate = encodeSourceManifest(input.manifest);
+    if (entities) {
+      publishQueryProjectionSection(location, "entities", certificate, (database) => {
+        insertQueryEntities(database, entities.projected);
+        insertSearchDocuments(database, entities.searchDocuments);
+        writeMeta(database, "built_at", new Date().toISOString());
+        writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
       });
-
-      // Entities and metrics replace the large tables. Repack once here, after
-      // commit and under the canonical writer lock. Fresh reads and
-      // wearable-only publications never pay this cost. Explicit search
-      // INTEGER PRIMARY KEY rowids keep the external-content FTS links stable.
-      if (entities || metrics) database.exec("VACUUM");
-    } finally {
-      database.close();
+    }
+    if (metrics) {
+      publishQueryProjectionSection(location, "metrics", certificate, (database) => {
+        insertMetricPoints(database, metrics.points);
+        insertMetricTargets(database, metrics.targets);
+      });
+    }
+    if (wearableRows) {
+      publishQueryProjectionSection(location, "wearables", certificate, (database) => {
+        insertWearableSummaryRows(database, wearableRows);
+      });
     }
   });
 }

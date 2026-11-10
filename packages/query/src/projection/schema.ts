@@ -1,10 +1,12 @@
+import { existsSync, renameSync, rmSync } from "node:fs";
+import path from "node:path";
+
 import {
-  QUERY_DB_RELATIVE_PATH,
-  applySqliteRuntimeMigrations,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
   openSqliteRuntimeDatabase,
   readSqliteRuntimeUserVersion,
   resolveRuntimePaths,
-  tableExists,
+  withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
 import type { QueryProjectionStatus } from "../query-projection-types.ts";
@@ -36,11 +38,12 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 36: Cluster metric points by metric and descending time without a sort index.
 // 37: Rebuild device-first wearable selections and their daily metric provenance.
 // 38: Certify entities, metrics and wearables separately; drop the manifest table.
-export const QUERY_PROJECTION_SQLITE_VERSION = 38;
+// 39: One write-once SQLite file per section, replaced by rename.
+export const QUERY_PROJECTION_SQLITE_VERSION = 39;
 
+/** The absolute vault root whose projection section files are read or published. */
 export interface QueryProjectionLocation {
-  absolutePath: string;
-  dbPath: string;
+  vaultRoot: string;
 }
 
 interface QueryProjectionMetaRow {
@@ -99,59 +102,75 @@ export function parseJsonValue<TValue>(
   }
 }
 
-export function openQueryProjectionDatabase(
-  location: QueryProjectionLocation,
-  options: { create?: boolean; readOnly?: boolean } = {},
-): DatabaseSync {
-  const database = openSqliteRuntimeDatabase(location.absolutePath, { ...options, pageSize: 8192 });
-
-  if (!(options.readOnly ?? false)) {
-    // Rebuilds replace whole tables. Zero retired payloads so compressed
-    // workspace snapshots do not carry bytes from earlier generations.
-    database.exec("PRAGMA secure_delete = ON;");
-    applySqliteRuntimeMigrations(database, {
-      migrations: [{
-        version: QUERY_PROJECTION_SQLITE_VERSION,
-        migrate(candidateDatabase) {
-          // Section tables are created by the publication that fills them.
-          candidateDatabase.exec(`
-            CREATE TABLE IF NOT EXISTS query_meta (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            );
-          `);
-        },
-      }],
-      schemaVersion: QUERY_PROJECTION_SQLITE_VERSION,
-      storeName: "query projection",
-    });
-  }
-
-  return database;
-}
-
-/** A store this build can read and publish into. Which sections it holds, and
- * whether they are fresh, are separate questions answered per section. */
-export function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
-  return (
-    tableExists(database, "query_meta") &&
-    readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID &&
-    readSqliteRuntimeUserVersion(database) === QUERY_PROJECTION_SQLITE_VERSION
-  );
-}
-
 export function currentQueryProjectionLocation(vaultRoot: string): QueryProjectionLocation {
-  const runtimePaths = resolveRuntimePaths(vaultRoot);
+  return { vaultRoot: resolveRuntimePaths(vaultRoot).absoluteVaultRoot };
+}
 
-  return {
-    absolutePath: runtimePaths.queryDbPath,
-    dbPath: QUERY_DB_RELATIVE_PATH,
-  };
+export function queryProjectionSectionPath(
+  location: QueryProjectionLocation,
+  section: QueryProjectionSection,
+): string {
+  return path.join(location.vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS[section]);
+}
+
+/** Open one published section read-only. A section file is never modified
+ * after it is renamed into place, so an open handle is one whole generation. */
+export function openQueryProjectionSection(
+  location: QueryProjectionLocation,
+  section: QueryProjectionSection,
+): DatabaseSync {
+  const sectionPath = queryProjectionSectionPath(location, section);
+  if (!existsSync(sectionPath)) {
+    throw new Error(
+      `Query projection at ${QUERY_PROJECTION_SECTION_RELATIVE_PATHS[section]} is missing. Rebuild the projection and try again.`,
+    );
+  }
+  return openSqliteRuntimeDatabase(sectionPath, { create: false, readOnly: true });
+}
+
+/** Whether this build wrote the open section file. */
+export function isCurrentQueryProjectionSection(database: DatabaseSync): boolean {
+  return readSqliteRuntimeUserVersion(database) === QUERY_PROJECTION_SQLITE_VERSION
+    && readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID;
+}
+
+/** Write one section as a new file, then rename it over the published one.
+ * Rows, certificate and version commit together in the new file, and a reader
+ * opens either the previous whole file or this one. A failure leaves the
+ * published file as it was. */
+export function publishQueryProjectionSection(
+  location: QueryProjectionLocation,
+  section: QueryProjectionSection,
+  certificate: string,
+  insertRows: (database: DatabaseSync) => void,
+): void {
+  const sectionPath = queryProjectionSectionPath(location, section);
+  const buildPath = `${sectionPath}.tmp`;
+  // An interrupted publication leaves its build file behind.
+  rmSync(buildPath, { force: true });
+  // Nothing reads the build file before the rename, so its rollback journal
+  // stays in memory and no sidecar file is written.
+  const database = openSqliteRuntimeDatabase(buildPath, { journalMode: "MEMORY", pageSize: 8192 });
+  try {
+    withImmediateTransaction(database, () => {
+      database.exec(`
+        CREATE TABLE query_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        ${QUERY_PROJECTION_SECTION_SCHEMA_SQL[section]}
+        PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION};
+      `);
+      insertRows(database);
+      writeMeta(database, QUERY_PROJECTION_CERTIFICATE_KEY, certificate);
+      writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
+    });
+  } finally {
+    database.close();
+  }
+  renameSync(buildPath, sectionPath);
 }
 
 export function emptyQueryProjectionStatus(): QueryProjectionStatus {
   return {
-    dbPath: QUERY_DB_RELATIVE_PATH,
+    dbPath: QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities,
     exists: false,
     schemaVersion: null,
     builtAt: null,
@@ -161,26 +180,15 @@ export function emptyQueryProjectionStatus(): QueryProjectionStatus {
   };
 }
 
-export type QueryProjectionSection = "entities" | "metrics" | "wearables";
+export type QueryProjectionSection = keyof typeof QUERY_PROJECTION_SECTION_RELATIVE_PATHS;
 
-interface QueryProjectionSectionDefinition {
-  /** `query_meta` key holding the canonical source manifest this section was built from. */
-  certificateKey: string;
-  schemaSql: string;
-  tables: readonly string[];
-}
+/** `query_meta` key holding the canonical source manifest a section file was built from. */
+export const QUERY_PROJECTION_CERTIFICATE_KEY = "source_manifest";
 
-/** The projection is three independently published sections. Each owns its
- * tables and one certificate, committed in the same transaction as its rows.
- * A section's tables exist only once it has been published, so a reader that
- * passed a freshness check against a store that was since replaced fails its
- * table guard instead of reading another section's empty tables. */
-export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProjectionSectionDefinition> = {
-  entities: {
-    certificateKey: "entity_source_manifest",
-    tables: ["query_entities", "query_search_document", "query_search_fts"],
-    schemaSql: `
-    CREATE TABLE IF NOT EXISTS query_entities (
+/** The projection is three independently published sections, one file each. */
+const QUERY_PROJECTION_SECTION_SCHEMA_SQL: Record<QueryProjectionSection, string> = {
+  entities: `
+    CREATE TABLE query_entities (
       entity_id TEXT PRIMARY KEY,
       sort_rank INTEGER NOT NULL,
       primary_lookup_id TEXT NOT NULL,
@@ -197,10 +205,10 @@ export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProj
       entity_json TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS query_entities_family_idx ON query_entities(family);
-    CREATE INDEX IF NOT EXISTS query_entities_kind_idx ON query_entities(kind);
+    CREATE INDEX query_entities_family_idx ON query_entities(family);
+    CREATE INDEX query_entities_kind_idx ON query_entities(kind);
 
-    CREATE TABLE IF NOT EXISTS query_search_document (
+    CREATE TABLE query_search_document (
       rowid INTEGER PRIMARY KEY,
       record_id TEXT NOT NULL UNIQUE,
       alias_ids_json TEXT NOT NULL,
@@ -219,12 +227,12 @@ export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProj
       structured_text TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS query_search_document_record_type_idx ON query_search_document(record_type);
-    CREATE INDEX IF NOT EXISTS query_search_document_kind_idx ON query_search_document(kind);
-    CREATE INDEX IF NOT EXISTS query_search_document_stream_idx ON query_search_document(stream);
-    CREATE INDEX IF NOT EXISTS query_search_document_experiment_idx ON query_search_document(experiment_slug);
+    CREATE INDEX query_search_document_record_type_idx ON query_search_document(record_type);
+    CREATE INDEX query_search_document_kind_idx ON query_search_document(kind);
+    CREATE INDEX query_search_document_stream_idx ON query_search_document(stream);
+    CREATE INDEX query_search_document_experiment_idx ON query_search_document(experiment_slug);
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS query_search_fts USING fts5(
+    CREATE VIRTUAL TABLE query_search_fts USING fts5(
       title_text,
       body_text,
       tags_text,
@@ -233,18 +241,14 @@ export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProj
       content_rowid = 'rowid',
       tokenize = 'unicode61 remove_diacritics 2 tokenchars ''-_'''
     );
-    `,
-  },
-  metrics: {
-    certificateKey: "metric_source_manifest",
-    tables: ["query_metric_payloads", "query_metric_points", "query_metric_targets"],
-    schemaSql: `
-    CREATE TABLE IF NOT EXISTS query_metric_payloads (
+  `,
+  metrics: `
+    CREATE TABLE query_metric_payloads (
       payload_id INTEGER PRIMARY KEY,
       metric_point_json TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS query_metric_points (
+    CREATE TABLE query_metric_points (
       id TEXT NOT NULL,
       metric_key TEXT NOT NULL,
       biomarker_key TEXT,
@@ -270,11 +274,11 @@ export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProj
       PRIMARY KEY (metric_key, effective_date DESC, observed_at DESC, id)
     ) WITHOUT ROWID;
 
-    CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx
+    CREATE INDEX query_metric_points_biomarker_latest_idx
       ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC)
       WHERE biomarker_key IS NOT NULL;
 
-    CREATE TABLE IF NOT EXISTS query_metric_targets (
+    CREATE TABLE query_metric_targets (
       id TEXT PRIMARY KEY,
       goal_id TEXT NOT NULL,
       metric_key TEXT NOT NULL,
@@ -285,21 +289,17 @@ export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProj
       target_json TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS query_metric_targets_goal_idx ON query_metric_targets(goal_id);
-    CREATE INDEX IF NOT EXISTS query_metric_targets_metric_idx ON query_metric_targets(metric_key);
-    CREATE INDEX IF NOT EXISTS query_metric_targets_biomarker_idx ON query_metric_targets(biomarker_key);
-    `,
-  },
-  wearables: {
-    certificateKey: "wearable_source_manifest",
-    tables: ["query_wearable_summary_shapes", "query_wearable_summaries"],
-    schemaSql: `
-    CREATE TABLE IF NOT EXISTS query_wearable_summary_shapes (
+    CREATE INDEX query_metric_targets_goal_idx ON query_metric_targets(goal_id);
+    CREATE INDEX query_metric_targets_metric_idx ON query_metric_targets(metric_key);
+    CREATE INDEX query_metric_targets_biomarker_idx ON query_metric_targets(biomarker_key);
+  `,
+  wearables: `
+    CREATE TABLE query_wearable_summary_shapes (
       shape_id INTEGER PRIMARY KEY,
       keys_json TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS query_wearable_summaries (
+    CREATE TABLE query_wearable_summaries (
       id TEXT PRIMARY KEY,
       provider_scope_key TEXT NOT NULL,
       provider_scope_json TEXT NOT NULL,
@@ -309,42 +309,14 @@ export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProj
       summary_json TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
+    CREATE INDEX query_wearable_summaries_scope_kind_date_idx
       ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
-    CREATE INDEX IF NOT EXISTS query_wearable_summaries_kind_date_idx
+    CREATE INDEX query_wearable_summaries_kind_date_idx
       ON query_wearable_summaries(summary_kind, summary_date DESC);
-    `,
-  },
+  `,
 };
 
-export const QUERY_PROJECTION_SECTION_NAMES = Object.keys(QUERY_PROJECTION_SECTIONS) as QueryProjectionSection[];
-
-export function ensureQueryProjectionSectionSchema(
-  database: DatabaseSync,
-  section: QueryProjectionSection,
-): void {
-  database.exec(QUERY_PROJECTION_SECTIONS[section].schemaSql);
-}
-
-export function hasQueryProjectionSectionTables(
-  database: DatabaseSync,
-  section: QueryProjectionSection,
-): boolean {
-  return tableExists(database, "query_meta")
-    && QUERY_PROJECTION_SECTIONS[section].tables.every((table) => tableExists(database, table));
-}
-
-export function assertQueryProjectionTables(
-  database: DatabaseSync,
-  location: QueryProjectionLocation,
-  section: QueryProjectionSection,
-): void {
-  if (!hasQueryProjectionSectionTables(database, section)) {
-    throw new Error(
-      `Query projection at ${location.dbPath} is missing required tables. Rebuild the projection and try again.`,
-    );
-  }
-}
+export const QUERY_PROJECTION_SECTION_NAMES = Object.keys(QUERY_PROJECTION_SECTION_SCHEMA_SQL) as QueryProjectionSection[];
 
 export function readMeta(database: DatabaseSync, key: string): string | null {
   const row = database.prepare("SELECT value FROM query_meta WHERE key = ?").get(key);

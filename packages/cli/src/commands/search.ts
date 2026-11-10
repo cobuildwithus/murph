@@ -298,7 +298,7 @@ export function registerSearchCommands(cli: Cli.Cli) {
 
   const projection = Cli.create('projection', {
     description:
-      'Inspect and rebuild the shared local query projection under .runtime/projections/query.sqlite.',
+      'Inspect and rebuild the shared local query projection under .runtime/projections/query-*.sqlite.',
   })
 
   projection.command('status', {

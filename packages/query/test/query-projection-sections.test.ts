@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 import { initializeVault, withCanonicalWriteLock } from "@murphai/core";
@@ -9,17 +11,25 @@ import * as source from "../src/vault-source.ts";
 import * as summaries from "../src/summaries.ts";
 import * as metrics from "../src/metrics/projection.ts";
 import * as candidates from "../src/wearables/candidates.ts";
+import * as metricStore from "../src/projection/metric-store.ts";
 import * as projector from "../src/projection/wearable-summary-projector.ts";
 import { publishQueryProjectionSections } from "../src/projection/rebuild.ts";
 import { readFreshQueryProjectionSections, readProjectionStatus } from "../src/projection/freshness.ts";
 import {
-  currentQueryProjectionLocation, ensureQueryProjectionSectionSchema, hasQueryProjectionSectionTables,
-  openQueryProjectionDatabase, QUERY_PROJECTION_SECTIONS, QUERY_PROJECTION_SECTION_NAMES,
+  currentQueryProjectionLocation, queryProjectionSectionPath, publishQueryProjectionSection,
+  openQueryProjectionSection, QUERY_PROJECTION_SECTION_NAMES, QUERY_PROJECTION_SQLITE_VERSION,
+  QUERY_PROJECTION_SCHEMA_ID, QUERY_PROJECTION_CERTIFICATE_KEY,
   type QueryProjectionSection,
 } from "../src/projection/schema.ts";
 import { listStoredMetricPoints } from "../src/projection/metric-store.ts";
 import { readStoredVaultSource } from "../src/projection/entity-store.ts";
 import { readWearableSummaryRows } from "../src/projection/wearable-summary-store.ts";
+
+const sectionTables = {
+  entities: ["query_entities", "query_search_document", "query_search_fts"],
+  metrics: ["query_metric_payloads", "query_metric_points", "query_metric_targets"],
+  wearables: ["query_wearable_summary_shapes", "query_wearable_summaries"],
+};
 
 const roots: string[] = [];
 const eventPath = "ledger/events/2026/2026-07.jsonl";
@@ -80,25 +90,38 @@ for (const first of QUERY_PROJECTION_SECTION_NAMES) {
     if (Array.isArray(result)) assert.ok(result.length > 0);
     else assert.ok(result && typeof result === "object" && "total" in result && Number(result.total) > 0);
     assert.deepEqual(await fresh(root), [first]);
-    const database = openQueryProjectionDatabase(currentQueryProjectionLocation(root), { readOnly: true });
+    const location = currentQueryProjectionLocation(root);
+    for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+      assert.equal(existsSync(queryProjectionSectionPath(location, section)), section === first);
+    }
+    const database = openQueryProjectionSection(location, first);
     try {
       for (const section of QUERY_PROJECTION_SECTION_NAMES) {
-        assert.equal(hasQueryProjectionSectionTables(database, section), section === first);
-        for (const table of QUERY_PROJECTION_SECTIONS[section].tables) {
+        for (const table of sectionTables[section]) {
           assert.equal(Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table)), section === first);
         }
       }
-      assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'query_source_manifest'").get(), undefined);
+      assert.deepEqual(database.prepare("SELECT key FROM query_meta WHERE key LIKE '%manifest%' ").all().map(row => row.key), [QUERY_PROJECTION_CERTIFICATE_KEY]);
     } finally { database.close(); }
     const status = await query.getQueryProjectionStatus(root);
+    assert.equal(status.exists, true);
+    assert.equal(status.schemaVersion, QUERY_PROJECTION_SCHEMA_ID);
+    assert.equal(status.dbPath, ".runtime/projections/query-entities.sqlite");
     assert.equal(status.fresh, false);
     assert.equal(status.entityCount > 0, first === "entities");
     assert.equal(status.searchDocumentCount > 0, first === "entities");
+    if (first === "entities") assert.ok(status.builtAt);
+    else assert.deepEqual([status.entityCount, status.searchDocumentCount, status.builtAt], [0, 0, null]);
     for (const section of QUERY_PROJECTION_SECTION_NAMES.filter(section => section !== first)) {
       await readers[section](root);
       assert.equal((await query.getQueryProjectionStatus(root)).fresh, (await fresh(root)).length === 3);
     }
     assert.deepEqual(await fresh(root), QUERY_PROJECTION_SECTION_NAMES);
+    const complete = await query.getQueryProjectionStatus(root);
+    assert.equal(complete.exists, true);
+    assert.equal(complete.schemaVersion, QUERY_PROJECTION_SCHEMA_ID);
+    assert.ok(complete.entityCount > 0 && complete.searchDocumentCount > 0 && complete.builtAt);
+    assert.equal(complete.fresh, true);
   });
 }
 
@@ -156,8 +179,9 @@ test("an empty manifest cannot certify absent sections or merely created tables"
   assert.deepEqual(await source.listCanonicalSourceManifest(root), []);
   assert.deepEqual(await fresh(root), []);
   await readers.wearables(root);
-  const database = openQueryProjectionDatabase(currentQueryProjectionLocation(root));
-  try { ensureQueryProjectionSectionSchema(database, "entities"); } finally { database.close(); }
+  const database = new DatabaseSync(queryProjectionSectionPath(currentQueryProjectionLocation(root), "entities"));
+  try { database.exec("CREATE TABLE query_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"); }
+  finally { database.close(); }
   assert.deepEqual(await fresh(root), ["wearables"]);
   assert.equal((await query.getQueryProjectionStatus(root)).fresh, false);
   await readers.entities(root);
@@ -218,33 +242,140 @@ test("forced publication after partial generations equals a fresh full store, ta
   // A copied partial cache retains independent generations without certifying
   // the stale entity rows. The source manifest comes from unchanged canonicals.
   const restored = currentQueryProjectionLocation(await tempRoot());
-  await mkdir(path.dirname(restored.absolutePath), { recursive: true });
-  await copyFile(currentQueryProjectionLocation(root).absolutePath, restored.absolutePath);
+  for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+    const destination = queryProjectionSectionPath(restored, section);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(queryProjectionSectionPath(currentQueryProjectionLocation(root), section), destination);
+  }
   const manifest = await source.listCanonicalSourceManifest(root);
   assert.deepEqual([...await readFreshQueryProjectionSections(restored, manifest)], ["metrics", "wearables"]);
   assert.equal((await readProjectionStatus(restored, manifest))?.fresh, false);
   await query.rebuildQueryProjection(root);
   const reference = currentQueryProjectionLocation(await tempRoot());
   await publishQueryProjectionSections(root, QUERY_PROJECTION_SECTION_NAMES, () => undefined, { location: reference, force: true });
-  const actual = openQueryProjectionDatabase(currentQueryProjectionLocation(root), { readOnly: true });
-  const expected = openQueryProjectionDatabase(reference, { readOnly: true });
-  try {
-    for (const table of QUERY_PROJECTION_SECTION_NAMES.flatMap(section => QUERY_PROJECTION_SECTIONS[section].tables)) {
-      const order = table === "query_metric_points" ? "metric_key, effective_date DESC, observed_at DESC, id" : "rowid";
-      assert.deepEqual(actual.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(),
-        expected.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(), table);
-    }
-  } finally { actual.close(); expected.close(); }
+  for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+    const actual = openQueryProjectionSection(currentQueryProjectionLocation(root), section);
+    const expected = openQueryProjectionSection(reference, section);
+    try {
+      for (const table of sectionTables[section]) {
+        const order = table === "query_metric_points" ? "metric_key, effective_date DESC, observed_at DESC, id" : "rowid";
+        assert.deepEqual(actual.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(),
+          expected.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(), table);
+      }
+    } finally { actual.close(); expected.close(); }
+  }
 });
 
-test("stored readers fail closed when their section tables are missing", async () => {
+// A section file gets its tables, rows, certificate and version in one
+// transaction and is never modified, so there is no table-presence check.
+test("a direct read of an unpublished section fails closed", async () => {
   const { root } = await fixture();
   const location = currentQueryProjectionLocation(root);
   await readers.wearables(root);
-  assert.throws(() => readStoredVaultSource(location), /missing required tables/u);
-  assert.throws(() => listStoredMetricPoints(location, {}), /missing required tables/u);
-  const database = openQueryProjectionDatabase(location);
-  try { database.exec("DROP TABLE query_wearable_summary_shapes"); } finally { database.close(); }
+  assert.throws(() => readStoredVaultSource(location), /is missing.*Rebuild the projection/u);
+  assert.throws(() => listStoredMetricPoints(location, {}), /is missing.*Rebuild the projection/u);
+  assert.deepEqual(await fresh(root), ["wearables"]);
+});
+
+
+test("section builds use an in-memory journal, 8192-byte pages and no disk sidecars", async () => {
+  const location = currentQueryProjectionLocation(await tempRoot());
+  const file = queryProjectionSectionPath(location, "entities");
+  publishQueryProjectionSection(location, "entities", "[]", database => {
+    assert.equal(database.prepare("PRAGMA journal_mode").get()?.journal_mode, "memory");
+    assert.equal(database.prepare("PRAGMA page_size").get()?.page_size, 8192);
+    assert.deepEqual(readdirSync(path.dirname(file)), [path.basename(file) + ".tmp"]);
+  });
+  assert.deepEqual(readdirSync(path.dirname(file)), [path.basename(file)]);
+  const database = openQueryProjectionSection(location, "entities");
+  try {
+    assert.equal(database.prepare("PRAGMA user_version").get()?.user_version, QUERY_PROJECTION_SQLITE_VERSION);
+    assert.equal(database.prepare("PRAGMA page_size").get()?.page_size, 8192);
+    assert.equal(database.prepare("SELECT value FROM query_meta WHERE key = ?").get(QUERY_PROJECTION_CERTIFICATE_KEY)?.value, "[]");
+    assert.throws(() => database.exec("DELETE FROM query_meta"), /readonly/u);
+  } finally { database.close(); }
+});
+
+test("interrupted temporary builds are replaced on the next publication", async () => {
+  const location = currentQueryProjectionLocation(await tempRoot());
+  const file = queryProjectionSectionPath(location, "metrics");
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file + ".tmp", "incomplete interrupted build");
+  publishQueryProjectionSection(location, "metrics", "[]", () => undefined);
+  assert.deepEqual(readdirSync(path.dirname(file)), [path.basename(file)]);
+  const database = openQueryProjectionSection(location, "metrics");
+  try { assert.equal(database.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok"); }
+  finally { database.close(); }
+});
+
+test("a later publication failure leaves earlier sections fresh and the failed file byte-identical, skips capture and retries", async () => {
+  const { root, events } = await fixture();
+  await query.rebuildQueryProjection(root);
+  const location = currentQueryProjectionLocation(root);
+  const metricsPath = queryProjectionSectionPath(location, "metrics");
+  const entitiesPath = queryProjectionSectionPath(location, "entities");
+  const previousMetrics = await readFile(metricsPath);
+  const previousEntities = await readFile(entitiesPath);
+  await withCanonicalWriteLock(root, () => appendFile(path.join(root, eventPath), JSON.stringify({
+    ...events[0], value: 9300, lifecycle: { revision: 2 }, recordedAt: "2026-07-12T12:00:00Z",
+  }) + "\n"));
+  const insert = metricStore.insertMetricPoints;
+  const failure = new Error("synthetic metric insertion failure");
+  const fail = vi.spyOn(metricStore, "insertMetricPoints").mockImplementation((...args) => {
+    insert(...args);
+    throw failure;
+  });
+  const capture = vi.fn();
+  // Reversed requests still publish in the canonical entities/metrics order.
+  await assert.rejects(publishQueryProjectionSections(root, ["metrics", "entities"], capture), error => error === failure);
+  assert.equal(capture.mock.calls.length, 0);
+  assert.notDeepEqual(await readFile(entitiesPath), previousEntities);
+  assert.deepEqual(await readFile(metricsPath), previousMetrics);
+  assert.deepEqual(await fresh(root), ["entities"]);
+  assert.equal(listStoredMetricPoints(location, { metricKey: "steps" })[0]?.value, 8000);
+  fail.mockRestore();
+  const entitiesAfter = await readFile(entitiesPath);
+  await publishQueryProjectionSections(root, ["entities", "metrics"], capture);
+  assert.equal(capture.mock.calls.length, 1);
+  assert.deepEqual(await readFile(entitiesPath), entitiesAfter);
+  assert.deepEqual(await fresh(root), ["entities", "metrics"]);
+  assert.equal(listStoredMetricPoints(location, { metricKey: "steps" })[0]?.value, 9300);
+});
+
+for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+  for (const state of ["v38", "corrupt"] as const) {
+    test(`${section} reader replaces a ${state} section without changing other files`, async () => {
+      const { root } = await fixture();
+      await query.rebuildQueryProjection(root);
+      const expected = await readers[section](root);
+      const location = currentQueryProjectionLocation(root);
+      const otherSections = QUERY_PROJECTION_SECTION_NAMES.filter(name => name !== section);
+      const before = await Promise.all(otherSections.map(name => readFile(queryProjectionSectionPath(location, name))));
+      const file = queryProjectionSectionPath(location, section);
+      if (state === "corrupt") await writeFile(file, "synthetic corrupt section");
+      else {
+        const database = new DatabaseSync(file);
+        try { database.exec("PRAGMA user_version = 38"); } finally { database.close(); }
+      }
+      assert.deepEqual(await fresh(root), otherSections);
+      assert.deepEqual(await readers[section](root), expected);
+      assert.deepEqual(await fresh(root), QUERY_PROJECTION_SECTION_NAMES);
+      assert.deepEqual(await Promise.all(otherSections.map(name => readFile(queryProjectionSectionPath(location, name)))), before);
+    });
+  }
+}
+
+test("a legacy shared query.sqlite is ignored and left byte-identical", async () => {
+  const { root } = await fixture();
+  const legacy = path.join(root, ".runtime/projections/query.sqlite");
+  await mkdir(path.dirname(legacy), { recursive: true });
+  const database = new DatabaseSync(legacy);
+  try { database.exec("CREATE TABLE legacy (value TEXT); INSERT INTO legacy VALUES ('synthetic'); PRAGMA user_version = 38"); }
+  finally { database.close(); }
+  const before = await readFile(legacy);
+  assert.equal((await query.getQueryProjectionStatus(root)).exists, false);
   assert.deepEqual(await fresh(root), []);
-  assert.throws(() => readWearableSummaryRows(location), /missing required tables/u);
+  await query.rebuildQueryProjection(root);
+  assert.deepEqual(await fresh(root), QUERY_PROJECTION_SECTION_NAMES);
+  assert.deepEqual(await readFile(legacy), before);
 });

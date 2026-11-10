@@ -2,20 +2,25 @@
 
 ## Mechanism and scope
 
-The source-list path reuses provider rows in the existing query SQLite owner and
+The source-list path reuses provider rows in the query-owned `query-wearables.sqlite` file and
 `query_wearable_summaries` table. One exact canonical manifest in the existing
-`query_meta.wearable_source_manifest` entry certifies the wearable portion
+`query_meta.source_manifest` entry certifies the wearable portion
 independently of global metrics, entities and search. Source reads retain the
 existing canonical lock through freshness checking, stale derivation, atomic
 row/manifest publication and stored-row capture. Repeats reuse those rows through
 the existing codecs and composition path. A full query reuses current wearable
 rows but still owns its required global work.
 
-A partial store has no global tables, rows or global completion marker. Version
-28 protects that state from older global readers across a reset; full schema
-promotion and publication are transactional. A later source-only refresh cannot
-certify stale global work. There is no new database, cache service, dependency,
-background task or canonical source of truth.
+Publishing only wearables leaves the entities and metrics files absent. Each
+section has its own `source_manifest` certificate. Publication builds a complete
+temporary file, closes it, and replaces the published file by rename. A later
+source-only refresh cannot certify stale entities or metrics. The canonical
+vault remains the source of truth.
+
+The harness reads the three section files for current checkouts and retains a
+legacy-layout adapter for comparisons with older checkouts. Its global operation
+measures entity and metric reads followed by the public activity read. The
+historical results below predate section files and do not measure this change.
 
 The comparison uses base `5b4f8ac08d11afb546bd224f276fe85db02f10fe` and the runtime
 implementation committed as `1330259345aa0c4cefad4c1a4a086f7a79402f35` for draft

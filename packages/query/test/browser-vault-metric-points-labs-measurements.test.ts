@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  QUERY_DB_RELATIVE_PATH,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
   openSqliteRuntimeDatabase,
 } from "@murphai/runtime-state/node";
 import { test } from "vitest";
@@ -1100,7 +1100,7 @@ test("query projection rebuild stores shared event and wearable metric points in
     const rebuilt = await rebuildQueryProjection(vaultRoot);
     assert.equal(rebuilt.schemaVersion, "murph.query-projection");
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics), {
       create: false,
       readOnly: true,
     });

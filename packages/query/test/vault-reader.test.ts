@@ -7,14 +7,15 @@ import { test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, VAULT_LAYOUT } from "@murphai/contracts";
 import {
-  QUERY_DB_RELATIVE_PATH,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
   openSqliteRuntimeDatabase,
 } from "@murphai/runtime-state/node";
 
 import { readVault, readVaultRawTolerant, readVaultTolerant } from "../src/model.ts";
 import {
   QUERY_PROJECTION_SCHEMA_ID,
-  ensureQueryProjectionSectionSchema,
+  currentQueryProjectionLocation,
+  publishQueryProjectionSection,
 } from "../src/projection/schema.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
@@ -84,7 +85,7 @@ test("readVaultTolerant builds a read model from sparse canonical layouts", asyn
       true,
     );
     await assert.rejects(
-      () => stat(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH)),
+      () => stat(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities)),
       (error): boolean => (error as NodeJS.ErrnoException).code === "ENOENT",
     );
     await assert.rejects(
@@ -108,7 +109,7 @@ test("readVault invalidates legacy v5 projections before strict reads", async ()
     );
     await writeVaultFile(vaultRoot, assessmentPath, "0");
     await seedLegacyV5QueryProjection(vaultRoot);
-    const priorProjection = await readFile(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
+    const priorProjection = await readFile(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
 
     const absoluteAssessmentPath = path.join(vaultRoot, assessmentPath);
     const before = await stat(absoluteAssessmentPath);
@@ -119,23 +120,23 @@ test("readVault invalidates legacy v5 projections before strict reads", async ()
       () => readVault(vaultRoot),
       /Canonical vault source ledger\/assessments\/2026\/2026-04\.jsonl:1 is invalid/u,
     );
-    assert.deepEqual(await readFile(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH)), priorProjection,
-      "strict source failure must precede destructive version reset");
+    assert.deepEqual(await readFile(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities)), priorProjection,
+      "strict source failure must leave the published file untouched");
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });
 
 async function seedLegacyV5QueryProjection(vaultRoot: string): Promise<void> {
+  publishQueryProjectionSection(currentQueryProjectionLocation(vaultRoot), "entities", "[]", () => undefined);
   const database = openSqliteRuntimeDatabase(
-    path.join(vaultRoot, QUERY_DB_RELATIVE_PATH),
+    path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities),
     { create: true },
   );
 
   try {
-    database.exec(`CREATE TABLE query_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    database.exec(`DELETE FROM query_meta;
       CREATE TABLE query_source_manifest (relative_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, mtime_ms REAL NOT NULL);`);
-    ensureQueryProjectionSectionSchema(database, "entities");
     database.exec("PRAGMA user_version = 5;");
     database.prepare(`
       INSERT INTO query_meta (key, value)

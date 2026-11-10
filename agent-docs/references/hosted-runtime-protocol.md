@@ -4222,8 +4222,8 @@ but never makes it portable; invalid capture metadata fails snapshot planning
 closed. Idle maintenance separately gives unprotected video a zero-length
 retention window, preserving descriptors and parser derivatives while the
 canonical retention transaction appends the tombstone and deletes the bytes.
-The one derived-cache exception is the exact query SQLite triplet
-`.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
+The one derived-cache exception is the three published query SQLite section files
+`.runtime/projections/query-{entities,metrics,wearables}.sqlite`: carrying it avoids a foreground
 canonical rescan after a cold restore, while normal source-manifest validation
 still discards and rebuilds stale copies. New archives use the POSIX PAX format
 so canonical source-file subsecond mtimes survive restore and keep an otherwise

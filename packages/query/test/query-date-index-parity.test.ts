@@ -1,3 +1,4 @@
+import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -7,7 +8,7 @@ import { addMeal, initializeVault } from "@murphai/core";
 import { test } from "vitest";
 
 import { listStoredCanonicalEntities } from "../src/projection/entity-store.ts";
-import { currentQueryProjectionLocation, openQueryProjectionDatabase } from "../src/projection/schema.ts";
+import { currentQueryProjectionLocation, queryProjectionSectionPath } from "../src/projection/schema.ts";
 import { searchQueryProjection } from "../src/projection/search-store.ts";
 import { rebuildQueryProjection } from "../src/query-projection.ts";
 
@@ -25,7 +26,7 @@ test("date-filtered entity and FTS reads retain results without standalone date 
       await addMeal({ vaultRoot: root, occurredAt: `2026-09-${day}T12:00:00Z`, note: `Synthetic noodles ${day}` });
     }
     await rebuildQueryProjection(root);
-    const database = openQueryProjectionDatabase(location);
+    const database = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "entities"));
     try {
       for (const [table, column] of unusedIndexes) {
         database.exec(`CREATE INDEX ${table}_${column}_idx ON ${table}(${column})`);
@@ -45,7 +46,7 @@ test("date-filtered entity and FTS reads retain results without standalone date 
     const withIndexes = read();
     assert.deepEqual(withIndexes.map(result => result.entities.length), [4, 3, 3, 2]);
     assert.deepEqual(withIndexes.map(result => result.search.hits.length), [4, 3, 3, 2]);
-    const candidate = openQueryProjectionDatabase(location);
+    const candidate = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "entities"));
     try {
       const plans = [
         "SELECT entity_json FROM query_entities WHERE COALESCE(date, substr(occurred_at, 1, 10)) >= '2026-09-02' ORDER BY COALESCE(date, substr(occurred_at, 1, 10)) DESC, occurred_at DESC, sort_rank ASC",

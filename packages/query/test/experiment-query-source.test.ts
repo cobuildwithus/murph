@@ -52,7 +52,7 @@ test("direct experiment source matches SQLite filtering, ordering and safe metri
   const actual = filters.map(filter => source.listMetricPoints(filter));
   assert.ok(actual[1]!.length > 0);
   assert.ok(source.readModel.entities.length < 12, "hidden observations must stay hidden");
-  assert.equal(existsSync(path.join(root, ".runtime/projections/query.sqlite")), false);
+  assert.equal(existsSync(path.join(root, ".runtime/projections")), false);
   assert.deepEqual(source.readModel, await readVault(root));
   for (const [index, filter] of filters.entries()) {
     assert.deepEqual(actual[index], await listMetricPointsBatchRuntime(root, filter));
@@ -73,6 +73,6 @@ test("each experiment read sees corrections and deletions while its lazy metrics
   await appendFile(shard, JSON.stringify({ ...events[1], recordedAt: "2026-07-03T00:00:00Z", lifecycle: { revision: 3, state: "deleted" } }) + "\n");
   const deleted = await readExperimentQuerySource(root);
   assert.ok(!deleted.listMetricPoints(filters).some(point => point.value === 65));
-  assert.equal(existsSync(path.join(root, ".runtime/projections/query.sqlite")), false);
+  assert.equal(existsSync(path.join(root, ".runtime/projections")), false);
   assert.deepEqual(deleted.listMetricPoints(filters), await listMetricPointsBatchRuntime(root, filters));
 });

@@ -109,8 +109,9 @@ observations are display-grade. Seed validation requires all three providers to
 be recognized by the real wearable source-health projector. Repeated reads include
 kind, date, tag, experiment and limit selection.
 
-Each scenario starts without query SQLite or WAL/SHM; canonical files and mtimes
-stay unchanged. Workers run sequentially, never concurrently against the shared
+Each scenario starts without the three published query section files; canonical
+files and mtimes stay unchanged. Comparisons with older checkouts also remove
+their legacy cache from the disposable fixture. Workers run sequentially, never concurrently against the shared
 derived files. No earlier scenario can warm one revision's global projector.
 Both revisions share the **same fixture path**, preserving exact
 full-envelope JSON SHA256, UTF-8 byte length and count across every pair. No output

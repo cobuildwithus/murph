@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { goalMetricTargetSchema } from "@murphai/contracts";
 import { initializeVault, upsertGoal } from "@murphai/core";
-import { openSqliteRuntimeDatabase, QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { openSqliteRuntimeDatabase, QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { describe, expect, it } from "vitest";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { parseGoalMetricTargets } from "../src/metrics/goals.ts";
@@ -88,7 +88,7 @@ describe("canonical goal target interpretation", () => {
       const canonicalPath = path.join(vaultRoot, saved.record.document.relativePath);
       const before = await readFile(canonicalPath, "utf8");
       await rebuildQueryProjection(vaultRoot);
-      const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), { create: false });
+      const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics), { create: false });
       try {
         database.prepare("UPDATE query_metric_targets SET target_json = ?").run(JSON.stringify(target));
         database.exec("PRAGMA user_version = 26;");

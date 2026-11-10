@@ -7,7 +7,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, test, vi } from "vitest";
 import * as core from "@murphai/core";
-import { withImmediateTransaction } from "@murphai/runtime-state/node";
+import * as runtimeState from "@murphai/runtime-state/node";
 import * as freshness from "../src/projection/freshness.ts";
 import * as shapeStore from "../src/projection/wearable-summary-shapes.ts";
 import * as ordinaryRuntime from "../src/query-projection.ts";
@@ -25,8 +25,9 @@ import { readVaultSourceStrict } from "../src/vault-source.ts";
 import { composePublicWearableSummaryBundleFromStoredRows } from "../src/projection/wearable-summary-compose.ts";
 import {
   currentQueryProjectionLocation,
-  hasCurrentQueryProjectionSchema,
-  hasQueryProjectionSectionTables,
+  isCurrentQueryProjectionSection,
+  queryProjectionSectionPath,
+  type QueryProjectionSection,
   QUERY_PROJECTION_SECTION_NAMES,
   QUERY_PROJECTION_SQLITE_VERSION,
 } from "../src/projection/schema.ts";
@@ -116,29 +117,40 @@ const globalTables = [
 ] as const;
 
 function inspectProjection(root: string) {
-  const database = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath, { readOnly: true });
+  const location = currentQueryProjectionLocation(root);
+  const global = new Map<string, unknown[]>();
+  const globalMeta: unknown[] = [];
+  for (const section of ["entities", "metrics"] as const) {
+    const file = queryProjectionSectionPath(location, section);
+    if (!existsSync(file)) continue;
+    const database = new DatabaseSync(file, { readOnly: true });
+    try {
+      for (const table of globalTables) {
+        if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
+          global.set(table, database.prepare(table === "query_metric_points"
+            ? "SELECT * FROM query_metric_points ORDER BY metric_key, effective_date DESC, observed_at DESC, id"
+            : `SELECT rowid, * FROM ${table} ORDER BY rowid`).all());
+        }
+      }
+      globalMeta.push({ section, meta: database.prepare("SELECT * FROM query_meta ORDER BY key").all() });
+    } finally { database.close(); }
+  }
+  const database = schema.openQueryProjectionSection(location, "wearables");
   try {
-    const existingGlobalTables = globalTables.filter(table =>
-      database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
     return {
-      globalTables: existingGlobalTables,
-      currentSchema: hasCurrentQueryProjectionSchema(database),
-      global: globalTables.map(table => existingGlobalTables.includes(table)
-        ? database.prepare(table === "query_metric_points"
-          ? "SELECT * FROM query_metric_points ORDER BY metric_key, effective_date DESC, observed_at DESC, id"
-          : `SELECT rowid, * FROM ${table} ORDER BY rowid`).all() : []),
-      globalMeta: database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all(),
-      wearableMeta: database.prepare("SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'").get()?.value,
+      globalTables: globalTables.filter(table => global.has(table)),
+      currentSchema: isCurrentQueryProjectionSection(database),
+      global: globalTables.map(table => global.get(table) ?? []),
+      globalMeta,
+      wearableMeta: database.prepare("SELECT value FROM query_meta WHERE key = 'source_manifest'").get()?.value,
       wearable: database.prepare("SELECT * FROM query_wearable_summaries ORDER BY id").all(),
       shapes: database.prepare("SELECT * FROM query_wearable_summary_shapes ORDER BY shape_id").all(),
     };
-  } finally {
-    database.close();
-  }
+  } finally { database.close(); }
 }
 
-function executeSql(root: string, sql: string) {
-  const database = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath);
+function executeSql(root: string, sql: string, section: QueryProjectionSection = "wearables") {
+  const database = new DatabaseSync(queryProjectionSectionPath(currentQueryProjectionLocation(root), section));
   try { database.exec(sql); } finally { database.close(); }
 }
 
@@ -155,7 +167,7 @@ async function publishAllStaleSections(root: string) {
 async function forceFullReference(root: string) {
   // Force independent full materialization rather than reusing the candidate's
   // partial publication. The oracle still uses ordinary stored composition.
-  executeSql(root, "DELETE FROM query_meta WHERE key = 'wearable_source_manifest'");
+  executeSql(root, "DELETE FROM query_meta WHERE key = 'source_manifest'");
   await rebuildQueryProjection(root);
 }
 
@@ -292,7 +304,7 @@ for (const order of ["source-global", "global-source"] as const) {
 test("malformed canonical input preserves the strict error and never serves stale rows", async () => {
   const { root, shard } = await fixture();
   await rebuildQueryProjection(root);
-  const databasePath = currentQueryProjectionLocation(root).absolutePath;
+  const databasePath = queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables");
   const before = await readFile(databasePath);
   await withCanonicalWriteLock(root, () => appendFile(shard, "{malformed canonical record\n"));
   const expected = await readVaultSourceStrict(root).then(() => null, (error: unknown) => error);
@@ -336,30 +348,26 @@ for (const state of ["legacy", "future", "unreadable", "missing-metadata", "corr
     const { root, shard } = await fixture();
     await rebuildQueryProjection(root);
     const expected = storedOracle(root, {});
+    const before = inspectProjection(root);
     const canonicalBefore = await readFile(shard);
-    const databasePath = currentQueryProjectionLocation(root).absolutePath;
+    const databasePath = queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables");
     if (state === "legacy" || state === "future") {
       executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION + (state === "legacy" ? -1 : 1)}`);
     } else if (state === "unreadable") {
       await writeFile(databasePath, "synthetic unreadable index");
     } else if (state === "missing-metadata") {
-      executeSql(root, "DELETE FROM query_meta WHERE key = 'wearable_source_manifest'");
+      executeSql(root, "DELETE FROM query_meta WHERE key = 'source_manifest'");
     } else {
-      executeSql(root, "UPDATE query_meta SET value = '{bad manifest' WHERE key = 'wearable_source_manifest'");
+      executeSql(root, "UPDATE query_meta SET value = '{bad manifest' WHERE key = 'source_manifest'");
     }
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
     const projected = vi.spyOn(projector, "buildWearableSummaryProjectionFromDataset");
     assert.deepEqual(await summarizeWearableSourceHealthRuntime(root), expected);
     assert.equal(projected.mock.calls.length, 1);
     await assertWearablesFresh(root);
-    if (["legacy", "future", "unreadable"].includes(state)) {
-      assert.deepEqual(inspectProjection(root).global, globalTables.map(() => []));
-      assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-    } else {
-      // Only the wearable certificate was corrupt; the unchanged global
-      // manifest still truthfully certifies its previously completed rows.
-      assert.equal((await getQueryProjectionStatus(root)).fresh, true);
-    }
+    assert.deepEqual(inspectProjection(root).global, before.global);
+    assert.deepEqual(inspectProjection(root).globalMeta, before.globalMeta);
+    assert.equal((await getQueryProjectionStatus(root)).fresh, true);
     await publishAllStaleSections(root);
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
     assert.equal(projected.mock.calls.length, 1, "global repair reuses the new wearable generation");
@@ -367,61 +375,7 @@ for (const state of ["legacy", "future", "unreadable", "missing-metadata", "corr
   });
 }
 
-test("an in-flight older global reader fails closed on a partial store after a version reset", async () => {
-  const { root, shard } = await fixture();
-  await withCanonicalWriteLock(root, () => appendFile(shard, JSON.stringify({
-    schemaVersion: "murph.event.v1", id: "evt_version_reset_note", kind: "note", source: "manual",
-    title: "Synthetic version reset note", occurredAt: "2026-05-05T12:00:00Z", recordedAt: "2026-05-05T12:00:00Z",
-  }) + "\n"));
-  await rebuildQueryProjection(root);
-  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
-  const initialEntities = entityStore.readStoredVaultSource(currentQueryProjectionLocation(root)).entities;
-  assert.match(JSON.stringify(initialEntities), /"id":"evt_version_reset_note"/u);
-  // Recreate v37's manifest table and its stored-reader guard. The reader has
-  // passed freshness and pauses before opening its stored-row connection.
-  executeSql(root, `CREATE TABLE query_source_manifest (
-    relative_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, mtime_ms REAL NOT NULL
-  ); PRAGMA user_version = 37`);
-  const legacy = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath);
-  try {
-    const insert = legacy.prepare("INSERT INTO query_source_manifest VALUES (?, ?, ?)");
-    for (const entry of await source.listCanonicalSourceManifest(root)) {
-      insert.run(entry.relativePath, entry.sizeBytes, entry.mtimeMs);
-    }
-  } finally { legacy.close(); }
-  const v37Read = () => {
-    const db = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath, { readOnly: true });
-    try {
-      // Exact required-table set from v37; this guard did not check user_version.
-      for (const table of [...globalTables, "query_source_manifest",
-        "query_wearable_summaries", "query_wearable_summary_shapes"]) {
-        if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
-          throw new Error("missing required tables");
-        }
-      }
-      return db.prepare("SELECT entity_json FROM query_entities ORDER BY sort_rank").all();
-    } finally { db.close(); }
-  };
-  assert.ok(v37Read().length > 0);
-  await summarizeWearableSourceHealthRuntime(root);
-  const location = currentQueryProjectionLocation(root);
-  const database = new DatabaseSync(location.absolutePath, { readOnly: true });
-  try {
-    assert.equal(hasCurrentQueryProjectionSchema(database), true);
-    assert.equal(hasQueryProjectionSectionTables(database, "entities"), false);
-  } finally { database.close(); }
-  assert.throws(v37Read, /missing required tables/u);
-  assert.throws(() => entityStore.readStoredVaultSource(location), /missing required tables/u);
-  assert.deepEqual(inspectProjection(root).globalTables, []);
-  assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-  await publishAllStaleSections(root);
-  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
-  assert.deepEqual(entityStore.readStoredVaultSource(location).entities, initialEntities);
-  // Even a fully published v38 replacement rejects the already-gated v37 read.
-  assert.throws(v37Read, /missing required tables/u);
-});
-
-test("a matching empty manifest and a reused builtAt cannot certify unfinished global tables", async () => {
+test("a matching empty manifest and a reused builtAt cannot certify unpublished or stale global sections", async () => {
   const { root, shard } = await fixture(true);
   await rm(path.join(root, "vault.json"));
   await rm(shard);
@@ -430,7 +384,7 @@ test("a matching empty manifest and a reused builtAt cannot certify unfinished g
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
   await publishAllStaleSections(root);
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
-  executeSql(root, "UPDATE query_meta SET value = '2026-01-01T00:00:00.000Z' WHERE key = 'built_at'");
+  executeSql(root, "UPDATE query_meta SET value = '2026-01-01T00:00:00.000Z' WHERE key = 'built_at'", "entities");
   await withCanonicalWriteLock(root, () => writeFile(shard, JSON.stringify(
     observation("evt_first", "garmin", "2026-05-01", "steps", 8000, "count"),
   ) + "\n"));
@@ -442,24 +396,31 @@ test("a matching empty manifest and a reused builtAt cannot certify unfinished g
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
 });
 
-test("failed wearable metadata publication rolls back rows and metadata and remains retryable", async () => {
+test("failed wearable metadata publication keeps the previous file byte-identical and remains retryable", async () => {
   const { root, shard } = await fixture();
   await rebuildQueryProjection(root);
   await withCanonicalWriteLock(root, () => appendFile(shard, JSON.stringify(
     observation("evt_new_sleep", "oura", "2026-05-09", "totalSleepMinutes", 490, "minutes"),
   ) + "\n"));
   const before = inspectProjection(root);
-  executeSql(root, `CREATE TRIGGER fail_wearable_metadata BEFORE UPDATE ON query_meta
-    WHEN NEW.key = 'wearable_source_manifest' BEGIN
-      SELECT RAISE(ABORT, 'injected wearable publication failure');
-    END;`);
+  const file = queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables");
+  const beforeBytes = await readFile(file);
+  const insert = wearableStore.insertWearableSummaryRows;
+  const fail = vi.spyOn(wearableStore, "insertWearableSummaryRows").mockImplementation((...args) => {
+    insert(...args);
+    args[0].exec(`CREATE TRIGGER fail_wearable_metadata BEFORE INSERT ON query_meta
+      WHEN NEW.key = 'source_manifest' BEGIN
+        SELECT RAISE(ABORT, 'injected wearable publication failure');
+      END;`);
+  });
   let report!: CliTiming;
   await assert.rejects(measuredQuery("wearables sources list", () => summarizeWearableSourceHealthRuntime(root), value => { report = value; }), /injected wearable publication failure/u);
   assertRebuildTiming(report, sourceRebuildPhases, root);
   assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
   assert.deepEqual(inspectProjection(root), before);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-  executeSql(root, "DROP TRIGGER fail_wearable_metadata");
+  assert.deepEqual(await readFile(file), beforeBytes);
+  fail.mockRestore();
   const actual = await summarizeWearableSourceHealthRuntime(root);
   await assertWearablesFresh(root);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
@@ -509,7 +470,7 @@ test("failed global publication preserves the independently current wearable por
 test("corrupt stored activity evidence fails closed rather than falling back to raw health", async () => {
   const { root } = await fixture();
   await summarizeWearableSourceHealthRuntime(root);
-  const database = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath);
+  const database = new DatabaseSync(queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables"));
   try {
     database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE summary_kind = 'activity'")
       .run(createWearableSummaryEncoder(database)("{}"));
@@ -581,8 +542,8 @@ function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhas
 }
 
 async function removeProjection(root: string) {
-  const databasePath = currentQueryProjectionLocation(root).absolutePath;
-  await Promise.all(["", "-wal", "-shm"].map(suffix => rm(databasePath + suffix, { force: true })));
+  await Promise.all(QUERY_PROJECTION_SECTION_NAMES.map(section =>
+    rm(queryProjectionSectionPath(currentQueryProjectionLocation(root), section), { force: true })));
 }
 
 test("full rebuild timing preserves canonical data, search output and freshness", async () => {
@@ -659,11 +620,11 @@ test("rebuild phase boundaries measure actual owners including publication open,
   vi.spyOn(search, "materializeSearchDocuments").mockImplementation((...args) => { advance(29); return documents(...args); });
   const summaries = search.materializeSampleSummarySearchDocuments;
   vi.spyOn(search, "materializeSampleSummarySearchDocuments").mockImplementation((...args) => { advance(31); return summaries(...args); });
-  const open = schema.openQueryProjectionDatabase;
-  vi.spyOn(schema, "openQueryProjectionDatabase").mockImplementation((location, options) => {
-    if (options?.create) advance(37);
-    const database = open(location, options);
-    if (options?.create) {
+  const open = runtimeState.openSqliteRuntimeDatabase;
+  vi.spyOn(runtimeState, "openSqliteRuntimeDatabase").mockImplementation((file, options) => {
+    if (file.endsWith(".tmp")) advance(37);
+    const database = open(file, options);
+    if (file.endsWith(".tmp")) {
       const close = database.close.bind(database);
       vi.spyOn(database, "close").mockImplementation(() => { advance(43); close(); });
     }
@@ -677,7 +638,7 @@ test("rebuild phase boundaries measure actual owners including publication open,
   assert.deepEqual(Object.fromEntries(report.commands[0]!.phases.filter(phase =>
     rebuildPhases.some(name => name === phase.phase)).map(phase => [phase.phase, phase.sumUs])), {
     "query-source-read": 11, "query-wearable-dataset": 13, "query-metric-projection": 46,
-    "query-wearable-summary": 23, "query-search-documents": 60, "query-publication": 121,
+    "query-wearable-summary": 23, "query-search-documents": 60, "query-publication": 281,
   });
   // Nested, not additive: the parent also includes its own unspanned work (17).
   assert.deepEqual(Object.fromEntries(report.commands[0]!.phases.filter(phase =>
@@ -711,11 +672,11 @@ for (const mode of ["full", "wearable-only"] as const) {
       const failure = new Error("PRIVATE_TIMING_FAILURE");
       if (boundary === "source") vi.spyOn(source, "readVaultSourceStrict").mockRejectedValue(failure);
       else {
-        const open = schema.openQueryProjectionDatabase;
-        vi.spyOn(schema, "openQueryProjectionDatabase").mockImplementation((location, options) => {
-          if (options?.create && boundary === "open") throw failure;
-          const database = open(location, options);
-          if (options?.create && boundary === "close") {
+        const open = runtimeState.openSqliteRuntimeDatabase;
+        vi.spyOn(runtimeState, "openSqliteRuntimeDatabase").mockImplementation((file, options) => {
+          if (file.endsWith(".tmp") && boundary === "open") throw failure;
+          const database = open(file, options);
+          if (file.endsWith(".tmp") && boundary === "close") {
             const close = database.close.bind(database);
             vi.spyOn(database, "close").mockImplementation(() => { close(); throw failure; });
           }
@@ -732,11 +693,10 @@ for (const mode of ["full", "wearable-only"] as const) {
       assert.equal(report.commands[0]!.outcome, "error");
       assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
       vi.restoreAllMocks();
-      // Closing failed after the actual close: the already-committed publication
-      // remains committed, just as before instrumentation. Other failures retry.
+      // A close failure prevents rename even after a successful build commit.
       assert.equal((await readFreshQueryProjectionSections(currentQueryProjectionLocation(root),
-        await source.listCanonicalSourceManifest(root))).has("wearables"), boundary === "close");
-      assert.equal((await getQueryProjectionStatus(root)).fresh, mode === "full" && boundary === "close");
+        await source.listCanonicalSourceManifest(root))).has("wearables"), false);
+      assert.equal((await getQueryProjectionStatus(root)).fresh, false);
       await run();
       await assertWearablesFresh(root);
     });
@@ -908,7 +868,7 @@ for (const reader of ordinaryWearableReaders) {
 test("all eight ordinary readers reject malformed canonical input even for empty provider scopes", async () => {
   const { root, shard } = await fixture();
   await rebuildQueryProjection(root);
-  const dbPath = currentQueryProjectionLocation(root).absolutePath;
+  const dbPath = queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables");
   const before = await readFile(dbPath);
   await withCanonicalWriteLock(root, () => appendFile(shard, "{malformed synthetic source\n"));
   const expected = await readVaultSourceStrict(root).then(() => null, (error: unknown) => error);
@@ -1003,11 +963,11 @@ for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable
       if (state === "wearable-only") await summarizeWearableSourceHealthRuntime(root);
     } else if (state === "legacy" || state === "future") {
       executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION + (state === "legacy" ? -1 : 1)}`);
-    } else if (state === "unreadable") await writeFile(currentQueryProjectionLocation(root).absolutePath, "synthetic invalid database");
+    } else if (state === "unreadable") await writeFile(queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables"), "synthetic invalid database");
     else if (state === "schema-id") executeSql(root, "UPDATE query_meta SET value = 'unsupported' WHERE key = 'schema_version'");
-    else if (state === "entity-certificate") executeSql(root, "DELETE FROM query_meta WHERE key = 'entity_source_manifest'");
-    else if (state === "metric-certificate") executeSql(root, "UPDATE query_meta SET value = 'stale' WHERE key = 'metric_source_manifest'");
-    else executeSql(root, "DELETE FROM query_meta WHERE key = 'wearable_source_manifest'");
+    else if (state === "entity-certificate") executeSql(root, "DELETE FROM query_meta WHERE key = 'source_manifest'", "entities");
+    else if (state === "metric-certificate") executeSql(root, "UPDATE query_meta SET value = 'stale' WHERE key = 'source_manifest'", "metrics");
+    else executeSql(root, "DELETE FROM query_meta WHERE key = 'source_manifest'");
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
     const captured = wearableStore.readWearableSummaryRows;
     vi.spyOn(wearableStore, "readWearableSummaryRows").mockImplementation((...args) => {
@@ -1019,9 +979,8 @@ for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable
     assert.equal(phaseCount(report, "query-wait"), 1);
     assert.equal(phaseCount(report, "query-metric-projection") + phaseCount(report, "query-search-documents"), 0);
     await assertWearablesFresh(root);
-    // Repairing only a corrupt wearable certificate can recertify unchanged
-    // completed global work; no other partial/reset case can do so.
-    assert.equal((await getQueryProjectionStatus(root)).fresh, state === "wearable-manifest");
+    // Replacing wearables preserves the independently certified entity and metric files.
+    assert.equal((await getQueryProjectionStatus(root)).fresh, !["missing", "wearable-only", "entity-certificate", "metric-certificate"].includes(state));
     await publishAllStaleSections(root);
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   });
@@ -1081,9 +1040,9 @@ test("a canonical write after the fresh status observation retains the old check
   const { root, shard, events } = await fixture(); await rebuildQueryProjection(root);
   const filters = { providers: ["garmin"] };
   const expected = JSON.stringify(ordinaryStoredOracle(ordinaryWearableReaders[0]!, root, filters));
-  const status = freshness.readProjectionStatus;
-  const check = vi.spyOn(freshness, "readProjectionStatus").mockImplementationOnce(async (...args) => {
-    const observed = await status(...args); assert.equal(observed?.fresh, true);
+  const status = freshness.readFreshQueryProjectionSections;
+  const check = vi.spyOn(freshness, "readFreshQueryProjectionSections").mockImplementationOnce(async (...args) => {
+    const observed = await status(...args); assert.equal(observed.size, 3);
     await withCanonicalWriteLock(root, () => appendFile(shard, JSON.stringify({ ...events[0], value: 9100,
       lifecycle: { revision: 2 }, recordedAt: "2026-05-06T09:00:00Z" }) + "\n"));
     return observed;
@@ -1103,16 +1062,16 @@ test("a canonical write after the fresh status observation retains the old check
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
 });
 
-for (const race of ["version-only", "reset", "missing-table", "corrupt-dictionary"] as const) {
+for (const race of ["version-only", "missing-file", "missing-table", "corrupt-dictionary"] as const) {
   test(`fresh-global ${race} after status retains direct stored-read success/error semantics`, async () => {
     const { root } = await fixture();
     for (const filters of [{}, { providers: [] }]) {
       await removeProjection(root); await rebuildQueryProjection(root);
-      const status = freshness.readProjectionStatus;
-      vi.spyOn(freshness, "readProjectionStatus").mockImplementationOnce(async (...args) => {
-        const observed = await status(...args); assert.equal(observed?.fresh, true);
-        if (race === "version-only" || race === "reset") executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION - 1}`);
-        if (race === "reset") await freshness.resetUnsupportedQueryProjection(currentQueryProjectionLocation(root));
+      const status = freshness.readFreshQueryProjectionSections;
+      vi.spyOn(freshness, "readFreshQueryProjectionSections").mockImplementationOnce(async (...args) => {
+        const observed = await status(...args); assert.equal(observed.size, 3);
+        if (race === "version-only") executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION - 1}`);
+        if (race === "missing-file") await rm(queryProjectionSectionPath(currentQueryProjectionLocation(root), "wearables"));
         if (race === "missing-table") executeSql(root, "DROP TABLE query_wearable_summary_shapes");
         if (race === "corrupt-dictionary") executeSql(root, "UPDATE query_wearable_summary_shapes SET keys_json = '[1]'");
         return observed;
@@ -1144,15 +1103,12 @@ test("fresh-global ordinary read captures dictionary and rows in one SQLite gene
   const next = { ...rows, rows: rows.rows.map(row => ({ ...row, summaryJson: JSON.stringify(Object.fromEntries(
     Object.entries(JSON.parse(row.summaryJson.replace(/8000/gu, "9100"))).reverse(),
   )) })) };
-  const writer = schema.openQueryProjectionDatabase(location);
+  const manifest = freshness.encodeSourceManifest(await source.listCanonicalSourceManifest(root));
   const readShapes = shapeStore.readWearableSummaryShapes;
   const focused = vi.spyOn(rebuild, "readFreshWearableSummaryRows");
   vi.spyOn(shapeStore, "readWearableSummaryShapes").mockImplementationOnce(database => {
     const shapes = readShapes(database);
-    withImmediateTransaction(writer, () => {
-      writer.exec("DELETE FROM query_wearable_summaries; DELETE FROM query_wearable_summary_shapes;");
-      wearableStore.insertWearableSummaryRows(writer, next.rows);
-    });
+    schema.publishQueryProjectionSection(location, "wearables", manifest, writer => wearableStore.insertWearableSummaryRows(writer, next.rows));
     return shapes;
   });
   try {
@@ -1161,7 +1117,7 @@ test("fresh-global ordinary read captures dictionary and rows in one SQLite gene
     assert.notDeepEqual(after, before);
     assert.deepEqual(await ordinaryRuntime.summarizeWearableDayRuntime(root, "2026-05-01", filters), after);
     assert.equal(focused.mock.calls.length, 0);
-  } finally { writer.close(); }
+  } finally { vi.restoreAllMocks(); }
 });
 
 test("ordinary timing charges extra global preflight separately from the locked focused recheck", async () => {
@@ -1169,19 +1125,19 @@ test("ordinary timing charges extra global preflight separately from the locked 
   let tick = 0n; vi.spyOn(process.hrtime, "bigint").mockImplementation(() => tick);
   const manifest = source.listCanonicalSourceManifest;
   vi.spyOn(source, "listCanonicalSourceManifest").mockImplementation(async (...args) => { tick += 11_000n; return manifest(...args); });
-  const status = freshness.readProjectionStatus;
-  vi.spyOn(freshness, "readProjectionStatus").mockImplementation(async (...args) => { tick += 13_000n; return status(...args); });
+  const publicStatus = vi.spyOn(freshness, "readProjectionStatus");
   const wearableStatus = freshness.readFreshQueryProjectionSections;
   vi.spyOn(freshness, "readFreshQueryProjectionSections").mockImplementation(async (...args) => { tick += 17_000n; return wearableStatus(...args); });
   let report!: CliTiming;
   const read = () => measuredQuery("wearables latest", () => ordinaryRuntime.summarizeWearableLatestRuntime(root), value => { report = value; });
   await read(); assertRebuildTiming(report, [], root);
+  assert.equal(publicStatus.mock.calls.length, 0);
   const phase = (name: CliTimingPhase) => report.commands[0]!.phases.find(row => row.phase === name)!;
-  assert.equal(phase("query-freshness").count, 2); assert.equal(phase("query-freshness").sumUs, 52);
-  assert.equal(phase("query-manifest").sumUs, 22); assert.equal(phase("query-status").sumUs, 30);
+  assert.equal(phase("query-freshness").count, 2); assert.equal(phase("query-freshness").sumUs, 56);
+  assert.equal(phase("query-manifest").sumUs, 22); assert.equal(phase("query-status").sumUs, 34);
   await rebuildQueryProjection(root);
   await read(); assertRebuildTiming(report, [], root);
-  assert.equal(phase("query-freshness").count, 1); assert.equal(phase("query-freshness").sumUs, 24);
+  assert.equal(phase("query-freshness").count, 1); assert.equal(phase("query-freshness").sumUs, 28);
   assert.equal(phaseCount(report, "query-wait"), 0);
   const failure = new Error("synthetic preflight failure");
   vi.spyOn(source, "listCanonicalSourceManifest").mockRejectedValueOnce(failure);
@@ -1199,7 +1155,7 @@ test("legacy confidence prose is ignored without rebuilding and disappears on we
   const expected = composePublicWearableSummaryBundleFromStoredRows({
     rows, providers: [], providerFilterWasProvided: false,
   }, {});
-  const database = new DatabaseSync(location.absolutePath);
+  const database = new DatabaseSync(queryProjectionSectionPath(location, "wearables"));
   try {
     const encode = createWearableSummaryEncoder(database);
     const update = database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?");
