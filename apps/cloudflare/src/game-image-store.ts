@@ -22,8 +22,8 @@ export interface GameImagesBinding {
 }
 
 export const GAME_IMAGE_DELIVERY_SECONDS = 300;
-export type GameImageVariant = "thumb" | "avatar" | "photo";
-const VARIANTS: Record<GameImageVariant, string> = { thumb: "gamethumb", avatar: "gameavatar", photo: "gamephoto" };
+export type GameImageVariant = "face" | "thumb" | "avatar" | "photo";
+const VARIANTS: Record<GameImageVariant, string> = { face: "gameface", thumb: "gamethumb", avatar: "gameavatar", photo: "gamephoto" };
 
 export function isGameImageVariant(value: string | null): value is GameImageVariant {
   return value !== null && Object.hasOwn(VARIANTS, value);

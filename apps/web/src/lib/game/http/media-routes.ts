@@ -37,7 +37,7 @@ export async function uploadGameMedia(input: { memberId: string; request: Reques
  * upload, or another player's entry once the game view would show it).
  * Locked and missing media look the same.
  */
-export async function serveGameMedia(input: { key: string; memberId: string; delivery?: boolean; variant?: "thumb" | "avatar" | "photo"; multiplayer?: boolean }): Promise<Response> {
+export async function serveGameMedia(input: { key: string; memberId: string; delivery?: boolean; variant?: "face" | "thumb" | "avatar" | "photo"; multiplayer?: boolean }): Promise<Response> {
   if (!(await isViewable(input.memberId, input.key, input.multiplayer))) throw mediaNotFound();
   requireStorage();
   if (input.delivery && servesSignedGameMedia()) {

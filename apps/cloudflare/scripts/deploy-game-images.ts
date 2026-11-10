@@ -31,17 +31,20 @@ export async function assertPrivateGameImageVariants(
       throw new Error("Game Images admission failed: account variant bypasses private delivery.");
     }
   }
-  for (const [id, pixels] of [["gamethumb", 240], ["gameavatar", 600], ["gamephoto", 1600]] as const) {
-    if (!isRequiredRendition(variants[id], id, pixels)) {
+  for (const [id, width, height, fit] of [
+    ["gameface", 240, 240, "crop"], ["gamethumb", 480, 640, "crop"],
+    ["gameavatar", 600, 600, "scale-down"], ["gamephoto", 1600, 1600, "scale-down"],
+  ] as const) {
+    if (!isRequiredRendition(variants[id], id, width, height, fit)) {
       throw new Error("Game Images admission failed: required private renditions are missing or misconfigured.");
     }
   }
 }
 
-function isRequiredRendition(variant: unknown, id: string, pixels: number): boolean {
+function isRequiredRendition(variant: unknown, id: string, width: number, height: number, fit: string): boolean {
   return isRecord(variant) && variant.id === id && isRecord(variant.options)
-    && variant.options.width === pixels && variant.options.height === pixels
-    && variant.options.fit === "scale-down" && variant.options.metadata === "none";
+    && variant.options.width === width && variant.options.height === height
+    && variant.options.fit === fit && variant.options.metadata === "none";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

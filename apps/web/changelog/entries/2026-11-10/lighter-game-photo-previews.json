@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "lighter-game-photo-previews",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Better-sized photo previews in Games",
+    "summary": "Photo previews fit the tall frames on your Games cards, keeping wide photos clear after cropping.",
+    "details": "Opening a game still uses larger photos for the recap. Your photos stay private.",
+    "relevanceTags": [
+      "games",
+      "photos"
+    ],
+    "sourcePullRequests": [
+      4808
+    ]
+  }
+}

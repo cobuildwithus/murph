@@ -3083,18 +3083,25 @@ alphanumeric provider IDs exactly; hyphenated names are rejected by Images:
 
 | ID | Width / height | Fit | Metadata | Never require signed URLs |
 | --- | --- | --- | --- | --- |
-| `gamethumb` | 240 / 240 | scale-down | none | false |
+| `gameface` | 240 / 240 | crop | none | false |
+| `gamethumb` | 480 / 640 | crop | none | false |
 | `gameavatar` | 600 / 600 | scale-down | none | false |
 | `gamephoto` | 1600 / 1600 | scale-down | none | false |
 
-History card and film-band frames use `thumb` (`gamethumb`). Provision it in the
+Faces use `face` (`gameface`); photo previews use `thumb` (`gamethumb`).
+The photo crop matches 3:4 history frames, preserves enough vertical detail
+for landscape sources, and covers expanded frames on the unfolded display.
+Rendered cards use uncropped `avatar` or `photo`. Provision both new variants in the
 bound account through an authorized Cloudflare operator before deploying the
 Worker that accepts `thumb`, then deploy Web's history signer. With the intended
 account selected in the authenticated `cf` profile, the manual provisioning step is:
 
 ```bash
+cf images variants create --id gameface \
+  --options-width 240 --options-height 240 --options-fit crop \
+  --options-metadata none --never-require-signed-urls=false
 cf images variants create --id gamethumb \
-  --options-width 240 --options-height 240 --options-fit scale-down \
+  --options-width 480 --options-height 640 --options-fit crop \
   --options-metadata none --never-require-signed-urls=false
 ```
 
@@ -3116,7 +3123,7 @@ delivery and retains the stable media URL without a signed delivery; the app can
 still request `variant=avatar` from the media route. Existing `avatar` and `photo`
 requests remain supported. An accepting Worker without `gamethumb` provisioned
 is not safe: signing need not detect a missing CDN variant. The deploy preflight
-requires all three renditions before allowing that Worker to serve.
+requires all four renditions before allowing that Worker to serve.
 
 Inspect **all** variants in the bound account: any `neverRequireSignedURLs: true`
 variant bypasses image-level privacy, even if this app never signs that variant.

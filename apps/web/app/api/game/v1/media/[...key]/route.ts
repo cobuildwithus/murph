@@ -14,7 +14,7 @@ export const GET = withJsonError(async (
   const { key } = await context.params;
   const query = new URL(request.url).searchParams;
   const variant = query.get("variant") ?? "photo";
-  if (variant !== "thumb" && variant !== "avatar" && variant !== "photo") throw invalidGameRequest("Unknown image variant.");
+  if (variant !== "face" && variant !== "thumb" && variant !== "avatar" && variant !== "photo") throw invalidGameRequest("Unknown image variant.");
   return serveGameMedia({ key: key.map(decodeSegment).join("/"), memberId,
     multiplayer: hasGameMultiplayer(request), delivery: query.get("delivery") === "signed", variant });
 });

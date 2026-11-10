@@ -163,13 +163,13 @@ export async function readGameMedia(key: string): Promise<{ bytes: Uint8Array; c
 
 /** Null on local stacks; callers then serve local bytes. This function
  * never grants access: the route must authorize the viewer first. */
-export async function gameMediaDelivery(key: string, variant: "thumb" | "avatar" | "photo") {
+export async function gameMediaDelivery(key: string, variant: "face" | "thumb" | "avatar" | "photo") {
   const store = requireStore();
   if (store.kind === "disk") return null;
   return hostedDelivery(store.control, key, variant);
 }
 
-async function hostedDelivery(control: CloudflareHostedControlClient, key: string, variant: "thumb" | "avatar" | "photo") {
+async function hostedDelivery(control: CloudflareHostedControlClient, key: string, variant: "face" | "thumb" | "avatar" | "photo") {
   const { mediaId, owner } = hostedName(key);
   const request = { mediaId, userId: owner, variant };
   let delivery = await control.gameImageDelivery(request);

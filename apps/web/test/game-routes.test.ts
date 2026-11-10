@@ -970,7 +970,7 @@ describe("weekly game routes", () => {
       expect(Buffer.from(await unlocked.arrayBuffer())).toEqual(JPEG);
     });
 
-    it.each(["thumb", "avatar", "photo"])("accepts the %s signed media variant after viewer authorization", async (variant) => {
+    it.each(["face", "thumb", "avatar", "photo"])("accepts the %s signed media variant after viewer authorization", async (variant) => {
       const key = `game/${LEO}/${"a".repeat(64)}.jpg`;
       vi.stubEnv("VERCEL_ENV", "production");
       const delivery = { url: `https://imagedelivery.net/account/image/game${variant}?exp=9999999999&sig=synthetic`, expiresAt: "2030-01-01T00:00:00.000Z" };
