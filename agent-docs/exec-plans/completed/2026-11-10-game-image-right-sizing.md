@@ -1,6 +1,6 @@
 # Right-size app image delivery and decoding
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -47,8 +47,9 @@ Existing 600px/1600px definitions remain intact. Backend #4808 and iOS #533
 are merged. Protected hosted deployment 42902482615 succeeded with Worker-only
 rollout and production smoke checks, using backend commit
 `8cd536d936d92fc1bc875bf4c528ce4dbfcd0b7e`. Web production admission passed,
-and the production domain was verified serving that same commit. The app's
-full release checks remain pending.
+and the production domain was verified serving that same commit. App build
+1.1.24 (95) passed both release workflows and uploaded successfully on
+2026-11-10 at 22:20:28 UTC, after the backend rollout.
 An older Worker rejects thumb; history preserves stable media links in that case.
 App requests must not ship before both additive Worker and Web contracts are live.
 
@@ -85,6 +86,15 @@ App requests must not ship before both additive Worker and Web contracts are liv
   corrected candidate. A separate merged finite login timeline then failed the
   expired-countdown resend journey; iOS #538 restores the working periodic
   rendering, with all 15 account-access tests passing on CI's iOS 26.5 runtime.
-  Both release suites are running on the final merged candidate
-  `087c912b9d3bc663a45a0ffbe6edd0132849f3ec` before upload.
+  Both release suites passed on final merged candidate
+  `087c912b9d3bc663a45a0ffbe6edd0132849f3ec`: native CI `42908124943`
+  attempt 2 and Games UI `42908130166`. One simulator app termination in the
+  first native CI attempt passed isolated replay and the unchanged full rerun.
+- Xcode 27.2 archived and exported build 95. The host and both extensions
+  passed App Store signature/profile, version, production endpoint, entitlement,
+  privacy-asset and Debug-exclusion checks. One guarded upload returned exit 0,
+  Apple's success marker and no ITMS errors. The iOS submission packet owns
+  the source and IPA hash receipt. Apple processing and internal-group availability
+  remain unverified because the App Store Connect browser requires sign-in.
 - Screenshots, raw diagnostic data and review responses stay out of Git.
+Completed: 2026-11-10
