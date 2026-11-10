@@ -6106,15 +6106,17 @@ heart-rate graph images, never raw samples or other health records. Web still
 authorizes every viewer against the current game/profile rules before the
 Worker issues a five-minute signed capability. The `GAME_IMAGES` binding uses
 provider-assigned UUIDs with `requireSignedURLs: true`; no signing key or Murph
-bearer goes to the native client/CDN respectively. Fixed `gameavatar` (600px)
-and `gamephoto` (1600px) variants strip metadata. All account variants must
-honor signed access; public-bypass variants are prohibited.
+bearer goes to the native client/CDN respectively. Fixed `gameface` (240px square crop), `gamethumb` (480x640px center crop),
+`gameavatar` (600px scale-down) and `gamephoto` (1600px scale-down) variants strip metadata.
+The 3:4 photo preview preserves detail after landscape-to-portrait cropping;
+faces use their own smaller square rendition. Rendered cards retain their whole image. All account
+variants must honor signed access; public-bypass variants are prohibited.
 
 Only a versioned provider UUID/size pointer lives at the existing opaque R2
 namespace (`.image.json`), conditionally created for concurrent retry election.
 The additive member-bound `game-images/{stage,delivery,stat}` control routes
-need no hosted workspace. Native clients request `?delivery=signed&variant=avatar`
-or `photo`; old clients still receive a bounded image-byte proxy. A post sent
+need no hosted workspace. Native clients request `?delivery=signed&variant=thumb`,
+`face`, `avatar` or `photo`; old clients still receive a bounded image-byte proxy. A post sent
 with `?delivery=signed` answers with the same signed `photo` capability on each
 other player's entry that post unlocked (`GameEntryView.delivery`), after the
 same `authorizeMediaRead` check, so the reveal needs no second request; one
@@ -6129,12 +6131,17 @@ retries and rollback. No new Worker route or crypto authority is needed. Local
 stacks keep plain files on disk.
 
 History keeps `mediaUrls` as stable cache identities and adds optional
-`delivery: { url, expiresAt }` to the previews in each person's latest game.
-These use the five-minute `avatar`/`gameavatar` rendition. The HTTP layer applies
+`delivery: { url, expiresAt }` to the previews in each person's or group's latest
+game.
+These use the five-minute `thumb`/`gamethumb` rendition. The HTTP layer applies
 the same media-read authorization after history's existing viewer filters,
 deduplicates content keys and processes six deliveries at once, outside
-transactions. Each six-key batch revalidates current media authority in one
-set-based query, including blocks, profile sharing, reports and visible uses.
+transactions. A failed signing request leaves the stable URL without a delivery,
+including when an older Worker rejects `thumb`; the app can still request `avatar`
+through the media route. Provision `gameface` and `gamethumb` and deploy the accepting Worker
+before Web starts signing history with `thumb`. Each six-key batch revalidates
+current media authority in one set-based query, including blocks, profile
+sharing, reports and visible uses.
 At 50 people and six previews this is at most 300
 normal Worker calls; a missing object uses two calls and a successful legacy
 repair uses four (delivery, legacy read, upload, delivery). Uploader-only batches

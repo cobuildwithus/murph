@@ -4,7 +4,8 @@ import { assertPrivateGameImageVariants } from "../scripts/deploy-game-images.ts
 const source = { CLOUDFLARE_ACCOUNT_ID: "synthetic-account", CLOUDFLARE_API_TOKEN: "synthetic-token" };
 const variant = (id: string, pixels: number) => ({ id, neverRequireSignedURLs: false,
   options: { width: pixels, height: pixels, fit: "scale-down", metadata: "none" } });
-const privateVariants = () => ({ "gameavatar": variant("gameavatar", 600), "gamephoto": variant("gamephoto", 1600) });
+const thumb = () => ({ ...variant("gamethumb", 480), options: { width: 480, height: 640, fit: "crop", metadata: "none" } });
+const privateVariants = () => ({ "gameface": { ...variant("gameface", 240), options: { ...variant("gameface", 240).options, fit: "crop" } }, "gamethumb": thumb(), "gameavatar": variant("gameavatar", 600), "gamephoto": variant("gamephoto", 1600) });
 const response = (variants: unknown) => Response.json({ success: true, result: { variants } });
 
 describe("private game Images deploy admission", () => {
@@ -26,6 +27,13 @@ describe("private game Images deploy admission", () => {
 
   it.each([
     {},
+    { ...privateVariants(), "gameface": undefined },
+    { ...privateVariants(), "gameface": variant("gameface", 120) },
+    { ...privateVariants(), "gamethumb": undefined },
+    { ...privateVariants(), "gamethumb": { ...thumb(), options: { ...thumb().options, height: 240 } } },
+    { ...privateVariants(), "gamethumb": variant("gamethumb", 600) },
+    { ...privateVariants(), "gamethumb": { ...thumb(), options: { ...thumb().options, metadata: "keep" } } },
+    { ...privateVariants(), "gamethumb": { ...thumb(), options: { ...thumb().options, fit: "cover" } } },
     { ...privateVariants(), "gamephoto": variant("gamephoto", 600) },
     { ...privateVariants(), "gameavatar": { ...variant("gameavatar", 600), options: { ...variant("gameavatar", 600).options, metadata: "keep" } } },
   ])("rejects missing or unsafe renditions", async variants => {

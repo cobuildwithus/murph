@@ -688,13 +688,13 @@ describe("weekly game routes", () => {
       expect(await response.json()).toEqual({ ok: true, ...history });
     });
 
-    it("signs history card previews with the avatar variant after media authorization, preserving cache identities", async () => {
+    it("signs history card previews with the thumb variant after media authorization, preserving cache identities", async () => {
       const history = historyFixture(1, 2);
       const previews = history.people[0].games[0].previews;
       // A repeated content key is authorized and signed only once.
       previews[1].mediaUrls = previews[0].mediaUrls;
       mocks.readHistory.mockResolvedValue(history);
-      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      const delivery = { url: "https://imagedelivery.net/account/image/gamethumb?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
       vi.stubEnv("VERCEL_ENV", "production");
       mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
       mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
@@ -707,7 +707,7 @@ describe("weekly game routes", () => {
       expect(mocks.authorizeMediaReads).toHaveBeenCalledTimes(1);
       expect(mocks.authorizeMediaReads).toHaveBeenCalledWith(LEO, expect.arrayContaining([`game/${LEO}/${"0".repeat(64)}.jpg`]), false);
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
-      expect(mocks.control.gameImageDelivery).toHaveBeenCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "avatar" });
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "thumb" });
 
       mocks.authorizeMediaReads.mockResolvedValue(new Set());
       expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
@@ -721,6 +721,54 @@ describe("weekly game routes", () => {
       expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
     });
 
+    it("signs only the latest group game's previews with thumb and preserves them on signing failure", async () => {
+      const games = historyFixture(1, 2).people[0].games;
+      const history: GameHistoryView = { people: [], groups: [{
+        id: "group_synthetic", word: "Walkers", task: "Walk daily", prize: null,
+        record: { won: 0, lost: 0, tied: 2 },
+        games: games.map((game) => ({ ...game, round: 1, players: [], winnerSeats: [], standings: [],
+          previews: game.previews.map((preview) => ({ ...preview, seat: 0 })),
+        })),
+      }] };
+      mocks.readHistory.mockResolvedValue(history);
+      vi.stubEnv("VERCEL_ENV", "production");
+      const delivery = { url: "https://imagedelivery.net/account/image/gamethumb?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
+      expect(result.groups[0].games[0].previews).toEqual(history.groups![0].games[0].previews.map(preview => ({ ...preview, delivery })));
+      expect(result.groups[0].games[1]).toEqual(history.groups![0].games[1]);
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledWith(LEO, expect.any(Array), true);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(6);
+      expect(mocks.control.gameImageDelivery.mock.calls.every(([input]) => input.variant === "thumb")).toBe(true);
+      mocks.control.gameImageDelivery.mockRejectedValue(new Error("synthetic signing outage"));
+      expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
+    });
+
+    it("keeps history usable against an old Worker and still serves the avatar fallback", async () => {
+      const history = historyFixture(1, 1);
+      mocks.readHistory.mockResolvedValue(history);
+      vi.stubEnv("VERCEL_ENV", "production");
+      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => new Headers(init?.headers).get("x-murph-image-variant") === "thumb"
+        ? Response.json({ error: "Game image variant is invalid." }, { status: 400 })
+        : Response.json(delivery));
+      const client = createCloudflareHostedControlClient({ baseUrl: "https://control.example.test", getBearerToken: async () => "synthetic-token", fetchImpl });
+      mocks.control = { gameImageDelivery: vi.fn(client.gameImageDelivery) };
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      const response = await routes.history.GET(new Request(`${BASE}/history`));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, ...history });
+      expect(fetchImpl).toHaveBeenCalledTimes(6);
+      const preview = history.people[0].games[0].previews[0];
+      const key = decodeURIComponent(preview.mediaUrls[0].split("/media/")[1]);
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const fallback = await routes.media.GET(new Request(`http://localhost${preview.mediaUrls[0]}?delivery=signed&variant=avatar`), params({ key: key.split("/") }));
+      expect(fallback.status).toBe(200);
+      expect(await fallback.json()).toEqual(delivery);
+      expect(mocks.control.gameImageDelivery).toHaveBeenLastCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "avatar" });
+    });
+
     it("keeps uploader deliveries when a mixed authorization batch fails", async () => {
       const history = historyFixture(1, 1);
       const other = history.people[0].games[0].previews[1];
@@ -728,7 +776,7 @@ describe("weekly game routes", () => {
       mocks.readHistory.mockResolvedValue(history);
       vi.stubEnv("VERCEL_ENV", "production");
       mocks.authorizeMediaReads.mockRejectedValue(new Error("synthetic database failure"));
-      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      const delivery = { url: "https://imagedelivery.net/account/image/gamethumb?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
       mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
       const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
       expect(result.people[0].games[0].previews).toEqual(history.people[0].games[0].previews
@@ -748,7 +796,7 @@ describe("weekly game routes", () => {
         peak = Math.max(peak, active);
         await new Promise<void>((resolve) => setImmediate(resolve));
         active -= 1;
-        return { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+        return { url: "https://imagedelivery.net/account/image/gamethumb?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
       }) };
       const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(300);
@@ -920,6 +968,30 @@ describe("weekly game routes", () => {
       expect(unlocked.headers.get("content-type")).toBe("image/jpeg");
       expect(unlocked.headers.get("cache-control")).toBe("private, no-store");
       expect(Buffer.from(await unlocked.arrayBuffer())).toEqual(JPEG);
+    });
+
+    it.each(["face", "thumb", "avatar", "photo"])("accepts the %s signed media variant after viewer authorization", async (variant) => {
+      const key = `game/${LEO}/${"a".repeat(64)}.jpg`;
+      vi.stubEnv("VERCEL_ENV", "production");
+      const delivery = { url: `https://imagedelivery.net/account/image/game${variant}?exp=9999999999&sig=synthetic`, expiresAt: "2030-01-01T00:00:00.000Z" };
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.authorizeMediaRead.mockResolvedValue(false);
+      const read = () => routes.media.GET(new Request(`${BASE}/media/${encodeURIComponent(key)}?delivery=signed&variant=${variant}`), params({ key: key.split("/") }));
+      expect((await read()).status).toBe(404);
+      expect(mocks.control.gameImageDelivery).not.toHaveBeenCalled();
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const response = await read();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(delivery);
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({ userId: LEO, mediaId: `${"a".repeat(64)}.jpg`, variant });
+    });
+
+    it("rejects unknown media variants before signing", async () => {
+      mocks.control = { gameImageDelivery: vi.fn() };
+      const response = await routes.media.GET(new Request(`${BASE}/media/x?delivery=signed&variant=public`), params({ key: ["x"] }));
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("Unknown image variant.");
+      expect(mocks.control.gameImageDelivery).not.toHaveBeenCalled();
     });
 
     it("is unavailable on Vercel deployments until deployed storage exists", async () => {

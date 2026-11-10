@@ -1,6 +1,6 @@
 import { CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER, CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
-import { createGameImageStore } from "../../game-image-store.ts";
+import { createGameImageStore, isGameImageVariant } from "../../game-image-store.ts";
 import { json, jsonError, readRequestBodyBytes } from "../../json.ts";
 import { requireHostedGameMediaId } from "../../storage-paths.ts";
 import type { WorkerRouteContext } from "../../worker-routes/shared.ts";
@@ -54,7 +54,7 @@ async function handle(context: WorkerRouteContext, userId: string, operation: ty
     return result ? json(result) : jsonError("Game image not found.", 404);
   }
   const variant = context.request.headers.get("x-murph-image-variant");
-  if (variant !== "avatar" && variant !== "photo") return jsonError("Game image variant is invalid.", 400);
+  if (!isGameImageVariant(variant)) return jsonError("Game image variant is invalid.", 400);
   try {
     const result = await store.delivery(mediaId, variant);
     return result ? new Response(JSON.stringify(result), { headers: {
