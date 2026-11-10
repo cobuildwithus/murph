@@ -265,6 +265,40 @@ describe('GitHub Actions cache trust-boundary guards', () => {
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
+    // The private matrix is skipped only on an explicit "unchanged" result
+    // from the trusted comparison, which itself can never fail the job.
+    const unchangedSkipMutations: Array<[string, string]> = [
+      [
+        "        if: ${{ steps.base-fixtures.outputs.unchanged != 'true' }}\n        env:",
+        "        if: ${{ steps.base-fixtures.outputs.unchanged == 'false' }}\n        env:",
+      ],
+      [
+        "        id: private-app-token\n        if: ${{ steps.base-fixtures.outputs.unchanged != 'true' }}\n",
+        "        id: private-app-token\n        if: ${{ steps.base-fixtures.outcome != 'success' }}\n",
+      ],
+      [
+        '        id: base-fixtures\n        continue-on-error: true\n',
+        '        id: base-fixtures\n',
+      ],
+      [
+        'node scripts/hosted-orchestration-compatibility.mjs compare-base',
+        'node scripts/compare-fixtures.mjs',
+      ],
+      [
+        '      unchanged: ${{ steps.base-fixtures.outputs.unchanged }}',
+        "      unchanged: 'true'",
+      ],
+    ]
+    for (const [original, replacement] of unchangedSkipMutations) {
+      expect(workflow).toContain(original)
+      expect(
+        isAllowedTemporalCompatibilityHandoff(
+          'temporal-compatibility.yml',
+          workflow.replace(original, replacement),
+          'workflow_run handoff trigger',
+        ),
+      ).toBe(false)
+    }
     expect(
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
@@ -306,8 +340,8 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
         workflow.replace(
-          '      - name: Dispatch exact private reader matrix\n        env:\n          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}\n',
-          '      - name: Dispatch exact private reader matrix\n        env:\n',
+          "      - name: Dispatch exact private reader matrix\n        if: ${{ steps.base-fixtures.outputs.unchanged != 'true' }}\n        env:\n          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}\n",
+          "      - name: Dispatch exact private reader matrix\n        if: ${{ steps.base-fixtures.outputs.unchanged != 'true' }}\n        env:\n",
         ),
         'workflow_run handoff trigger',
       ),
@@ -347,8 +381,8 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
         workflow.replace(
-          '      pull-requests: read\n    steps:',
-          '      pull-requests: read\n      statuses: write\n    steps:',
+          '      pull-requests: read\n    outputs:',
+          '      pull-requests: read\n      statuses: write\n    outputs:',
         ),
         'workflow_run handoff trigger',
       ),
@@ -655,8 +689,50 @@ function isAllowedTemporalCompatibilityHandoff(
       'Checkout trusted controller',
     )
     && hasTemporalCompatibilityAppToken(compatibility.steps)
+    && hasUnchangedProducerFixtureSkip(compatibility)
     && workflow.includes('node scripts/hosted-orchestration-compatibility.mjs run')
   )
+}
+
+// The private matrix may be skipped only when the trusted default-branch
+// comparison explicitly reports the PR's producer fixtures as unchanged.
+function hasUnchangedProducerFixtureSkip(compatibility: Record<string, unknown>): boolean {
+  const steps = compatibility.steps
+  const outputs = compatibility.outputs
+  if (!Array.isArray(steps) || !isRecord(outputs)) {
+    return false
+  }
+
+  const indexOfStep = (name: string) =>
+    steps.findIndex((step) => isRecord(step) && step.name === name)
+  const checkoutIndex = indexOfStep('Checkout trusted controller')
+  const compareIndex = indexOfStep('Compare producer fixtures with trusted main')
+  const tokenIndex = indexOfStep('Mint private compatibility token')
+  const dispatchIndex = indexOfStep('Dispatch exact private reader matrix')
+  const compare = steps[compareIndex]
+  const token = steps[tokenIndex]
+  const dispatch = steps[dispatchIndex]
+  if (!isRecord(compare) || !isRecord(token) || !isRecord(dispatch)) {
+    return false
+  }
+
+  const onlyWhenChanged = "${{ steps.base-fixtures.outputs.unchanged != 'true' }}"
+  const skipConditions = steps.filter((step) =>
+    isRecord(step) && typeof step.if === 'string' && step.if.includes('base-fixtures')
+  )
+  return checkoutIndex >= 0
+    && checkoutIndex < compareIndex
+    && compareIndex < tokenIndex
+    && tokenIndex < dispatchIndex
+    && compare.id === 'base-fixtures'
+    && compare['continue-on-error'] === true
+    && compare.if === undefined
+    && typeof compare.run === 'string'
+    && compare.run.startsWith('node scripts/hosted-orchestration-compatibility.mjs compare-base ')
+    && token.if === onlyWhenChanged
+    && dispatch.if === onlyWhenChanged
+    && skipConditions.length === 2
+    && outputs.unchanged === '${{ steps.base-fixtures.outputs.unchanged }}'
 }
 
 function hasTemporalCompatibilityAppToken(value: unknown): boolean {

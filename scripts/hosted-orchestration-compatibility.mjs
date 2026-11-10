@@ -233,6 +233,26 @@ export function inspectProducerFixtures(value) {
   };
 }
 
+// The private readers only parse these fixtures, and every main commit sends
+// main's fixtures to the same readers at release admission. A pull request
+// whose fixtures equal the ones this trusted default-branch checkout builds
+// therefore has nothing new for the readers to prove.
+export async function producerFixturesMatchTrustedBase(
+  candidate,
+  loadTrustedBaseFixtures = loadTrustedBaseProducerFixtures,
+) {
+  const candidateDigest = inspectProducerFixtures(candidate).digest;
+  const base = inspectProducerFixtures(JSON.stringify(await loadTrustedBaseFixtures()));
+  return candidateDigest === base.digest;
+}
+
+async function loadTrustedBaseProducerFixtures() {
+  const { buildTemporalCompatibilityProducerFixtures } = await import(
+    "./temporal-compatibility-producer-fixtures.ts"
+  );
+  return buildTemporalCompatibilityProducerFixtures();
+}
+
 export function inspectPrivateMainRef(raw) {
   assertRecord(raw, "private main ref");
   if (
@@ -940,6 +960,16 @@ async function runCompatibilityCommand(args) {
   });
 }
 
+async function runCompareBaseCommand(args) {
+  const unchanged = await producerFixturesMatchTrustedBase(
+    await readFile(requiredArg(args, "fixtures"), "utf8"),
+  );
+  await writeOutputs({ unchanged: String(unchanged) });
+  console.log(unchanged
+    ? "Producer fixtures equal trusted main's. The private reader matrix is not dispatched."
+    : "Producer fixtures differ from trusted main's. The private reader matrix runs.");
+}
+
 async function runMainCompatibilityCommand(args) {
   const publicToken = requiredEnv("TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN");
   const privateToken = requiredEnv("TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN");
@@ -966,9 +996,10 @@ async function main(argv) {
   const [command, ...rest] = argv;
   if (command === "select" && rest.length === 0) return runSelectCommand();
   const args = parseArgs(rest);
+  if (command === "compare-base") return runCompareBaseCommand(args);
   if (command === "run") return runCompatibilityCommand(args);
   if (command === "run-main") return runMainCompatibilityCommand(args);
-  throw new Error("Expected select, run, or run-main.");
+  throw new Error("Expected select, compare-base, run, or run-main.");
 }
 
 function remainingHttpTimeout({ deadline = Number.POSITIVE_INFINITY, now = Date.now } = {}, label) {

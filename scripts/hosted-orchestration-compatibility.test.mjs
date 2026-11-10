@@ -36,6 +36,7 @@ import {
   inspectPublicCandidateAncestry,
   inspectPullRequest,
   inspectProducerFixtures,
+  producerFixturesMatchTrustedBase,
   isTemporalCompatibilityRelevantPath,
   runTemporalCompatibility,
   selectPullRequest,
@@ -1550,6 +1551,75 @@ test("accepted-run cancellation force-cancels only after ordinary cancellation s
   });
 });
 
+test("producer fixtures match trusted main only when their canonical bytes are equal", async () => {
+  const base = JSON.parse(PRODUCER_FIXTURES);
+  const loadBase = async () => base;
+  assert.equal(await producerFixturesMatchTrustedBase(PRODUCER_FIXTURES, loadBase), true);
+  // Formatting is not part of the payload the readers receive.
+  assert.equal(
+    await producerFixturesMatchTrustedBase(`${JSON.stringify(base, null, 2)}\n`, loadBase),
+    true,
+  );
+  assert.equal(
+    await producerFixturesMatchTrustedBase(JSON.stringify([...base, { added: true }]), loadBase),
+    false,
+  );
+  assert.equal(
+    await producerFixturesMatchTrustedBase(JSON.stringify([...base].reverse()), async () => [
+      ...base,
+      { added: true },
+    ]),
+    false,
+  );
+  await assert.rejects(producerFixturesMatchTrustedBase("not json", loadBase), /invalid JSON/u);
+  await assert.rejects(producerFixturesMatchTrustedBase(PRODUCER_FIXTURES, async () => []), /artifact is invalid/u);
+  await assert.rejects(
+    producerFixturesMatchTrustedBase(PRODUCER_FIXTURES, async () => {
+      throw new Error("trusted fixture build failed");
+    }),
+    /trusted fixture build failed/u,
+  );
+});
+
+test("compare-base reports whether a fixture file equals this checkout's own fixtures", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "temporal-compatibility-compare-base-"));
+  try {
+    const script = path.join(REPO_ROOT, "scripts", "hosted-orchestration-compatibility.mjs");
+    const ownPath = path.join(tempDir, "own.json");
+    const produced = spawnSync(process.execPath, [
+      path.join(REPO_ROOT, "scripts", "temporal-compatibility-producer-fixtures.ts"),
+      "--output",
+      ownPath,
+    ], { encoding: "utf8" });
+    assert.equal(produced.status, 0, produced.stderr);
+    const changedPath = path.join(tempDir, "changed.json");
+    await writeFile(
+      changedPath,
+      JSON.stringify([...JSON.parse(await readFile(ownPath, "utf8")), { added: true }]),
+    );
+    const invalidPath = path.join(tempDir, "invalid.json");
+    await writeFile(invalidPath, "[]");
+    for (const [name, fixturesPath, expectedStatus, expectedOutput] of [
+      ["own", ownPath, 0, "unchanged=true\n"],
+      ["changed", changedPath, 0, "unchanged=false\n"],
+      // A failed comparison writes nothing, so the workflow runs the full proof.
+      ["invalid", invalidPath, 1, ""],
+      ["missing", path.join(tempDir, "missing.json"), 1, ""],
+    ]) {
+      const outputPath = path.join(tempDir, `${name}.output`);
+      await writeFile(outputPath, "");
+      const result = spawnSync(process.execPath, [script, "compare-base", "--fixtures", fixturesPath], {
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_OUTPUT: outputPath },
+      });
+      assert.equal(result.status, expectedStatus, `${name}: ${result.stderr}`);
+      assert.equal(await readFile(outputPath, "utf8"), expectedOutput, name);
+    }
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("workflow keeps credentials behind trusted selection and publishes one stable context", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "temporal-compatibility.yml"),
@@ -1603,6 +1673,35 @@ test("workflow keeps credentials behind trusted selection and publishes one stab
     credentialedJob.indexOf("ref: ${{ github.event.repository.default_branch }}")
       < credentialedJob.indexOf("Mint private compatibility token"),
   );
+  // The comparison runs trusted main's code, before any private credential
+  // exists, and only an explicit "unchanged" result skips the private matrix.
+  assert.ok(
+    credentialedJob.indexOf("ref: ${{ github.event.repository.default_branch }}")
+      < credentialedJob.indexOf("- name: Compare producer fixtures with trusted main"),
+  );
+  assert.ok(
+    credentialedJob.indexOf("- name: Compare producer fixtures with trusted main")
+      < credentialedJob.indexOf("Mint private compatibility token"),
+  );
+  assert.match(
+    credentialedJob,
+    /- name: Compare producer fixtures with trusted main\n\s+id: base-fixtures\n\s+continue-on-error: true\n/u,
+  );
+  assert.match(credentialedJob, /- name: Setup Node\n\s+continue-on-error: true\n/u);
+  assert.match(
+    credentialedJob,
+    /- name: Mint private compatibility token\n\s+id: private-app-token\n\s+if: \$\{\{ steps\.base-fixtures\.outputs\.unchanged != 'true' \}\}\n/u,
+  );
+  assert.match(
+    credentialedJob,
+    /- name: Dispatch exact private reader matrix\n\s+if: \$\{\{ steps\.base-fixtures\.outputs\.unchanged != 'true' \}\}\n/u,
+  );
+  assert.equal(credentialedJob.match(/steps\.base-fixtures\.outputs\.unchanged/gu)?.length, 3);
+  assert.match(
+    credentialedJob,
+    /outputs:\n\s+unchanged: \$\{\{ steps\.base-fixtures\.outputs\.unchanged \}\}\n/u,
+  );
+  assert.match(workflow, /UNCHANGED: \$\{\{ needs\.compatibility\.outputs\.unchanged \}\}/u);
 });
 
 test("workflow status shell executes every terminal outcome", async () => {
@@ -1617,6 +1716,7 @@ test("workflow status shell executes every terminal outcome", async () => {
     SELECTED: "true",
     SOURCE_RESULT: "success",
     TRUSTED: "true",
+    UNCHANGED: "",
   };
   const scenarios = [
     [{ SELECT_RESULT: "failure" }, "failure", "Temporal compatibility selection failed."],
@@ -1627,7 +1727,12 @@ test("workflow status shell executes every terminal outcome", async () => {
     [{ SELECTED: "false", SOURCE_RESULT: "cancelled" }, "success", "No hosted Temporal compatibility owner changed."],
     [{ TRUSTED: "false" }, "failure", "Relevant changes require a same-repository human-authored head."],
     [{ COMPATIBILITY_RESULT: "success" }, "success", "Exact public SHA passed every supported private Temporal reader."],
+    [{ COMPATIBILITY_RESULT: "success", UNCHANGED: "false" }, "success", "Exact public SHA passed every supported private Temporal reader."],
+    [{ COMPATIBILITY_RESULT: "success", UNCHANGED: "true" }, "success", "Temporal producer fixtures equal trusted main; no new reader proof is needed."],
     [{ COMPATIBILITY_RESULT: "failure" }, "failure", "No complete exact-SHA private Temporal compatibility proof was recorded."],
+    // An "unchanged" result never rescues a job that did not succeed.
+    [{ COMPATIBILITY_RESULT: "failure", UNCHANGED: "true" }, "failure", "No complete exact-SHA private Temporal compatibility proof was recorded."],
+    [{ COMPATIBILITY_RESULT: "skipped", UNCHANGED: "true" }, "failure", "No complete exact-SHA private Temporal compatibility proof was recorded."],
   ];
   const tempDir = await mkdtemp(path.join(tmpdir(), "temporal-compatibility-status-proof-"));
   try {
