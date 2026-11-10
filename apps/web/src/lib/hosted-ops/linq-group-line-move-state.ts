@@ -10,6 +10,7 @@ import { acquireHostedLinqChatOwnershipLockTx } from "../hosted-routing/linq-cha
 import { linqGroupMoveSelect, type HostedLinqGroupMoveCleanup } from "../hosted-routing/linq-group-line-move-store";
 
 export const groupMoveOperatorSelect = { ...linqGroupMoveSelect, addStartedAt: true, addConfirmedAt: true,
+  removeStartedAt: true, removeAcceptedAt: true,
   adoptedAt: true, leaveConfirmedAt: true, lastErrorCode: true, createdAt: true } satisfies Prisma.HostedLinqGroupLineMoveSelect;
 export type OperatorGroupMove = Prisma.HostedLinqGroupLineMoveGetPayload<{ select: typeof groupMoveOperatorSelect }>;
 export const GROUP_MOVE_QUIET_MS = 60_000;
@@ -46,6 +47,7 @@ export function summarizeOperatorGroupMove(row: OperatorGroupMove) {
     adoptionExpired: row.status === "reserved" && row.adoptionDeadlineAt.getTime() <= Date.now(), holdActive: row.status === "reserved",
     sourceHoldActive: row.status === "reserved" && row.adoptionDeadlineAt.getTime() > Date.now(),
     addStartedAt: row.addStartedAt?.toISOString() ?? null, addConfirmedAt: row.addConfirmedAt?.toISOString() ?? null,
+    removeStartedAt: row.removeStartedAt?.toISOString() ?? null, removeAcceptedAt: row.removeAcceptedAt?.toISOString() ?? null,
     adoptedAt: row.adoptedAt?.toISOString() ?? null,
     leaveConfirmedAt: row.leaveConfirmedAt?.toISOString() ?? null, code: row.lastErrorCode };
 }

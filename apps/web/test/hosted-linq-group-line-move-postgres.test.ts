@@ -9,7 +9,7 @@ import { runWithHostedDomainRootProviderCallsDisabled } from "@/src/lib/hosted-c
 import { createHostedExternalThreadIdentityLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 import { readHostedThreadRouteByThreadIdentity } from "@/src/lib/hosted-routing/thread-route-store";
-import { prepareHostedLinqGroupMoveCleanup, openHostedLinqGroupMoveCleanup, linqGroupMoveSelect, readHostedLinqGroupMoveServicePhones } from "@/src/lib/hosted-routing/linq-group-line-move-store";
+import { prepareHostedLinqGroupMoveCleanup, openHostedLinqGroupMoveCleanup, linqGroupMoveSelect, readHostedLinqGroupMoveServicePhones, readHostedLinqGroupMovesForIngress, HOSTED_LINQ_GROUP_MOVE_REPLAY_MS } from "@/src/lib/hosted-routing/linq-group-line-move-store";
 import { prepareHostedLinqGroupMoveIngress } from "@/src/lib/hosted-routing/linq-group-line-move-ingress";
 import { replaceHostedLinqGroupLineMoveRouteTx } from "@/src/lib/hosted-routing/thread-container-service";
 import { prepareHostedLinqGroupMoveEgressAlias, assertHostedLinqRecentInboundEngagementForRuntime } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
@@ -70,7 +70,7 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
     const sourceCleanupEncrypted = await prepareHostedLinqGroupMoveCleanup({ id: moveId, containerMemberId: room, fromAccountLookupKey: sourceKey, toAccountLookupKey: targetKey, sourceChatId: fromChat, prisma: db });
     return db.hostedLinqGroupLineMove.create({ data: { id: moveId, containerMemberId: room, fromAccountLookupKey: sourceKey, toAccountLookupKey: targetKey,
       fromThreadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: fromChat })!, sourceCleanupEncrypted,
-      adoptionDeadlineAt: new Date(Date.now() + 60_000) }, select: linqGroupMoveSelect });
+      addStartedAt: new Date(), adoptionDeadlineAt: new Date(Date.now() + 60_000) }, select: linqGroupMoveSelect });
   }
   function delivery(chatId = toChat, from = source, text = serviceReply, line = target, prisma = db) {
     const id = randomUUID(), occurredAt = new Date().toISOString();
@@ -90,7 +90,7 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
       .toEqual([{ threadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: fromChat }) }]);
   }
   async function preparedAdoption() {
-    const prepared = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: toChat, sender: source, recipientPhone: target, isFromMe: false, route: null, prisma: db });
+    const prepared = await prepareHostedLinqGroupMoveIngress({ eventCreatedAt: new Date().toISOString(), service: "iMessage", threadId: toChat, sender: source, recipientPhone: target, isFromMe: false, route: null, prisma: db });
     if (!prepared.adoption) throw new Error("Synthetic adoption was not prepared.");
     return prepared.adoption;
   }
@@ -113,11 +113,11 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
     const queries: string[] = [];
     measured.$on("query", ({ query }) => queries.push(query));
     try {
-      const heldPreparation = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: toChat, sender: phone, recipientPhone: target, isFromMe: false, route: null, prisma: measured });
+      const heldPreparation = await prepareHostedLinqGroupMoveIngress({ eventCreatedAt: new Date().toISOString(), service: "iMessage", threadId: toChat, sender: phone, recipientPhone: target, isFromMe: false, route: null, prisma: measured });
       expect(heldPreparation.retryAfterAdoption).toBe(true);
       const heldStatements = queries.length;
       queries.length = 0; provider.retrieve.mockClear();
-      const prepared = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: toChat, sender: source, recipientPhone: target, isFromMe: false, route: null, prisma: measured });
+      const prepared = await prepareHostedLinqGroupMoveIngress({ eventCreatedAt: new Date().toISOString(), service: "iMessage", threadId: toChat, sender: source, recipientPhone: target, isFromMe: false, route: null, prisma: measured });
       expect(provider.retrieve).toHaveBeenCalledTimes(2);
       if (!prepared.adoption) throw new Error("Synthetic adoption preparation missing.");
       const adoption = prepared.adoption;
@@ -215,7 +215,7 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
     await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: other, accountLookupKey: targetKey,
       threadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: otherChat })!, threadLookupKey: "synthetic-second-bound-route" } });
     const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: otherChat, prisma: db });
-    const prepared = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: otherChat,
+    const prepared = await prepareHostedLinqGroupMoveIngress({ eventCreatedAt: new Date().toISOString(), service: "iMessage", threadId: otherChat,
       sender: phone, recipientPhone: target, isFromMe: false, route, prisma: db });
     expect(prepared.action).toBe("continue"); expect(prepared.adoption).toBeUndefined();
     expect((await row()).status).toBe("reserved"); await assertSource();
@@ -254,13 +254,33 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
   });
   it("a cancelled move and traffic on the wrong receiving line have no move authority", async () => {
     await reserve();
-    const wrongLine = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: toChat, recipientPhone: source, sender: source, isFromMe: false, route: null, prisma: db });
+    const wrongLine = await prepareHostedLinqGroupMoveIngress({ eventCreatedAt: new Date().toISOString(), service: "iMessage", threadId: toChat, recipientPhone: source, sender: source, isFromMe: false, route: null, prisma: db });
     expect(wrongLine).toMatchObject({ action: "continue" }); expect(wrongLine.adoption).toBeUndefined();
     expect((await row()).status).toBe("reserved"); await assertSource();
     await db.hostedLinqGroupLineMove.update({ where: { id: moveId }, data: { status: "cancelled" } });
     const cancelled = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: toChat, recipientPhone: target, sender: source, isFromMe: false, route: null, prisma: db });
-    expect(cancelled).toMatchObject({ action: "continue" }); expect(cancelled.adoption).toBeUndefined();
+    expect(cancelled).toMatchObject({ action: "consume" }); expect(cancelled.adoption).toBeUndefined();
     expect((await row()).status).toBe("cancelled"); await assertSource();
+  });
+  it.each(["before-add", "missing", "invalid", "future", "unstarted"])("refuses adoption for an event with %s creation authority", async kind => {
+    const move = await reserve();
+    if (kind === "unstarted") await db.hostedLinqGroupLineMove.update({ where: { id: moveId }, data: { addStartedAt: null } });
+    const eventCreatedAt = kind === "missing" ? undefined : kind === "invalid" ? "invalid" :
+      new Date(kind === "before-add" ? move.addStartedAt!.getTime() - 1 : Date.now() + (kind === "future" ? 60_000 : 0)).toISOString();
+    const prepared = await prepareHostedLinqGroupMoveIngress({ service: "iMessage", eventCreatedAt, threadId: toChat,
+      sender: phone, recipientPhone: target, isFromMe: false, route: null, prisma: db });
+    expect(prepared.action).toBe("hold"); expect(prepared.adoption).toBeUndefined();
+    expect((await row()).status).toBe("reserved"); await assertSource();
+  });
+  it("bounds cancelled replay history by the provider window and fails closed at the row cap", async () => {
+    const move = await reserve();
+    await db.hostedLinqGroupLineMove.update({ where: { id: moveId }, data: { status: "cancelled" } });
+    const read = () => readHostedLinqGroupMovesForIngress({ threadId: toChat, recipientPhone: target, prisma: db });
+    expect(await read()).toHaveLength(1);
+    await db.hostedLinqGroupLineMove.update({ where: { id: moveId }, data: { updatedAt: new Date(Date.now() - HOSTED_LINQ_GROUP_MOVE_REPLAY_MS - 1) } });
+    expect(await read()).toHaveLength(0);
+    await db.hostedLinqGroupLineMove.createMany({ data: Array.from({ length: 5 }, () => ({ ...move, id: randomUUID(), status: "cancelled" })) });
+    await expect(read()).rejects.toMatchObject(held);
   });
   it("rolls back route and move together, then commits with provider and KMS work disabled", async () => {
     await reserve(); const prepared = await preparedAdoption(); provider.retrieve.mockClear();
@@ -292,7 +312,7 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
   });
   it("does not adopt over SMS", async () => {
     await reserve();
-    const prepared = await prepareHostedLinqGroupMoveIngress({ service: "SMS", threadId: toChat,
+    const prepared = await prepareHostedLinqGroupMoveIngress({ eventCreatedAt: new Date().toISOString(), service: "SMS", threadId: toChat,
       sender: source, recipientPhone: target, isFromMe: false, route: null, prisma: db });
     expect(prepared.action).toBe("hold"); expect(prepared.adoption).toBeUndefined();
     await assertSource();

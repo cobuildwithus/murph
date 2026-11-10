@@ -4,6 +4,27 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-10
 
+## PR 4806 round 1 remediation
+
+Both High findings in `audit-packages/pr-4806-round-1.md` are accepted.
+This continuation is local only: no push, PR edit, production access, real
+Linq API, dotenv reads or further ReviewGPT. Keep the plan active and commit
+with `scripts/committer`.
+
+Outcome: cancellation cannot fork group identity or remove a later destination.
+Reaches: delayed target webhooks, cancel/restart, overlapping operator cancels.
+Proof: extend the real webhook/Postgres source-fallback scenario through both
+replay timings and a fresh handoff; pause cancellation across cleanup ownership
+and restart, retaining queued-removal and interruption recovery coverage.
+
+The existing move row owns both corrections. Ingress retains a bounded view
+of recent cancellations and checks event creation against the add claim.
+Removal receives one durable claim and a provider-return receipt; an uncertain
+or still-dispatchable claim keeps the reservation unavailable. No new queue,
+table, retry system or provider mutation path is introduced. Extend only the
+unmerged silent-producer migration. Verification and final dispositions follow
+below after execution.
+
 ## Goal
 
 Murph runs on two Linq lines and is retiring one to halve the provider bill.
@@ -707,15 +728,29 @@ admission; `sourceHoldActive` reports whether source messages can still wait.
   waiting for a qualifying group message. Normal deadline is 24 hours.
 - `adopted`: destination is authoritative permanently; leave is still pending.
 - `left`: source departure verified. Repeated leave/resume is a no-op.
-- `cancelled`: pre-adoption cleanup verified and protection released.
+- `cancelled`: pre-adoption cleanup verified and the reservation released.
+  The immutable cancellation timestamp continues fencing old unbound target
+  events for 30 minutes. A restart requires a new event created at or after
+  its add claim; delayed copies cannot adopt or duplicate source work.
 - `adoptionExpired: true`: source remains authoritative; resume does not renew.
   Cancel verifies target removal. `source_hold_expired` identifies automatic
   disarming; resume may subsequently report `adoption_deadline_elapsed`.
 - `add_outcome_unknown` or `add_unconfirmed` (possibly with a provider suffix): disarmed but provider add is not terminally settled;
   retain the reservation, then retry cleanup from fresh provider truth.
-- `remove_pending`, `leave_pending`, `leave_requires_four_participants`, or
-  operation/provider error codes: the named effect is unconfirmed/refused;
-  repeat the appropriate recovery action after resolving the condition.
+- `remove_pending`: one removal was accepted, but target absence is not yet
+  verified. Repeat cancel to reconcile fresh rosters; it never sends another
+  removal. Both source and target remain reserved until cleanup settles.
+- `remove_outcome_unknown` or a removal error with non-null `removeStartedAt`
+  and null `removeAcceptedAt`: a dispatch may still be outstanding. Repeated
+  cancel cannot release the reservation, even on absence, or repeat removal.
+  Wait for the original request's receipt. If it was interrupted or lost its
+  receipt, separately investigate and establish that it cannot still dispatch
+  before any explicitly reviewed repair; never clear the claim based on elapsed
+  time or roster absence alone. No automatic recovery from this ambiguous
+  boundary is claimed.
+- `leave_pending`, `leave_requires_four_participants`, or other
+  operation/provider error codes: inspect the named effect and repeat the
+  appropriate recovery action after resolving the condition.
 - Validation/auth errors are HTTP 400/403/404/409. A 200 summary with a non-null
   code is an operation result requiring inspection, not proof of completion.
 
@@ -800,3 +835,132 @@ indistinguishable unbound second-group case remain unproved as described above.
 
 The reviewed files form a local checkpoint for `scripts/committer`; the active
 plan remains open. This checkpoint is not a claim that PR B is ready to ship.
+
+### Round 1 finding dispositions
+
+1. **High — cancelled target replay: accepted, fixed locally.**
+   `linq-group-line-move-store.ts` retains recently cancelled target-line rows
+   in the existing five-row read. Their final `updatedAt` is immutable at these
+   owners and fences events created at or before cancellation. The new composite
+   index bounds the target/status/time lookup. The 30-minute retention follows
+   Linq's documented total retry window **from event creation**:
+   https://docs.linqapp.com/channel/imessage/guides/webhooks/#delivery-guarantees.
+   `linq-group-line-move-ingress.ts` enforces `addStartedAt` before adoption and
+   after the new destination is bound. Unusable creation times fail closed.
+   No current-membership check substitutes for the replay boundary. Because an
+   unadopted move has no target-chat identity, recent cancellations conservatively
+   consume older unbound events on the target line; unrelated bound routes keep
+   their authority. More than four candidate relations still fails closed.
+
+   The producer Postgres source-fallback test now covers four combinations of
+   held-target ordering and replay before/after restart. It checks unchanged
+   container, route and mailbox counts (including activation), settles source
+   work, restarts, rejects the old copy before and after fresh adoption, admits
+   the fresh request once and leaves once. Consumer regressions cover an event
+   before add, no add claim, missing/invalid/future creation times, the 30-minute
+   lookup bound and overflow. Before the fix, both source-fallback orderings
+   produced a second container, route, activation and conversation input.
+
+2. **High — overlapping removal: accepted, fixed locally.**
+   `linq-group-line-move.ts` claims removal once under the source-chat lock;
+   `linq-group-line-move-state.ts` exposes its two progress timestamps.
+   `schema.prisma` and only the unmerged
+   `20261110190000_linq_group_line_move_silent` migration add nullable
+   `removeStartedAt` and `removeAcceptedAt`. A pending claim retains `reserved`
+   even if a concurrent roster reports absence. A successful provider return
+   and verified absence permit cancellation. Claim/finalization predicates
+   prevent stale observations from releasing or redispatching the effect;
+   a lost claim stops before the provider call. Concurrent/replayed cancels
+   only reconcile, never issue another removal.
+
+   Producer regressions pause a positive-roster cancel while a second settles
+   and a restarted move adopts; releasing the stale request cannot remove the
+   new destination. A second race pauses the removal owner before its effect,
+   exercises overlapping cancels with both presence and absence, rejects
+   restart/adoption while dispatch remains possible, then permits restart
+   after cleanup. Queued-removal replay now explicitly asserts one call.
+   Interrupted removal before its receipt remains reserved; interruption after
+   the receipt recovers from absence without redispatch. Existing interrupted
+   add and queued-removal cases remain in the focused suite. Before the fix,
+   the races issued two removals and falsely released a live removal claim.
+
+The operator runbook above now distinguishes accepted pending removal from a
+missing receipt. An interrupted or ambiguous removal without a durable receipt
+cannot be automatically released from absence: it requires separate investigation
+and an explicitly reviewed repair once the old request cannot dispatch. This
+deliberate safety limit is not a new retry mechanism. The earlier same-reservation
+source-fallback and identical-unbound-roster limitations remain outside these
+two findings; a fresh message after verified cancel/restart is now proved.
+
+Deployment skew remains governed by **start no move until all Web instances
+converge and old instances drain**. The merged #4792 migration is untouched;
+the extension adds nullable columns and an index, with no new status values.
+Existing old-shape rows remain readable. New silent/null-hash reservations and
+their replay/cleanup protections require this producer/consumer revision, so
+the convergence gate remains necessary and sufficient before the first move.
+No runner or Cloudflare change is needed. No production rollout or real provider
+behavior was exercised. The architecture owner documents the new invariants.
+
+Product UX patch walkthrough: local synthetic real-webhook/Postgres journeys
+preserve the original group and process only the fresh target request after
+restart. Cleanup overlap cannot remove the new receiving line. These two
+regressions are Ready locally; the existing broader PR release Hold remains.
+No separate public changelog entry is added for this pre-release operator-path
+correction. No assistant prompt, tool schema or runtime policy changes.
+
+### Round 1 verification
+
+All commands ran locally with synthetic provider fixtures. Prisma's explicit
+ignored config targets a newly created isolated local test database and loads
+no dotenv files. Root typecheck reused the existing no-dotenv Node preload;
+it ran after the first full Web suite finished, before the final full rerun.
+The existing Frog entries cover that workaround, the Prisma regeneration race
+and the full suite's SWC cache residue; no new repository friction was created.
+
+```sh
+scripts/frog list
+pnpm --dir apps/web exec prisma generate --config ../../.tmp/prisma-no-env.config.ts
+pnpm --dir apps/web exec prisma validate --config ../../.tmp/prisma-no-env.config.ts
+pnpm --dir apps/web exec prisma migrate deploy --config ../../.tmp/prisma-no-env.config.ts
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_move_review_final \
+MURPH_TEST_POSTGRES_CONCURRENCY=1 \
+pnpm exec vitest run --config apps/web/vitest.config.ts \
+  apps/web/test/hosted-linq-group-line-move.test.ts \
+  apps/web/test/hosted-linq-group-line-move-postgres.test.ts \
+  apps/web/test/hosted-linq-group-line-move-producer-postgres.test.ts \
+  apps/web/test/hosted-ops-linq-group-line-move-route.test.ts \
+  apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts \
+  apps/web/test/production-migration-guard.test.ts --maxWorkers 1 --silent
+MURPH_APP_VITEST_MAX_WORKERS=2 pnpm --dir apps/web test
+NODE_OPTIONS="--require=$PWD/.tmp/skip-dotenv.cjs" \
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_move_review \
+pnpm typecheck
+pnpm --dir apps/web lint
+pnpm complexity:diff
+pnpm docs:drift
+git diff --check
+```
+
+Results: Prisma generate and validate passed; all 282 migrations applied
+to a fresh local database, including the final forward migration. The final
+focused selection passed **6 files, 180 tests** (41.07 seconds), including
+32 consumer and 37 producer Postgres cases. Root `pnpm typecheck`, Web lint
+(existing warnings only), complexity and whitespace checks passed. The
+complexity diff adds no debt; the listed pre-existing webhook hotspots are
+unchanged. Ingress still uses two bounded move reads, with no new provider or
+crypto work for the replay fence; the real-query-count consumer proof passed.
+
+The first full Web suite had 14,606 passes, 2,412 skips and three failures,
+all from the migration guard rejecting an unnecessary new CHECK constraint.
+The constraint was removed: the claim owner already enforces receipt ordering,
+and the migration is now only nullable columns, nullable legacy hash and an
+index. The final migration and guard both passed in the focused selection.
+The final full Web rerun passed **872 files, 14,609 tests**, with 159 files and
+2,412 opt-in tests skipped, **zero failures** (336.63 seconds). The separate
+focused selection supplies the actual Postgres evidence. Docs drift and final
+diff whitespace passed, and authored additions passed the privacy scan.
+Parent review found no further gap in either accepted finding. The active plan
+and the scoped fix are ready for the authorized local `scripts/committer` commit.
+
+No push, PR edit, production access, real Linq API call, dotenv read, new
+ReviewGPT round or CI run occurred. This remains an active local checkpoint.

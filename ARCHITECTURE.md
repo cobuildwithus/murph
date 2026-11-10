@@ -3929,15 +3929,26 @@ group ingress adds two reads (preparation and locked revalidation), and direct
 ingress adds none. Reservations protect source traffic and affected unbound
 target chats using the existing retryable-error/preparation retry boundary.
 An expired adoption deadline releases the source hold, retaining unbound-target
-admission protection. Cancelled rows
-grant no authority; the producer must verify provider cleanup before cancelling.
+admission protection. Cancelled rows grant no authority; the producer must
+verify provider cleanup before cancelling. Their immutable final `updated_at`
+fences unbound target-line events created at or before cancellation. The same
+bounded read includes cancellations from the last 30 minutes, indexed by target
+line, status and update time, covering Linq's entire
+[retry window from event creation](https://docs.linqapp.com/channel/imessage/guides/webhooks/#delivery-guarantees).
+Without a known destination chat before adoption, this conservatively consumes
+old unbound events on that line; already-bound unrelated chats retain their
+route. Missing, invalid or future event times cannot authorize adoption and
+are consumed by a recent cancellation fence. Overflow still fails closed.
 
 Silent adoption requires one reservation on the target receiving line and an
-iMessage group message of any kind, plus two complete provider rosters
+iMessage group message created at or after the reservation's `add_started_at`,
+plus two complete provider rosters
 with equal active human handle sets, including unknown phone/email contacts.
 Source-service speech is consumed. A person's adopting event commits the move
 and gets a retryable 503; redelivery finds the bound route and ordinary mailbox
 deduplication admits it once. No message, template or marker announces the move.
+The add-time boundary remains enforced on the adopted destination so an older
+target copy cannot duplicate source work after a fresh message completes restart.
 Both service numbers must be active on the destination; each chat must identify
 its own line as self. Reads use a three-second timeout and a 32-handle bound.
 Evidence must be at most 30 seconds old when the transaction runs. The explicit
@@ -3967,6 +3978,17 @@ runs after the adoption response and is also operator-retryable; refusal keeps
 adoption permanent. Start requires a quiet source with no pending work and uses
 a 24-hour deadline. The legacy notice hash column remains nullable for rollout;
 new code omits it. Drain old Web before producing null-hash reservations.
+
+Cancellation claims `remove_started_at` once under the source-chat lock before
+dispatch and records `remove_accepted_at` only after a successful provider
+return. Replays reconcile roster absence; they never repeat removal. Until
+acceptance and a complete absence read settle cleanup, the row stays reserved,
+keeping both source and target unavailable for reuse. A missing acceptance
+receipt (including an interrupted or ambiguous call) retains the reservation
+even on absence; it requires separate operator investigation, not an automatic
+claim reset. The forward silent-producer migration adds nullable progress
+columns without new statuses. The existing no-moves-until-all-Web-converges
+rollout gate remains required: older consumers lack these replay boundaries.
 
 PR B is an active, local implementation checkpoint, not a release-ready change:
 later adoption after bounded source fallback remains unresolved in the active

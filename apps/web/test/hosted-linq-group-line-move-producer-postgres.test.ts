@@ -73,6 +73,19 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
   const start = () => startHostedLinqGroupLineMove({ containerRef, targetLineLookupKey: targetKey, prisma: db });
   const operate = (moveId: string, operation: "resume" | "cancel" | "retry_leave" = "resume") => operateHostedLinqGroupLineMove({ moveId, operation, prisma: db });
   const row = (id: string) => db.hostedLinqGroupLineMove.findUniqueOrThrow({ where: { id } });
+  async function admissionCounts() {
+    const containers = await db.hostedThreadContainer.findMany({ where: { ownerMemberId: { in: [owner, sender] } }, select: { memberId: true } });
+    const members = containers.map(container => container.memberId);
+    return {
+      containers: containers.length,
+      routes: await db.hostedThreadRoute.count({ where: { containerMemberId: { in: members } } }),
+      mailbox: await db.hostedMailboxItem.groupBy({ by: ["kind"], where: { userId: { in: members } }, _count: true, orderBy: { kind: "asc" } }),
+    };
+  }
+  async function settleSourceWork() {
+    await db.hostedMailboxItem.updateMany({ where: { userId: room }, data: { consumedAt: new Date() } });
+    vi.setSystemTime(Date.now() + 60_001);
+  }
   async function reserve(step: "reserved" | "add_started" | "add_confirmed") {
     const id = randomUUID();
     const sourceCleanupEncrypted = await prepareHostedLinqGroupMoveCleanup({ id, containerMemberId: room,
@@ -161,7 +174,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     for (const callback of callbacks) await callback();
     expect((await row(result.moveId)).status).toBe("left"); expect(provider.leave).toHaveBeenCalledOnce();
   });
-  it.each([false, true])("bounds the source hold and disarms adoption before source admission; heldTargetFirst=%s", async heldTargetFirst => {
+  it.each([[false, false], [false, true], [true, false], [true, true]])("bounds the source hold and disarms adoption before source admission; heldTargetFirst=%s; replayBeforeRestart=%s", async (heldTargetFirst, replayBeforeRestart) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const at = Date.now(); vi.setSystemTime(at);
     const result = await start(), oldId = randomUUID(), newId = randomUUID();
@@ -190,6 +203,80 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(provider.send).toHaveBeenCalledOnce();
     expect((await operate(result.moveId)).adoptionExpired).toBe(true);
     expect((await operate(result.moveId, "cancel")).status).toBe("cancelled");
+    const admitted = await admissionCounts();
+    expect(targetPresent).toBe(false);
+    // The complete provider roster now lacks target/self. The old event still
+    // must not create a container, route, activation or conversation input.
+    if (replayBeforeRestart) { await newCopy(); await newCopy(); }
+    expect(await admissionCounts()).toEqual(admitted);
+    await settleSourceWork();
+    const restarted = await start();
+    expect(targetPresent).toBe(true);
+    await newCopy(); await newCopy();
+    expect((await row(restarted.moveId)).status).toBe("reserved");
+    expect(await admissionCounts()).toEqual(admitted);
+    vi.setSystemTime(Date.now() + 1);
+    const freshId = randomUUID();
+    const fresh = () => webhook(targetChat, person, "Synthetic fresh question", target, freshId);
+    await expect(fresh()).rejects.toMatchObject({ httpStatus: 503 });
+    await fresh(); await fresh(); await newCopy();
+    expect((await row(restarted.moveId)).status).toBe("adopted");
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "conversation.message" } })).toBe(2);
+    expect((await admissionCounts()).containers).toBe(admitted.containers);
+    expect((await admissionCounts()).routes).toBe(admitted.routes);
+    for (const callback of callbacks) await callback();
+    expect((await row(restarted.moveId)).status).toBe("left");
+    expect(provider.leave).toHaveBeenCalledOnce(); expect(provider.add).toHaveBeenCalledTimes(2);
+  });
+  it("stops a delayed positive-roster cancellation after another cancel settles and a new move adopts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const result = await start();
+    const read = provider.retrieve.getMockImplementation()!;
+    let releaseRoster!: () => void;
+    provider.retrieve.mockImplementationOnce(async (chatId: string) => {
+      const positiveRoster = await read(chatId);
+      await new Promise<void>(resolve => { releaseRoster = resolve; });
+      return positiveRoster;
+    });
+    const delayed = operate(result.moveId, "cancel");
+    await vi.waitFor(() => expect(releaseRoster).toBeDefined());
+    expect((await row(result.moveId)).adoptionDeadlineAt).toEqual(new Date(0));
+    try {
+      expect((await operate(result.moveId, "cancel")).status).toBe("cancelled");
+      vi.setSystemTime(Date.now() + 1);
+      const restarted = await start();
+      await webhook();
+      expect((await row(restarted.moveId)).status).toBe("adopted");
+    } finally { releaseRoster(); await delayed; }
+    expect(provider.remove).toHaveBeenCalledOnce(); expect(targetPresent).toBe(true);
+  });
+  it("keeps the source and target reserved while the removal owner can still dispatch", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const result = await start();
+    let releaseRemoval!: () => void;
+    provider.remove.mockImplementationOnce(async () => {
+      await new Promise<void>(resolve => { releaseRemoval = resolve; });
+      targetPresent = false;
+      return { status: "queued" };
+    });
+    const removing = operate(result.moveId, "cancel");
+    await vi.waitFor(() => expect(releaseRemoval).toBeDefined());
+    try {
+      expect((await operate(result.moveId, "cancel")).status).toBe("reserved");
+      expect(provider.remove).toHaveBeenCalledOnce();
+      // An intervening roster absence cannot release an outstanding dispatch.
+      targetPresent = false;
+      expect((await operate(result.moveId, "cancel")).status).toBe("reserved");
+      await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_MOVE_CONFLICT" });
+      await expect(webhook()).rejects.toMatchObject({ httpStatus: 503 });
+      expect(provider.remove).toHaveBeenCalledOnce();
+    } finally { releaseRemoval(); await removing; }
+    expect((await row(result.moveId)).status).toBe("cancelled");
+    vi.setSystemTime(Date.now() + 1);
+    const restarted = await start(); await webhook();
+    expect((await row(restarted.moveId)).status).toBe("adopted");
+    await operate(result.moveId, "cancel");
+    expect(provider.remove).toHaveBeenCalledOnce(); expect(targetPresent).toBe(true);
   });
   it("lets the source continue on expiry while holding the unbound target copy", async () => {
     const result = await start();
@@ -254,10 +341,28 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
   it("verifies removal, disarms adoption, retains the hold until absent, and then releases it", async () => {
     const result = await start(); provider.remove.mockResolvedValue({ status: "queued" });
     expect(await operate(result.moveId, "cancel")).toMatchObject({ status: "reserved", code: "remove_pending", holdActive: true });
+    expect(await operate(result.moveId, "cancel")).toMatchObject({ status: "reserved", code: "remove_pending", holdActive: true });
+    expect(provider.remove).toHaveBeenCalledOnce();
     await expect(webhook()).rejects.toMatchObject({ retryable: true });
     targetPresent = false;
     expect(await operate(result.moveId, "cancel")).toMatchObject({ status: "cancelled", holdActive: false });
     expect(provider.remove).toHaveBeenCalledOnce();
+  });
+  it("retains an interrupted removal claim even on absence, without redispatch", async () => {
+    const id = await reserve("add_confirmed");
+    await db.hostedLinqGroupLineMove.update({ where: { id }, data: { adoptionDeadlineAt: new Date(0), removeStartedAt: new Date() } });
+    targetPresent = false;
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "remove_outcome_unknown" });
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_MOVE_CONFLICT" });
+    expect(provider.remove).not.toHaveBeenCalled();
+  });
+  it("recovers after accepted removal and interruption before cancellation commits", async () => {
+    const id = await reserve("add_confirmed");
+    await db.hostedLinqGroupLineMove.update({ where: { id }, data: { adoptionDeadlineAt: new Date(0),
+      removeStartedAt: new Date(), removeAcceptedAt: new Date() } });
+    targetPresent = false;
+    expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled" });
+    expect(provider.remove).not.toHaveBeenCalled();
   });
   it("keeps adoption permanent when leave is rejected or the group is too small", async () => {
     const result = await start(); await webhook(); humans = 1;

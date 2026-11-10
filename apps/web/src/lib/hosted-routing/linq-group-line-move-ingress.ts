@@ -23,6 +23,16 @@ export const HOSTED_LINQ_GROUP_MOVE_SOURCE_HOLD_MS = 60_000;
 
 function fingerprint(rows: readonly HostedLinqGroupLineMove[]): string { return sha256Hex(JSON.stringify(rows)); }
 
+function eventCreationTime(input: Ingress): number | null {
+  const time = Date.parse(input.eventCreatedAt ?? "");
+  return Number.isFinite(time) && time <= Date.now() ? time : null;
+}
+
+function predatesMoveAdd(input: Ingress, move: HostedLinqGroupLineMove): boolean {
+  const createdAt = eventCreationTime(input);
+  return createdAt === null || !move.addStartedAt || createdAt < move.addStartedAt.getTime();
+}
+
 /** Compare complete provider handles, including unknown phones and emails, never the member projection. */
 export function hostedLinqGroupMoveAudience(chat: HostedLinqChatSummary, cleanup: HostedLinqGroupMoveCleanup): string[] | null {
   if (chat.isGroup !== true || !chat.handlesComplete || !chat.handles.length || chat.handles.length > 32) return null;
@@ -75,7 +85,7 @@ export async function prepareHostedLinqGroupMoveIngress(input: Ingress & {
   const rows = await readHostedLinqGroupMovesForIngress(input);
   const prepared: PreparedHostedLinqGroupMoveIngress = { fingerprint: fingerprint(rows), action: "continue" };
   if (!rows.length || input.isFromMe) return prepared;
-  const source = rows.filter(move => linqGroupMoveSourceMatches(move, input.threadId));
+  const source = rows.filter(move => move.status !== "cancelled" && linqGroupMoveSourceMatches(move, input.threadId));
   if (source.length > 1) holdHostedLinqGroupLineMove("HOSTED_LINQ_GROUP_LINE_MOVE_AMBIGUOUS");
   if (source[0]) {
     if (source[0].status === "reserved" && input.route?.containerMemberId !== source[0].containerMemberId)
@@ -89,9 +99,17 @@ export async function prepareHostedLinqGroupMoveIngress(input: Ingress & {
     const cleanup = await openHostedLinqGroupMoveCleanup(move, input.prisma);
     if (input.route?.containerMemberId !== move.containerMemberId || normalizePhoneNumber(input.recipientPhone) !== cleanup.targetPhone)
       return { ...prepared, action: "hold" };
+    // Keep the add boundary after adoption too: an old target copy must not
+    // duplicate source work merely because a fresh event won the new route.
+    if (predatesMoveAdd(input, move)) return { ...prepared, action: "consume" };
     if (normalizePhoneNumber(input.sender) === cleanup.sourcePhone) return { ...prepared, action: "consume" };
   }
   if (input.route) return prepared;
+  const createdAt = eventCreationTime(input);
+  // Before adoption there is no durable target-chat identity. Conservatively
+  // fence old unbound events on this line, even when today's roster lacks self.
+  if (rows.some(move => move.status === "cancelled" && (createdAt === null || createdAt <= move.updatedAt.getTime())))
+    return { ...prepared, action: "consume" };
   return prepareUnboundReservation(input, rows, prepared);
 }
 
@@ -120,6 +138,7 @@ async function prepareUnboundReservation(input: Ingress & { prisma: PrismaClient
   const containsSource = candidate.handles.some(handle => normalizePhoneNumber(handle.handle) === cleanup.sourcePhone
     && (handle.status === null || handle.status.trim().toLowerCase() === "active"));
   if (containsSource && input.service?.trim().toLowerCase() === "imessage" && move.adoptionDeadlineAt.getTime() > Date.now()) {
+    if (predatesMoveAdd(input, move)) return { ...prepared, action: "hold" };
     return prepareAdoption(input, move, cleanup, candidate, prepared);
   }
   // Expiry removes automatic adoption authority, never the admission protection.

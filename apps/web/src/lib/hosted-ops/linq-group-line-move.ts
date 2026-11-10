@@ -116,22 +116,40 @@ async function cancelGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
       data: { adoptionDeadlineAt: new Date(0) } });
   });
   if (!disarmed.count) return;
+  let current = await readOperatorGroupMove(move.id, prisma);
+  if (current.status !== "reserved") return;
+  if (current.removeStartedAt && !current.removeAcceptedAt) {
+    await recordGroupMoveError(move, "remove_outcome_unknown", prisma); return;
+  }
+  // Reconciliation absence must be observed after the dispatch receipt.
   let roster = await readGroupMoveRoster(cleanup);
   assertGroupMoveSourceSelf(roster, cleanup);
-  const current = await readOperatorGroupMove(move.id, prisma);
   if (!groupMoveHasPhone(roster, cleanup.targetPhone) && current.addStartedAt && !current.addConfirmedAt && !current.lastErrorCode?.startsWith("add_rejected")) {
     await recordGroupMoveError(move, current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : "add_outcome_unknown", prisma); return;
   }
   if (groupMoveHasPhone(roster, cleanup.targetPhone)) {
-    // Positive presence settles a claimed add even if its response/progress write was lost.
-    await prisma.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved" }, data: { addConfirmedAt: current.addConfirmedAt ?? new Date() } });
+    if (current.removeStartedAt) { await recordGroupMoveError(move, "remove_pending", prisma); return; }
+    // Claim under the same lock as final cancellation. A stale positive roster
+    // cannot dispatch after another cancel releases this source/target pair.
+    const claimed = await prisma.$transaction(async tx => {
+      await lockGroupMoveSource(cleanup, tx);
+      return tx.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved",
+        adoptionDeadlineAt: new Date(0), removeStartedAt: null },
+        data: { addConfirmedAt: current.addConfirmedAt ?? new Date(), removeStartedAt: new Date() } });
+    });
+    if (!claimed.count) return;
     await removeHostedLinqChatParticipant({ chatId: cleanup.sourceChatId, handle: cleanup.targetPhone });
+    const accepted = await prisma.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved" }, data: { removeAcceptedAt: new Date() } });
+    if (!accepted.count) return;
+    current = await readOperatorGroupMove(move.id, prisma);
+    if (current.status !== "reserved") return;
     roster = await readGroupMoveRoster(cleanup);
     if (groupMoveHasPhone(roster, cleanup.targetPhone)) { await recordGroupMoveError(move, "remove_pending", prisma); return; }
   }
   await prisma.$transaction(async tx => {
     await lockGroupMoveSource(cleanup, tx);
-    await tx.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved", adoptionDeadlineAt: new Date(0) },
+    await tx.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved", adoptionDeadlineAt: new Date(0),
+      removeStartedAt: current.removeStartedAt, removeAcceptedAt: current.removeAcceptedAt },
       data: { status: "cancelled", lastErrorCode: current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : null } });
   });
 }
