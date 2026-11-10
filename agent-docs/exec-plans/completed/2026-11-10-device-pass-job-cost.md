@@ -61,3 +61,5 @@ Updated: 2026-11-10
 - Product UX walkthrough: a scheduled device pass still checks the existing yield/abort points before import publication and between jobs; the 205-test service suite includes foreground cancellation and retry paths. No member-visible output or authority changed. Hosted foreground-arrival latency and the RSS distribution after deployment remain unproved.
 - Focused core cache tests (11), device-sync service tests (205), hosted/backfill tests (125), the byte-for-byte differential test, all three package typechecks, benchmark typecheck, and complexity guard passed. No production mutation, deploy, or ReviewGPT was performed.
 Completed: 2026-11-10
+
+- The synthetic pass benchmark that produced these numbers is not checked in: it imported `@murphai/core` from the device-syncd package, which the workspace boundary check rejects. The differential guarantee in the tree is `packages/core/test/device-import-cache-invalidation.test.ts`.
