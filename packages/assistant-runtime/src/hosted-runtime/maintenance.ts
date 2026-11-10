@@ -708,7 +708,7 @@ export async function runHostedAssistantAutomation(
       cronProcessed: result.cronProcessed,
       nextWakeAt,
       autonomousNextWakeAt: result.autonomousNextWakeAt,
-      routingNextWakeAt: result.routing.nextWakeAt,
+      routingNextWakeAt: routing.nextWakeAt,
       ...(result.outboxOnlyNextWakeAt
         ? { outboxOnlyNextWakeAt: result.outboxOnlyNextWakeAt }
         : {}),
