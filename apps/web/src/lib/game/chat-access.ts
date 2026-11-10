@@ -1,5 +1,6 @@
 import "server-only";
 
+import { HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
 import { hostedThreadContainerParticipantAccessCutoff } from "../hosted-groups/thread-container-participant-access";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "../legal/consent";
@@ -19,22 +20,24 @@ export async function readGameChatFundingRooms(input: {
   const cutoff = hostedThreadContainerParticipantAccessCutoff(input.now);
   const settledCutoff = new Date(input.now.getTime() - GAME_CHAT_SETTLED_ACCESS_MS);
   const groupPlayers = Prisma.sql`EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
-      AND p.left_at IS NULL AND p.member_id = ANY(pair.player_ids))
+      AND p.left_at IS NULL AND p.member_id = ANY(roster.member_ids))
     AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
-      AND p.left_at IS NULL AND (p.member_id IS NULL OR p.seat NOT BETWEEN 0 AND 9))`;
+      AND p.left_at IS NULL AND (p.member_id IS NULL OR NOT (p.member_id = ANY(roster.member_ids))))`;
+  const restrictedMembers = Prisma.sql`(roster.member_ids || ARRAY(SELECT p.member_id FROM game_player p
+    WHERE p.game_id = game.id AND p.member_id IS NOT NULL))`;
   const rows = await input.prisma.$queryRaw<Array<{ memberId: string; beneficiaryMemberId: string }>>(Prisma.sql`
     SELECT room.id AS "memberId", candidate.chat_container_member_id AS "beneficiaryMemberId"
     FROM hosted_member room
     JOIN hosted_thread_container container ON container.member_id = room.id
     JOIN LATERAL (
-      SELECT array_agg(participant_member_id ORDER BY participant_member_id) AS player_ids
+      SELECT array_agg(participant_member_id ORDER BY participant_member_id) AS member_ids
       FROM (
         SELECT participant_member_id, last_seen_at FROM hosted_thread_container_participant
         WHERE container_member_id = room.id AND removed_at IS NULL
-        ORDER BY participant_member_id LIMIT 11
-      ) roster
-      HAVING count(*) BETWEEN 1 AND 10 AND bool_and(last_seen_at >= ${cutoff})
-    ) pair ON TRUE
+        ORDER BY participant_member_id LIMIT ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX + 1}
+      ) participants
+      HAVING count(*) BETWEEN 1 AND ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} AND bool_and(last_seen_at >= ${cutoff})
+    ) roster ON TRUE
     JOIN LATERAL (
       SELECT COALESCE(
         (SELECT game.id FROM game WHERE game.max_players = 10
@@ -47,31 +50,42 @@ export async function readGameChatFundingRooms(input: {
         (SELECT rematch.id FROM game rematch
           WHERE rematch.max_players = 2 AND rematch.chat_container_member_id = room.id AND rematch.status = 'invited'
             AND (rematch.invite_expires_at IS NULL OR rematch.invite_expires_at > ${input.now})
-            AND rematch.created_by = ANY(pair.player_ids)
-            AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = rematch.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> rematch.created_by)
+            AND rematch.created_by = ANY(roster.member_ids)
+            AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = rematch.id AND invited.member_id = ANY(roster.member_ids) AND invited.member_id <> rematch.created_by)
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.source = 'game_lifecycle' AND receipt.source_ref = rematch.id
                 AND receipt.template = 'game_rematch'
                 AND receipt.status IN ('awaiting_generation', 'generation_queued')
                 AND receipt.skipped_at IS NULL)
           ORDER BY rematch.created_at DESC, rematch.id LIMIT 1),
+        -- Expanded rooms can use only their own bound pair, never the first
+        -- two people in the room as an inferred pair.
+        (SELECT bound.id FROM game bound
+          WHERE bound.max_players = 2 AND bound.chat_container_member_id = room.id
+            AND cardinality(roster.member_ids) > 2
+            AND (bound.status = 'live' OR (bound.status = 'negotiating'
+              AND (bound.invite_expires_at IS NULL OR bound.invite_expires_at > ${input.now}))
+              OR (bound.status = 'settled' AND bound.settled_at > ${settledCutoff} AND bound.settled_at <= ${input.now}))
+            AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bound.id
+              AND (p.member_id IS NULL OR p.left_at IS NOT NULL OR NOT (p.member_id = ANY(roster.member_ids))))
+          ORDER BY bound.created_at, bound.id LIMIT 1),
         -- Derive the pair from the indexed seats. Select one established
         -- primary room even when several games are live or still unbound.
         (SELECT active.id FROM game_player first_player
           JOIN game active ON active.id = first_player.game_id
-          WHERE active.max_players = 2 AND first_player.member_id = pair.player_ids[1]
+          WHERE cardinality(roster.member_ids) = 2 AND active.max_players = 2 AND first_player.member_id = roster.member_ids[1]
             AND active.chat_container_member_id IS NOT NULL
             AND (active.status = 'live' OR (active.status = 'negotiating'
               AND (active.invite_expires_at IS NULL OR active.invite_expires_at > ${input.now})))
             AND EXISTS (SELECT 1 FROM game_player second_player
-              WHERE second_player.game_id = active.id AND second_player.member_id = pair.player_ids[2])
+              WHERE second_player.game_id = active.id AND second_player.member_id = roster.member_ids[2])
           ORDER BY active.created_at, active.id LIMIT 1),
         (SELECT recent.id FROM game_player first_player
           JOIN game recent ON recent.id = first_player.game_id
-          WHERE recent.max_players = 2 AND first_player.member_id = pair.player_ids[1]
+          WHERE cardinality(roster.member_ids) = 2 AND recent.max_players = 2 AND first_player.member_id = roster.member_ids[1]
             AND recent.status = 'settled' AND recent.settled_at > ${settledCutoff} AND recent.settled_at <= ${input.now}
             AND EXISTS (SELECT 1 FROM game_player second_player
-              WHERE second_player.game_id = recent.id AND second_player.member_id = pair.player_ids[2])
+              WHERE second_player.game_id = recent.id AND second_player.member_id = roster.member_ids[2])
           ORDER BY recent.settled_at DESC, recent.id LIMIT 1),
         -- Cancellation releases its slot but keeps its already-bound room
         -- available until the reserved notice reaches provider dispatch.
@@ -112,13 +126,13 @@ export async function readGameChatFundingRooms(input: {
                       (bootstrap.status = 'live' OR (bootstrap.status IN ('invited', 'negotiating')
                         AND (bootstrap.invite_expires_at IS NULL OR bootstrap.invite_expires_at > ${input.now})))
                       AND ((bootstrap.status = 'invited'
-                          AND bootstrap.created_by = ANY(pair.player_ids)
-                          AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = bootstrap.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> bootstrap.created_by))
+                          AND bootstrap.created_by = ANY(roster.member_ids)
+                          AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = bootstrap.id AND invited.member_id = ANY(roster.member_ids) AND invited.member_id <> bootstrap.created_by))
                         OR (bootstrap.status <> 'invited'
                           AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 0)
                           AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 1)
                           AND NOT EXISTS (SELECT 1 FROM game_player p
-                            WHERE p.game_id = bootstrap.id AND (p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids))))))
+                            WHERE p.game_id = bootstrap.id AND (p.seat NOT IN (0, 1) OR p.member_id IS NULL OR p.left_at IS NOT NULL OR NOT (p.member_id = ANY(roster.member_ids))))))
                     ))))
                   OR receipt.payload_schema = 'game_chat_bootstrap_v1')
                 AND receipt.bootstrap_route_attached_at IS NULL AND receipt.skipped_at IS NULL)
@@ -130,21 +144,21 @@ export async function readGameChatFundingRooms(input: {
             AND (game.invite_expires_at IS NULL OR game.invite_expires_at > ${input.now})) OR
           (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
           (game.status = 'void' AND game.chat_container_member_id = room.id))
-        AND ((game.max_players = 10 AND ${groupPlayers}) OR (game.max_players = 2 AND cardinality(pair.player_ids) = 2 AND ((game.status = 'invited'
-              AND game.created_by = ANY(pair.player_ids)
-              AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> game.created_by))
+        AND ((game.max_players = 10 AND ${groupPlayers}) OR (game.max_players = 2 AND (game.chat_container_member_id = room.id OR cardinality(roster.member_ids) = 2) AND ((game.status = 'invited'
+              AND game.created_by = ANY(roster.member_ids)
+              AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(roster.member_ids) AND invited.member_id <> game.created_by))
           OR (game.status <> 'invited'
               AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 0)
               AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)
               AND NOT EXISTS (SELECT 1 FROM game_player p
-                WHERE p.game_id = game.id AND (p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids))))))
+                WHERE p.game_id = game.id AND (p.seat NOT IN (0, 1) OR p.member_id IS NULL OR p.left_at IS NOT NULL OR NOT (p.member_id = ANY(roster.member_ids))))))
         ))
         AND NOT EXISTS (SELECT 1 FROM game_block blocked
-          WHERE blocked.blocker_member_id = ANY(pair.player_ids) AND blocked.blocked_member_id = ANY(pair.player_ids))
+          WHERE blocked.blocker_member_id = ANY(${restrictedMembers}) AND blocked.blocked_member_id = ANY(${restrictedMembers}))
         AND ${gameOnSql("game")}
         AND NOT EXISTS (
           SELECT 1 FROM hosted_member person
-          WHERE person.id = ANY(pair.player_ids) AND (
+          WHERE person.id = ANY(${restrictedMembers}) AND (
             person.suspended_at IS NOT NULL
             OR EXISTS (SELECT 1 FROM hosted_consent_grant consent
               WHERE consent.member_id = person.id AND consent.scope = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE}

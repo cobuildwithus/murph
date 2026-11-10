@@ -111,7 +111,7 @@ import { addDays, daysBetween, gameLocalDate } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, reserveGameChallengeTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInRuns, morningAfterLastDay, isMissedCheckInDueNow, visitGameMissedCheckInPages } from "./missed-check-in";
@@ -1285,7 +1285,7 @@ async function proposeGroupChange(context: CommandContext, command: Extract<Game
   const prior = await getPrisma().gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
   // Provider evidence and sealed words are prepared before the game lock.
   const audience = context.chatContainerMemberId ? context.chatAudience
-    : before.row.chatContainerMemberId ? await readGroupGameChatAuthority(before.row, before.row.chatContainerMemberId) : null;
+    : before.row.chatContainerMemberId ? await readGameChatAuthority(before.row, before.row.chatContainerMemberId) : null;
   const prepared = prior ? null : command.type === "editTerms"
     ? await prepareGroupChange(before, command, gameNow(context.now ?? new Date(), before.row))
     : { change: command.change, ...await prepareGameChangeWords(before.row, command.change, command.expectedTermsVersion), rosterBasis: groupChangeRosterBasis(before.state) };
@@ -1335,7 +1335,7 @@ async function assertGroupProposalPreparedTx(locked: LockedStep,
   groupContext: { before: LoadedGame; audience: GameChatAudience | null | undefined } | undefined): Promise<void> {
   const { loaded, tx } = locked;
   if (!groupContext?.audience || !loaded.row.chatContainerMemberId
-    || !await readGroupGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, groupContext.audience, tx)) reject("NOT_A_PLAYER", "Open this game’s bound group chat before requesting a change.");
+    || !await readGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, groupContext.audience, tx)) reject("NOT_A_PLAYER", "Open this game’s bound group chat before requesting a change.");
   if (!prepared || loaded.row.wordsOwnerMemberId !== groupContext.before.row.wordsOwnerMemberId
     || prepared.rosterBasis !== groupChangeRosterBasis(loaded.state)) reject("TERMS_CHANGED", "The game changed. Take another look.");
 }
@@ -1524,7 +1524,7 @@ export async function removeGameReplyForReview(replyId: string): Promise<void> {
 async function challenge(context: CommandContext, command: Extract<GameCommand, { type: "challenge" }>): Promise<string> {
   const candidate = await getPrisma().game.findUnique({ where: { id: command.gameId }, include: { players: true, invitees: true } });
   const audience = candidate?.maxPlayers === 10 && candidate.chatContainerMemberId
-    ? await readGroupGameChatAuthority(candidate, candidate.chatContainerMemberId) : null;
+    ? await readGameChatAuthority(candidate, candidate.chatContainerMemberId) : null;
   await runLocked(command.gameId, context, async ({ loaded, now, tx }) => {
     const player = playerFor(loaded.state, context.actor);
     if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
@@ -1537,7 +1537,7 @@ async function challenge(context: CommandContext, command: Extract<GameCommand, 
       return [];
     }
     if (loaded.row.maxPlayers === 10 && (!audience || !loaded.row.chatContainerMemberId
-      || !await readGroupGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, audience, tx))) {
+      || !await readGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, audience, tx))) {
       reject("CHAT_UNAVAILABLE", "This game needs its shared chat first.");
     }
     const [history, reports] = await Promise.all([
@@ -2146,7 +2146,7 @@ async function negotiateGroupNote(context: CommandContext, command: Extract<Game
     if (!invitation) reject("INVITE_USED", "Only an addressed invitee who hasn't joined can send a note.");
     if (currentTerms(loaded.state.game.terms).n !== command.termsVersion) reject("TERMS_CHANGED", "The game changed. Take another look.");
     const room = audience && loaded.row.chatContainerMemberId
-      ? await readGroupGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, audience, tx) : null;
+      ? await readGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, audience, tx) : null;
     if (!room || !room.memberIds.includes(context.actor) || !(await verifiedGameContactKeys(tx, context.actor, room.contacts)).length) reject("CHAT_UNAVAILABLE", "Join the game's group chat before sending a note.");
     const accepted = await tx.gameEvent.findMany({ where: { gameId: owner.id, type: "talk_requested" }, select: { actor: true, payload: true }, take: 10 });
     if (accepted.length >= 9 || accepted.some(event => {
@@ -2447,7 +2447,7 @@ async function readGroupRematchNotice(gameId: string, previousGameId: string | n
     || isGameInviteExpired(rematch, now)
     || previousGameId && (!previous || previous.status !== "settled" || previous.maxPlayers !== 10)) return null;
   const terms = parseStoredTerms(rematch.terms);
-  const audience = await readGroupGameChatAuthority(rematch, rematch.chatContainerMemberId);
+  const audience = await readGameChatAuthority(rematch, rematch.chatContainerMemberId);
   if (!audience) return null;
   const shared = (await readGameChatState(rematch.chatContainerMemberId, audience.memberIds, undefined, true, audience)).games.find(game => game.id === gameId);
   const requester = shared?.players.find(player => player.memberId === rematch.createdBy);
@@ -2481,7 +2481,7 @@ export async function readGameNoticeRoom(gameId: string, playerMemberIds: readon
   // A historical group outcome still names its game after settlement or voiding.
   if (!shared && containerMemberId) {
     const [loaded] = await loadGames(getPrisma(), [gameId]);
-    if (loaded?.row.maxPlayers === 10 && await readGroupGameChatAuthority(loaded.row, containerMemberId)) {
+    if (loaded?.row.maxPlayers === 10 && await readGameChatAuthority(loaded.row, containerMemberId)) {
       const [plain] = await openGameTexts([{ ...gameTarget(loaded.row, "terms_words"), value: loaded.row.termsWordsEncrypted }]);
       const words = parseTermWords(plain ?? "");
       const terms = termsView(loaded.state, words, true);
@@ -2683,7 +2683,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   if (!recapPlayers || !recapPlayers.every(hasGameIdentity) || row.maxPlayers !== 10 && !sameGamePlayers(recapPlayers.map(player => player.memberId), expectedPlayers)) return null;
   const memberIds = recapPlayers.map(player => player.memberId);
   if (await hasGameChatBlock(prisma, expectedPlayers)) return null;
-  if (row.maxPlayers === 10 && !await readGroupGameChatAuthority(row, containerMemberId)) return null;
+  if (row.maxPlayers === 10 && !await readGameChatAuthority(row, containerMemberId)) return null;
   const rowEntries = await prisma.gameEntry.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? { memberId: { in: memberIds } } : {}) }, orderBy: { receivedAt: "asc" } });
   const allowed = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
@@ -2768,7 +2768,7 @@ export async function sealGameRecap(input: {
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
     if (!current || current.wordsOwnerMemberId !== row.wordsOwnerMemberId) return null;
-    if (current.maxPlayers === 10 ? !groupGameRecapPlayers(current) || !audience || !await readGroupGameChatAuthority(current, input.containerMemberId, audience, tx)
+    if (current.maxPlayers === 10 ? !groupGameRecapPlayers(current) || !audience || !await readGameChatAuthority(current, input.containerMemberId, audience, tx)
       : !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds) || await hasGameChatBlock(tx, input.playerMemberIds)) return null;
     if (!await settleGameRecapGenerationTx(tx, current, input.eventId)) return null;
     if (scope.regenerationId) {
@@ -3381,7 +3381,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
     const payload = parseGameTalkPayload(event.payload);
     return event.actor === actor || payload?.v === 2 && payload.invitationSeat === invitation.seat;
   })) return false;
-  const audience = await readGroupGameChatAuthority(row, row.chatContainerMemberId).catch(() => null);
+  const audience = await readGameChatAuthority(row, row.chatContainerMemberId).catch(() => null);
   return Boolean(audience?.memberIds.includes(actor) && (await verifiedGameContactKeys(db, actor, audience.contacts)).length);
 }
 

@@ -21,7 +21,7 @@ import { isGameInviteExpired } from "./rules";
 import { pendingGameChangeView } from "./changes";
 import { assertGameProposalDeliveryCurrentTx } from "./chat-delivery-authority";
 
-import { bindPairGameChat, findExistingGameChat, readGroupGameChatAuthority, readGroupGameNoticeAuthority, type GameChatAudience, requireExactChat, requireExactGameChat } from "./chat-membership";
+import { bindPairGameChat, findExistingGameChat, readGameChatAuthority, readGroupGameNoticeAuthority, type GameChatAudience, requireExactChat, requireExactGameChat } from "./chat-membership";
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
@@ -57,7 +57,7 @@ async function deliverGroupChangeProposal(gameId: string, proposalId: string, no
   const proposal = await readPendingGameChange(game);
   if (!proposal || proposal.origin === "chat") return false;
   if (!game.chatContainerMemberId) return false;
-  const audience = await readGroupGameChatAuthority(game, game.chatContainerMemberId);
+  const audience = await readGameChatAuthority(game, game.chatContainerMemberId);
   if (!audience) return false;
   const players = current.state.players.filter(player => !player.leftAt);
   const [profiles, room] = await Promise.all([

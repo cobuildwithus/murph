@@ -1878,27 +1878,25 @@ existing accounting and provider access checks.
 
 ## Weekly game chat authority
 
-Group room authority belongs to `readGroupGameChatAuthority`: complete provider
-handles with exactly one active Murph handle and current Linq routing must match
-the original keyed audience or prove a subset of at least two people. Remaining
-players must have identities in addressed seats 0–9 and resolve in the current
-text on both exact and subset paths. Exact rooms may retain tombstoned departed
-contacts; original handle equality cannot substitute for remaining-player
-identity evidence. Each subset contact must resolve to an addressed player
-(left or not) or bound invitee, or match its own unbound invitation's lookup read
-candidates, even if registered. Bound invitation keys grant nothing; null
-identities never match. Adding anyone outside the original audience or losing
-a remaining player from the text detaches the game.
+Prepared game-room authority belongs to `readGameChatAuthority` for both pairs
+and groups. Complete provider handles, exactly one active Murph handle,
+normalizable distinct contacts, unambiguous identities, a usable line and a
+current Linq route prove the room. A bound game needs every current player in
+that room; other people and player seat numbers do not change this authority.
+An unbound group needs the original keyed audience and no other binding. An
+unbound pair, or one bound elsewhere, stays visible only in its exact pair room.
+Pair rematches include the invited opponent before their seat exists.
 Deleting the room owner removes its binding. Resolve verified accounts where
 they exist and check restrictions over their union with all extant player IDs,
-including leavers. Unresolved handles are valid audience evidence and do not
-acquire account rights.
+including leavers. Unresolved bystanders are room evidence and acquire no
+account rights. Invitation keys remain limited to two through ten contacts;
+room evidence itself does not borrow the game roster limit.
 
 During a reserved/adopted Linq line move, the existing game audience boundary
 collapses only that container's persisted, provider-inventory-verified pair of
 service numbers to the current route's sending self. Unknown handles receive
 no exemption. Complete provider evidence, human audience/consent checks and
-the game's original audience key remain authoritative. Multiple unresolved
+the game's binding or exact first-claim audience remain authoritative. Multiple unresolved
 overlaps fail closed. An adopted/left source alias is egress-only and bound to
 the calling container; it cannot authorize ingress or translate a native reply
 or reaction. `ARCHITECTURE.md` owns the retained tombstone and rollback floor.
@@ -1938,7 +1936,7 @@ code records only the accepted canonical bare room chat line, once, within the
 existing 64 KiB limit; that line must use room-visible evidence only. A separate
 group missed-day batch may grant writable lore only for authorized room-visible
 evidence, never app captions or media. Its producer and final egress must use
-`readGroupGameChatAuthority` for every included game and current eligible person;
+`readGameChatAuthority` for every included game and current eligible person;
 a room identifier alone grants no authority. Group missed-day production uses
 the guarded batch policy described below.
 
@@ -1953,7 +1951,7 @@ replacement writes, because their evidence contains only room conversation and
 shared structural state. A mixed room never merges pair lore or different group
 notebooks. Public names are disambiguated once across the room; private labels,
 unjoined task overrides, captions and media never enter the instructions.
-`readGroupGameChatAuthority` remains the sole group authority at collection,
+`readGameChatAuthority` remains the sole group authority at collection,
 publication, recovery and final egress, including two-person turnout.
 
 The strict `game_group_missed_check_in` policy in the encrypted mailbox binds
@@ -1984,7 +1982,7 @@ membership, profile, current verified addressed invitation and bound room presen
 One accepted event per author and seat is the quota, even if its content is later
 redacted. Exact compound receipt identity and event type/author govern recovery;
 pair game-only references remain readable. Publication and dispatch share the
-same locked currentness validator and `readGroupGameChatAuthority`. Preparation
+same locked currentness validator and `readGameChatAuthority`. Preparation
 of provider evidence, contact keys, names and sealed mailbox content happens
 outside transactions. Stale notes/cases are terminally skipped; provider failures
 retain their receipt for recovery. Deletion scrubs author-bound note fields before

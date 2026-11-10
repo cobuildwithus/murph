@@ -506,8 +506,8 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await readGroupMissedDayDeliveryAuthority(gameGroupMissedDayEventId(f.roomId, date), f.roomId))?.policy.batch).toHaveLength(2);
   });
 
-  it("skips a room with one person left in the text, and its next shard visit retries", async () => {
-    const bad = await drainPastBrokenRoom("participants_changed", f => { proof.rooms.set(f.roomId, [f.people[0]!.email]); });
+  it("skips duplicate provider handles, and its next shard visit retries", async () => {
+    const bad = await drainPastBrokenRoom("participants_changed", f => { proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); });
     // Nothing was recorded, so the room's next shard visit inside the window claims normally.
     proof.rooms.set(bad.roomId, bad.people.map(person => person.email));
     await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000));
@@ -628,7 +628,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it("skips a due room with an unsendable audience and warns", async () => {
     const f = await fixture(), id = await f.addGame();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(0);
     expect(proof.audienceReads).toEqual([`route:${f.roomId}`, `chat:${f.roomId}`]);
@@ -637,7 +637,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it("reads nothing and logs nothing for a not-due room with an unsendable audience", async () => {
     const f = await fixture(), id = await f.addGame();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await reserveGroupGameMissedDay(f.roomId, [id], new Date(now.getTime() - 1_000))).toBe(0);
     expect(proof.audienceReads).toEqual([]);
@@ -648,7 +648,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   const deadline = hours(2), justLate = new Date(deadline.getTime() + 1);
   const outage = () => hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Linq chat read timed out.", retryable: true });
   const heldUp = [
-    ["an unsendable room", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email]); }],
+    ["an unsendable room", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); }],
     ["a provider outage", (f: Fixture) => { proof.chatFailures.set(f.roomId, outage()); }],
   ] as const;
   const recover = (f: Fixture) => { proof.chatFailures.clear(); proof.rooms.set(f.roomId, f.people.map(person => person.email)); };
@@ -710,7 +710,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it.each([["exactly at", deadline, "awaiting_generation"], ["just past", justLate, "skipped"]] as const)("treats a receipt %s its deadline correctly", async (_side, at, status) => {
     const { f, eventId } = await reservedRoom();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     await turn(eventId, at);
     expect((await receipt(eventId)).status).toBe(status);
   });
@@ -733,7 +733,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
       const item = await db.hostedMailboxItem.findFirstOrThrow({ where: { userId: f.roomId, lane: "system" } });
       await advanceHostedMailboxConsumedSeqByLane({ userId: f.roomId, prisma: db, lanes: [{ lane: "system", consumedSeq: item.laneSeq }] });
     }
-    proof.rooms.set(f.roomId, [f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });
     expect(await receipt(eventId)).toMatchObject({ status: "generation_queued", retryAfterAt: null, skippedAt: null });
@@ -782,7 +782,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it("clears a receipt that was already stuck, with no migration", async () => {
     const { f, eventId } = await reservedRoom();
-    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     // A row from before this change: a database-default createdAt and a months-old retry history.
     await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { createdAt: hours(-24 * 90), retryAfterAt: hours(-1) } });
     await turn(eventId, now);
@@ -948,12 +948,12 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     await expect(db.$transaction(tx => assertAndDispatch(authority, tx))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
-  it("requires exact encrypted mailbox authority and rejects added outsiders at egress", async () => {
+  it("keeps bystanders at egress and still requires exact encrypted mailbox authority", async () => {
     const f = await fixture(), id = await f.addGame(), authority = await publish(f.roomId, [id]);
     expect(await readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).toMatchObject({ policy: authority.policy });
     await expect(readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, "other-room")).rejects.toThrow();
     proof.rooms.get(f.roomId)!.push("outsider@example.test");
-    await expect(readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).rejects.toThrow();
+    expect(await readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).toMatchObject({ policy: authority.policy });
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, deliveryIdempotencyKey: authority.policy.eventId, containerMemberId: f.roomId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 });
@@ -1157,7 +1157,7 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
 
   it("retries a failing receipt when its lease ends, not sooner", async () => {
     const [room] = await dueRooms(1);
-    proof.rooms.set(room!.f.roomId, [room!.f.people[0]!.email]);
+    proof.rooms.set(room!.f.roomId, [room!.f.people[0]!.email, room!.f.people[0]!.email]);
     let clock = now.getTime();
     vi.spyOn(Date, "now").mockImplementation(() => clock);
     await drainGameChatLifecycle({ now });
@@ -1173,7 +1173,7 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
   it.each([
     ["an unexpected defect", "TypeError", (f: Fixture) => { proof.chatFailures.set(f.roomId, new TypeError(`Synthetic detail about ${f.roomId}.`)); }],
     ["a provider failure", "LINQ_SEND_FAILED", (f: Fixture) => { proof.chatFailures.set(f.roomId, hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: `Synthetic detail about ${f.roomId}.`, retryable: true })); }],
-    ["an unsendable room", "participants_changed", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email]); }],
+    ["an unsendable room", "participants_changed", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]); }],
   ] as const)("logs one fixed-code diagnostic for %s and keeps its siblings going", async (_cause, reason, breakRoom) => {
     const rooms = await dueRooms(3), failed = rooms[1]!;
     breakRoom(failed.f);

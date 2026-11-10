@@ -16,7 +16,7 @@ vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGame
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
 vi.mock("../src/lib/game/reminder-notification", () => ({ sendDueGameReminders: m.reminders }));
-vi.mock("../src/lib/game/chat-membership", async original => ({ ...await original<typeof import("../src/lib/game/chat-membership")>(), bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGroupGameChatAuthority: m.groupAuthority, readGroupGameNoticeAuthority: m.groupAuthority }));
+vi.mock("../src/lib/game/chat-membership", async original => ({ ...await original<typeof import("../src/lib/game/chat-membership")>(), bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGameChatAuthority: m.groupAuthority, readGroupGameNoticeAuthority: m.groupAuthority }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal, readGameProposalDeliveryPlayers: async () => ["person-a", "person-b"] }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identity }));

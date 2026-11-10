@@ -293,6 +293,12 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     mocks.audience.mockRejectedValueOnce(new Error("synthetic provider failure"));
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     const evidence = await mocks.audience();
+    for (const registered of [false, true]) {
+      mocks.audience.mockResolvedValueOnce({ ...evidence,
+        contacts: [...evidence.contacts, createHostedLinqParticipantContact({ kind: "email", value: "bystander@example.test" })!],
+        memberIds: registered ? [...evidence.memberIds, f.room] : evidence.memberIds });
+      await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
+    }
     mocks.audience.mockResolvedValueOnce({ ...evidence, memberIds: [f.a, f.room] });
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     mocks.audience.mockImplementationOnce(async () => { await db.game.update({ where: { id: f.gameId }, data: { chatContainerMemberId: null } }); return evidence; });

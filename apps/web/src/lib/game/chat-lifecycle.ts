@@ -17,7 +17,7 @@ import { isHostedMailboxItemConsumed, appendPreparedHostedMailboxEnvelopeTx, pre
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { GameChatAudienceError, readGroupGameChatAuthority, readGroupGameNoticeAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
+import { GameChatAudienceError, readGameChatAuthority, readGroupGameNoticeAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -413,7 +413,7 @@ async function recoverGameNotificationPointer(receiptId: string, roomId: string,
 
 async function revalidateGroupNotificationWake(game: GameChatLifecycleRecord, eventId: string, now: Date): Promise<boolean> {
   if (!eventId.startsWith("game-talk:") && !eventId.startsWith("game-challenge:")) {
-    return Boolean(await readGroupGameChatAuthority(game, game.chatContainerMemberId!));
+    return Boolean(await readGameChatAuthority(game, game.chatContainerMemberId!));
   }
   const prisma = getPrisma();
   try {
@@ -747,7 +747,7 @@ async function isGameLifecycleAppendCurrentTx(input: Parameters<typeof enqueueGa
     const resolution = await readGameChangeResolution(tx, input.gameId, notice.proposalId);
     if (!resolution || gameResolutionNoticeKind(resolution.outcome) !== input.kind) return false;
   }
-  return !input.audience || Boolean(await readGroupGameChatAuthority(current, input.containerMemberId, input.audience, tx));
+  return !input.audience || Boolean(await readGameChatAuthority(current, input.containerMemberId, input.audience, tx));
 }
 
 async function enqueueGameLifecycle(input: {

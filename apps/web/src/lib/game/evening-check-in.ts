@@ -11,7 +11,7 @@ import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, 
 import { getPrisma } from "../prisma";
 import { isGameOn } from "./access";
 import { lockGamePair } from "./blocks";
-import { GameChatAudienceError, readGroupGameChatAuthority, requireExactGameChat, sameGamePlayers, type GameChatAudience } from "./chat-membership";
+import { GameChatAudienceError, readGameChatAuthority, requireExactGameChat, sameGamePlayers, type GameChatAudience } from "./chat-membership";
 import { readGroupMissedDayRoom } from "./group-missed-day";
 import { visitGameMissedCheckInPages } from "./missed-check-in";
 import { reminderOpenDay } from "./reminders";
@@ -242,7 +242,7 @@ async function roomAudienceCurrentTx(games: Games, roomId: string, memberIds: re
   for (const { row } of games) {
     if (!hasJoinedAudience(row, memberIds)) return false;
     if (row.maxPlayers === 10 && (!audience || audience.contacts.length !== memberIds.length
-      || !await readGroupGameChatAuthority(row, roomId, audience, tx))) return false;
+      || !await readGameChatAuthority(row, roomId, audience, tx))) return false;
   }
   return true;
 }
