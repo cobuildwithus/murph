@@ -104,6 +104,127 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     return result;
   }
 
+  async function retireAndRelease(owner: HostedRuntimeOwner) {
+    const current = identity(owner);
+    expect(await retireHostedRuntime({ prisma: first, identity: current })).toBe(true);
+    expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: current,
+      runnerContainerName: null })).toBe(true);
+  }
+
+  it("admits 24 autonomous starts, then enforces one per five minutes without refund", async () => {
+    const userId = await member();
+    const now = new Date("2030-01-01T12:00:00.000Z");
+    const firstStart = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true, now });
+    expect(firstStart.status).toBe("claimed");
+    if (firstStart.status !== "claimed") throw new Error("Expected first autonomous claim.");
+    expect(firstStart.owner.backgroundStartCount).toBe(1);
+    await retireAndRelease(firstStart.owner);
+    await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      backgroundWindowStartedAt: now, backgroundStartCount: 23, lastBackgroundStartedAt: now,
+    } });
+    const attempts = await Promise.all([first, second, observer].map(prisma =>
+      claimHostedRuntime({ prisma, userId, processingMode: "default", autonomousWake: true,
+        enforceBackgroundWakeGuard: true, now: new Date(now.getTime() + 60_000) })));
+    expect(attempts.filter(result => result.status === "claimed")).toHaveLength(1);
+    expect(attempts.filter(result => result.status === "existing")).toHaveLength(2);
+    const admitted = attempts.find(result => result.status === "claimed");
+    if (!admitted || admitted.status !== "claimed") throw new Error("Expected one admitted claim.");
+    expect(admitted.owner.backgroundStartCount).toBe(24);
+    await retireAndRelease(admitted.owner);
+    const atMinuteTwo = new Date(now.getTime() + 2 * 60_000);
+    const deferred = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true, now: atMinuteTwo });
+    expect(deferred).toEqual({ cutover: "postgres", status: "blocked", reason: "background_rate_limited",
+      retryAt: new Date(now.getTime() + 6 * 60_000).toISOString() });
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).backgroundStartCount).toBe(24);
+    const next = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true,
+      now: new Date(now.getTime() + 6 * 60_000) });
+    expect(next.status).toBe("claimed");
+    if (next.status !== "claimed") throw new Error("Expected a later autonomous claim.");
+    expect(next.owner.backgroundStartCount).toBe(25);
+    await retireAndRelease(next.owner);
+    const newWindow = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true,
+      now: new Date(now.getTime() + 60 * 60_000) });
+    expect(newWindow.status).toBe("claimed");
+    if (newWindow.status !== "claimed") throw new Error("Expected fixed-window reset.");
+    expect(newWindow.owner.backgroundStartCount).toBe(1);
+  });
+
+  it("repairs missing or future timing and leaves foreground and retention unbounded", async () => {
+    const userId = await member();
+    const now = new Date("2030-01-01T12:00:00.000Z");
+    const start = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true, now });
+    if (start.status !== "claimed") throw new Error("Expected first claim.");
+    await retireAndRelease(start.owner);
+    await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      backgroundWindowStartedAt: null, backgroundStartCount: 24, lastBackgroundStartedAt: null,
+    } });
+    const repaired = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true, now });
+    expect(repaired.status).toBe("claimed");
+    if (repaired.status !== "claimed") throw new Error("Expected repaired claim.");
+    expect(repaired.owner.backgroundStartCount).toBe(1);
+    await retireAndRelease(repaired.owner);
+    await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      backgroundWindowStartedAt: new Date(now.getTime() + 60_000),
+      backgroundStartCount: 24, lastBackgroundStartedAt: new Date(now.getTime() + 60_000),
+    } });
+    const rollback = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      autonomousWake: true, enforceBackgroundWakeGuard: true, now });
+    expect(rollback.status).toBe("claimed");
+    if (rollback.status !== "claimed") throw new Error("Expected repaired clock claim.");
+    expect(rollback.owner.backgroundStartCount).toBe(1);
+    await retireAndRelease(rollback.owner);
+    await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      backgroundWindowStartedAt: now, backgroundStartCount: 24, lastBackgroundStartedAt: now,
+    } });
+    const foreground = await claimHostedRuntime({ prisma: first, userId, processingMode: "default", now });
+    expect(foreground.status).toBe("claimed");
+    if (foreground.status !== "claimed") throw new Error("Expected foreground claim.");
+    expect(foreground.owner.backgroundStartCount).toBe(24);
+    await retireAndRelease(foreground.owner);
+    const retention = await claimHostedRuntime({ prisma: first, userId, processingMode: "inbox_media_retention",
+      autonomousWake: true, enforceBackgroundWakeGuard: true, now });
+    expect(retention.status).toBe("claimed");
+    if (retention.status !== "claimed") throw new Error("Expected retention claim.");
+    expect(retention.owner.backgroundStartCount).toBe(24);
+  });
+
+  it("observes a would-defer decision while enforcement is off", async () => {
+    const userId = await member();
+    const now = new Date();
+    await observer.hostedRuntimeOwner.create({ data: { userId, migrationPhase: "postgres", phase: "idle",
+      backgroundWindowStartedAt: now, backgroundStartCount: 24, lastBackgroundStartedAt: now } });
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const result = await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+        autonomousWake: true, enforceBackgroundWakeGuard: false });
+      expect(result.status).toBe("claimed");
+      expect(log).toHaveBeenCalledWith("Hosted background wake guard decision.",
+        expect.objectContaining({ enforced: false, count: 24, wouldDefer: true }));
+    } finally { log.mockRestore(); }
+  });
+
+  it("returns the exact blocked deadline through the owner command boundary", async () => {
+    const userId = await member();
+    const now = new Date();
+    await observer.hostedRuntimeOwner.create({ data: { userId, migrationPhase: "postgres", phase: "idle",
+      backgroundWindowStartedAt: now, backgroundStartCount: 24, lastBackgroundStartedAt: now } });
+    vi.stubEnv("HOSTED_BACKGROUND_WAKE_GUARD_ENFORCE", "1");
+    try {
+      expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId,
+        command: { operation: "claim", processingMode: "default", autonomousWake: true } })).toEqual({
+        cutover: "postgres", status: "blocked", owner: null, blockedReason: "background_rate_limited",
+        retryAt: new Date(now.getTime() + 5 * 60_000).toISOString(),
+      });
+    } finally { vi.unstubAllEnvs(); }
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).backgroundStartCount).toBe(24);
+  });
+
   async function launchedRuntime() {
     const userId = await member();
     const owner = (await claim(userId)).owner;

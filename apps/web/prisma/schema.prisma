@@ -1326,6 +1326,9 @@ model HostedRuntimeOwner {
   // Server-owned allowance attribution, frozen for this exact invocation.
   allowanceBeneficiaryMemberId String? @map("allowance_beneficiary_member_id")
   startedAt                 DateTime? @map("started_at")
+  backgroundWindowStartedAt DateTime? @map("background_window_started_at")
+  backgroundStartCount      Int       @default(0) @map("background_start_count")
+  lastBackgroundStartedAt   DateTime? @map("last_background_started_at")
   acceptedAt                DateTime? @map("accepted_at")
   completedAt               DateTime? @map("completed_at")
   failureCount              Int      @default(0) @map("failure_count")

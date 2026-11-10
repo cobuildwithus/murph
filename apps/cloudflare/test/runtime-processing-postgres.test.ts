@@ -632,6 +632,19 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
+  it("passes the exact background deferral deadline through retry_later", async () => {
+    const { source, container } = harness();
+    const retryAt = "2026-11-10T12:05:00.000Z";
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ ...response(null, "blocked"),
+      blockedReason: "background_rate_limited", retryAt });
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, autonomousWake: true }))
+      .toEqual({ kind: "retry_later", retryAt });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
+      command: { operation: "claim", processingMode: "default", autonomousWake: true },
+    }));
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, "false", "true"])("starts a new Postgres member without the retired deployment flag (%s)", async flag => {
     const { source, container } = harness();
     const legacy = vi.fn(() => { throw new Error("Legacy namespace must not be accessed."); });
@@ -770,6 +783,18 @@ describe("Postgres runtime orchestration", () => {
     ]);
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the autonomous marker on a reclaim after stale admission", async () => {
+    const { source, container } = harness();
+    container.ensureProcessing.mockResolvedValue({ kind: "start-required", reason: "no-active-child" });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(null, "stale"));
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, autonomousWake: true,
+      admission: response(owner()) })).toMatchObject({ kind: "retry_later" });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command)).toEqual([
+      { operation: "retire", attemptId: "attempt-a", generation: "1", completed: false },
+      { operation: "claim", processingMode: "default", autonomousWake: true },
+    ]);
   });
 
   it("re-claims after a stale supplied snapshot and wakes the canonical successor", async () => {

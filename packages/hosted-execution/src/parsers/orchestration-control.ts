@@ -258,6 +258,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     "admission",
     "assistantExecutionBlocked",
     "conversationWorkPending",
+    "autonomousWake",
     "voiceCallId",
     "mailboxWakeHighWater",
     "orchestrationAttemptId",
@@ -301,6 +302,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
     );
   }
+  const autonomousWake = parseAutonomousWakeRequest(record.autonomousWake, conversationWorkPending);
 
   return {
     ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
@@ -311,6 +313,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       ? {}
       : { assistantExecutionBlocked }),
     ...(conversationWorkPending === undefined ? {} : { conversationWorkPending }),
+    ...(autonomousWake === undefined ? {} : { autonomousWake }),
     ...(mailboxWakeHighWater ? { mailboxWakeHighWater } : {}),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
@@ -318,6 +321,13 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     ),
     ...(processingMode === undefined ? {} : { processingMode }),
   };
+}
+
+function parseAutonomousWakeRequest(value: unknown, conversationWorkPending: true | undefined): true | undefined {
+  if (value === undefined) return undefined;
+  const autonomousWake = requireExactTrue(value, "Hosted runtime autonomous wake");
+  if (conversationWorkPending) throw new TypeError("Autonomous wake cannot carry pending conversation work.");
+  return autonomousWake;
 }
 
 function parseRuntimeProcessingAdmission(value: unknown, processingMode: string) {

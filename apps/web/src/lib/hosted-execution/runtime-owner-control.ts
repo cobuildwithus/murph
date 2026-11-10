@@ -11,7 +11,7 @@ import {
 
 type CommandInput = { prisma: PrismaClient; userId: string; command: HostedRuntimeOwnerCommand };
 type CommandResult = { cutover?: HostedRuntimeOwnerResponse["cutover"]; status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null;
-  blockedReason?: HostedRuntimeOwnerResponse["blockedReason"] };
+  blockedReason?: HostedRuntimeOwnerResponse["blockedReason"]; retryAt?: string };
 type IdentityCommand = Exclude<Extract<HostedRuntimeOwnerCommand, { attemptId: string }>, { operation: "authorize_effect" }>;
 
 /** Durable ownership commands. The HTTP boundary owns advisory completion hints. */
@@ -26,7 +26,7 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
   const result = await executeCommand({ ...input, command: input.command });
   const cutover = "postgres";
   return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectHostedRuntimeOwner(result.owner),
-    blockedReason: result.blockedReason });
+    blockedReason: result.blockedReason, retryAt: result.retryAt });
 }
 
 async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "authorize_provider" | "authorize_effect" }> }): Promise<CommandResult> {
@@ -40,9 +40,11 @@ async function executeCommand(input: Omit<CommandInput, "command"> & { command: 
       return authorized(await isHostedRuntimeDeletionReady(input));
     }
     case "claim": {
-      const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode });
+      const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode,
+        autonomousWake: command.autonomousWake });
       return result.status === "blocked"
-        ? { cutover: result.cutover, status: result.status, owner: null, blockedReason: result.reason }
+        ? { cutover: result.cutover, status: result.status, owner: null, blockedReason: result.reason,
+            ...("retryAt" in result ? { retryAt: result.retryAt } : {}) }
         : { cutover: result.cutover, status: result.status, owner: result.owner };
     }
     case "target_retired":
