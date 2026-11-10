@@ -468,10 +468,8 @@ function createPromptInput(
   return {
     assistantCliContract: null,
     assistantHostedAutomationAvailable: true,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantHostedLabsAvailable: false,
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',

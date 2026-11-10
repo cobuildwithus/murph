@@ -9,16 +9,13 @@ import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'telegram',
     cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-08-12',
     currentTimeZone: 'America/Chicago',
     onboardingGuidance: false,
     turnTrigger: null,
-    assistantContextSnapshotPrompt: null,
   })
 }
 

@@ -13,11 +13,8 @@ describe('proactive onboarding support', () => {
   it('makes the first reminder-and-review package proactive but keeps the launch text-only', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
-      assistantContextSnapshotPrompt: null,
       assistantHostedAutomationAvailable: true,
-      assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: false,
       channel: 'linq',
       cliAccess: {
         rawCommand: 'vault-cli',

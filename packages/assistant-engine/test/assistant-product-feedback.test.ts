@@ -197,9 +197,6 @@ describe("assistant product feedback", () => {
       "name the generic actor, exact Murph surface or workflow";
     const systemPrompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
-      assistantContextSnapshotPrompt: null,
-      assistantHostedDeviceConnectAvailable: false,
-      assistantKnowledgeToolsAvailable: false,
       channel: "telegram",
       cliAccess: {
         rawCommand: "vault-cli",

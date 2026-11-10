@@ -10,7 +10,7 @@ import { buildAssistantCliGuidanceText } from '../src/assistant-cli-access.js'
 
 function privateLayers() {
   return buildAssistantSystemPromptLayers({
-    assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+    assistantCliContract: null,
     channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
     cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-05-18', currentTimeZone: 'UTC',

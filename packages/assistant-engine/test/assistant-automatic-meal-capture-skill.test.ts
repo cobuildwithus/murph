@@ -10,9 +10,7 @@ function buildPrompt(input: {
 } = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'imessage',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -23,7 +21,6 @@ function buildPrompt(input: {
     onboardingGuidance: false,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt,
     turnTrigger: null,
-    assistantContextSnapshotPrompt: null,
   })
 }
 

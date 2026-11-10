@@ -14,7 +14,6 @@ import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from '../src/assistant/manag
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantKnowledgeToolsAvailable: false,
     channel: 'local',
     cliAccess: {
       rawCommand: 'vault-cli',

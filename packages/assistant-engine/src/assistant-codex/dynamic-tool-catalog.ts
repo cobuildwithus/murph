@@ -1891,8 +1891,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
-  exerciseRoutineResponseCardsAvailable?: boolean | null
-  telegramRichContentResponseCardsAvailable?: boolean | null
+  telegramPresentationResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
@@ -1937,9 +1936,9 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_SLEEP_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
-      a.exerciseRoutineResponseCardsAvailable)],
+      a.telegramPresentationResponseCardsAvailable)],
     [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>
-      a.telegramRichContentResponseCardsAvailable)],
+      a.telegramPresentationResponseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

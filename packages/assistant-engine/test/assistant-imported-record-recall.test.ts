@@ -100,9 +100,9 @@ describe('imported-record natural recall evidence', () => {
 
   it('already gives ordinary direct turns source-first resolution and canonical query discovery', () => {
     const prompt = buildAssistantSystemPrompt({
-      assistantCliContract: null, assistantContextSnapshotPrompt: null,
-      assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: false, channel: 'linq',
+      assistantCliContract: null,
+      assistantHostedDeviceConnectProviders: [],
+      channel: 'linq',
       cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', hostedRuntime: true, ordinaryInboundTurn: true,
       currentInstant: '2026-04-11T12:00:00Z', currentLocalDate: '2026-04-11', currentTimeZone: 'UTC',

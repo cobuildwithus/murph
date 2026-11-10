@@ -132,7 +132,6 @@ test('context handoff planning adds its ordinary-text contract and bounded group
       expect(prompt).not.toContain('privateSummary')
     }
     expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
-    expect(plan.promptCacheMetadata).toBeNull()
   } finally {
     await rm(vault, { force: true, recursive: true })
   }

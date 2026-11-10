@@ -6,10 +6,7 @@ import type { AssistantConversationScope } from '../src/assistant/conversation-p
 function buildPrompt(conversationScope: AssistantConversationScope): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',

@@ -8444,9 +8444,6 @@ text(JSON.stringify(result));
     const updatedSnapshot = groupSnapshot('gpt-6-sol')
     const groupDeveloperInstructions = buildAssistantSystemPrompt({
       assistantCliContract: null,
-      assistantContextSnapshotPrompt: null,
-      assistantHostedDeviceConnectAvailable: false,
-      assistantKnowledgeToolsAvailable: true,
       assistantStyleSettingsAvailable: true,
       channel: 'linq',
       cliAccess: {
@@ -11433,15 +11430,13 @@ function buildScriptedHostedSystemPrompt(
   conversationScope: 'direct' | 'group',
   onboardingGuidance = false,
   scheduledOccurrenceAt?: string,
-  assistantContextSnapshotPrompt?: string,
+  context?: string,
   assistantProgressUpdatesAvailable = true,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
-    assistantContextSnapshotPrompt: assistantContextSnapshotPrompt ?? null,
-    assistantHostedDeviceConnectAvailable: true,
+    assistantDynamicContextPrompts: context ? [context] : [],
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: true,
     assistantProgressUpdatesAvailable,
     channel: 'telegram',
     cliAccess: {

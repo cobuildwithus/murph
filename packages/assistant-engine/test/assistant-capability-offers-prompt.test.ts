@@ -9,7 +9,7 @@ import {
   renderAssistantInputGroupReactionContextPrompt,
 } from '../src/assistant/automation/prompt-builder.js'
 import {
-  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantMaintenanceSystemPromptResult,
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
@@ -36,7 +36,7 @@ describe('assistant capability-offers prompt contract', () => {
   })
 
   it('does not expose external-capable sections to maintenance turns', () => {
-    const layers = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+    const layers = buildAssistantMaintenanceSystemPromptResult({
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
       profile: 'member-memory',
@@ -58,7 +58,7 @@ describe('assistant capability-offers prompt contract', () => {
   })
 
   it('keeps group room-model maintenance on the exact knowledge page boundary', () => {
-    const prompt = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+    const prompt = buildAssistantMaintenanceSystemPromptResult({
       currentLocalDate: '2026-07-25',
       currentTimeZone: 'America/New_York',
       profile: 'group-room-model',
@@ -643,12 +643,10 @@ function createCommonCodexPromptInput(
 ): AssistantSystemPromptInput {
   return {
     assistantCliContract: 'Stable CLI contract for common Codex route.',
-    assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
       { label: 'WHOOP', provider: 'whoop' },
     ],
-    assistantKnowledgeToolsAvailable: true,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -657,7 +655,6 @@ function createCommonCodexPromptInput(
     currentTimeZone: 'Asia/Kuala_Lumpur',
     onboardingGuidance: true,
     turnTrigger: null,
-    assistantContextSnapshotPrompt: null,
     ...overrides,
   }
 }

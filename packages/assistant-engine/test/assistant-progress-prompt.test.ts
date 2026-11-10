@@ -4,7 +4,7 @@ import { buildAssistantSystemPrompt, type AssistantSystemPromptInput } from '../
 
 function prompt(overrides: Partial<AssistantSystemPromptInput> = {}): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null, assistantContextSnapshotPrompt: null,
+    assistantCliContract: null,
     assistantProgressUpdatesAvailable: true,
     channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentLocalDate: '2030-01-10', currentTimeZone: 'UTC',

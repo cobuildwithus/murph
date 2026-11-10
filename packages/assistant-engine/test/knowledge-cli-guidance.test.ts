@@ -19,7 +19,7 @@ afterEach(async () => {
 
 describe('knowledge CLI guidance matches the shipped CLI', () => {
   it('composes the real upsert shape only on the CLI route', () => {
-    const cliRoute = buildKnowledgePrompt({ assistantKnowledgeToolsAvailable: false })
+    const cliRoute = buildKnowledgePrompt({ })
     expect(parseUpsertShape(cliRoute)).toEqual({
       command: ['knowledge', 'upsert', '--slug', '<slug>', '--body', '<markdown>'],
       libraryFlag: '--library-slug',
@@ -27,10 +27,6 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
     })
     expect(cliRoute).not.toContain('dedicated knowledge write surface')
     expect(cliRoute).not.toContain('attach `librarySlugs`')
-
-    const dedicatedRoute = buildKnowledgePrompt({ assistantKnowledgeToolsAvailable: true })
-    expect(dedicatedRoute).toContain('Persist pages through the dedicated knowledge write surface for this route')
-    expect(dedicatedRoute).not.toContain('vault-cli knowledge upsert')
 
     expect(buildKnowledgePrompt({ conversationScope: 'group' })).not.toContain('knowledge upsert')
   })
@@ -42,7 +38,7 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
       '# Synthetic route reference', '', 'Reference page.', '',
     ].join('\n'))
     await writeVaultFile(vault, 'research/synthetic-route-note.md', '# Synthetic route note\n')
-    const shape = parseUpsertShape(buildKnowledgePrompt({ assistantKnowledgeToolsAvailable: false }))
+    const shape = parseUpsertShape(buildKnowledgePrompt({ }))
     const argv = [
       ...shape.command.map((token) => token === '<slug>'
         ? 'synthetic-route-choice'
@@ -123,13 +119,12 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
 })
 
 function buildKnowledgePrompt(input: {
-  assistantKnowledgeToolsAvailable?: boolean
   conversationScope?: 'direct' | 'group'
 }): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null, assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: input.assistantKnowledgeToolsAvailable ?? false, channel: 'linq',
+    assistantCliContract: null,
+    assistantHostedDeviceConnectProviders: [],
+    channel: 'linq',
     cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: input.conversationScope ?? 'direct', currentLocalDate: '2026-10-16', currentTimeZone: 'UTC',
     hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,

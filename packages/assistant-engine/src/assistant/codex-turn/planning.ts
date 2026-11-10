@@ -97,13 +97,12 @@ import {
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import {
-  buildAssistantAskContinuationSystemPromptWithCacheMetadata,
-  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
-  buildAssistantOperatorMessagePromptWithCacheMetadata,
-  buildAssistantSystemNotificationPromptWithCacheMetadata,
-  buildAssistantSystemPromptWithCacheMetadata,
+  buildAssistantAskContinuationSystemPromptResult,
+  buildAssistantMaintenanceSystemPromptResult,
+  buildAssistantOperatorMessagePromptResult,
+  buildAssistantSystemNotificationPromptResult,
+  buildAssistantSystemPromptResult,
   resolveAssistantMurphProductBaseUrl,
-  type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
@@ -169,7 +168,6 @@ export interface AssistantRouteTurnPlan {
   sessionContext?: {
     binding: AssistantSession['binding']
   }
-  promptCacheMetadata: AssistantPromptCacheMetadata | null
   assistantPreferredElevenLabsVoiceId?: string | null
   systemPrompt: string | null
   currentStatePrompt?: string | null
@@ -271,9 +269,7 @@ export interface AssistantRouteCodexResumePlan {
 }
 
 export interface AssistantPromptCapabilityAvailability {
-  assistantHostedDeviceConnectAvailable: boolean
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
-  assistantKnowledgeToolsAvailable: boolean
 }
 
 export type AssistantCodexTurnPromptProfile =
@@ -517,18 +513,6 @@ async function prepareAssistantGameLoreGuidance(input: {
 
 function optionalPrompt(prompt: string | null): string[] {
   return prompt ? [prompt] : []
-}
-
-function resolveAssistantAllowFinishWithoutReply(input: {
-  configured: boolean | null | undefined
-  hostedToolContext: AssistantHostedToolContext | null
-  toolProfile: AssistantCodexTurnToolProfile
-}): boolean {
-  if (input.configured != null) return input.configured
-  return [
-    input.toolProfile === 'provider-turn',
-    input.hostedToolContext?.currentGameMissedCheckInScope?.() != null,
-  ].includes(true)
 }
 
 function resolveAssistantSpecializedDynamicTools(input: {
@@ -796,18 +780,13 @@ function resolveResponseCardAvailability({
   const telegramPresentationResponseCardsAvailable =
     channel === 'telegram' &&
     (responseCardsAvailable || groupResponseCardsAvailable)
-  const exerciseRoutineResponseCardsAvailable =
-    telegramPresentationResponseCardsAvailable
-  const telegramRichContentResponseCardsAvailable =
-    telegramPresentationResponseCardsAvailable
   const groupChallengeResponseCardsAvailable =
     groupResponseCardsAvailable &&
     channel === 'linq' &&
     input.hostedToolContext?.groupSharedReader != null
   return {
     responseCardsAvailable,
-    exerciseRoutineResponseCardsAvailable,
-    telegramRichContentResponseCardsAvailable,
+    telegramPresentationResponseCardsAvailable,
     groupChallengeResponseCardsAvailable,
   }
 }
@@ -1009,8 +988,8 @@ export async function resolveAssistantRouteTurnPlan(
     'followUpContextElapsedMs',
     () => resolveAssistantFollowUpTurnContext({
       message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
-      interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
-      outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
+      interactiveConversation: conversationProviderTurn,
+      providerTools: input.profile.toolProfile === 'provider-turn',
       onboardingGoalCheckin: onboardingGoalCheckinTurn,
       supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
     }),
@@ -1029,8 +1008,7 @@ export async function resolveAssistantRouteTurnPlan(
     )
   const {
     responseCardsAvailable,
-    exerciseRoutineResponseCardsAvailable,
-    telegramRichContentResponseCardsAvailable,
+    telegramPresentationResponseCardsAvailable,
     groupChallengeResponseCardsAvailable,
   } = resolveResponseCardAvailability({
     input,
@@ -1089,7 +1067,6 @@ export async function resolveAssistantRouteTurnPlan(
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.onboardingGuidanceOpen &&
     privateInteractiveAudience
-  const assistantToolNameAliases = null
   // Maintenance turns consume only their engine-supplied evidence and exact
   // policy-owned destination. The health context snapshot and hosted dynamic
   // prompts must not reach them, or prompt construction itself would hand the
@@ -1217,7 +1194,6 @@ export async function resolveAssistantRouteTurnPlan(
       sharedPlan: input.sharedPlan,
     })
   const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel, scheduledInvocationScope)
-  const toolSchemaHash = null
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
     injectOnboardingGuidance: boolean
@@ -1229,53 +1205,39 @@ export async function resolveAssistantRouteTurnPlan(
           'Maintenance turns require an engine-resolved maintenance profile.',
         )
       }
-      return buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+      return buildAssistantMaintenanceSystemPromptResult({
         canonicalTimeZoneAvailable:
           input.promptTimeContext.canonicalTimeZoneAvailable !== false,
         currentLocalDate: input.promptTimeContext.currentLocalDate,
         currentTimeZone: input.promptTimeContext.currentTimeZone,
         profile: maintenanceProfile,
-      }, {
-        toolSchemaHash,
       })
     }
 
     if (input.profile.promptProfile === 'assistant-ask-continuation') {
-      return buildAssistantAskContinuationSystemPromptWithCacheMetadata({
-        assistantContextSnapshotPrompt: null,
-      }, {
-        toolSchemaHash,
-      })
+      return buildAssistantAskContinuationSystemPromptResult()
     }
 
     if (input.profile.promptProfile === 'system-notification') {
-      return buildAssistantSystemNotificationPromptWithCacheMetadata({
+      return buildAssistantSystemNotificationPromptResult({
         channel: resolvedChannel,
-      }, {
-        toolSchemaHash,
       })
     }
 
     if (input.profile.promptProfile === 'operator-message') {
-      return buildAssistantOperatorMessagePromptWithCacheMetadata({
+      return buildAssistantOperatorMessagePromptResult({
         channel: resolvedChannel,
-      }, {
-        toolSchemaHash,
       })
     }
 
-    return buildAssistantSystemPromptWithCacheMetadata({
+    return buildAssistantSystemPromptResult({
       assistantAndroidAppAvailable: isMurphAndroidAppEnabled(
         input.sharedPlan.cliAccess.env,
       ),
       assistantCliContract: options.assistantCliContract,
-      assistantContextSnapshotPrompt: null,
       assistantDynamicContextPrompts: assistantDynamicContextPrompts,
       assistantHostedAutomationAvailable:
         input.hostedToolContext?.automationTool != null,
-      assistantHostedDeviceConnectAvailable:
-        privateInteractiveAudience &&
-        promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
       assistantHostedDeviceConnectProviders:
         promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
       assistantHostedLabsAvailable:
@@ -1287,11 +1249,8 @@ export async function resolveAssistantRouteTurnPlan(
           : input.hostedToolContext?.groupSharedReader != null
             ? 'shared_read'
             : 'none',
-      assistantKnowledgeToolsAvailable:
-        promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantPollsAvailable: pollsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
-      assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
         privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
@@ -1315,12 +1274,10 @@ export async function resolveAssistantRouteTurnPlan(
       ordinaryInboundTurn,
       scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
       turnTrigger: input.input.turnTrigger ?? null,
-    }, {
-      toolSchemaHash,
     })
   }
   const buildDeveloperInstructions = (
-    promptResult: ReturnType<typeof buildAssistantSystemPromptWithCacheMetadata>,
+    promptResult: ReturnType<typeof buildAssistantSystemPromptResult>,
   ) =>
     [
       promptResult.layers.staticCacheableCorePrompt,
@@ -1365,11 +1322,7 @@ export async function resolveAssistantRouteTurnPlan(
     privateInteractiveAudience ||
     (hostedGroupRuntime && messageTargetingAvailable)
   const productFeedbackAuthorized = hasProductFeedbackAuthority(input, conversationScope)
-  const allowFinishWithoutReply = resolveAssistantAllowFinishWithoutReply({
-    configured: input.allowFinishWithoutReply,
-    hostedToolContext: input.hostedToolContext ?? null,
-    toolProfile: input.profile.toolProfile,
-  })
+  const allowFinishWithoutReply = input.allowFinishWithoutReply === true
   // Maintenance turns run without a delivery target. Each mutable profile
   // receives only its host-owned tool for the exact managed automation.
   const specializedDynamicTools = resolveAssistantSpecializedDynamicTools({
@@ -1419,8 +1372,7 @@ export async function resolveAssistantRouteTurnPlan(
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
-        exerciseRoutineResponseCardsAvailable,
-        telegramRichContentResponseCardsAvailable,
+        telegramPresentationResponseCardsAvailable,
         groupChallengeResponseCardsAvailable,
         ...resolveCommunicationToolAvailability({
           input,
@@ -1553,9 +1505,6 @@ export async function resolveAssistantRouteTurnPlan(
           binding: input.session.binding,
         }
       : undefined,
-    promptCacheMetadata: contextHandoffNotificationTurn
-      ? null
-      : threadStartPromptResult.cacheMetadata,
     assistantPreferredElevenLabsVoiceId:
       assistantVoicePreferenceApplies
         ? resolveAssistantVoiceOptionElevenLabsVoiceId(assistantVoice)
@@ -1969,16 +1918,10 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
 }): AssistantPromptCapabilityAvailability {
   const assistantHostedDeviceConnectProviders =
     input.executionContext?.hosted?.deviceConnectProviders ?? []
-  const assistantHostedDeviceConnectAvailable =
-    assistantHostedDeviceConnectProviders.length > 0 &&
-    input.executionContext?.hosted?.deviceTool != null
-
   return {
-    assistantHostedDeviceConnectAvailable,
-    assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
+    assistantHostedDeviceConnectProviders: input.executionContext?.hosted?.deviceTool != null
       ? assistantHostedDeviceConnectProviders
       : [],
-    assistantKnowledgeToolsAvailable: false,
   }
 }
 

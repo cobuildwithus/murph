@@ -39,7 +39,7 @@ describe('assistant current state', () => {
     if (language) await upsertMemory(root, { section: 'Preferences', text: `Observed conversational language: ${language}.` })
     const snapshot = await readAssistantCurrentStatePrompt({ vaultRoot: root })
     const layers = buildAssistantSystemPromptLayers({
-      assistantCliContract: null, assistantContextSnapshotPrompt: snapshot,
+      assistantCliContract: null,
       channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
       currentLocalDate: '2030-04-02', currentTimeZone: 'Europe/Warsaw',
       currentInstant: '2030-04-02T06:00:00.000Z', scheduledOccurrenceAt: '2030-04-02T06:00:00.000Z',
@@ -52,8 +52,9 @@ describe('assistant current state', () => {
     expect(layers.dynamicTurnContextPrompt).toContain('triggered by an existing scheduled automation run')
     expect(layers.dynamicTurnContextPrompt).toContain('execution instructions for this scheduled run')
     expect(layers.dynamicTurnContextPrompt).toContain('Europe/Warsaw')
-    if (language) expect(layers.dynamicTurnContextPrompt).toContain(`Observed conversational language: ${language}.`)
-    else expect(layers.dynamicTurnContextPrompt).not.toContain('Observed conversational language:')
+    if (language) expect(snapshot).toContain(`Observed conversational language: ${language}.`)
+    else expect(snapshot).not.toContain('Observed conversational language:')
+    expect(layers.dynamicTurnContextPrompt).not.toContain('Observed conversational language:')
     expect(layers.prompt).not.toContain('This is not an attended user turn or a scheduled automation occurrence')
   })
 

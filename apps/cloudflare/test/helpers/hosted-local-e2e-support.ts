@@ -237,8 +237,7 @@ export function expectAdvertisedMurphDynamicTools(
     calendarLinkAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
-    exerciseRoutineResponseCardAvailable?: boolean;
-    groupAvailable?: boolean;
+        groupAvailable?: boolean;
     gameReadAvailable?: boolean;
     gamesAvailable?: boolean;
     gamePhotosAvailable?: boolean;
@@ -253,7 +252,7 @@ export function expectAdvertisedMurphDynamicTools(
     senderContactAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     responseCardAvailable?: boolean;
-    telegramRichContentResponseCardAvailable?: boolean;
+    telegramPresentationResponseCardAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
     askGrokAvailable?: boolean;
   } = {},
@@ -280,8 +279,7 @@ export function expectAdvertisedMurphDynamicTools(
     phoneCallStopAvailable: true,
     conversationAttachmentsAvailable: true,
     responseCardsAvailable: options.responseCardAvailable,
-    exerciseRoutineResponseCardsAvailable: options.exerciseRoutineResponseCardAvailable,
-    telegramRichContentResponseCardsAvailable: options.telegramRichContentResponseCardAvailable,
+    telegramPresentationResponseCardsAvailable: options.telegramPresentationResponseCardAvailable,
   });
   expect(lastResponsesRequest).toBeDefined();
   const advertisement = readMurphDynamicToolAdvertisement(

@@ -53,7 +53,7 @@ describe('weekly usage optimizer', () => {
   })
 
   it('composes bounded Luna eligibility without the retired no-tool prohibition', async () => {
-    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC',turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
+    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC',turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
     const skill = (await readFile(
       path.join(resolveAssistantSkillsRoot(), 'product-feedback', 'SKILL.md'), 'utf8',
     )).replace(/\s+/gu, ' ')

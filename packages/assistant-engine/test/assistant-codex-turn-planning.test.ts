@@ -244,6 +244,27 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it.each([
+    ['conversation', 'provider-turn', true],
+    ['conversation', 'output-only-turn', false],
+    ['conversation', 'game-host-turn', false],
+    ['maintenance', 'maintenance-turn', false],
+    ['assistant-ask-continuation', 'output-only-turn', false],
+    ['system-notification', 'output-only-turn', false],
+    ['operator-message', 'output-only-turn', false],
+  ] as const)('attaches follow-ups for the reached %s/%s profile only with provider tools', async (_promptProfile, toolProfile, expected) => {
+    const result = await followUps.resolveAssistantFollowUpTurnContext({
+      message: createMessageInput(),
+      session: createSession(),
+      privateConversation: true,
+      interactiveConversation: toolProfile === 'provider-turn',
+      providerTools: toolProfile === 'provider-turn',
+      onboardingGoalCheckin: false,
+      supportsNativeResume: false,
+    })
+    expect(result.attachmentAllowed).toBe(expected)
+  })
+
   it('attributes each thread rotation without changing provider declarations', async () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
     const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
@@ -383,6 +404,7 @@ describe('assistant Codex turn planning', () => {
     const scheduledOccurrenceAt = '2026-08-30T09:00:00.000-04:00'
     const plans = {
       direct: await resolveAssistantRouteTurnPlan({
+        allowFinishWithoutReply: true,
         executionContext: null,
         input: {
           ...createMessageInput(),
@@ -400,6 +422,7 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: createSharedPlan({}, directAudience),
       }),
       group: await resolveAssistantRouteTurnPlan({
+        allowFinishWithoutReply: true,
         executionContext: {
           hosted: {
             memberId: 'member-characterization-group',
@@ -518,6 +541,21 @@ describe('assistant Codex turn planning', () => {
     for (const instructions of [plans.group.systemPrompt, plans.group.developerInstructions]) {
       expect(instructions).not.toContain('knowledge upsert')
     }
+    expect(Object.fromEntries(
+      Object.entries(plans).filter(([name]) => name === 'direct' || name === 'group').map(([name, plan]) => [
+        name,
+        createHash('sha256').update(JSON.stringify({
+          systemPrompt: plan.systemPrompt,
+          developerInstructions: plan.developerInstructions,
+          tools: plan.dynamicTools,
+        })).digest('hex'),
+      ]),
+    )).toMatchInlineSnapshot(`
+      {
+        "direct": "9bb1176b990ef34a84d93f413740a072efb8c42444fd3ce812b22c909c85c927",
+        "group": "99349948f848aa7c63775af0a63eed47d3a57c3fb6acea1d2ffe8532bcc19e63",
+      }
+    `)
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
     ) => {
@@ -566,7 +604,6 @@ describe('assistant Codex turn planning', () => {
           shouldPrepareBootstrapContext:
             plan.planningDiagnostics.shouldPrepareBootstrapContext,
         },
-        promptCacheMetadata: plan.promptCacheMetadata,
         resume: plan.resume,
         sessionContext: plan.sessionContext,
         systemPrompt: plan.systemPrompt,
@@ -580,11 +617,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "7b7a3a24f753c03db7bb7059a46f67e4cd39ee8763e912c833cf6475a2e50d73",
-        "group": "bf678991c76fa63fc9b60450049b0fbbab5027e26b1220feb9451635cd934033",
-        "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
-        "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "9656cb88e5884ff013f21cbc464806b67252bb417c41df6fd2455becba214943",
+        "direct": "16999afdcc586fbb053c3780af9f8cff261461392db940e6739b0b690c62f7d4",
+        "group": "a69857a6b9c70ab1bb1b0e1b7d2d64930f21233908189d76cb2d77907a451832",
+        "maintenance": "ea99a6725085104db8b7225bc03cfa0860609937f9aead8536fcf2b15213c18d",
+        "outputOnly": "57cb2bf34c00e716ba46d49e3b5813f9bd7eb171b1a801f269141a1ebba21449",
+        "scheduledEmail": "96a313c4d285d74270068be94d6dfeec8cae78f1226f121b85ae9ed1ac88f617",
       }
     `)
   })
@@ -2938,6 +2975,7 @@ describe('assistant Codex turn planning', () => {
     })
     const route = createRoute()
     const input = {
+      allowFinishWithoutReply: true,
       executionContext: null,
       input: createMessageInput(),
       profile: {
@@ -2965,8 +3003,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
-          exerciseRoutineResponseCardsAvailable: true,
-          telegramRichContentResponseCardsAvailable: true,
+          telegramPresentationResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3711,6 +3748,7 @@ describe('assistant Codex turn planning', () => {
       currentTimeZone: 'Asia/Kuala_Lumpur',
     }
     const telegramReplyPlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -3729,8 +3767,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
-          exerciseRoutineResponseCardsAvailable: true,
-          telegramRichContentResponseCardsAvailable: true,
+          telegramPresentationResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -3741,6 +3778,7 @@ describe('assistant Codex turn planning', () => {
     )
 
     const telegramWithoutAuthorizerPlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       input: {
         ...createMessageInput(),
@@ -3758,6 +3796,7 @@ describe('assistant Codex turn planning', () => {
     expect(toolsWithoutAuthorizer).not.toContain('select_reply_target')
 
     const linqReplyPlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -3824,6 +3863,7 @@ describe('assistant Codex turn planning', () => {
         threadIsDirect: targetingRoute.threadIsDirect,
       }
       const bindingOnlyPlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
         executionContext: null,
         messageTargetAuthorizerAvailable: true,
         input: bindingOnlyInput,
@@ -3834,6 +3874,7 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: createSharedPlan(),
       })
       const planWithDuplicateTarget = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
         executionContext: null,
         messageTargetAuthorizerAvailable: true,
         input: {
@@ -3856,6 +3897,7 @@ describe('assistant Codex turn planning', () => {
     }
 
     const linqCurrentMessageNotReactionEligiblePlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -3888,6 +3930,7 @@ describe('assistant Codex turn planning', () => {
     )
 
     const telegramBusinessReplyPlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -3907,8 +3950,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
-          exerciseRoutineResponseCardsAvailable: true,
-          telegramRichContentResponseCardsAvailable: true,
+          telegramPresentationResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3919,6 +3961,7 @@ describe('assistant Codex turn planning', () => {
     )
 
     const telegramInferredBindingPlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: createMessageInput(),
@@ -3934,8 +3977,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
-          exerciseRoutineResponseCardsAvailable: true,
-          telegramRichContentResponseCardsAvailable: true,
+          telegramPresentationResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3949,6 +3991,7 @@ describe('assistant Codex turn planning', () => {
     )
 
     const telegramWithoutRoutePlan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -3983,6 +4026,7 @@ describe('assistant Codex turn planning', () => {
     }
 
     const plan = await resolveAssistantRouteTurnPlan({
+      allowFinishWithoutReply: true,
       executionContext: {
         hosted: {
           memberId: 'member-hosted',
@@ -4014,8 +4058,7 @@ describe('assistant Codex turn planning', () => {
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
-          exerciseRoutineResponseCardsAvailable: true,
-          telegramRichContentResponseCardsAvailable: true,
+          telegramPresentationResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
@@ -4299,6 +4342,10 @@ describe('assistant Codex turn planning', () => {
       acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
       executionContext: {
         hosted: {
+          // A group turn runs in a member's workspace, which has the device
+          // tool. Connect links still belong to the member's own chat.
+          deviceConnectProviders: [{ label: 'WHOOP', provider: 'whoop' }],
+          deviceTool: { request: vi.fn() },
           memberId: 'member-group-container',
           progressDeliveryDependencies: {},
           providerFetch: null,
