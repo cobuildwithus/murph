@@ -2191,7 +2191,11 @@ export async function sendAssistantMessageLocal(
                 await stopAssistantChannelTypingIndicator(typingIndicator)
                 typingIndicator = null
               }
-            } finally {
+            } catch (error) {
+              // The thread now holds a draft that was never sent and nothing
+              // in it says so. Drop it so the retry reads the conversation
+              // from the transcript. A completed reconsideration keeps the
+              // thread: its instruction tells the model the draft was unsent.
               currentSession = {
                 ...currentSession,
                 codexResume: null,
@@ -2203,6 +2207,7 @@ export async function sendAssistantMessageLocal(
                   vault: input.vault,
                 })
               })
+              throw error
             }
           }
           return selectAssistantGroupProviderResult(heldProviderResult)
@@ -2321,17 +2326,12 @@ export async function sendAssistantMessageLocal(
           }) ?? response
         })
         const providerResumeStateAction =
-          providerRequestOrdinal === 1
-            ? 'clear'
-            : resolveAssistantProviderResumeStateAction({
-                codexThreadId: providerResult.codexThreadId ?? null,
-                providerThreadUnchanged: providerResult.providerThreadUnchanged,
-                threadScope,
-              })
-        if (
-          providerRequestOrdinal === 0 &&
-          providerResumeStateAction === 'clear'
-        ) {
+          resolveAssistantProviderResumeStateAction({
+            codexThreadId: providerResult.codexThreadId ?? null,
+            providerThreadUnchanged: providerResult.providerThreadUnchanged,
+            threadScope,
+          })
+        if (providerResumeStateAction === 'clear') {
           currentSession = await clearAssistantSessionCodexResumeState({
             session: currentSession,
             vault: input.vault,
@@ -2681,7 +2681,11 @@ export async function sendAssistantMessageLocal(
         const failedAt = new Date().toISOString()
         const failedSession = applyAssistantProgressDeliveredSession({
           progressDeliveredSession: progressDeliveredSessionRef.value,
-          session: currentSession,
+          // A reconsidered turn that fails after request 1 completed leaves an
+          // unsent result in the thread, so it gives the thread up as well.
+          session: providerRequestOrdinal === 1
+            ? { ...currentSession, codexResume: null, resumeState: null }
+            : currentSession,
         })
 
         if (
