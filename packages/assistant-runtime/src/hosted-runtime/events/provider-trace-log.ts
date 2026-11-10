@@ -17,14 +17,6 @@ const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA =
   "murph.assistant-provider-prompt-size-diagnostics.v1";
 const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE =
   "assistant.provider.prompt_size";
-const ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
-  "murph.assistant-codex-invalid-output-diagnostics.v1";
-const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
-  "assistant.codex.invalid_output_resume_failure";
-const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA =
-  "murph.assistant-codex-resume-failure-diagnostics.v1";
-const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE =
-  "assistant.codex.resume_failure";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
@@ -69,58 +61,6 @@ const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
 ]);
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES = new Set([
   "primary",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES = new Set([
-  "resume-failed",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES = new Set([
-  "ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED",
-  "ASSISTANT_CODEX_APP_SERVER_FAILED",
-  "ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE",
-  "ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID",
-  "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
-  "ASSISTANT_CODEX_APP_SERVER_TIMEOUT",
-  "ASSISTANT_CODEX_CONNECTION_LOST",
-  "ASSISTANT_CODEX_FAILED",
-  "ASSISTANT_CODEX_HOME_INVALID",
-  "ASSISTANT_CODEX_IMAGE_INVALID",
-  "ASSISTANT_CODEX_INTERRUPTED",
-  "ASSISTANT_CODEX_NOT_FOUND",
-  "ASSISTANT_CODEX_RESUME_STALE",
-  "ASSISTANT_CODEX_USAGE_LIMIT",
-  "ASSISTANT_PROVIDER_UNSUPPORTED",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_KIND_VALUES = new Set([
-  "invalid-input-output",
-  "invalid-output",
-]);
-const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_PHASE_VALUES = new Set([
-  "resume-failed",
-]);
-const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES = new Set([
-  "codex-failed",
-  "connection-lost",
-  "invalid-input-output",
-  "provider-unsupported",
-  "rpc-failed",
-  "resume-stale",
-  "timeout",
-  "turn-failed",
-  "unknown",
-  "usage-limit",
-]);
-const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
-  "codex-turn-failed",
-  "connection-lost",
-  "credits-exhausted",
-  "input-output-field",
-  "invalid-input",
-  "quota-exceeded",
-  "rate-limit",
-  "resume-stale",
-  "status-failed",
-  "timeout",
-  "usage-limit",
 ]);
 const HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES = new Set([
   "SIGINT",
@@ -217,107 +157,6 @@ const HOSTED_ASSISTANT_GENERATED_AUDIO_TERMINAL_PHASE_VALUES = new Set([
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
-  "initialize",
-  "rpc.error",
-  "rpc.response",
-  "thread/resume",
-  "thread/start",
-  "turn/completed",
-  "turn/interrupt",
-  "turn/start",
-  "turn/started",
-  "turn/steer",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES = new Set([
-  "array",
-  "boolean",
-  "cancelled",
-  "canceled",
-  "command.execution",
-  "completed",
-  "connection_lost",
-  "dynamic.tool.call",
-  "error",
-  "failed",
-  "file.change",
-  "function_call",
-  "function_call_output",
-  "image",
-  "in_progress",
-  "input_image",
-  "input_text",
-  "interrupted",
-  "message",
-  "null",
-  "number",
-  "object",
-  "other",
-  "process_exit",
-  "reasoning",
-  "running",
-  "string",
-  "succeeded",
-  "turn_failed",
-  "undefined",
-  "unknown",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_KEY_BUCKET_VALUES = new Set([
-  "[key]",
-  "[sensitive-key]",
-  "content",
-  "id",
-  "image_url",
-  "kind",
-  "method",
-  "output",
-  "params",
-  "status",
-  "text",
-  "type",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_BOOLEAN_KEYS = [
-  "codexInvalidOutputFailureSessionPresent",
-  "codexInvalidOutputFailureTurnPresent",
-  "codexInvalidOutputResumeMatchesFailureSession",
-  "codexInvalidOutputResumeSessionPresent",
-] as const;
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_KEYS = [
-  "codexInvalidOutputFailureEventCount",
-  "codexInvalidOutputFailureProviderActionCount",
-  "codexInvalidOutputErrorMessageLength",
-  "codexInvalidOutputInputIndex",
-] as const;
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS = [
-  "codexInvalidOutputFailureOutputArrayLengths",
-  "codexInvalidOutputFailureOutputStringLengths",
-] as const;
-const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS = [
-  "codexResumeFailureCodexAbortRequested",
-  "codexResumeFailureCodexLiveTurnOpen",
-  "codexResumeFailureCodexProcessGroupPresent",
-  "codexResumeFailureCodexProviderRequestStarted",
-  "codexResumeFailureCodexShutdownRequested",
-  "codexResumeFailureErrorMessagePresent",
-  "codexResumeFailureResumeMatchesFailureSession",
-  "codexResumeFailureResumeSessionPresent",
-  "codexResumeFailureRetryable",
-  "codexResumeFailureSessionPresent",
-  "codexResumeFailureTurnPresent",
-] as const;
-const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS = [
-  "codexResumeFailureCodexJsonEventCount",
-  "codexResumeFailureCodexPendingRpcCount",
-  "codexResumeFailureCodexProcessLifetimeMs",
-  "codexResumeFailureCodexStderrBytes",
-  "codexResumeFailureErrorMessageLength",
-  "codexResumeFailureEventCount",
-  "codexResumeFailureProviderActionCount",
-] as const;
-const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
-  "codexResumeFailureOutputArrayLengths",
-  "codexResumeFailureOutputStringLengths",
-] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_BOOLEAN_KEYS = [
   "codexActionThreadIdPresent",
   "codexActionTurnIdPresent",
@@ -398,10 +237,6 @@ const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
   "turnContextPromptBytes",
   "userPromptBytes",
 ] as const;
-const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH = 2048;
-const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_KEY_PATTERN =
-  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
-
 export function emitHostedAssistantProviderTraceLog(input: {
   details?: HostedExecutionStructuredLogDetails | null;
   event: unknown;
@@ -459,24 +294,6 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: promptSizeDiagnostic,
       message: "Hosted assistant provider prompt-size diagnostics captured.",
-    };
-  }
-
-  const invalidOutputDiagnostic =
-    readHostedAssistantCodexInvalidOutputDiagnosticTrace(event);
-  if (invalidOutputDiagnostic) {
-    return {
-      details: invalidOutputDiagnostic,
-      message: "Hosted assistant Codex invalid-output diagnostics captured.",
-    };
-  }
-
-  const resumeFailureDiagnostic =
-    readHostedAssistantCodexResumeFailureDiagnosticTrace(event);
-  if (resumeFailureDiagnostic) {
-    return {
-      details: resumeFailureDiagnostic,
-      message: "Hosted assistant Codex resume-failure diagnostics captured.",
     };
   }
 
@@ -538,19 +355,6 @@ function sanitizeHostedAssistantProviderDiagnosticDetails(
     if (sanitizedValue !== undefined) {
       sanitized[key] = sanitizedValue;
     }
-  }
-
-  for (const [key, value] of Object.entries(details)) {
-    if (!isHostedAssistantProviderDiagnosticTextKey(key) || typeof value !== "string") {
-      continue;
-    }
-
-    const text = sanitizeHostedExecutionStructuredLogText(value);
-    if (!text || text.length > HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH) {
-      continue;
-    }
-
-    sanitized[key] = text;
   }
 
   return sanitized;
@@ -696,300 +500,6 @@ function readHostedAssistantProviderPromptSizeDiagnosticTrace(
       details,
       key,
       readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
-
-  return details;
-}
-
-function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
-  event: unknown,
-): HostedExecutionStructuredLogDetails | null {
-  const record = readHostedAssistantProviderRawTraceRecord(event);
-  if (!record) {
-    return null;
-  }
-
-  const schema = readHostedAssistantProviderPlanString(record, "schema");
-  const type = readHostedAssistantProviderPlanString(record, "type");
-  if (
-    schema !== ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA
-    || type !== ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
-  ) {
-    return null;
-  }
-
-  const details: HostedExecutionStructuredLogDetails = {
-    codexInvalidOutputTraceType: "failure",
-    providerTraceKind: "codex.invalid_output_resume_failure",
-    schema: ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA,
-  };
-
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputPhase",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexInvalidOutputPhase",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES,
-    ),
-  );
-  for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_BOOLEAN_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
-  for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
-
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputErrorCode",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexInvalidOutputErrorCode",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputErrorField",
-    readHostedAssistantCodexInvalidOutputField(record),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputErrorKind",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexInvalidOutputErrorKind",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_KIND_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputFailureEventMethods",
-    readHostedAssistantProviderDiagnosticAllowedStringArray(
-      record,
-      "codexInvalidOutputFailureEventMethods",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES,
-    ),
-  );
-  for (const key of [
-    "codexInvalidOutputFailureEventKinds",
-    "codexInvalidOutputFailureEventStatuses",
-    "codexInvalidOutputFailureOutputKinds",
-    "codexInvalidOutputFailureOutputPartTypes",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticAllowedStringArray(
-        record,
-        key,
-        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
-      ),
-    );
-  }
-  for (const key of [
-    "codexInvalidOutputFailureOutputObjectKeys",
-    "codexInvalidOutputFailureParamKeys",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticKeySummaryArray(record, key),
-    );
-  }
-  for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNumberArray(record, key),
-    );
-  }
-
-  return details;
-}
-
-function readHostedAssistantCodexResumeFailureDiagnosticTrace(
-  event: unknown,
-): HostedExecutionStructuredLogDetails | null {
-  const record = readHostedAssistantProviderRawTraceRecord(event);
-  if (!record) {
-    return null;
-  }
-
-  const schema = readHostedAssistantProviderPlanString(record, "schema");
-  const type = readHostedAssistantProviderPlanString(record, "type");
-  if (
-    schema !== ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA
-    || type !== ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE
-  ) {
-    return null;
-  }
-
-  const details: HostedExecutionStructuredLogDetails = {
-    codexResumeFailureTraceType: "failure",
-    providerTraceKind: "codex.resume_failure",
-    schema: ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA,
-  };
-
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailurePhase",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailurePhase",
-      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_PHASE_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureErrorCode",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureErrorCode",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureErrorKind",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureErrorKind",
-      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureErrorMessage",
-    readHostedAssistantProviderDiagnosticText(record, "codexResumeFailureErrorMessage"),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureCodexFailureStage",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureCodexFailureStage",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureCodexTurnStatus",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureCodexTurnStatus",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureCodexExitSignal",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureCodexExitSignal",
-      HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureCodexLifecycleStage",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureCodexLifecycleStage",
-      HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureCodexPendingRpcMethod",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureCodexPendingRpcMethod",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureCodexTerminationSignalSent",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexResumeFailureCodexTerminationSignalSent",
-      HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES,
-    ),
-  );
-  for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
-  for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureEventMethods",
-    readHostedAssistantProviderDiagnosticAllowedStringArray(
-      record,
-      "codexResumeFailureEventMethods",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexResumeFailureErrorPhrases",
-    readHostedAssistantProviderDiagnosticAllowedStringArray(
-      record,
-      "codexResumeFailureErrorPhrases",
-      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES,
-    ),
-  );
-  for (const key of [
-    "codexResumeFailureEventKinds",
-    "codexResumeFailureEventStatuses",
-    "codexResumeFailureOutputKinds",
-    "codexResumeFailureOutputPartTypes",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticAllowedStringArray(
-        record,
-        key,
-        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
-      ),
-    );
-  }
-  for (const key of [
-    "codexResumeFailureOutputObjectKeys",
-    "codexResumeFailureParamKeys",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticKeySummaryArray(record, key),
-    );
-  }
-  for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNumberArray(record, key),
     );
   }
 
@@ -1495,52 +1005,6 @@ function readHostedAssistantProviderDiagnosticExactAllowedString(
     : undefined;
 }
 
-function readHostedAssistantProviderDiagnosticText(
-  record: Record<string, unknown>,
-  key: string,
-): string | null | undefined {
-  if (!(key in record)) {
-    return undefined;
-  }
-
-  const value = record[key];
-  if (value === null) {
-    return null;
-  }
-  if (!isHostedAssistantProviderDiagnosticTextKey(key) || typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = sanitizeHostedExecutionStructuredLogText(value);
-  return normalized
-    && normalized.length <= HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH
-    ? normalized
-    : undefined;
-}
-
-function isHostedAssistantProviderDiagnosticTextKey(key: string): boolean {
-  return HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_KEY_PATTERN.test(key);
-}
-
-function readHostedAssistantCodexInvalidOutputField(
-  record: Record<string, unknown>,
-): string | null | undefined {
-  const key = "codexInvalidOutputErrorField";
-  if (!(key in record)) {
-    return undefined;
-  }
-
-  const value = record[key];
-  if (value === null) {
-    return null;
-  }
-
-  const stringValue = readHostedAssistantProviderPlanString(record, key);
-  return stringValue && /^input\.\d+\.output$/u.test(stringValue)
-    ? stringValue
-    : undefined;
-}
-
 function readHostedAssistantProviderDiagnosticAllowedStringArray(
   record: Record<string, unknown>,
   key: string,
@@ -1653,37 +1117,6 @@ function readHostedAssistantProviderDiagnosticToolIdentifierPart(
   return HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN.test(normalized)
     ? normalized
     : undefined;
-}
-
-function readHostedAssistantProviderDiagnosticKeySummaryArray(
-  record: Record<string, unknown>,
-  key: string,
-): string[] | null | undefined {
-  if (!(key in record)) {
-    return undefined;
-  }
-
-  const value = record[key];
-  if (value === null) {
-    return null;
-  }
-  if (!Array.isArray(value) || value.length > 16) {
-    return undefined;
-  }
-
-  const output = value.flatMap((entry) => {
-    if (typeof entry !== "string") {
-      return [];
-    }
-    const tokens = entry.split(",");
-    return tokens.length > 0
-      && tokens.every((token) =>
-        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_KEY_BUCKET_VALUES.has(token),
-      )
-      ? [tokens.join(",")]
-      : [];
-  });
-  return output.length > 0 ? output : undefined;
 }
 
 function readHostedAssistantProviderDiagnosticNumberArray(

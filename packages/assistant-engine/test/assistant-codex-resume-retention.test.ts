@@ -70,19 +70,16 @@ it('starts a fresh native thread after retirement without a resume RPC or resume
     expect(resumed.session.codexResume).toBeNull()
     const resume = vi.spyOn(requests, 'buildCodexThreadResumeParams')
     const start = vi.spyOn(requests, 'buildCodexThreadStartParams')
-    const traces: unknown[] = []
     stub.markRequestBaseline()
     stub.queue({ text: 'Fresh synthetic reply.' })
     const fresh = await executeCodexAppServerTurn({
       ...scenario.turnInput, dynamicTools: [], prompt: 'Say hello again.',
       resumeSessionId: resumed.session.codexResume?.threadId,
-      onTraceEvent: event => traces.push(event),
     })
     expect(fresh.threadId).not.toBe(original.threadId)
     expect(fresh.finalMessage).toBe('Fresh synthetic reply.')
     expect(start).toHaveBeenCalledTimes(1)
     expect(resume).not.toHaveBeenCalled()
-    expect(JSON.stringify(traces)).not.toContain('resume_failure')
     expect(stub.requestCountSinceBaseline()).toBe(1)
   } finally {
     await stopWarmCodexAppServer()
