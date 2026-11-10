@@ -5912,14 +5912,14 @@ test("Junction normalizer compacts tier-1 timeseries resources into bounded dail
       implausibleValue: 20,
     },
     {
-      // Junction documents caffeine in grams; the daily SUM lands in mg.
+      // The daily SUM adds each caffeine entry after its own unit interpretation.
       resource: "caffeine",
       resourceSlug: "caffeine",
       metric: "caffeine",
       unit: "mg",
       expectedValue: 158,
       values: [0.095, 0.063],
-      implausibleValue: 3,
+      implausibleValue: 2000.5,
     },
     {
       resource: "water",
@@ -7345,7 +7345,7 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
   assert.ok(complete.events?.some((event) =>
     event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 190
   ));
-  // A documented 200 mg sample arrives as 0.2 g, including zero-duration samples.
+  // An in-range 0.2 g row keeps its 200 mg interpretation, including zero-duration samples.
   const coffee = normalizeJunctionSnapshot(snapshotFor({ value: 0.2 }));
   assert.ok(coffee.events?.some((event) =>
     event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 295
@@ -7372,12 +7372,53 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
   }
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   try {
+    for (const [value, expectedEntry, expectedSum] of [
+      [0.095, 95, 190], [2, 2000, 2095], [8, 8, 103],
+      [95, 95, 190], [2000, 2000, 2095],
+    ] as const) {
+      warn.mockClear();
+      const snapshot = snapshotFor({ value });
+      const normalized = normalizeJunctionSnapshot(snapshot);
+      assert.ok(normalized.events?.some((event) =>
+        event.kind === "observation" && event.fields?.metric === "caffeine"
+          && event.fields.value === expectedSum
+      ));
+      const matchesEntry = (events: typeof normalized.events) => events?.some((event) =>
+        event.kind === "measurement"
+          && event.occurredAt === "2026-04-22T09:00:00.000Z"
+          && readJunctionEventMeasurements(event).some((measurement) =>
+            measurement.metric === "caffeine" && measurement.value === expectedEntry
+          )
+      );
+      assert.ok(matchesEntry(normalized.events));
+      const precise = normalizeJunctionSnapshot({ ...snapshot, timeseriesWindowKind: "precise" });
+      assert.ok(matchesEntry(precise.events));
+      assert.equal(warn.mock.calls.length, 0);
+    }
+    const distinct = snapshotFor({ value: 2000 });
+    const distinctGroup = distinct.timeseries.caffeine.groups.apple_health_kit[0];
+    const distinctRows = normalizeJunctionSnapshot({
+      ...distinct,
+      timeseries: { caffeine: { groups: { apple_health_kit: [{
+        ...distinctGroup,
+        data: [{ ...row, value: 2 }, {
+          ...row, start: "2026-04-22T09:00:00.000Z",
+          end: "2026-04-22T09:00:00.000Z", value: 2000,
+        }],
+      }] } } },
+    });
+    assert.ok(distinctRows.events?.some((event) =>
+      event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 4000
+    ));
+    assert.equal(distinctRows.events?.filter((event) =>
+      event.kind === "measurement" && readJunctionEventMeasurements(event)
+        .some((measurement) => measurement.metric === "caffeine")
+    ).length, 2);
     for (const [patch, reason, range, unitKind] of [
       [{ value: undefined }, "sparse_interval.value_missing", undefined, "g"],
       [{ value: "not-a-number" }, "sparse_interval.value_non_numeric", undefined, "g"],
-      [{ value: 95 }, "sparse_interval.value_out_of_range", "above_range_10x_to_1000x", "g"],
-      [{ value: 200 }, "sparse_interval.value_out_of_range", "above_range_10x_to_1000x", "g"],
-      [{ value: "200", unit: "mg" }, "sparse_interval.value_out_of_range", "above_range_10x_to_1000x", "mg"],
+      [{ value: -1 }, "sparse_interval.value_out_of_range", "below_range", "g"],
+      [{ value: 2000.5 }, "sparse_interval.value_out_of_range", "above_range_up_to_10x", "g"],
     ] as const) {
       warn.mockClear();
       const normalized = normalizeJunctionSnapshot(snapshotFor(patch));
@@ -7401,7 +7442,7 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
       ...allRejected,
       timeseries: { caffeine: { groups: { apple_health_kit: [{
         source: { provider: "apple_health_kit", type: "app" },
-        data: [95, 95, 95, 95, 2.5].map((value, index) => ({
+        data: [2000.5, 2000.5, 2000.5, 2000.5, -1].map((value, index) => ({
           ...row,
           start: `2026-04-22T${String(8 + index).padStart(2, "0")}:00:00.000Z`,
           end: `2026-04-22T${String(8 + index).padStart(2, "0")}:00:00.000Z`,
@@ -7414,9 +7455,9 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
     ));
     assert.deepEqual(rejectedWarn.mock.calls.map((call) => call[1]), [
       { reason: "sparse_interval.value_out_of_range", sourceProvider: "apple-health-kit",
-        sourceTypeKind: "app", unitKind: "g", valueRange: "above_range_10x_to_1000x", count: 4 },
+        sourceTypeKind: "app", unitKind: "g", valueRange: "above_range_up_to_10x", count: 4 },
       { reason: "sparse_interval.value_out_of_range", sourceProvider: "apple-health-kit",
-        sourceTypeKind: "app", unitKind: "g", valueRange: "above_range_up_to_10x", count: 1 },
+        sourceTypeKind: "app", unitKind: "g", valueRange: "below_range", count: 1 },
     ]);
   } finally {
     rejectedWarn.mockRestore();
@@ -7443,7 +7484,7 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
 });
 
 test.each([
-  { resource: "caffeine" as const, max: 2, unit: "g" },
+  { resource: "caffeine" as const, max: 2000, unit: "g" },
   { resource: "water" as const, max: 10_000, unit: "ml" },
   { resource: "mindfulness_minutes" as const, max: 1440, unit: "min" },
 ])("Junction sparse $resource skips out-of-range values with a counted diagnostic", ({ resource, max, unit }) => {

@@ -11113,18 +11113,18 @@ function normalizeBodyTemperatureCelsius(value: unknown): number | undefined {
   return roundJunctionDailyAggregateValue(numeric);
 }
 
-// Junction's caffeine timeseries is documented in grams
-// (docs.junction.com/api-reference/data/timeseries/caffeine); convert to
-// milligrams for the observation metric. 2 g per logged entry is already an
-// implausible single intake.
+// Junction labels caffeine in grams, while its Apple Health uploader sends
+// milligrams. A single intake above 2 g is implausible, so values above 2 and
+// through 2000 are already milligrams. The 0..2 band is ambiguous and keeps
+// its existing grams-to-milligrams conversion.
 function normalizeCaffeineMilligrams(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric < 0 || numeric > 2) {
+  if (numeric === undefined || numeric < 0 || numeric > 2000) {
     return undefined;
   }
 
-  return roundJunctionDailyAggregateValue(numeric * 1000);
+  return roundJunctionDailyAggregateValue(numeric <= 2 ? numeric * 1000 : numeric);
 }
 
 function normalizeWaterMilliliters(value: unknown): number | undefined {
