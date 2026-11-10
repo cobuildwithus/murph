@@ -2,8 +2,9 @@
 
 `device-pass.ts` is an opt-in synthetic benchmark of durable job execution through
 `createDeviceSyncService`, the Junction snapshot importer, and core canonical
-storage. It creates six monthly event shards with samples, sleep, and workout
-observation families. A pass has 80 resource/reconcile job rows; every second
+storage. It creates six monthly event shards containing observations, real
+sleep sessions, and activity sessions, plus heart-rate sample shards. A pass has
+80 resource/reconcile job rows; every second
 row re-imports the prior row's exact snapshot. The provider executor is local
 and deterministic, so these numbers exclude provider network time, hosted
 checkpoint callbacks, artifact upload, and query projection publication.

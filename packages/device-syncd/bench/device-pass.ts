@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { CONTRACT_SCHEMA_VERSION, eventRecordSchema } from "@murphai/contracts";
+import { CONTRACT_SCHEMA_VERSION, eventRecordSchema, sampleRecordSchema } from "@murphai/contracts";
 import { deterministicContractId, initializeVault } from "@murphai/core";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createDefaultImporterPort, createDeviceSyncService, SqliteDeviceSyncStore } from "../src/service.ts";
@@ -47,36 +47,60 @@ try {
     await cp(fixture, root, { recursive: true });
   } else {
     await initializeVault({ vaultRoot: root, createdAt: "2026-01-01T00:00:00.000Z", timezone: "UTC" });
-  // Month shards and event families are written once: fixture setup must not
-  // itself pay an O(history²) import cost. The measured jobs use normal writes.
-  const months = 6;
-  for (let month = 0; month < months; month++) {
-    const lines: string[] = [];
-    const start = Math.floor(month * historyRows / months);
-    const end = Math.floor((month + 1) * historyRows / months);
-    for (let index = start; index < end; index++) {
-      const at = new Date(Date.UTC(2025, month + 5, 1) + Math.floor((index - start) * 27 * 86_400_000 / (end - start))).toISOString();
-      const family = ["samples", "sleep", "workout"][index % 3]!;
-      const record = {
-        schemaVersion: CONTRACT_SCHEMA_VERSION.event,
-        id: deterministicContractId("evt", `device-pass-history-${index}`),
-        kind: "observation", source: "device", occurredAt: at, recordedAt: at,
-        dayKey: at.slice(0, 10), timeZone: "UTC", title: `Synthetic ${family} observation`,
-        metric: family === "samples" ? "heart-rate" : family === "sleep" ? "sleep-duration" : "workout-duration",
-        unit: family === "samples" ? "bpm" : "min", value: 60 + index % 40,
-        externalRef: { system: "junction", resourceType: family, resourceId: `history-${index}`, version: at },
-      };
-      const parsed = eventRecordSchema.safeParse(record);
-      assert.ok(parsed.success, "fixture event must satisfy the canonical schema");
-      lines.push(JSON.stringify(parsed.data));
+    // Seed canonical families once. Job execution below still uses normal writes.
+    const months = 6;
+    for (let month = 0; month < months; month++) {
+      const lines: string[] = [];
+      const sampleLines: string[] = [];
+      const start = Math.floor(month * historyRows / months);
+      const end = Math.floor((month + 1) * historyRows / months);
+      const year = 2025 + Math.floor((month + 5) / 12);
+      const monthNumber = (month + 5) % 12 + 1;
+      const shardName = `${year}-${String(monthNumber).padStart(2, "0")}.jsonl`;
+      for (let index = start; index < end; index++) {
+        const at = new Date(Date.UTC(year, monthNumber - 1, 1)
+          + Math.floor((index - start) * 27 * 86_400_000 / (end - start))).toISOString();
+        const family = index % 20 === 0 ? "sleep_session" : index % 20 === 1 ? "activity_session" : "observation";
+        const base = {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.event,
+          id: deterministicContractId("evt", `device-pass-history-${index}`),
+          source: "device", occurredAt: at, recordedAt: at,
+          dayKey: at.slice(0, 10), timeZone: "UTC",
+          externalRef: { system: "junction", resourceType: family.replace("_", "-"), resourceId: `history-${index}`, version: at },
+        };
+        const record = family === "sleep_session"
+          ? { ...base, kind: family, title: "Synthetic device sleep", startAt: at,
+              endAt: new Date(Date.parse(at) + 480 * 60_000).toISOString(), durationMinutes: 480 }
+          : family === "activity_session"
+            ? { ...base, kind: family, title: "Synthetic device workout", activityType: "running",
+                durationMinutes: 45, workout: { startedAt: at, exercises: [] } }
+            : { ...base, kind: family, title: "Synthetic device sample observation",
+                metric: "heart-rate", unit: "bpm", value: 60 + index % 40 };
+        const parsed = eventRecordSchema.safeParse(record);
+        assert.ok(parsed.success, parsed.success ? undefined : JSON.stringify(parsed.error.issues.map((issue) => ({ path: issue.path, code: issue.code }))));
+        lines.push(JSON.stringify(parsed.data));
+        if (index - start < Math.min(1_000, end - start)) {
+          const sample = sampleRecordSchema.safeParse({
+            schemaVersion: CONTRACT_SCHEMA_VERSION.sample,
+            id: deterministicContractId("smp", `device-pass-sample-${index}`),
+            stream: "heart_rate", recordedAt: at, dayKey: at.slice(0, 10),
+            source: "device", quality: "raw", value: 60 + index % 40, unit: "bpm",
+          });
+          assert.ok(sample.success, sample.success ? undefined : JSON.stringify(sample.error.issues.map((issue) => ({ path: issue.path, code: issue.code }))));
+          sampleLines.push(JSON.stringify(sample.data));
+        }
+      }
+      for (const [directory, payload] of [
+        ["ledger/events", lines], ["ledger/samples/heart_rate", sampleLines],
+      ] as const) {
+        const shard = path.join(root, directory, String(year), shardName);
+        await mkdir(path.dirname(shard), { recursive: true });
+        await writeFile(shard, `${payload.join("\n")}\n`);
+      }
     }
-    const shard = path.join(root, "ledger/events", String(2025 + Math.floor((month + 5) / 12)), `${2025 + Math.floor((month + 5) / 12)}-${String((month + 5) % 12 + 1).padStart(2, "0")}.jsonl`);
-    await mkdir(path.dirname(shard), { recursive: true });
-    await writeFile(shard, `${lines.join("\n")}\n`);
-  }
-  if (process.env.MURPH_DEVICE_PASS_SAVE_FIXTURE) {
-    await cp(root, process.env.MURPH_DEVICE_PASS_SAVE_FIXTURE, { recursive: true });
-  }
+    if (process.env.MURPH_DEVICE_PASS_SAVE_FIXTURE) {
+      await cp(root, process.env.MURPH_DEVICE_PASS_SAVE_FIXTURE, { recursive: true });
+    }
   }
 
   const base = createJunctionDeviceSyncProvider({
