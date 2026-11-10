@@ -5657,7 +5657,7 @@ test.each([
   }
 });
 
-test.each(["blood_oxygen", "electrocardiogram_voltage"])(
+test.each(["blood_oxygen", "electrocardiogram_voltage", "caffeine", "water", "mindfulness_minutes"])(
   "Junction %s validation remains pending across exhaustion and restart until corrected",
   async (resource) => {
     const vaultRoot = await makeTempDirectory("murph-junction-validation-retry");
@@ -5674,9 +5674,9 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
         async executeJob(_context, job) {
           if (job.payload.resource !== resource) { otherJobs += 1; return {}; }
           if (corrected) return {};
-          if (resource === "blood_oxygen") {
+          if (resource !== "electrocardiogram_voltage") {
             throw new JunctionSparseCalendarRepairNormalizationError({
-              reason: "daily.value_out_of_range", valueKind: "number",
+              reason: resource === "blood_oxygen" ? "daily.value_out_of_range" : "sparse_interval.row_incomplete", valueKind: "number",
               valueRange: "negative", unitKind: "percent",
             });
           }
@@ -5700,7 +5700,9 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
       const input = {
         accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
         availableAt: now.toISOString(), dedupeKey: "validation-resource-day",
-        payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+        payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "apple_health_kit",
+          ...(["caffeine", "water", "mindfulness_minutes"].includes(resource)
+            ? { calendarRefreshDay: "2026-04-02" } : {}),
           windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
       };
       const original = fixture.store.enqueueJob(input);
@@ -5713,7 +5715,9 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
         assert.ok(retained.maxAttempts > retained.attempts);
         assert.deepEqual(retained.payload, original.payload);
         assert.equal(Date.parse(retained.availableAt) - now.getTime(), 30 * 60_000);
-        assert.equal(fixture.store.enqueueJob(input).id, original.id);
+        // Replay the retained deadline, as hosted hydration does. A new sparse
+        // correction may deliberately advance the existing accepted-work job.
+        assert.equal(fixture.store.enqueueJob({ ...input, availableAt: retained.availableAt }).id, original.id);
         assert.equal(await fixture.service.runWorkerOnce(), null);
         const diagnostic = fixture.service.listJobFailureDiagnostics().at(-1);
         assert.equal(diagnostic?.details.validationRetryDelayMs, 30 * 60_000);
@@ -5723,7 +5727,7 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
         }
         if (attempt === 1) {
           const other = fixture.store.enqueueJob({ ...input, dedupeKey: "other-resource",
-            payload: { ...input.payload, resource: "heartrate" } });
+            payload: { resource: "heartrate", resourceCategory: "timeseries" } });
           assert.equal((await fixture.service.runWorkerOnce())?.id, other.id);
           assert.equal(fixture.store.getJobById(other.id)?.status, "succeeded");
           fixture.close();

@@ -7315,6 +7315,60 @@ test("Junction authoritative empty sparse days clear the prior retained daily su
   }
 });
 
+test("Junction Apple Health caffeine calendar validation accepts intervals and rejects incomplete source days", () => {
+  const row = {
+    start: "2026-04-22T08:00:00.000Z",
+    end: "2026-04-22T08:00:00.000Z",
+    timestamp: "2026-04-22T08:00:00.000Z",
+    unit: "g",
+    value: 0.095,
+  };
+  const snapshotFor = (patch: Record<string, unknown>) => ({
+    accountId: "synthetic-caffeine-calendar",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseriesWindowKind: "calendar_day" as const,
+    strictSparseCalendarRepair: {
+      dayKey: "2026-04-22",
+      resource: "caffeine" as const,
+      sourceProviderSlug: "apple-health-kit",
+      sourceType: "app",
+    },
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: { caffeine: { groups: { apple_health_kit: [{
+      source: { provider: "apple_health_kit", type: "app" },
+      data: [row, { ...row, start: "2026-04-22T09:00:00.000Z",
+        end: "2026-04-22T09:00:00.000Z", ...patch }],
+    }] } } },
+  });
+  const complete = normalizeJunctionSnapshot(snapshotFor({}));
+  assert.ok(complete.events?.some((event) =>
+    event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 190
+  ));
+  // All these distinct failures can have the same absolute/UTC diagnostic.
+  // The provider schema has no numeric maximum; the 2 g cap is Murph policy.
+  for (const patch of [
+    { end: undefined },
+    { end: "invalid" },
+    { end: "2026-04-22T07:59:00.000Z" },
+    { value: undefined },
+    { value: "not-a-number" },
+    { value: -1 },
+    { value: 2.5 },
+    { calendarDate: "2026-04-21" },
+    { sourceType: "watch" },
+  ]) {
+    assert.throws(() => normalizeJunctionSnapshot(snapshotFor(patch)), (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.rowOrdinal, 2);
+      assert.equal(error.diagnostic.timestampKind, "absolute");
+      assert.equal(error.diagnostic.timestampSemantics, "utc");
+      return true;
+    });
+  }
+});
+
 test("Junction strict sparse calendar repairs reject mixed valid and malformed rows before import", async () => {
   const baseSnapshot = {
     accountId: "junction-account-strict-sparse-calendar-day",

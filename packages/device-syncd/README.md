@@ -2,7 +2,8 @@
 
 Workspace-private hosted device ingestion and reconciliation runtime for Murph.
 
-Junction `blood_oxygen` resource jobs that fail complete-day normalization and
+Junction resource jobs that fail complete-day normalization (including sparse
+`caffeine`, `water`, and `mindfulness_minutes` calendar refreshes) and
 `electrocardiogram_voltage` jobs that fail recording binding stay queued for a
 30-minute recheck even after their initial attempt allowance. Existing data and
 the failed resource/window remain intact; corrected provider responses use the
@@ -10,6 +11,9 @@ same import owner. This does not revive already terminal jobs, weaken source
 binding, or bypass disconnect and lease fences. Other failure classes retain
 their existing retry behavior. See `agent-docs/RELIABILITY.md` for the finite
 normalization categories, ECG collection counts, and hosted progress diagnostics.
+Hosted cold handoff carries each absolute retry deadline and remaining attempt
+budget, rebuilding the local attempt counter from zero. Validation retries use
+the fixed cadence across that boundary; they do not depend on that counter.
 
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 
