@@ -70,8 +70,7 @@ const DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS = 5;
 function retainedJunctionValidationSql(errorCode: string): string {
   return `
   provider = 'junction' and kind = 'resource' and (
-    (coalesce(json_extract(payload_json, '$.resource'), '') = 'blood_oxygen'
-      and coalesce(${errorCode}, '') = 'JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION')
+    coalesce(${errorCode}, '') = 'JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION'
     or (coalesce(json_extract(payload_json, '$.resource'), '') = 'electrocardiogram_voltage'
       and coalesce(${errorCode}, '') = 'JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE')
   )

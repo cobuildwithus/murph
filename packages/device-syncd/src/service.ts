@@ -2393,8 +2393,9 @@ function connectionChangedDuringDisconnectError(): DeviceSyncError {
 
 function isRetainedJunctionValidationFailure(job: DeviceSyncJobRecord, code: string): boolean {
   if (job.provider !== "junction" || job.kind !== "resource") return false;
-  return (job.payload.resource === "blood_oxygen"
-      && code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION")
+  // Calendar validation is deterministic for the fetched response. Its slow
+  // retry must not depend on local attempt counts, which cold handoff resets.
+  return code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
     || (job.payload.resource === "electrocardiogram_voltage"
       && code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
 }
