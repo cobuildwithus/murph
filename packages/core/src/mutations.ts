@@ -1,5 +1,6 @@
 import { invalidateIntegrationIngestInventory } from "./integration-ingest-inventory.ts";
 import { mealNameViolation, MEAL_NAME_GUIDANCE } from "@murphai/contracts";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { normalizeOptionalText } from "./domains/shared.ts";
 import { createReadStream } from "node:fs";
@@ -3234,12 +3235,37 @@ interface DeviceEventIdentityContext {
 
 // One resident vault is normal. Bound retained history, including revisions and
 // rejected rows; oversized ledgers still use the complete builder per import.
-const deviceEventIdentityCache = new Map<string, {
+type DeviceEventIdentityCacheEntry = {
   index: EventExternalRefIndex;
   eventLedgerFingerprint: string;
   pendingPayloads: [string, string][];
-}>();
+};
+const deviceEventIdentityCache = new Map<string, DeviceEventIdentityCacheEntry>();
+const deviceEventIdentityPassCache = new AsyncLocalStorage<Map<string, DeviceEventIdentityCacheEntry>>();
 const MAX_WARM_IDENTITY_ROWS = 100_000;
+const MAX_PASS_IDENTITY_ROWS = 150_000;
+
+// A hosted device drain owns one scope. The larger index dies at the end of
+// that drain; unrelated imports retain the existing bounded process cache.
+export function withDeviceBatchImportPass<T>(work: () => Promise<T>): Promise<T> {
+  const cache = new Map<string, DeviceEventIdentityCacheEntry>();
+  return deviceEventIdentityPassCache.run(cache, async () => {
+    try {
+      return await work();
+    } finally {
+      cache.clear();
+    }
+  });
+}
+
+function currentDeviceEventIdentityCache(vaultRoot: string): Map<string, DeviceEventIdentityCacheEntry> {
+  const passCache = deviceEventIdentityPassCache.getStore();
+  return passCache?.has(vaultRoot) ? passCache : deviceEventIdentityCache;
+}
+
+function currentDeviceEventIdentityRowLimit(cache: Map<string, DeviceEventIdentityCacheEntry>): number {
+  return cache === deviceEventIdentityCache ? MAX_WARM_IDENTITY_ROWS : MAX_PASS_IDENTITY_ROWS;
+}
 
 function retainDeviceEventIdentityIndex(
   vaultRoot: string,
@@ -3247,10 +3273,16 @@ function retainDeviceEventIdentityIndex(
   fingerprint?: string,
   pendingPayloads: [string, string][] = [],
 ): void {
+  const rows = [...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0);
+  const passCache = deviceEventIdentityPassCache.getStore();
+  const cache = rows <= MAX_WARM_IDENTITY_ROWS
+    ? deviceEventIdentityCache
+    : rows <= MAX_PASS_IDENTITY_ROWS ? passCache : undefined;
   deviceEventIdentityCache.clear();
-  if (fingerprint && [...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= MAX_WARM_IDENTITY_ROWS) {
+  passCache?.clear();
+  if (fingerprint && cache) {
     // Alias histories belong to one repair request, not the reusable ledger index.
-    deviceEventIdentityCache.set(vaultRoot, {
+    cache.set(vaultRoot, {
       index: { ...index, aliasRepairHistoryById: new Map() },
       eventLedgerFingerprint: fingerprint,
       pendingPayloads,
@@ -7128,6 +7160,7 @@ export async function importDeviceBatch(
     return { ...result, events: structuredClone(result.events) };
   } catch (error) {
     deviceEventIdentityCache.delete(input.vaultRoot);
+    deviceEventIdentityPassCache.getStore()?.delete(input.vaultRoot);
     invalidateIntegrationIngestInventory(input.vaultRoot);
     throw error;
   } finally {
@@ -7176,7 +7209,8 @@ timing: DeviceBatchImportTiming,
   const requiresEventIdentityContext = deviceBatchPlan.preparedEvents.length > 0
     || deviceBatchPlan.authoritativeEventSets.length > 0;
   const indexStartedAt = performance.now();
-  const cached = requiresEventIdentityContext ? deviceEventIdentityCache.get(vaultRoot) : undefined;
+  const cache = currentDeviceEventIdentityCache(vaultRoot);
+  const cached = requiresEventIdentityContext ? cache.get(vaultRoot) : undefined;
   const fingerprint = requiresEventIdentityContext
     ? await tryBuildDeviceEventLedgerFingerprint(vaultRoot) : undefined;
   let cachedIndex: EventExternalRefIndex | undefined;
@@ -7193,14 +7227,15 @@ timing: DeviceBatchImportTiming,
       await refreshEventExternalRefMatches(index, changedIds, options.signal);
       index.aliasRepairHistoryById = new Map();
       cached.pendingPayloads = [];
-      if ([...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= MAX_WARM_IDENTITY_ROWS) {
+      const limit = currentDeviceEventIdentityRowLimit(cache);
+      if ([...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= limit) {
         cachedIndex = index;
       }
     } catch {
       cachedIndex = undefined;
     }
   }
-  if (cached && !cachedIndex) deviceEventIdentityCache.delete(vaultRoot);
+  if (cached && !cachedIndex) cache.delete(vaultRoot);
   const initialEventIdentityContext = await buildDeviceEventIdentityContext(
     vaultRoot,
     deviceBatchPlan.preparedEvents,
@@ -8105,11 +8140,12 @@ timing: DeviceBatchImportTiming,
     performance.now() - canonicalWriteStartedAt,
   );
   await ingestInspection.recordCommittedAppend(ingestAppendPlan.payloads);
-  const publishedCache = deviceEventIdentityCache.get(vaultRoot);
+  const publishedCacheOwner = currentDeviceEventIdentityCache(vaultRoot);
+  const publishedCache = publishedCacheOwner.get(vaultRoot);
   if (publishedCache && eventAppendPlan.appendedRecordIds.length > 0) {
     // Only the append payloads represent rows actually published. Reconciliation
     // also returns unchanged owners and must never be used to advance this cache.
-    deviceEventIdentityCache.delete(vaultRoot);
+    publishedCacheOwner.delete(vaultRoot);
     try {
       retainDeviceEventIdentityIndex(vaultRoot, publishedCache.index,
         await tryBuildDeviceEventLedgerFingerprint(vaultRoot),

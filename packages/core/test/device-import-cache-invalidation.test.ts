@@ -5,7 +5,7 @@ import path from "node:path";
 import { test, vi } from "vitest";
 import * as contracts from "@murphai/contracts";
 import * as publication from "../src/operations/write-batch.ts";
-import { deterministicContractId, importDeviceBatch, initializeVault, type DeviceBatchImportTiming } from "../src/index.ts";
+import { deterministicContractId, importDeviceBatch, initializeVault, withDeviceBatchImportPass, type DeviceBatchImportTiming } from "../src/index.ts";
 
 function input(vaultRoot: string, day: number) {
   const at = `2026-02-${String(day).padStart(2, "0")}T00:00:00.000Z`;
@@ -25,6 +25,23 @@ async function withVault(run: (root: string) => Promise<void>) {
     await fs.rm(root, { force: true, recursive: true });
   }
 }
+
+test("scoped import rejects an outside ledger write without losing the warm small-vault cache", async () => withVault(async (root) => {
+  const seed = await importDeviceBatch(input(root, 1));
+  const shard = path.join(root, seed.eventShardPaths[0]!);
+  const hits: boolean[] = [];
+  await withDeviceBatchImportPass(async () => {
+    const options = { onTiming: (timing: DeviceBatchImportTiming) => hits.push(timing.eventIdentityIndexCacheHit) };
+    await importDeviceBatch(input(root, 2), options);
+    await importDeviceBatch(input(root, 3), options);
+    await fs.appendFile(shard, JSON.stringify({ ...seed.events[0], id: deterministicContractId("evt", "pass-external") }) + "\n");
+    await importDeviceBatch(input(root, 4), options);
+  });
+  await importDeviceBatch(input(root, 5), {
+    onTiming: (timing) => hits.push(timing.eventIdentityIndexCacheHit),
+  });
+  assert.deepEqual(hits, [true, true, false, true]);
+}));
 
 for (const change of ["append", "delete", "replace", "vault replacement"] as const) {
   test(`rebuilds after an unobserved ${change}`, async () => withVault(async (root) => {

@@ -1324,6 +1324,7 @@ export interface DeviceSyncServiceSummary {
 }
 
 export interface DeviceSyncImporterPort {
+  withDeviceImportPass?<T>(work: () => Promise<T>): Promise<T>;
   importDeviceProviderSnapshot(input: {
     completeSourceDay?: CompleteDeviceProviderSourceDay;
     provider: string;

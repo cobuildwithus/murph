@@ -145,6 +145,7 @@ export {
   ensureJournalDay,
   importAssessmentResponse,
   importDeviceBatch,
+  withDeviceBatchImportPass,
   importDocument,
   importEventBatch,
   importSamples,

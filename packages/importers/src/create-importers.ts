@@ -33,6 +33,9 @@ export function createImporters({
   return {
     presetRegistry: registry,
     deviceProviderRegistry: providers,
+    withDeviceImportPass<T>(work: () => Promise<T>): Promise<T> {
+      return coreRuntime.withDeviceBatchImportPass(work);
+    },
     importDocument(input: unknown) {
       return importDocument(input, { corePort: writer });
     },
