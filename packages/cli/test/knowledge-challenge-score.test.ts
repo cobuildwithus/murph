@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { afterEach, test } from 'vitest'
-import type { GroupChallengeScoreResult } from '@murphai/assistant-engine'
+import type { GroupChallengeScoreResult } from '@murphai/assistant-engine/group-challenge-scorecard'
 
 import { createVaultCli } from '../src/vault-cli.js'
 import { runInProcessJsonCli } from './cli-test-helpers.js'

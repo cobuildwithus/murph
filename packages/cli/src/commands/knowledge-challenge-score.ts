@@ -4,7 +4,7 @@ import {
   groupChallengeScoreInputSchema,
   groupChallengeScoreResultSchema,
   scoreGroupChallenge,
-} from '@murphai/assistant-engine'
+} from '@murphai/assistant-engine/group-challenge-scorecard'
 import {
   emptyArgsSchema,
 } from '@murphai/operator-config/command-helpers'
