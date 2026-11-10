@@ -67,7 +67,7 @@ test("canonical mixed producers, duplicate payloads and sparse input match the o
 test("colliding ids preserve stable ties and distinct identities with last-wins payloads", () => {
   // Deterministically force equal hashes for equal-length identities. Do not
   // replace the production hash or use hashed ids as a test dedupe shortcut.
-  const bigint = vi.spyOn(globalThis, "BigInt").mockReturnValue(0n);
+  const codeUnits = vi.spyOn(String.prototype, "charCodeAt").mockReturnValue(0);
   try {
     const a = row("2026-01-01", 81, "a"); const b = row("2026-01-01", 81, "b");
     const input = { metricRows: [b, a, { ...b, sourceLabel: "Last payload" }] };
@@ -76,7 +76,7 @@ test("colliding ids preserve stable ties and distinct identities with last-wins 
     assert.deepEqual(result.map(p => p.source.recordId), ["b", "a"]);
     assert.equal(result[0]?.provenance.sourceLabel, "Last payload");
     assert.deepEqual(onePassProposal(input), oldComposition(input));
-  } finally { bigint.mockRestore(); }
+  } finally { codeUnits.mockRestore(); }
 });
 
 test("accepted noncanonical cross-producer dates prevent deleting the intermediate sorts", () => {

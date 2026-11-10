@@ -87,6 +87,16 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(normalizeMetricKey("restingHeartRate"), "resting-heart-rate");
   assert.equal(normalizeMetricKey(" Apo B / Latest "), "apo-b-latest");
   assert.equal(normalizeMetricKey("  hs_CRP / Latest! "), "hs-crp-latest");
+  for (const [input, expected] of [
+    ["resting-heart-rate", "resting-heart-rate"],
+    ["vo2-max", "vo2-max"],
+    ["a--b", "a-b"],
+    ["-a-", "a"],
+    ["a\n", "a"],
+    ["", ""],
+  ] as const) {
+    assert.equal(normalizeMetricKey(input), expected);
+  }
   assert.ok(listMetricDefinitions().length > 10);
   assert.equal(resolveMetricDefinition("LDL_C")?.key, "ldl-c");
   assert.equal(resolveMetricDefinition("serum_albumin")?.key, "albumin");

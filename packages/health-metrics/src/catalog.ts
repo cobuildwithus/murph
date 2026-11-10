@@ -17,6 +17,8 @@ import type { MetricDefinition } from "./types.ts";
 
 export const DEFAULT_STALE_AFTER_DAYS = 90;
 export const ISO_DAY_MS = 24 * 60 * 60 * 1000;
+// Declared before the alias tables below, which normalize keys while this module loads.
+const NORMALIZED_METRIC_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   ...RECOVERY_METRICS,
@@ -67,6 +69,12 @@ export function listMetricDefinitions(): MetricDefinition[] {
 }
 
 export function normalizeMetricKey(value: string): string {
+  // Stored keys are already in this form, and every metric point resolves its
+  // key several times; the rewrite below leaves such a key unchanged.
+  if (NORMALIZED_METRIC_KEY_PATTERN.test(value)) {
+    return value;
+  }
+
   return value
     .trim()
     .replace(/([a-z0-9])([A-Z])/gu, "$1-$2")
