@@ -825,12 +825,6 @@ describe("cloudflare worker routes", () => {
       };
     });
     const env = createWorkerEnv(createUserRunnerStub(), {
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      STANDBY_COORDINATOR: {
-        getByName() {
-          throw new Error("The model-only phase must not repeat inventory verification.");
-        },
-      },
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
@@ -5218,7 +5212,7 @@ function createSmokeHarness(bank: "primary" | "next", failure?: "prepare" | "ret
   const context: WorkerRouteContext = { env, url, request: new Request(url),
     environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
   };
-  return { active, context, readySlotNames, servingGet, otherBankGet, coordinatorGet,
+  return { active, candidate, context, readySlotNames, servingGet, otherBankGet, coordinatorGet,
     ensureReadyStandby, claimReadyStandby, prepareStandbySlot, retireStandbySlot, unexpected, smokeHealth };
 }
 
@@ -5248,10 +5242,40 @@ describe("deployment standby serving proof", () => {
     );
   }
 
-  it.each(["artifact", "live-model"] as const)("keeps the %s phase off serving inventory", async phase => {
+  it("proves serving inventory in the same request as the live model turn", async () => {
     const h = createSmokeHarness("primary");
-    if (phase === "live-model") h.context.url.searchParams.set("liveModelTurn", "1");
-    const response = await handleDeployContainerSmokeRoute(h.context, phase === "artifact");
+    h.context.url.searchParams.set("liveModelTurn", "1");
+    const response = await handleDeployContainerSmokeRoute(h.context);
+    expect(response.status).toBe(200);
+    expect(h.prepareStandbySlot).toHaveBeenCalledOnce();
+    expect(h.retireStandbySlot).toHaveBeenCalledWith({});
+    expect(h.smokeHealth).toHaveBeenCalledExactlyOnceWith({
+      liveModelTurn: { model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL },
+    });
+    await expect(response.json()).resolves.toMatchObject({ ok: true,
+      standbyInventory: { ready: true, readyCount: 2, target: 2, provisioningCount: 0 } });
+  });
+
+  it("returns a failed model turn in the body, apart from a container that never started", async () => {
+    const h = createSmokeHarness("primary");
+    h.context.url.searchParams.set("liveModelTurn", "1");
+    h.smokeHealth.mockImplementationOnce(async () => ({
+      ...await createRunnerContainerNamespace().getByName("artifact").smokeHealth(),
+      liveModelTurnFailure: "Codex final output was not OK.",
+      ok: false,
+      runnerBundle: h.candidate,
+    }));
+    const response = await handleDeployContainerSmokeRoute(h.context);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      runnerContainer: { liveModelTurnFailure: "Codex final output was not OK.", ok: false },
+    });
+  });
+
+  it("keeps the artifact phase off serving inventory", async () => {
+    const h = createSmokeHarness("primary");
+    const response = await handleDeployContainerSmokeRoute(h.context, true);
     expect(response.status).toBe(200);
     expect(h.smokeHealth).toHaveBeenCalledOnce();
     expect(h.coordinatorGet).not.toHaveBeenCalled();

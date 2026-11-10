@@ -418,6 +418,7 @@ interface HostedExecutionContainerSmokeHealthResult {
     model: string | null;
     stdoutBytes: number | null;
   } | null;
+  liveModelTurnFailure?: string;
   ok: boolean;
   runnerBundle: {
     buildSkipped?: boolean;
@@ -2026,15 +2027,23 @@ export class RunnerContainer extends Container {
           ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
           : undefined;
         let liveModelTurn: HostedExecutionContainerSmokeHealthResult["liveModelTurn"] | undefined;
+        let liveModelTurnFailure: string | undefined;
         if (input.liveModelTurn) {
-          liveModelTurn = await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn);
+          try {
+            liveModelTurn = await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn);
+          } catch (error) {
+            // Reported, not thrown: the deploy smoke retries a container that
+            // failed to start but must stop on a model turn that ran and failed.
+            liveModelTurnFailure = error instanceof Error ? error.message : String(error);
+          }
         }
 
         return {
           codexShell,
           ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
           ...(liveModelTurn === undefined ? {} : { liveModelTurn }),
-          ok: true,
+          ...(liveModelTurnFailure === undefined ? {} : { liveModelTurnFailure }),
+          ok: liveModelTurnFailure === undefined,
           runnerBundle,
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
