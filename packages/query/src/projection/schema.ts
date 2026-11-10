@@ -35,7 +35,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 35: Index allowlisted clinical-fact fields in private search.
 // 36: Cluster metric points by metric and descending time without a sort index.
 // 37: Rebuild device-first wearable selections and their daily metric provenance.
-export const QUERY_PROJECTION_SQLITE_VERSION = 37;
+// 38: Certify entities, metrics and wearables separately; drop the manifest table.
+export const QUERY_PROJECTION_SQLITE_VERSION = 38;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -100,10 +101,9 @@ export function parseJsonValue<TValue>(
 
 export function openQueryProjectionDatabase(
   location: QueryProjectionLocation,
-  options: { create?: boolean; readOnly?: boolean; wearableOnly?: boolean } = {},
+  options: { create?: boolean; readOnly?: boolean } = {},
 ): DatabaseSync {
-  const { wearableOnly = false, ...runtimeOptions } = options;
-  const database = openSqliteRuntimeDatabase(location.absolutePath, { ...runtimeOptions, pageSize: 8192 });
+  const database = openSqliteRuntimeDatabase(location.absolutePath, { ...options, pageSize: 8192 });
 
   if (!(options.readOnly ?? false)) {
     // Rebuilds replace whole tables. Zero retired payloads so compressed
@@ -113,8 +113,13 @@ export function openQueryProjectionDatabase(
       migrations: [{
         version: QUERY_PROJECTION_SQLITE_VERSION,
         migrate(candidateDatabase) {
-          if (wearableOnly) ensureWearableQueryProjectionSchema(candidateDatabase);
-          else ensureQueryProjectionSchema(candidateDatabase);
+          // Section tables are created by the publication that fills them.
+          candidateDatabase.exec(`
+            CREATE TABLE IF NOT EXISTS query_meta (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+          `);
         },
       }],
       schemaVersion: QUERY_PROJECTION_SQLITE_VERSION,
@@ -125,11 +130,11 @@ export function openQueryProjectionDatabase(
   return database;
 }
 
-/** Supported wearable core/version; global completeness is checked separately. */
+/** A store this build can read and publish into. Which sections it holds, and
+ * whether they are fresh, are separate questions answered per section. */
 export function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
-  if (!hasWearableQueryProjectionTables(database)) return false;
-
   return (
+    tableExists(database, "query_meta") &&
     readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID &&
     readSqliteRuntimeUserVersion(database) === QUERY_PROJECTION_SQLITE_VERSION
   );
@@ -156,47 +161,25 @@ export function emptyQueryProjectionStatus(): QueryProjectionStatus {
   };
 }
 
-// A partial store deliberately omits global tables. Even an older reader that
-// passed its freshness check before a version reset fails its table guard,
-// rather than reading empty global results from a newly published partial store.
-function ensureWearableQueryProjectionSchema(database: DatabaseSync): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS query_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
+export type QueryProjectionSection = "entities" | "metrics" | "wearables";
 
-    CREATE TABLE IF NOT EXISTS query_wearable_summary_shapes (
-      shape_id INTEGER PRIMARY KEY,
-      keys_json TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS query_wearable_summaries (
-      id TEXT PRIMARY KEY,
-      provider_scope_key TEXT NOT NULL,
-      provider_scope_json TEXT NOT NULL,
-      summary_kind TEXT NOT NULL,
-      summary_date TEXT,
-      sort_rank INTEGER NOT NULL,
-      summary_json TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
-      ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
-    CREATE INDEX IF NOT EXISTS query_wearable_summaries_kind_date_idx
-      ON query_wearable_summaries(summary_kind, summary_date DESC);
-  `);
+interface QueryProjectionSectionDefinition {
+  /** `query_meta` key holding the canonical source manifest this section was built from. */
+  certificateKey: string;
+  schemaSql: string;
+  tables: readonly string[];
 }
 
-function hasWearableQueryProjectionTables(database: DatabaseSync): boolean {
-  return tableExists(database, "query_meta")
-    && tableExists(database, "query_wearable_summaries")
-    && tableExists(database, "query_wearable_summary_shapes");
-}
-
-export function ensureQueryProjectionSchema(database: DatabaseSync): void {
-  ensureWearableQueryProjectionSchema(database);
-  database.exec(`
+/** The projection is three independently published sections. Each owns its
+ * tables and one certificate, committed in the same transaction as its rows.
+ * A section's tables exist only once it has been published, so a reader that
+ * passed a freshness check against a store that was since replaced fails its
+ * table guard instead of reading another section's empty tables. */
+export const QUERY_PROJECTION_SECTIONS: Record<QueryProjectionSection, QueryProjectionSectionDefinition> = {
+  entities: {
+    certificateKey: "entity_source_manifest",
+    tables: ["query_entities", "query_search_document", "query_search_fts"],
+    schemaSql: `
     CREATE TABLE IF NOT EXISTS query_entities (
       entity_id TEXT PRIMARY KEY,
       sort_rank INTEGER NOT NULL,
@@ -217,6 +200,45 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_entities_family_idx ON query_entities(family);
     CREATE INDEX IF NOT EXISTS query_entities_kind_idx ON query_entities(kind);
 
+    CREATE TABLE IF NOT EXISTS query_search_document (
+      rowid INTEGER PRIMARY KEY,
+      record_id TEXT NOT NULL UNIQUE,
+      alias_ids_json TEXT NOT NULL,
+      record_type TEXT NOT NULL,
+      kind TEXT,
+      stream TEXT,
+      title TEXT,
+      occurred_at TEXT,
+      date TEXT,
+      experiment_slug TEXT,
+      tags_json TEXT NOT NULL,
+      path TEXT NOT NULL,
+      title_text TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      tags_text TEXT NOT NULL,
+      structured_text TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS query_search_document_record_type_idx ON query_search_document(record_type);
+    CREATE INDEX IF NOT EXISTS query_search_document_kind_idx ON query_search_document(kind);
+    CREATE INDEX IF NOT EXISTS query_search_document_stream_idx ON query_search_document(stream);
+    CREATE INDEX IF NOT EXISTS query_search_document_experiment_idx ON query_search_document(experiment_slug);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS query_search_fts USING fts5(
+      title_text,
+      body_text,
+      tags_text,
+      structured_text,
+      content = 'query_search_document',
+      content_rowid = 'rowid',
+      tokenize = 'unicode61 remove_diacritics 2 tokenchars ''-_'''
+    );
+    `,
+  },
+  metrics: {
+    certificateKey: "metric_source_manifest",
+    tables: ["query_metric_payloads", "query_metric_points", "query_metric_targets"],
+    schemaSql: `
     CREATE TABLE IF NOT EXISTS query_metric_payloads (
       payload_id INTEGER PRIMARY KEY,
       metric_point_json TEXT NOT NULL
@@ -266,72 +288,58 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_metric_targets_goal_idx ON query_metric_targets(goal_id);
     CREATE INDEX IF NOT EXISTS query_metric_targets_metric_idx ON query_metric_targets(metric_key);
     CREATE INDEX IF NOT EXISTS query_metric_targets_biomarker_idx ON query_metric_targets(biomarker_key);
-
-    CREATE TABLE IF NOT EXISTS query_source_manifest (
-      relative_path TEXT PRIMARY KEY,
-      size_bytes INTEGER NOT NULL,
-      mtime_ms REAL NOT NULL
+    `,
+  },
+  wearables: {
+    certificateKey: "wearable_source_manifest",
+    tables: ["query_wearable_summary_shapes", "query_wearable_summaries"],
+    schemaSql: `
+    CREATE TABLE IF NOT EXISTS query_wearable_summary_shapes (
+      shape_id INTEGER PRIMARY KEY,
+      keys_json TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS query_search_document (
-      rowid INTEGER PRIMARY KEY,
-      record_id TEXT NOT NULL UNIQUE,
-      alias_ids_json TEXT NOT NULL,
-      record_type TEXT NOT NULL,
-      kind TEXT,
-      stream TEXT,
-      title TEXT,
-      occurred_at TEXT,
-      date TEXT,
-      experiment_slug TEXT,
-      tags_json TEXT NOT NULL,
-      path TEXT NOT NULL,
-      title_text TEXT NOT NULL,
-      body_text TEXT NOT NULL,
-      tags_text TEXT NOT NULL,
-      structured_text TEXT NOT NULL
+    CREATE TABLE IF NOT EXISTS query_wearable_summaries (
+      id TEXT PRIMARY KEY,
+      provider_scope_key TEXT NOT NULL,
+      provider_scope_json TEXT NOT NULL,
+      summary_kind TEXT NOT NULL,
+      summary_date TEXT,
+      sort_rank INTEGER NOT NULL,
+      summary_json TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS query_search_document_record_type_idx ON query_search_document(record_type);
-    CREATE INDEX IF NOT EXISTS query_search_document_kind_idx ON query_search_document(kind);
-    CREATE INDEX IF NOT EXISTS query_search_document_stream_idx ON query_search_document(stream);
-    CREATE INDEX IF NOT EXISTS query_search_document_experiment_idx ON query_search_document(experiment_slug);
+    CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
+      ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
+    CREATE INDEX IF NOT EXISTS query_wearable_summaries_kind_date_idx
+      ON query_wearable_summaries(summary_kind, summary_date DESC);
+    `,
+  },
+};
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS query_search_fts USING fts5(
-      title_text,
-      body_text,
-      tags_text,
-      structured_text,
-      content = 'query_search_document',
-      content_rowid = 'rowid',
-      tokenize = 'unicode61 remove_diacritics 2 tokenchars ''-_'''
-    );
-  `);
+export const QUERY_PROJECTION_SECTION_NAMES = Object.keys(QUERY_PROJECTION_SECTIONS) as QueryProjectionSection[];
+
+export function ensureQueryProjectionSectionSchema(
+  database: DatabaseSync,
+  section: QueryProjectionSection,
+): void {
+  database.exec(QUERY_PROJECTION_SECTIONS[section].schemaSql);
 }
 
-export function hasQueryProjectionTables(database: DatabaseSync): boolean {
-  return (
-    tableExists(database, "query_entities") &&
-    tableExists(database, "query_metric_points") &&
-    tableExists(database, "query_metric_payloads") &&
-    tableExists(database, "query_metric_targets") &&
-    tableExists(database, "query_wearable_summaries") &&
-    tableExists(database, "query_wearable_summary_shapes") &&
-    tableExists(database, "query_source_manifest") &&
-    tableExists(database, "query_search_document") &&
-    tableExists(database, "query_search_fts")
-  );
+export function hasQueryProjectionSectionTables(
+  database: DatabaseSync,
+  section: QueryProjectionSection,
+): boolean {
+  return tableExists(database, "query_meta")
+    && QUERY_PROJECTION_SECTIONS[section].tables.every((table) => tableExists(database, table));
 }
 
 export function assertQueryProjectionTables(
   database: DatabaseSync,
   location: QueryProjectionLocation,
-  scope: "global" | "wearable" = "global",
+  section: QueryProjectionSection,
 ): void {
-  const hasTables = scope === "wearable"
-    ? hasWearableQueryProjectionTables(database)
-    : hasQueryProjectionTables(database);
-  if (!hasTables) {
+  if (!hasQueryProjectionSectionTables(database, section)) {
     throw new Error(
       `Query projection at ${location.dbPath} is missing required tables. Rebuild the projection and try again.`,
     );

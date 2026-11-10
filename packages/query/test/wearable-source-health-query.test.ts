@@ -16,7 +16,6 @@ import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import { CANONICAL_WRITE_LOCK_DIRECTORY, withCanonicalWriteLock } from "@murphai/core";
 import {
   getQueryProjectionStatus,
-  listCanonicalEntitiesRuntime,
   rebuildQueryProjection,
   searchVaultRuntime,
   summarizeWearableSourceHealthRuntime,
@@ -27,10 +26,11 @@ import { composePublicWearableSummaryBundleFromStoredRows } from "../src/project
 import {
   currentQueryProjectionLocation,
   hasCurrentQueryProjectionSchema,
-  hasQueryProjectionTables,
+  hasQueryProjectionSectionTables,
+  QUERY_PROJECTION_SECTION_NAMES,
   QUERY_PROJECTION_SQLITE_VERSION,
 } from "../src/projection/schema.ts";
-import { isWearableProjectionFresh } from "../src/projection/freshness.ts";
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
 import * as rebuild from "../src/projection/rebuild.ts";
 import * as metrics from "../src/metrics/projection.ts";
 import * as metricPoints from "../src/metrics/index.ts";
@@ -112,7 +112,7 @@ const filterCases: WearableSummaryFilters[] = [
 
 const globalTables = [
   "query_entities", "query_metric_points", "query_metric_payloads", "query_metric_targets",
-  "query_source_manifest", "query_search_document", "query_search_fts",
+  "query_search_document", "query_search_fts",
 ] as const;
 
 function inspectProjection(root: string) {
@@ -143,9 +143,13 @@ function executeSql(root: string, sql: string) {
 }
 
 async function assertWearablesFresh(root: string) {
-  assert.equal(await isWearableProjectionFresh(
+  assert.equal((await readFreshQueryProjectionSections(
     currentQueryProjectionLocation(root), await source.listCanonicalSourceManifest(root),
-  ), true);
+  )).has("wearables"), true);
+}
+
+async function publishAllStaleSections(root: string) {
+  await rebuild.publishQueryProjectionSections(root, QUERY_PROJECTION_SECTION_NAMES, () => undefined);
 }
 
 async function forceFullReference(root: string) {
@@ -198,7 +202,6 @@ for (const empty of [false, true]) {
 test("source-only reads publish wearables once per manifest and never invoke global work", async () => {
   const { root, shard } = await fixture();
   const forbidden = [
-    vi.spyOn(rebuild, "rebuildQueryProjectionFromCanonicalSource"),
     vi.spyOn(metrics, "buildMetricProjection"),
     vi.spyOn(search, "materializeSearchDocuments"),
     vi.spyOn(search, "materializeSampleSummarySearchDocuments"),
@@ -267,12 +270,12 @@ for (const order of ["source-global", "global-source"] as const) {
         const before = inspectProjection(root);
         const encodingCalls = encoded.mock.calls.length;
         assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-        await listCanonicalEntitiesRuntime(root);
+        await publishAllStaleSections(root);
         assert.deepEqual(inspectProjection(root).wearable, before.wearable);
         assert.equal(inspectProjection(root).wearableMeta, before.wearableMeta);
         assert.equal(encoded.mock.calls.length, encodingCalls);
       } else {
-        await listCanonicalEntitiesRuntime(root);
+        await publishAllStaleSections(root);
         const before = inspectProjection(root);
         await summarizeWearableSourceHealthRuntime(root);
         assert.deepEqual(inspectProjection(root), before);
@@ -357,7 +360,7 @@ for (const state of ["legacy", "future", "unreadable", "missing-metadata", "corr
       // manifest still truthfully certifies its previously completed rows.
       assert.equal((await getQueryProjectionStatus(root)).fresh, true);
     }
-    await listCanonicalEntitiesRuntime(root);
+    await publishAllStaleSections(root);
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
     assert.equal(projected.mock.calls.length, 1, "global repair reuses the new wearable generation");
     assert.deepEqual(await readFile(shard), canonicalBefore);
@@ -374,23 +377,48 @@ test("an in-flight older global reader fails closed on a partial store after a v
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   const initialEntities = entityStore.readStoredVaultSource(currentQueryProjectionLocation(root)).entities;
   assert.match(JSON.stringify(initialEntities), /"id":"evt_version_reset_note"/u);
-  // Model a version-27 reader which checked freshness before the new owner
-  // reset its store. Its unchanged required-global-tables guard must reject the
-  // partial replacement even though that reader will not recheck user_version.
-  executeSql(root, "PRAGMA user_version = 27");
+  // Recreate v37's manifest table and its stored-reader guard. The reader has
+  // passed freshness and pauses before opening its stored-row connection.
+  executeSql(root, `CREATE TABLE query_source_manifest (
+    relative_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, mtime_ms REAL NOT NULL
+  ); PRAGMA user_version = 37`);
+  const legacy = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath);
+  try {
+    const insert = legacy.prepare("INSERT INTO query_source_manifest VALUES (?, ?, ?)");
+    for (const entry of await source.listCanonicalSourceManifest(root)) {
+      insert.run(entry.relativePath, entry.sizeBytes, entry.mtimeMs);
+    }
+  } finally { legacy.close(); }
+  const v37Read = () => {
+    const db = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath, { readOnly: true });
+    try {
+      // Exact required-table set from v37; this guard did not check user_version.
+      for (const table of [...globalTables, "query_source_manifest",
+        "query_wearable_summaries", "query_wearable_summary_shapes"]) {
+        if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
+          throw new Error("missing required tables");
+        }
+      }
+      return db.prepare("SELECT entity_json FROM query_entities ORDER BY sort_rank").all();
+    } finally { db.close(); }
+  };
+  assert.ok(v37Read().length > 0);
   await summarizeWearableSourceHealthRuntime(root);
   const location = currentQueryProjectionLocation(root);
   const database = new DatabaseSync(location.absolutePath, { readOnly: true });
   try {
     assert.equal(hasCurrentQueryProjectionSchema(database), true);
-    assert.equal(hasQueryProjectionTables(database), false);
+    assert.equal(hasQueryProjectionSectionTables(database, "entities"), false);
   } finally { database.close(); }
+  assert.throws(v37Read, /missing required tables/u);
   assert.throws(() => entityStore.readStoredVaultSource(location), /missing required tables/u);
   assert.deepEqual(inspectProjection(root).globalTables, []);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-  await listCanonicalEntitiesRuntime(root);
+  await publishAllStaleSections(root);
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   assert.deepEqual(entityStore.readStoredVaultSource(location).entities, initialEntities);
+  // Even a fully published v38 replacement rejects the already-gated v37 read.
+  assert.throws(v37Read, /missing required tables/u);
 });
 
 test("a matching empty manifest and a reused builtAt cannot certify unfinished global tables", async () => {
@@ -400,7 +428,7 @@ test("a matching empty manifest and a reused builtAt cannot certify unfinished g
   assert.deepEqual(await source.listCanonicalSourceManifest(root), []);
   assert.deepEqual(await summarizeWearableSourceHealthRuntime(root), []);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-  await listCanonicalEntitiesRuntime(root);
+  await publishAllStaleSections(root);
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   executeSql(root, "UPDATE query_meta SET value = '2026-01-01T00:00:00.000Z' WHERE key = 'built_at'");
   await withCanonicalWriteLock(root, () => writeFile(shard, JSON.stringify(
@@ -466,14 +494,14 @@ test("failed global publication preserves the independently current wearable por
   const failure = new Error("injected global publication failure");
   const insert = vi.spyOn(searchStore, "insertSearchDocuments").mockImplementation(() => { throw failure; });
   let report!: CliTiming;
-  await assert.rejects(measuredQuery("event list", () => listCanonicalEntitiesRuntime(root), value => { report = value; }), error => error === failure);
+  await assert.rejects(measuredQuery("event list", () => publishAllStaleSections(root), value => { report = value; }), error => error === failure);
   assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
   assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
   assert.deepEqual(inspectProjection(root), before);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
   assert.deepEqual(await summarizeWearableSourceHealthRuntime(root), expected);
   insert.mockRestore();
-  await listCanonicalEntitiesRuntime(root);
+  await publishAllStaleSections(root);
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   assert.equal(projected.mock.calls.length, 0);
 });
@@ -585,7 +613,7 @@ test("full rebuild timing preserves canonical data, search output and freshness"
   assert.deepEqual(await readFile(shard), canonical);
 });
 
-test("wearable-only timing omits global work and a later full rebuild omits reused summaries", async () => {
+test("wearable-only timing omits unrelated work and a later non-forced publication reuses summaries", async () => {
   const { root, shard } = await fixture();
   const canonical = await readFile(shard);
   const expected = await summarizeWearableSourceHealthRuntime(root);
@@ -601,7 +629,7 @@ test("wearable-only timing omits global work and a later full rebuild omits reus
   await assertWearablesFresh(root);
   assert.deepEqual(await measuredQuery("wearables sources list", () => summarizeWearableSourceHealthRuntime(root), value => { report = value; }), expected);
   assertRebuildTiming(report, [], root);
-  await measuredQuery("query projection rebuild", () => rebuildQueryProjection(root), value => { report = value; });
+  await measuredQuery("query projection rebuild", () => publishAllStaleSections(root), value => { report = value; });
   assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   assert.deepEqual(inspectProjection(root).wearable, expectedProjection.wearable);
@@ -706,8 +734,8 @@ for (const mode of ["full", "wearable-only"] as const) {
       vi.restoreAllMocks();
       // Closing failed after the actual close: the already-committed publication
       // remains committed, just as before instrumentation. Other failures retry.
-      assert.equal(await isWearableProjectionFresh(currentQueryProjectionLocation(root),
-        await source.listCanonicalSourceManifest(root)), boundary === "close");
+      assert.equal((await readFreshQueryProjectionSections(currentQueryProjectionLocation(root),
+        await source.listCanonicalSourceManifest(root))).has("wearables"), boundary === "close");
       assert.equal((await getQueryProjectionStatus(root)).fresh, mode === "full" && boundary === "close");
       await run();
       await assertWearablesFresh(root);
@@ -812,7 +840,7 @@ for (const reader of ordinaryWearableReaders) {
       await assertWearablesFresh(root);
       // A real global operation must still do its work, without re-encoding
       // the focused generation. Then force an independent full-row oracle.
-      await measuredQuery("query list", () => listCanonicalEntitiesRuntime(root), value => { report = value; });
+      await measuredQuery("query list", () => publishAllStaleSections(root), value => { report = value; });
       assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
       assert.equal((await getQueryProjectionStatus(root)).fresh, true);
       await forceFullReference(root);
@@ -838,7 +866,7 @@ for (const reader of ordinaryWearableReaders) {
         assert.deepEqual(inspectProjection(root).global, before.global);
         assert.deepEqual(inspectProjection(root).globalMeta, before.globalMeta);
         assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-        await measuredQuery("query list", () => listCanonicalEntitiesRuntime(root), value => { report = value; });
+        await measuredQuery("query list", () => publishAllStaleSections(root), value => { report = value; });
         assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
         await forceFullReference(root);
         for (const [index, filters] of cases.entries()) {
@@ -965,7 +993,7 @@ for (const read of [ordinaryRuntime.summarizeWearableSleepRuntime, summarizeWear
   });
 }
 
-for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable", "schema-id", "built-at", "global-manifest", "wearable-manifest"] as const) {
+for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable", "schema-id", "entity-certificate", "metric-certificate", "wearable-manifest"] as const) {
   test(`ordinary global preflight cannot treat ${state} as fresh`, async () => {
     const { root } = await fixture(); await rebuildQueryProjection(root);
     const reader = ordinaryWearableReaders[1]!;
@@ -977,8 +1005,8 @@ for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable
       executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION + (state === "legacy" ? -1 : 1)}`);
     } else if (state === "unreadable") await writeFile(currentQueryProjectionLocation(root).absolutePath, "synthetic invalid database");
     else if (state === "schema-id") executeSql(root, "UPDATE query_meta SET value = 'unsupported' WHERE key = 'schema_version'");
-    else if (state === "built-at") executeSql(root, "DELETE FROM query_meta WHERE key = 'built_at'");
-    else if (state === "global-manifest") executeSql(root, "UPDATE query_source_manifest SET size_bytes = size_bytes + 1");
+    else if (state === "entity-certificate") executeSql(root, "DELETE FROM query_meta WHERE key = 'entity_source_manifest'");
+    else if (state === "metric-certificate") executeSql(root, "UPDATE query_meta SET value = 'stale' WHERE key = 'metric_source_manifest'");
     else executeSql(root, "DELETE FROM query_meta WHERE key = 'wearable_source_manifest'");
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
     const captured = wearableStore.readWearableSummaryRows;
@@ -994,7 +1022,7 @@ for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable
     // Repairing only a corrupt wearable certificate can recertify unchanged
     // completed global work; no other partial/reset case can do so.
     assert.equal((await getQueryProjectionStatus(root)).fresh, state === "wearable-manifest");
-    await listCanonicalEntitiesRuntime(root);
+    await publishAllStaleSections(root);
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   });
 }
@@ -1028,7 +1056,7 @@ for (const outcome of ["commit", "rollback"] as const) {
       if (++attempts === ordinaryWearableReaders.length) attempted.release(); return lock(...args);
     });
     const captured = vi.spyOn(wearableStore, "readWearableSummaryRows");
-    const globalRebuild = vi.spyOn(rebuild, "rebuildQueryProjectionFromCanonicalSource");
+    const unrelatedBuilders = [vi.spyOn(metrics, "buildMetricProjection"), vi.spyOn(search, "materializeSearchDocuments")];
     const pending = ordinaryWearableReaders.map(reader => reader.read(root, {}));
     const reads = Promise.all(pending);
     try {
@@ -1039,7 +1067,7 @@ for (const outcome of ["commit", "rollback"] as const) {
     } finally { release.release(); await writer; await reads.catch(() => undefined); }
     assert.equal(await writer, outcome === "rollback" ? failure : null);
     const actual = await reads;
-    assert.equal(globalRebuild.mock.calls.length, 0);
+    for (const builder of unrelatedBuilders) assert.equal(builder.mock.calls.length, 0);
     assert.deepEqual(inspectProjection(root).global, before.global);
     assert.deepEqual(inspectProjection(root).globalMeta, before.globalMeta);
     await forceFullReference(root);
@@ -1143,8 +1171,8 @@ test("ordinary timing charges extra global preflight separately from the locked 
   vi.spyOn(source, "listCanonicalSourceManifest").mockImplementation(async (...args) => { tick += 11_000n; return manifest(...args); });
   const status = freshness.readProjectionStatus;
   vi.spyOn(freshness, "readProjectionStatus").mockImplementation(async (...args) => { tick += 13_000n; return status(...args); });
-  const wearableStatus = freshness.isWearableProjectionFresh;
-  vi.spyOn(freshness, "isWearableProjectionFresh").mockImplementation(async (...args) => { tick += 17_000n; return wearableStatus(...args); });
+  const wearableStatus = freshness.readFreshQueryProjectionSections;
+  vi.spyOn(freshness, "readFreshQueryProjectionSections").mockImplementation(async (...args) => { tick += 17_000n; return wearableStatus(...args); });
   let report!: CliTiming;
   const read = () => measuredQuery("wearables latest", () => ordinaryRuntime.summarizeWearableLatestRuntime(root), value => { report = value; });
   await read(); assertRebuildTiming(report, [], root);
@@ -1193,7 +1221,7 @@ test("legacy confidence prose is ignored without rebuilding and disappears on we
     }
   } finally { database.close(); }
   const before = inspectProjection(root);
-  const rebuildSpy = vi.spyOn(rebuild, "rebuildQueryProjectionFromCanonicalSource");
+  const unrelatedBuilders = [vi.spyOn(metrics, "buildMetricProjection"), vi.spyOn(search, "materializeSearchDocuments")];
   const publishSpy = vi.spyOn(projector, "buildWearableSummaryProjectionFromDataset");
   const actual = await rebuild.readFreshWearableSummaryRows(root, {});
   assert.deepEqual(composePublicWearableSummaryBundleFromStoredRows(actual, {}), expected);
@@ -1201,12 +1229,12 @@ test("legacy confidence prose is ignored without rebuilding and disappears on we
   assert.equal((await getQueryProjectionStatus(root)).fresh, true);
   assert.deepEqual(inspectProjection(root), before);
   assert.equal(publishSpy.mock.calls.length, 0);
-  assert.equal(rebuildSpy.mock.calls.length, 0);
+  for (const builder of unrelatedBuilders) assert.equal(builder.mock.calls.length, 0);
   // The next canonical wearable change uses the existing wearable-only owner.
   await appendFile(shard, `${JSON.stringify(observation("evt_upgrade_new", "garmin", "2026-05-05", "steps", 9000, "count"))}\n`);
   const published = await rebuild.readFreshWearableSummaryRows(root, {});
   assert.equal(publishSpy.mock.calls.length, 1);
-  assert.equal(rebuildSpy.mock.calls.length, 0);
+  for (const builder of unrelatedBuilders) assert.equal(builder.mock.calls.length, 0);
   assert.ok(published.rows.every(row => !row.summaryJson.includes('"reasons"')));
   const after = inspectProjection(root);
   assert.deepEqual(after.global, before.global);

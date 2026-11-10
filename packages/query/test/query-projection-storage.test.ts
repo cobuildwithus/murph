@@ -1,3 +1,4 @@
+import * as schema from "../src/projection/schema.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -10,11 +11,11 @@ import type { MetricPoint } from "@murphai/health-metrics";
 import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murphai/runtime-state/node";
 import { test, vi } from "vitest";
 
-import { getQueryProjectionStatus, listCanonicalEntitiesRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
+import { getQueryProjectionStatus, listCanonicalEntitiesRuntime, listMetricPointsRuntime, summarizeWearableSourceHealthRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
 import * as searchStore from "../src/projection/search-store.ts";
 import { readProjectionStatus } from "../src/projection/freshness.ts";
 import { insertMetricPoints, listStoredMetricPoints } from "../src/projection/metric-store.ts";
-import { currentQueryProjectionLocation, openQueryProjectionDatabase } from "../src/projection/schema.ts";
+import { currentQueryProjectionLocation, ensureQueryProjectionSectionSchema, openQueryProjectionDatabase } from "../src/projection/schema.ts";
 import { insertWearableSummaryRows, readWearableSummaryRows } from "../src/projection/wearable-summary-store.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
@@ -40,6 +41,7 @@ test("sparse biomarker index preserves filtered and unfiltered metric reads", as
     const points = Array.from({ length: 1000 }, (_, index) => metricPoint(index, null));
     points.push(metricPoint(1000, "biomarker:apob"));
     const database = openQueryProjectionDatabase(location);
+    ensureQueryProjectionSectionSchema(database, "metrics");
     try {
       withImmediateTransaction(database, () => insertMetricPoints(database, points));
       const indexed = database.prepare(`
@@ -76,6 +78,7 @@ test("query replacement clears retired payloads for compression and preserves ro
     for (const clearRetired of [false, true]) {
       const location = currentQueryProjectionLocation(path.join(root, String(clearRetired)));
       const database = openQueryProjectionDatabase(location);
+      ensureQueryProjectionSectionSchema(database, "wearables");
       try {
         // The control recreates the old connection behavior.
         if (!clearRetired) database.exec("PRAGMA secure_delete = OFF");
@@ -145,6 +148,8 @@ test(`v${version} caches rebuild once and current SQLite bytes remain reusable a
     }
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
     assert.deepEqual(await listCanonicalEntitiesRuntime(root), before);
+    await listMetricPointsRuntime(root);
+    await summarizeWearableSourceHealthRuntime(root);
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
     const current = openQueryProjectionDatabase(location, { readOnly: true });
     try {
@@ -183,6 +188,7 @@ test("shared metric payloads preserve full results, filters and restored SQLite 
   }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   try {
     const database = openQueryProjectionDatabase(location);
+    ensureQueryProjectionSectionSchema(database, "metrics");
     try {
       withImmediateTransaction(database, () => insertMetricPoints(database, points));
       assert.equal(database.prepare("SELECT count(*) AS count FROM query_metric_points").get()?.count, 1200);
@@ -229,8 +235,10 @@ test("full publication rolls back metric references together and clears retired 
       database.close();
     }
     const before = listStoredMetricPoints(location, { limit: null });
-    const failPublication = vi.spyOn(searchStore, "insertSearchDocuments").mockImplementationOnce(() => {
-      throw new Error("synthetic publication failure");
+    const writeMeta = schema.writeMeta;
+    const failPublication = vi.spyOn(schema, "writeMeta").mockImplementation((...args) => {
+      if (args[1] === "schema_version") throw new Error("synthetic publication failure");
+      return writeMeta(...args);
     });
     try {
       await assert.rejects(rebuildQueryProjection(root), /synthetic publication failure/u);

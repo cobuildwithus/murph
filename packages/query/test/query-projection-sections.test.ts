@@ -1,0 +1,238 @@
+import assert from "node:assert/strict";
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { initializeVault, withCanonicalWriteLock } from "@murphai/core";
+import { afterEach, test, vi } from "vitest";
+import * as query from "../src/query-projection.ts";
+import * as source from "../src/vault-source.ts";
+import * as summaries from "../src/summaries.ts";
+import * as metrics from "../src/metrics/projection.ts";
+import * as candidates from "../src/wearables/candidates.ts";
+import * as projector from "../src/projection/wearable-summary-projector.ts";
+import { publishQueryProjectionSections } from "../src/projection/rebuild.ts";
+import { readFreshQueryProjectionSections, readProjectionStatus } from "../src/projection/freshness.ts";
+import {
+  currentQueryProjectionLocation, ensureQueryProjectionSectionSchema, hasQueryProjectionSectionTables,
+  openQueryProjectionDatabase, QUERY_PROJECTION_SECTIONS, QUERY_PROJECTION_SECTION_NAMES,
+  type QueryProjectionSection,
+} from "../src/projection/schema.ts";
+import { listStoredMetricPoints } from "../src/projection/metric-store.ts";
+import { readStoredVaultSource } from "../src/projection/entity-store.ts";
+import { readWearableSummaryRows } from "../src/projection/wearable-summary-store.ts";
+
+const roots: string[] = [];
+const eventPath = "ledger/events/2026/2026-07.jsonl";
+const samplePath = "ledger/metric-samples/glucose/2026/2026-07.jsonl";
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+
+async function tempRoot() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "query-sections-"));
+  roots.push(root);
+  return root;
+}
+
+// Same canonical sample and sleep shapes as query.test and the sleep-pattern
+// runtime fixture; use real strict source reads for every publication.
+async function fixture() {
+  const root = await tempRoot();
+  await initializeVault({ vaultRoot: root, timezone: "UTC", createdAt: "2026-07-01T00:00:00Z" });
+  const events = [{
+    schemaVersion: "murph.event.v1", id: "evt_sections_steps", kind: "observation", source: "device",
+    title: "Synthetic steps", occurredAt: "2026-07-10T12:00:00Z", recordedAt: "2026-07-10T12:05:00Z",
+    dayKey: "2026-07-10", metric: "steps", unit: "count", value: 8000,
+    externalRef: { system: "garmin", resourceType: "daily", resourceId: "sections-steps" },
+  }, {
+    schemaVersion: "murph.event.v1", id: "evt_sections_sleep", kind: "sleep_session", source: "device",
+    title: "Synthetic sleep", occurredAt: "2026-07-10T03:00:00Z", recordedAt: "2026-07-10T11:05:00Z",
+    dayKey: "2026-07-10", startAt: "2026-07-10T03:00:00Z", endAt: "2026-07-10T11:00:00Z",
+    durationMinutes: 480, sleepType: "main_sleep",
+    externalRef: { system: "oura", resourceType: "sleep", resourceId: "sections-sleep" },
+  }];
+  const samples = [
+    { id: "smp_sections_derived", quality: "derived", value: 104, recordedAt: "2026-07-10T12:00:00Z" },
+    { id: "smp_sections_raw", quality: "raw", value: 999, recordedAt: "2026-07-11T12:00:00Z" },
+  ].map(sample => ({ schemaVersion: "murph.metric-sample.v1", metric: "glucose", source: "device",
+    unit: "mg_dL", dayKey: sample.recordedAt.slice(0, 10), ...sample }));
+  for (const [relativePath, rows] of [[eventPath, events], [samplePath, samples]] as const) {
+    await mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
+    await writeFile(path.join(root, relativePath), rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+  }
+  return { root, events };
+}
+
+const readers: Record<QueryProjectionSection, (root: string) => Promise<unknown>> = {
+  entities: root => query.searchVaultRuntime(root, "glucose", { kinds: ["sample_summary"] }),
+  metrics: root => query.listMetricPointsRuntime(root, { metricKey: "steps", limit: null }),
+  wearables: root => query.summarizeWearableSourceHealthRuntime(root),
+};
+async function fresh(root: string) {
+  return [...await readFreshQueryProjectionSections(currentQueryProjectionLocation(root), await source.listCanonicalSourceManifest(root))];
+}
+
+for (const first of QUERY_PROJECTION_SECTION_NAMES) {
+  test(`${first} can publish first without creating or certifying other sections`, async () => {
+    const { root } = await fixture();
+    const result = await readers[first](root);
+    if (Array.isArray(result)) assert.ok(result.length > 0);
+    else assert.ok(result && typeof result === "object" && "total" in result && Number(result.total) > 0);
+    assert.deepEqual(await fresh(root), [first]);
+    const database = openQueryProjectionDatabase(currentQueryProjectionLocation(root), { readOnly: true });
+    try {
+      for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+        assert.equal(hasQueryProjectionSectionTables(database, section), section === first);
+        for (const table of QUERY_PROJECTION_SECTIONS[section].tables) {
+          assert.equal(Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table)), section === first);
+        }
+      }
+      assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'query_source_manifest'").get(), undefined);
+    } finally { database.close(); }
+    const status = await query.getQueryProjectionStatus(root);
+    assert.equal(status.fresh, false);
+    assert.equal(status.entityCount > 0, first === "entities");
+    assert.equal(status.searchDocumentCount > 0, first === "entities");
+    for (const section of QUERY_PROJECTION_SECTION_NAMES.filter(section => section !== first)) {
+      await readers[section](root);
+      assert.equal((await query.getQueryProjectionStatus(root)).fresh, (await fresh(root)).length === 3);
+    }
+    assert.deepEqual(await fresh(root), QUERY_PROJECTION_SECTION_NAMES);
+  });
+}
+
+test("entities retain display-grade summary IDs, filters and citations without metric or wearable work", async () => {
+  const { root } = await fixture();
+  const dataset = vi.spyOn(candidates, "collectWearableDataset");
+  const metric = vi.spyOn(metrics, "buildMetricProjection");
+  const wearable = vi.spyOn(projector, "buildWearableSummaryProjectionFromDataset");
+  const scoped = await query.searchVaultRuntime(root, "glucose", { streams: ["glucose"] });
+  assert.doesNotMatch(JSON.stringify(scoped), /999|smp_sections_raw|sample-summary:2026-07-11/u);
+  const result = await query.searchVaultRuntime(root, "glucose", { streams: ["glucose"], kinds: ["sample_summary"] });
+  assert.equal(result.total, 1);
+  assert.equal(result.hits[0]?.recordId, "sample-summary:2026-07-10:glucose:mg_dL");
+  assert.equal(result.hits[0]?.kind, "sample_summary");
+  assert.equal(result.hits[0]?.recordType, "sample");
+  assert.equal(result.hits[0]?.citation.path, samplePath);
+  assert.deepEqual(await query.searchVaultRuntime(root, "glucose", { kinds: ["sample_summary"] }), result);
+  assert.equal((await query.searchVaultRuntime(root, "glucose", { streams: ["heart_rate"] })).total, 0);
+  assert.doesNotMatch(JSON.stringify(result), /999|smp_sections_raw|sample-summary:2026-07-11/u);
+  assert.equal(dataset.mock.calls.length, 0);
+  assert.equal(metric.mock.calls.length, 0);
+  assert.equal(wearable.mock.calls.length, 0);
+  await query.rebuildQueryProjection(root);
+  assert.deepEqual(await query.searchVaultRuntime(root, "glucose", { streams: ["glucose"], kinds: ["sample_summary"] }), result);
+});
+
+test("entities and metrics share one strict read and one sample summarization", async () => {
+  const { root } = await fixture();
+  const read = vi.spyOn(source, "readVaultSourceStrict");
+  const summarize = vi.spyOn(summaries, "summarizeDailySamples");
+  const dataset = vi.spyOn(candidates, "collectWearableDataset");
+  await publishQueryProjectionSections(root, ["entities", "metrics"], () => undefined);
+  assert.equal(read.mock.calls.length, 1);
+  assert.equal(summarize.mock.calls.length, 1);
+  assert.equal(dataset.mock.calls.length, 1);
+  assert.deepEqual(await fresh(root), ["entities", "metrics"]);
+  await publishQueryProjectionSections(root, ["entities", "metrics"], () => undefined);
+  assert.equal(read.mock.calls.length, 1, "fresh sections reuse their publication");
+});
+
+test("an empty manifest cannot certify absent sections or merely created tables", async () => {
+  const root = await tempRoot();
+  assert.deepEqual(await source.listCanonicalSourceManifest(root), []);
+  assert.deepEqual(await fresh(root), []);
+  await readers.wearables(root);
+  const database = openQueryProjectionDatabase(currentQueryProjectionLocation(root));
+  try { ensureQueryProjectionSectionSchema(database, "entities"); } finally { database.close(); }
+  assert.deepEqual(await fresh(root), ["wearables"]);
+  assert.equal((await query.getQueryProjectionStatus(root)).fresh, false);
+  await readers.entities(root);
+  assert.deepEqual(await fresh(root), ["entities", "wearables"]);
+  assert.equal((await query.getQueryProjectionStatus(root)).fresh, false);
+  await readers.metrics(root);
+  assert.equal((await query.getQueryProjectionStatus(root)).fresh, true);
+});
+
+test("provider-specific metric reads refresh wearable rows after a metrics-only refresh", async () => {
+  const { root, events } = await fixture();
+  await query.rebuildQueryProjection(root);
+  const input = { metricKeys: ["steps"], providers: ["garmin"] };
+  const before = await query.listMetricPointsByPublicSourceRuntime(root, input);
+  await withCanonicalWriteLock(root, () => appendFile(path.join(root, eventPath), JSON.stringify({
+    ...events[0], value: 9100, lifecycle: { revision: 2 }, recordedAt: "2026-07-12T12:00:00Z",
+  }) + "\n"));
+  await readers.metrics(root);
+  assert.deepEqual(await fresh(root), ["metrics"]);
+  const current = await query.listMetricPointsByPublicSourceRuntime(root, input);
+  assert.notDeepEqual(current, before);
+  assert.equal(current[0]?.points[0]?.value, 9100);
+  assert.deepEqual(await fresh(root), ["metrics", "wearables"]);
+  await query.rebuildQueryProjection(root);
+  assert.deepEqual(await query.listMetricPointsByPublicSourceRuntime(root, input), current);
+});
+
+test("sleep pattern uses changed canonical timezone after wearables-only publication", async () => {
+  const { root } = await fixture();
+  await query.rebuildQueryProjection(root);
+  const metadataPath = path.join(root, "vault.json");
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  await withCanonicalWriteLock(root, () => writeFile(metadataPath, JSON.stringify({ ...metadata, timezone: "America/New_York" })));
+  await readers.wearables(root);
+  const build = vi.spyOn(summaries, "summarizeDailySamples");
+  const result = await query.summarizeWearableSleepPatternRuntime(root, { date: "2026-07-10", now: "2026-07-11T12:00:00Z" });
+  assert.equal(result.reportingTimeZone, "America/New_York");
+  assert.equal(result.reportingTimeZoneSource, "vault_metadata");
+  assert.equal(result.bedtime.medianLocalTime, "23:00");
+  assert.equal(result.wakeTime.medianLocalTime, "07:00");
+  assert.deepEqual(await fresh(root), ["wearables"]);
+  assert.equal(build.mock.calls.length, 0);
+  assert.equal(readStoredVaultSource(currentQueryProjectionLocation(root)).metadata?.timezone, "UTC");
+});
+
+// Malformed unrelated goal frontmatter + stale event reads without publication
+// remain covered by vault-usecases/test/event-list-contract.test.ts and
+// blood-test-focused.test.ts; their lock/order assertions stay in those owners.
+
+test("forced publication after partial generations equals a fresh full store, table for table", async () => {
+  const { root, events } = await fixture();
+  await readers.entities(root);
+  await withCanonicalWriteLock(root, () => appendFile(path.join(root, eventPath), JSON.stringify({
+    ...events[0], value: 9200, lifecycle: { revision: 2 }, recordedAt: "2026-07-12T12:00:00Z",
+  }) + "\n"));
+  await readers.metrics(root);
+  await readers.wearables(root);
+  // A copied partial cache retains independent generations without certifying
+  // the stale entity rows. The source manifest comes from unchanged canonicals.
+  const restored = currentQueryProjectionLocation(await tempRoot());
+  await mkdir(path.dirname(restored.absolutePath), { recursive: true });
+  await copyFile(currentQueryProjectionLocation(root).absolutePath, restored.absolutePath);
+  const manifest = await source.listCanonicalSourceManifest(root);
+  assert.deepEqual([...await readFreshQueryProjectionSections(restored, manifest)], ["metrics", "wearables"]);
+  assert.equal((await readProjectionStatus(restored, manifest))?.fresh, false);
+  await query.rebuildQueryProjection(root);
+  const reference = currentQueryProjectionLocation(await tempRoot());
+  await publishQueryProjectionSections(root, QUERY_PROJECTION_SECTION_NAMES, () => undefined, { location: reference, force: true });
+  const actual = openQueryProjectionDatabase(currentQueryProjectionLocation(root), { readOnly: true });
+  const expected = openQueryProjectionDatabase(reference, { readOnly: true });
+  try {
+    for (const table of QUERY_PROJECTION_SECTION_NAMES.flatMap(section => QUERY_PROJECTION_SECTIONS[section].tables)) {
+      const order = table === "query_metric_points" ? "metric_key, effective_date DESC, observed_at DESC, id" : "rowid";
+      assert.deepEqual(actual.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(),
+        expected.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(), table);
+    }
+  } finally { actual.close(); expected.close(); }
+});
+
+test("stored readers fail closed when their section tables are missing", async () => {
+  const { root } = await fixture();
+  const location = currentQueryProjectionLocation(root);
+  await readers.wearables(root);
+  assert.throws(() => readStoredVaultSource(location), /missing required tables/u);
+  assert.throws(() => listStoredMetricPoints(location, {}), /missing required tables/u);
+  const database = openQueryProjectionDatabase(location);
+  try { database.exec("DROP TABLE query_wearable_summary_shapes"); } finally { database.close(); }
+  assert.deepEqual(await fresh(root), []);
+  assert.throws(() => readWearableSummaryRows(location), /missing required tables/u);
+});

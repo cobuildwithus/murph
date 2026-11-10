@@ -14,6 +14,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   listMetricPointsByPublicSource,
+  rebuildQueryProjection,
   summarizeWearableSleepRuntime,
 } from "@murphai/query";
 import {
@@ -112,7 +113,10 @@ it.each([
     from: DATE, to: DATE, providers: ["oura"], metricKeys: ["total-sleep-minutes"],
   });
   expect(projected?.points[0]).toMatchObject({ value: 22, context: { sleepType: "nap" } });
-  // Simulate cached MetricPoints from before sleepType was propagated.
+  // Simulate cached MetricPoints from before sleepType was propagated. The
+  // provider read above publishes wearable rows only, so publish the metric
+  // tables before rewriting them.
+  await rebuildQueryProjection(root);
   const database = openSqliteRuntimeDatabase(join(root, QUERY_DB_RELATIVE_PATH), { create: false });
   try {
     const update = database.prepare(`

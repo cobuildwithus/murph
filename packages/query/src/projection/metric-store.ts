@@ -188,7 +188,7 @@ export function listStoredMetricPointsBatch(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "metrics");
 
     const pointsById = new Map<string, MetricPoint>();
     for (const filters of filtersList) {
@@ -300,7 +300,7 @@ export function metricPointFiltersForGoalTarget(
 export function listStoredMetricTargets(location: QueryProjectionLocation): QueryMetricTargetRow[] {
   const database = openQueryProjectionDatabase(location, { create: false, readOnly: true });
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "metrics");
     const rows = database.prepare(`
       SELECT id, goal_id AS goalId, target_json AS targetJson
       FROM query_metric_targets

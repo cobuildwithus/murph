@@ -13,7 +13,7 @@ import * as core from "@murphai/core";
 import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
 import { listCanonicalEntitiesRuntime, listCanonicalEventEntitiesRuntime, getQueryProjectionStatus, summarizeWearableSourceHealthRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
 import { readExperimentQuerySource } from "../src/experiment-query-source.ts";
-import { isWearableProjectionFresh } from "../src/projection/freshness.ts";
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
 import { currentQueryProjectionLocation } from "../src/projection/schema.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
@@ -90,9 +90,9 @@ for (const outcome of ["commit", "rollback"] as const) {
       if (reader.startsWith("source-health")) {
         assert.equal(rows.length, outcome === "commit" ? 1 : 0);
         if (outcome === "commit") assert.ok(rows.some(row => "provider" in row && row.provider === "garmin"));
-        assert.equal(await isWearableProjectionFresh(
+        assert.equal((await readFreshQueryProjectionSections(
           currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
-        ), true);
+        )).has("wearables"), true);
         assert.deepEqual(await summarizeWearableSourceHealthRuntime(vaultRoot), rows);
         // Rollback may invalidate manifest mtimes. Refresh only committed
         // wearable rows, never certify unfinished global work.
@@ -103,7 +103,9 @@ for (const outcome of ["commit", "rollback"] as const) {
         const meals = rows.filter(row => "family" in row && row.family === "event" && row.kind === "meal");
         assert.equal(meals.length, outcome === "commit" ? 1 : 0);
       }
-      if (reader === "projection") assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
+      if (reader === "projection") assert.deepEqual(
+        [...await readFreshQueryProjectionSections(currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot))], ["entities"],
+      );
       if (reader === "event") assert.equal((await getQueryProjectionStatus(vaultRoot)).exists, false);
     } finally {
       if (!child.stdin.destroyed) child.stdin.end("release\n");
@@ -144,7 +146,9 @@ test("a canonical lock owner can query while another reader waits to rebuild", a
   try {
     await owner;
     await reader;
-    assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
+    assert.deepEqual([...await readFreshQueryProjectionSections(
+      currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+    )], ["entities"]);
   } finally {
     await Promise.allSettled([owner, reader]);
     await nestedRead?.catch(() => undefined);

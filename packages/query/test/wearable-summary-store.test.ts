@@ -9,6 +9,7 @@ import { wearableProviderRowKey } from "../src/projection/provider-scope.ts";
 import {
   currentQueryProjectionLocation,
   expectString,
+  ensureQueryProjectionSectionSchema,
   openQueryProjectionDatabase,
 } from "../src/projection/schema.ts";
 import {
@@ -24,6 +25,7 @@ test("bounded sleep reads decode only sleep rows in range while retaining source
   try {
     await mkdir(path.dirname(location.absolutePath), { recursive: true });
     const database = openQueryProjectionDatabase(location, { create: true });
+    ensureQueryProjectionSectionSchema(database, "wearables");
     try {
       const provider = "oura";
       const providerScopeKey = wearableProviderRowKey(provider);
