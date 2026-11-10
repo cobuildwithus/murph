@@ -74,6 +74,9 @@ const JUNCTION_LINK_TOKEN_FILTER_PROVIDER_SLUGS = new Set([
 test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
   assert.equal(computeRetryDelayMs(1), 15_000);
   assert.equal(computeRetryDelayMs(2), 60_000);
+  assert.equal(computeRetryDelayMs(6), 2 * 60 * 60_000);
+  assert.equal(computeRetryDelayMs(1_000_000), 2 * 60 * 60_000);
+  assert.equal(computeRetryDelayMs(Number.MAX_SAFE_INTEGER), 2 * 60 * 60_000);
 });
 
 test("connect targets expose direct providers plus Junction-backed sources", () => {

@@ -29,6 +29,7 @@ import {
   resolveDeviceSyncSourceState,
 } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
+import { DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS } from "@murphai/device-syncd/types";
 import type {
   DeviceSyncCanonicalImportReceipt,
   DeviceSyncJobInput,
@@ -1014,25 +1015,10 @@ async function applyHostedDeviceSyncWakeHint(input: {
   }
 
   for (const [index, hint] of jobHints.entries()) {
-    const job = hostedJobHintToDeviceSyncJobInput(
-      {
-        ...hint,
-        dedupeKey: resolveHostedDeviceSyncWakeJobDedupeKey({
-          hint,
-          index,
-          wake: input.wake,
-        }),
-      },
-      input.wake.occurredAt,
-    );
     store.enqueueJob({
+      ...hostedJobHintToDeviceSyncJobInput(hint, input.wake.occurredAt),
       accountId: localAccountId,
-      availableAt: job.availableAt,
-      dedupeKey: job.dedupeKey,
-      kind: job.kind,
-      maxAttempts: job.maxAttempts,
-      payload: job.payload ?? {},
-      priority: job.priority ?? 0,
+      dedupeKey: resolveHostedDeviceSyncWakeJobDedupeKey({ hint, index, wake: input.wake }),
       provider: account.provider,
     });
   }
@@ -1122,6 +1108,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       ? jobRetryAt
       : retryAt;
     retryHints.push({
+      attempts: job.attempts,
       availableAt: jobRetryAt,
       dedupeKey,
       kind: job.kind,
@@ -3188,13 +3175,15 @@ function assignMonotonicTimestampUpdate(
 function hostedJobHintToDeviceSyncJobInput(
   hint: HostedExecutionDeviceSyncJobHint,
   fallbackAvailableAt: string,
-): DeviceSyncJobInput {
+): DeviceSyncJobInput & { attempts: number } {
+  const attempts = hint.attempts ?? 0;
   return {
+    attempts,
+    availableAt: hint.availableAt ?? fallbackAvailableAt,
     kind: hint.kind,
-    ...(hint.availableAt ? { availableAt: hint.availableAt } : { availableAt: fallbackAvailableAt }),
-    ...(hint.dedupeKey !== undefined ? { dedupeKey: hint.dedupeKey ?? undefined } : {}),
-    ...(typeof hint.maxAttempts === "number" ? { maxAttempts: hint.maxAttempts } : {}),
-    ...(hint.payload ? { payload: { ...hint.payload } } : {}),
-    ...(typeof hint.priority === "number" ? { priority: hint.priority } : {}),
+    // The wire keeps its legacy remaining-budget meaning; SQLite owns a total ceiling.
+    maxAttempts: attempts + (hint.maxAttempts ?? DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS),
+    payload: { ...hint.payload },
+    priority: hint.priority ?? 0,
   };
 }

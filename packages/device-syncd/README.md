@@ -11,9 +11,19 @@ same import owner. This does not revive already terminal jobs, weaken source
 binding, or bypass disconnect and lease fences. Other failure classes retain
 their existing retry behavior. See `agent-docs/RELIABILITY.md` for the finite
 normalization categories, ECG collection counts, and hosted progress diagnostics.
-Hosted cold handoff carries each absolute retry deadline and remaining attempt
-budget, rebuilding the local attempt counter from zero. Validation retries use
-the fixed cadence across that boundary; they do not depend on that counter.
+Hosted cold handoff carries each absolute retry deadline, remaining attempt
+budget (`maxAttempts`) and optional consumed queue attempts (`attempts`). Restore
+seeds the existing counter and adds consumed attempts to the remaining budget
+for the local total ceiling. Missing history defaults to zero; old readers drop
+the new field and keep the legacy budget/deadline behavior. Retained hints live
+in the runner checkpoint, so only the runner image needs release. Web/Worker
+admission parsers share the additive reader but do not consume that checkpoint.
+Validation retries keep their fixed cadence. Other failures reuse the queue's
+`computeRetryDelayMs` ladder, whose index clamps at 4 (two hours) for all attempt
+counts of five or more. Retain-until-success counters can grow for the lifetime
+of a job; they occupy the same SQLite integer/JSON number, not a history list.
+At the capped cadence, reaching JavaScript's safe-integer limit would take over
+two trillion years; no new counter cap or retry-budget policy is introduced.
 
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 

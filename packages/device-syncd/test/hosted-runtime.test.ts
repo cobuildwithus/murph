@@ -3390,6 +3390,19 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it.each([0, 1, 6, 1_000_000])("preserves consumed attempts %s without changing remaining budget", (attempts) => {
+    const hint = { jobs: [{ kind: "resource", attempts, maxAttempts: 3 }] };
+    expect(normalizeHostedDeviceSyncJobHints(parseHostedExecutionDeviceSyncWakeHint(hint)))
+      .toEqual(hint.jobs);
+  });
+
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, "2", null])(
+    "rejects invalid consumed attempts %s", (attempts) => {
+      expect(() => parseHostedExecutionDeviceSyncWakeHint({ jobs: [{ kind: "resource", attempts }] }))
+        .toThrow("attempts must be a non-negative safe integer");
+    },
+  );
+
   it("feeds the parsed wake shape into job-hint normalization", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [

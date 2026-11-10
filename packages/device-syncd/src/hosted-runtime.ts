@@ -741,9 +741,12 @@ export function findHostedExecutionDeviceSyncRuntimeApplyEntry(
 }
 
 export interface HostedExecutionDeviceSyncJobHint {
+  /** Consumed queue attempts; absent on legacy admission and recovery hints. */
+  attempts?: number;
   availableAt?: string;
   dedupeKey?: string | null;
   kind: string;
+  /** Remaining budget, not the local queue's total attempt ceiling. */
   maxAttempts?: number;
   payload?: Record<string, unknown>;
   priority?: number;
@@ -1515,6 +1518,7 @@ export function normalizeHostedDeviceSyncJobHints(
   return Array.isArray(value?.jobs)
     ? value.jobs.map((job) => ({
         kind: job.kind,
+        ...(job.attempts !== undefined ? { attempts: job.attempts } : {}),
         ...(job.availableAt ? { availableAt: job.availableAt } : {}),
         ...(job.dedupeKey !== undefined ? { dedupeKey: job.dedupeKey ?? null } : {}),
         ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
@@ -1641,6 +1645,13 @@ function parseHostedExecutionDeviceSyncJobHint(
       record.dedupeKey,
       `Hosted execution device-sync.wake hint jobs[${index}].dedupeKey`,
     );
+  }
+
+  if (record.attempts !== undefined) {
+    if (typeof record.attempts !== "number" || !Number.isSafeInteger(record.attempts) || record.attempts < 0) {
+      throw new TypeError(`Hosted execution device-sync.wake hint jobs[${index}].attempts must be a non-negative safe integer.`);
+    }
+    next.attempts = record.attempts;
   }
 
   if (record.maxAttempts !== undefined) {
