@@ -17,6 +17,8 @@ import {
 import { compareByOccurredAtDescThenId } from "./comparators.ts";
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
+// Blood tests are `test` events; other kinds never project to a record.
+const BLOOD_TEST_EVENT_SOURCE = { eventKinds: ["test"] } as const;
 
 export interface BloodTestQueryRecord {
   id: string;
@@ -201,7 +203,7 @@ export async function readBloodTest(
   eventId: string,
 ): Promise<BloodTestQueryRecord | null> {
   const records = selectProjectedBloodTests(
-    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+    await readCanonicalEntityFamilySource(vaultRoot, "event", BLOOD_TEST_EVENT_SOURCE),
   );
   return records.find((record) => record.id === eventId) ?? null;
 }
@@ -211,7 +213,7 @@ export async function showBloodTest(
   lookup: string,
 ): Promise<BloodTestQueryRecord | null> {
   const records = selectProjectedBloodTests(
-    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+    await readCanonicalEntityFamilySource(vaultRoot, "event", BLOOD_TEST_EVENT_SOURCE),
   );
   return (
     records.find((record) =>

@@ -11,6 +11,9 @@ import {
 } from "./shared.ts";
 import { compareByOccurredAtDescThenId } from "./comparators.ts";
 
+// Only `immunization` events project to a record.
+const IMMUNIZATION_EVENT_SOURCE = { eventKinds: ["immunization"] } as const;
+
 export interface ImmunizationQueryRecord {
   id: string;
   kind: "immunization";
@@ -180,7 +183,7 @@ export async function readImmunization(
   eventId: string,
 ): Promise<ImmunizationQueryRecord | null> {
   const records = selectProjectedImmunizations(
-    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+    await readCanonicalEntityFamilySource(vaultRoot, "event", IMMUNIZATION_EVENT_SOURCE),
   );
   return records.find((record) => record.id === eventId) ?? null;
 }
@@ -190,7 +193,7 @@ export async function showImmunization(
   lookup: string,
 ): Promise<ImmunizationQueryRecord | null> {
   const records = selectProjectedImmunizations(
-    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+    await readCanonicalEntityFamilySource(vaultRoot, "event", IMMUNIZATION_EVENT_SOURCE),
   );
   return (
     records.find((record) =>
