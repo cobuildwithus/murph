@@ -408,9 +408,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             const commitIndex = queries.findIndex((query, index) => index > lockIndex && /^\s*COMMIT\b/iu.test(query));
             expect(commitIndex).toBeGreaterThan(lockIndex);
             const plannerQueries = queries.slice(lockIndex, commitIndex);
-            // The adapter does not emit BEGIN. 22 statements plus BEGIN/COMMIT
-            // is 24 round trips, down from the established baseline's 27.
-            expect(plannerQueries).toHaveLength(22);
+            // The adapter does not emit BEGIN. 20 statements plus BEGIN/COMMIT
+            // is 22 round trips, down from the established baseline's 27. The
+            // mailbox append allocates both sequences in one statement.
+            expect(plannerQueries).toHaveLength(20);
             expect(plannerQueries.filter(query => query.includes('FROM "public"."hosted_member_routing"'))).toHaveLength(1);
           }
           // A separate connection observes the committed mailbox item while the FK holder is still open.

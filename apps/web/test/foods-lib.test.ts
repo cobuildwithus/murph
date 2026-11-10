@@ -650,43 +650,41 @@ describe("foods query helpers", () => {
     const searchSql = searchCall?.text ?? "";
     const ftsIndexSql = searchSql.slice(
       searchSql.indexOf("fts_index_matches AS MATERIALIZED"),
-      searchSql.indexOf("name_nearest_matches AS MATERIALIZED"),
-    );
-    const nameNearestSql = searchSql.slice(
-      searchSql.indexOf("name_nearest_matches AS MATERIALIZED"),
-      searchSql.indexOf("fts_nearest_matches AS MATERIALIZED"),
-    );
-    const ftsNearestSql = searchSql.slice(
-      searchSql.indexOf("fts_nearest_matches AS MATERIALIZED"),
       searchSql.indexOf("fts_matches AS MATERIALIZED"),
+    );
+    const wholeNameTypoSql = searchSql.slice(
+      searchSql.indexOf("whole_name_typo_matches AS MATERIALIZED"),
+      searchSql.indexOf("strict_word_typo_matches AS MATERIALIZED"),
+    );
+    const strictWordTypoSql = searchSql.slice(
+      searchSql.indexOf("strict_word_typo_matches AS MATERIALIZED"),
+      searchSql.indexOf("trigram_matches AS MATERIALIZED"),
     );
     expect(ftsIndexSql).toContain("to_tsvector");
     expect(ftsIndexSql).not.toContain("ORDER BY");
-    expect(nameNearestSql).not.toContain("to_tsvector");
-    expect(nameNearestSql).toContain(
-      "(SELECT count(*) FROM fts_index_matches) = 10000",
-    );
-    expect(nameNearestSql).toContain("ORDER BY name <->>> $1::text");
-    expect(ftsNearestSql).toContain("FROM name_nearest_matches");
-    expect(ftsNearestSql).not.toContain("EXISTS");
-    expect(ftsNearestSql).not.toContain("FROM foods");
     expect(searchCall?.text).toMatch(
-      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
+      /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*fts_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
-      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?count\(\*\) FROM fts_index_matches\) = 10000[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
+      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches\s+UNION\s+SELECT \* FROM fts_index_matches\s+\) matches/u,
     );
+    // A whole-catalog distance ordering reads every name and cannot finish
+    // inside the statement timeout on the live catalog. Every trigram scan
+    // must carry its similarity predicate as an index condition instead.
+    expect(searchCall?.text).not.toContain("<->>>");
+    expect(searchCall?.text).not.toContain("name_nearest_matches");
+    expect(searchCall?.text).not.toContain("fts_nearest_matches");
+    expect(searchCall?.text.match(/ORDER BY name <-> \$1::text/gu)).toHaveLength(1);
+    expect(wholeNameTypoSql).toMatch(
+      /FROM foods\s+WHERE\s+NOT EXISTS \(SELECT 1 FROM fts_index_matches\)[\s\S]*?AND name % \$1::text[\s\S]*?ORDER BY name <-> \$1::text\s+LIMIT 1000\s*\),/u,
+    );
+    expect(wholeNameTypoSql).not.toContain("%>>");
+    expect(strictWordTypoSql).toMatch(
+      /FROM foods\s+WHERE\s+NOT EXISTS \(SELECT 1 FROM fts_index_matches\)[\s\S]*?AND NOT EXISTS \(SELECT 1 FROM whole_name_typo_matches\)\s+AND name %>> \$1::text[\s\S]*?LIMIT 1000\s*\),/u,
+    );
+    expect(strictWordTypoSql).not.toContain("ORDER BY");
     expect(searchCall?.text).toMatch(
-      /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?to_tsvector/u,
-    );
-    expect(searchCall?.text).toMatch(
-      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_index_matches[\s\S]*?SELECT \* FROM fts_nearest_matches/u,
-    );
-    expect(searchCall?.text).toMatch(
-      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM \([\s\S]*?FROM foods[\s\S]*?NOT EXISTS \(SELECT 1 FROM fts_index_matches\)[\s\S]*?ORDER BY name <-> \$1::text\s*LIMIT 10000[\s\S]*?\) nearest_names\s*WHERE name % \$1::text/u,
-    );
-    expect(searchCall?.text).not.toMatch(
-      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches/u,
+      /trigram_matches AS MATERIALIZED \(\s*SELECT \* FROM whole_name_typo_matches\s+UNION ALL\s+SELECT \* FROM strict_word_typo_matches\s*\),/u,
     );
     expect(searchCall?.text).not.toContain("trigram_nearest_matches");
     expect(searchCall?.text).not.toContain("fts_canonical_matches");
